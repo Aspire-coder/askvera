@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,7 +27,7 @@ jobs:
         run: python -m compileall api config services utils scripts tests
 
       - name: Test
-        run: pytest tests/unit -q
+        run: python -m pytest tests/unit -q
 
       - name: Validate config defaults
         env:
@@ -35,7 +35,7 @@ jobs:
         run: python scripts/validate_config.py
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
