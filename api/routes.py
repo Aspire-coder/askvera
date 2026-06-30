@@ -55,7 +55,7 @@ def _valid_language_codes(country_code: str) -> set[str]:
     return set()
 
 
-@router.post("/api/chat")
+@router.post("/api/chat", response_model=None)
 def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
@@ -110,7 +110,7 @@ def privacy(country: str, lang: str, request: Request) -> HTMLResponse:
     return HTMLResponse(content=html)
 
 
-@router.post("/api/consent")
+@router.post("/api/consent", response_model=None)
 def consent(body: ConsentRequest, request: Request) -> Envelope | JSONResponse:
     """Record user privacy consent."""
     correlation_id = _correlation_id(request)
@@ -121,7 +121,7 @@ def consent(body: ConsentRequest, request: Request) -> Envelope | JSONResponse:
         return error_response(exc, correlation_id)
 
 
-@router.post("/api/feedback")
+@router.post("/api/feedback", response_model=None)
 def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse:
     """Send user feedback to SQS."""
     correlation_id = _correlation_id(request)
