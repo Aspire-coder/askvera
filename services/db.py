@@ -47,7 +47,10 @@ def init_db(correlation_id: str = "startup") -> Engine:
         pool_size=settings.POSTGRES_POOL_SIZE,
         max_overflow=settings.POSTGRES_MAX_OVERFLOW,
         pool_pre_ping=True,
-        connect_args={"connect_timeout": settings.POSTGRES_CONNECT_TIMEOUT_SECONDS},
+        connect_args={
+            "connect_timeout": settings.POSTGRES_CONNECT_TIMEOUT_SECONDS,
+            "sslmode": "require",
+        },
     )
     create_schema(correlation_id)
     LOGGER.info("postgres_initialized", correlation_id=correlation_id, db_identifier=settings.RDS_DB_IDENTIFIER)
