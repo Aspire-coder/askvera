@@ -1,0 +1,62 @@
+"""Typed application exceptions and stable error codes."""
+
+
+class AskVeraError(Exception):
+    """Base class for all expected ASK Vera errors."""
+
+    error_code = "ASK_VERA_ERROR"
+    status_code = 500
+
+    def __init__(self, message: str) -> None:
+        """Create an exception with a human-readable message."""
+        super().__init__(message)
+        self.message = message
+
+
+class ConfigurationError(AskVeraError):
+    """Raised when required startup configuration is missing."""
+
+    error_code = "CONFIGURATION_ERROR"
+    status_code = 500
+
+
+class BedrockTimeoutError(AskVeraError):
+    """Raised when Bedrock times out."""
+
+    error_code = "BEDROCK_TIMEOUT"
+    status_code = 504
+
+
+class BedrockServiceError(AskVeraError):
+    """Raised when Bedrock returns an unexpected error."""
+
+    error_code = "BEDROCK_ERROR"
+    status_code = 502
+
+
+class CacheConnectionError(AskVeraError):
+    """Raised when Redis cannot be reached."""
+
+    error_code = "CACHE_CONNECTION_ERROR"
+    status_code = 503
+
+
+class GuardrailBlockedError(AskVeraError):
+    """Raised when input or output is blocked by guardrails."""
+
+    error_code = "GUARDRAIL_BLOCKED"
+    status_code = 400
+
+
+class LowConfidenceError(AskVeraError):
+    """Raised when retrieved knowledge does not meet the confidence threshold."""
+
+    error_code = "LOW_CONFIDENCE"
+    status_code = 200
+
+
+class AwsServiceError(AskVeraError):
+    """Raised when an AWS dependency other than Bedrock fails."""
+
+    error_code = "AWS_SERVICE_ERROR"
+    status_code = 502
