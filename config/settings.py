@@ -63,6 +63,8 @@ BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
 S3_BUCKET = "askverachat-prod-kb"
 # Session TTL in seconds. Used by PostgreSQL chat_sessions.expires_at.
 SESSION_TTL_SECONDS = 7200
+# ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.
+REDIS_CACHE_NAME = "askverachat-cache"
 # ElastiCache Valkey primary endpoint hostname. Found in ElastiCache -> Valkey cache -> Connectivity.
 REDIS_HOST = "master.askverachat-cache.iivrdz.use1.cache.amazonaws.com"
 # ElastiCache Valkey TLS port. Found in ElastiCache -> Valkey cache details -> Port.
