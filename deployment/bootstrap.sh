@@ -71,20 +71,24 @@ install_system_packages() {
         python3-pip
       ;;
     dnf)
-      dnf install -y \
-        ca-certificates \
-        gcc \
-        gcc-c++ \
-        make \
-        curl \
-        git \
-        sudo \
-        nginx \
-        certbot \
-        python3-certbot-nginx \
-        python3.11 \
-        python3.11-devel \
+      dnf_packages=(
+        ca-certificates
+        gcc
+        gcc-c++
+        make
+        git
+        sudo
+        nginx
+        certbot
+        python3-certbot-nginx
+        python3.11
+        python3.11-devel
         python3.11-pip
+      )
+      if ! command -v curl >/dev/null 2>&1; then
+        dnf_packages+=(curl-minimal)
+      fi
+      dnf install -y "${dnf_packages[@]}"
       ;;
     *)
       echo "Unsupported package manager: ${PKG_MANAGER}" >&2
