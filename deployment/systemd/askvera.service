@@ -1,5 +1,6 @@
 [Unit]
 Description=ASK Vera FastAPI service
+Documentation=https://github.com/Aspire-coder/askvera
 After=network-online.target
 Wants=network-online.target
 
@@ -9,15 +10,20 @@ User=askvera
 Group=askvera
 WorkingDirectory=/opt/askvera
 EnvironmentFile=/etc/askvera/production.env
-ExecStart=/opt/askvera/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="127.0.0.1"
-ExecReload=/bin/kill -HUP $MAINPID
+ExecStart=/opt/askvera/.venv/bin/uvicorn main:app --host ${HOST} --port ${PORT} --proxy-headers --forwarded-allow-ips="127.0.0.1"
 KillSignal=SIGTERM
+TimeoutStartSec=60
 TimeoutStopSec=30
 Restart=on-failure
 RestartSec=5
+SyslogIdentifier=askvera
+StandardOutput=journal
+StandardError=journal
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectHome=true
 ProtectSystem=full
+RestrictSUIDSGID=true
 ReadWritePaths=/opt/askvera /tmp
 
 [Install]

@@ -32,6 +32,14 @@ sudo ./deployment/deploy.sh
 sudo ./deployment/deploy.sh
 ```
 
+## Service Operations
+
+```bash
+sudo systemctl status askvera --no-pager
+sudo systemctl restart askvera
+sudo journalctl -u askvera -f
+```
+
 ## Rollback
 
 ```bash
