@@ -21,9 +21,10 @@ _redis_client: redis.Redis | None = None
 class RedisIamCredentialProvider(CredentialProvider):
     """Generate Redis IAM credentials for each new connection."""
 
-    def __init__(self, host: str, port: int, user_id: str, region: str) -> None:
+    def __init__(self, host: str, port: int, cache_name: str, user_id: str, region: str) -> None:
         self.host = host
         self.port = port
+        self.cache_name = cache_name
         self.user_id = user_id
         self.region = region
 
@@ -34,20 +35,21 @@ class RedisIamCredentialProvider(CredentialProvider):
             generate_iam_auth_token(
                 self.host,
                 self.port,
+                self.cache_name,
                 self.user_id,
                 self.region,
             ),
         )
 
 
-def generate_iam_auth_token(host: str, port: int, user_id: str, region: str) -> str:
+def generate_iam_auth_token(host: str, port: int, cache_name: str, user_id: str, region: str) -> str:
     """Generate a short-lived IAM token for ElastiCache Valkey."""
     credentials = boto3.Session().get_credentials()
     if credentials is None:
         raise CacheConnectionError("AWS credentials are required for Redis IAM authentication.")
     request = botocore.awsrequest.AWSRequest(
         method="GET",
-        url=f"https://{host}:{port}/?Action=connect&User={user_id}",
+        url=f"https://{cache_name}/?Action=connect&User={user_id}",
     )
     signer = botocore.auth.SigV4QueryAuth(
         credentials.get_frozen_credentials(),
@@ -68,6 +70,7 @@ def init_cache(correlation_id: str = "startup") -> redis.Redis | None:
     credential_provider = RedisIamCredentialProvider(
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
+        cache_name=settings.REDIS_CACHE_NAME,
         user_id=settings.REDIS_USER,
         region=settings.AWS_REGION,
     )
