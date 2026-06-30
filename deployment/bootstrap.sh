@@ -85,9 +85,6 @@ install_system_packages() {
         python3.11-devel
         python3.11-pip
       )
-      if ! rpm -q curl >/dev/null 2>&1 && ! rpm -q curl-minimal >/dev/null 2>&1; then
-        dnf_packages+=(curl)
-      fi
       dnf install -y "${dnf_packages[@]}"
       ;;
     *)
