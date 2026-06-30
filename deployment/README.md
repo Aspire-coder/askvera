@@ -32,6 +32,13 @@ sudo ./deployment/deploy.sh
 sudo ./deployment/deploy.sh
 ```
 
+## Health Check
+
+```bash
+sudo ./deployment/healthcheck.sh
+sudo PUBLIC_URL=https://api.vera-api.xyz ./deployment/healthcheck.sh
+```
+
 ## Service Operations
 
 ```bash
@@ -52,6 +59,8 @@ sudo tail -f /var/log/nginx/access.log /var/log/nginx/error.log
 
 ```bash
 sudo ./deployment/rollback.sh HEAD~1
+sudo ./deployment/rollback.sh v1.0.0-beta
+sudo ./deployment/rollback.sh 4380931
 ```
 
 ## Widget Deployment

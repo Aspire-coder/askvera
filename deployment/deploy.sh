@@ -50,7 +50,7 @@ rollback() {
     sudo -u "${APP_USER}" git -C "${APP_DIR}" checkout "${previous_rev}"
     systemctl restart "${SERVICE_NAME}"
     sleep 3
-    BASE_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh" || true
+    PUBLIC_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh" || true
   fi
 }
 
@@ -101,7 +101,7 @@ systemctl restart "${SERVICE_NAME}"
 sleep 3
 
 log "Running health checks."
-if ! BASE_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh"; then
+if ! PUBLIC_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh"; then
   echo "Health check failed after deploy." >&2
   rollback "${PREVIOUS_REV}"
   exit 1
