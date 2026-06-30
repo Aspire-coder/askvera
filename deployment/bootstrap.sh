@@ -5,7 +5,7 @@ APP_USER="${APP_USER:-askvera}"
 APP_DIR="${APP_DIR:-/opt/askvera}"
 REPO_URL="${REPO_URL:-https://github.com/Aspire-coder/askvera.git}"
 ENV_DIR="${ENV_DIR:-/etc/askvera}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run bootstrap.sh as root." >&2
@@ -13,7 +13,17 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 apt-get update
-apt-get install -y git nginx certbot python3-certbot-nginx python3 python3-venv python3-pip curl
+apt-get install -y \
+  build-essential \
+  curl \
+  git \
+  nginx \
+  certbot \
+  python3-certbot-nginx \
+  python3.11 \
+  python3.11-dev \
+  python3.11-venv \
+  python3-pip
 
 if ! id "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --create-home --shell /usr/sbin/nologin "${APP_USER}"
@@ -24,6 +34,8 @@ chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
 
 if [[ ! -d "${APP_DIR}/.git" ]]; then
   sudo -u "${APP_USER}" git clone "${REPO_URL}" "${APP_DIR}"
+else
+  sudo -u "${APP_USER}" git -C "${APP_DIR}" fetch origin main
 fi
 
 if [[ ! -f "${ENV_DIR}/production.env" ]]; then

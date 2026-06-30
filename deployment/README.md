@@ -18,6 +18,7 @@ Production runtime configuration should come from IAM, SSM Parameter Store, and 
 ## First-Time EC2 Setup
 
 ```bash
+chmod +x deployment/*.sh deployment/ssl/*.sh
 sudo REPO_URL=https://github.com/Aspire-coder/askvera.git ./deployment/bootstrap.sh
 sudo EMAIL=you@example.com ./deployment/ssl/certbot.sh
 sudo ./deployment/deploy.sh

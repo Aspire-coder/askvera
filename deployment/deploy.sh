@@ -4,7 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/askvera}"
 APP_USER="${APP_USER:-askvera}"
 SERVICE_NAME="${SERVICE_NAME:-askvera}"
-HEALTH_URL="${HEALTH_URL:-https://api.vera-api.xyz/health}"
+HEALTH_BASE_URL="${HEALTH_BASE_URL:-https://api.vera-api.xyz}"
 RUN_TESTS="${RUN_TESTS:-true}"
 PREVIOUS_REV="$(sudo -u "${APP_USER}" git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
 
@@ -27,12 +27,13 @@ sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py
 systemctl restart "${SERVICE_NAME}"
 sleep 3
 
-if ! curl --fail --silent --show-error "${HEALTH_URL}" >/dev/null; then
+if ! BASE_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh"; then
   echo "Health check failed after deploy." >&2
   if [[ -n "${PREVIOUS_REV}" ]]; then
     echo "Rolling back to ${PREVIOUS_REV}" >&2
     sudo -u "${APP_USER}" git checkout "${PREVIOUS_REV}"
     systemctl restart "${SERVICE_NAME}"
+    BASE_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh" || true
   fi
   exit 1
 fi
