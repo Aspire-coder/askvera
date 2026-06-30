@@ -38,7 +38,7 @@ def generate_iam_auth_token(host: str, port: int, user_id: str, region: str) -> 
         raise CacheConnectionError("AWS credentials are required for Redis IAM authentication.")
     request = botocore.awsrequest.AWSRequest(
         method="GET",
-        url=f"rediss://{host}:{port}/?Action=connect&User={user_id}",
+        url=f"https://{host}:{port}/?Action=connect&User={user_id}",
     )
     signer = botocore.auth.SigV4QueryAuth(
         credentials.get_frozen_credentials(),
@@ -47,7 +47,7 @@ def generate_iam_auth_token(host: str, port: int, user_id: str, region: str) -> 
         expires=900,
     )
     signer.add_auth(request)
-    return request.url
+    return request.url.replace("https://", "", 1)
 
 
 def init_cache(correlation_id: str = "startup") -> redis.Redis | None:
