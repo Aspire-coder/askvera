@@ -32,7 +32,13 @@ def _handle_sigterm(signum: int, _frame: object) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     """Validate config, initialise clients, and close cleanly on shutdown."""
-    settings.load_ssm_config()
+    loaded_config = settings.load_ssm_config()
+    LOGGER.info(
+        "ssm_config_loaded",
+        parameter_count=len(loaded_config),
+        parameter_path=settings.SSM_PARAMETER_PATH,
+        rds_secret_arn=settings.RDS_SECRET_ARN,
+    )
     missing = validate()
     if missing:
         raise ConfigurationError(f"Missing required config values: {', '.join(missing)}")
