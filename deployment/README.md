@@ -40,6 +40,14 @@ sudo systemctl restart askvera
 sudo journalctl -u askvera -f
 ```
 
+## Nginx Operations
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+sudo tail -f /var/log/nginx/access.log /var/log/nginx/error.log
+```
+
 ## Rollback
 
 ```bash
