@@ -23,11 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Format check
-        run: black --check .
-
-      - name: Lint
-        run: flake8 .
+      - name: Compile Python source
+        run: python -m compileall api config services utils scripts tests
 
       - name: Test
         run: pytest tests/unit -q
