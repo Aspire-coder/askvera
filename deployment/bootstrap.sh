@@ -7,9 +7,90 @@ REPO_URL="${REPO_URL:-https://github.com/Aspire-coder/askvera.git}"
 ENV_DIR="${ENV_DIR:-/etc/askvera}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 BRANCH="${BRANCH:-main}"
+PKG_MANAGER=""
 
 log() {
   echo "[bootstrap] $*"
+}
+
+detect_package_manager() {
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    case "${ID:-}" in
+      ubuntu|debian)
+        PKG_MANAGER="apt"
+        return
+        ;;
+      amzn|amazon)
+        PKG_MANAGER="dnf"
+        return
+        ;;
+    esac
+
+    case "${ID_LIKE:-}" in
+      *debian*)
+        PKG_MANAGER="apt"
+        return
+        ;;
+      *fedora*|*rhel*)
+        PKG_MANAGER="dnf"
+        return
+        ;;
+    esac
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    PKG_MANAGER="apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    PKG_MANAGER="dnf"
+  else
+    echo "Unsupported OS: expected Ubuntu/Debian with apt or Amazon Linux with dnf." >&2
+    exit 1
+  fi
+}
+
+install_system_packages() {
+  case "${PKG_MANAGER}" in
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y \
+        ca-certificates \
+        software-properties-common \
+        build-essential \
+        curl \
+        git \
+        sudo \
+        nginx \
+        certbot \
+        python3-certbot-nginx \
+        python3.11 \
+        python3.11-dev \
+        python3.11-venv \
+        python3-pip
+      ;;
+    dnf)
+      dnf install -y \
+        ca-certificates \
+        gcc \
+        gcc-c++ \
+        make \
+        curl \
+        git \
+        sudo \
+        nginx \
+        certbot \
+        python3-certbot-nginx \
+        python3.11 \
+        python3.11-devel \
+        python3.11-pip
+      ;;
+    *)
+      echo "Unsupported package manager: ${PKG_MANAGER}" >&2
+      exit 1
+      ;;
+  esac
 }
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -17,24 +98,9 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-export DEBIAN_FRONTEND=noninteractive
-
-log "Installing system packages."
-apt-get update
-apt-get install -y \
-  ca-certificates \
-  software-properties-common \
-  build-essential \
-  curl \
-  git \
-  sudo \
-  nginx \
-  certbot \
-  python3-certbot-nginx \
-  python3.11 \
-  python3.11-dev \
-  python3.11-venv \
-  python3-pip
+detect_package_manager
+log "Installing system packages with ${PKG_MANAGER}."
+install_system_packages
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   echo "${PYTHON_BIN} is not available after package installation." >&2
@@ -43,8 +109,9 @@ if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
 fi
 
 if ! id "${APP_USER}" >/dev/null 2>&1; then
+  NOLOGIN_SHELL="$(command -v nologin || echo /sbin/nologin)"
   log "Creating service user ${APP_USER}."
-  useradd --system --create-home --shell /usr/sbin/nologin "${APP_USER}"
+  useradd --system --create-home --shell "${NOLOGIN_SHELL}" "${APP_USER}"
 fi
 
 mkdir -p "${APP_DIR}" "${ENV_DIR}"
