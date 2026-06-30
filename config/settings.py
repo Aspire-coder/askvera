@@ -12,6 +12,9 @@ from typing import Any
 REQUIRED_VALUES = [
     "AWS_REGION",
     "RDS_SECRET_ARN",
+    "REDIS_HOST",
+    "REDIS_CACHE_NAME",
+    "REDIS_USER",
 ]
 
 # AWS Region where all runtime resources are deployed. Found in AWS Console top-right region selector.

@@ -74,7 +74,7 @@ def init_cache(correlation_id: str = "startup") -> redis.Redis | None:
         user_id=settings.REDIS_USER,
         region=settings.AWS_REGION,
     )
-    _redis_client = redis.Redis(
+    client = redis.Redis(
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
         credential_provider=credential_provider,
@@ -84,9 +84,23 @@ def init_cache(correlation_id: str = "startup") -> redis.Redis | None:
         socket_timeout=2,
         retry_on_timeout=True,
     )
-    _redis_client.ping()
+    try:
+        client.ping()
+    except redis.RedisError:
+        client.close()
+        raise
+    _redis_client = client
     LOGGER.info("cache_initialized", correlation_id=correlation_id, host=settings.REDIS_HOST, user=settings.REDIS_USER)
     return _redis_client
+
+
+def close_cache(correlation_id: str = "shutdown") -> None:
+    """Close Redis connections during graceful shutdown."""
+    global _redis_client
+    if _redis_client is not None:
+        _redis_client.close()
+        _redis_client = None
+        LOGGER.info("cache_closed", correlation_id=correlation_id)
 
 
 def build_cache_key(message: str, country: str, language: str, role: str) -> str:
