@@ -1,0 +1,24 @@
+[Unit]
+Description=ASK Vera FastAPI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=askvera
+Group=askvera
+WorkingDirectory=/opt/askvera
+EnvironmentFile=/etc/askvera/production.env
+ExecStart=/opt/askvera/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="127.0.0.1"
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/askvera /tmp
+
+[Install]
+WantedBy=multi-user.target

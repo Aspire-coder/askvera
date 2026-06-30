@@ -10,6 +10,7 @@ ASK Vera is an AWS-native FastAPI chatbot backend for a public website widget. I
 - `utils/` - Structured logging, typed exceptions, and Pydantic models.
 - `tests/` - Unit and gated integration tests.
 - `scripts/validate_config.py` - Fails fast when required settings are missing.
+- `deployment/` - Repeatable EC2, Nginx, systemd, SSL, health check, and rollback assets.
 - `main.py` - App entry point for Uvicorn.
 - `widget-wrapper/` - Reusable React + TypeScript widget wrapper package for embedding any assistant, iframe, script widget, or message feed.
 
@@ -70,6 +71,16 @@ make run
 ## Deploy
 
 Deploy behind CloudFront, WAF, ALB, and an Auto Scaling Group on private EC2 instances. Attach `ChatbotAppRole` to the launch template. Health checks must use `GET /health`, which makes no AWS calls.
+
+Repeatable deployment assets live in `deployment/`:
+
+```bash
+sudo ./deployment/bootstrap.sh
+sudo EMAIL=you@example.com ./deployment/ssl/certbot.sh
+sudo ./deployment/deploy.sh
+```
+
+See `deployment/README.md` before running these on EC2.
 
 ## Tests
 

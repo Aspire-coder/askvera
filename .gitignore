@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+deployment/production.env
 *.pem
 *.key
 *.log
