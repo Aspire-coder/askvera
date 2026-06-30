@@ -6,17 +6,28 @@ APP_DIR="${APP_DIR:-/opt/askvera}"
 REPO_URL="${REPO_URL:-https://github.com/Aspire-coder/askvera.git}"
 ENV_DIR="${ENV_DIR:-/etc/askvera}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+BRANCH="${BRANCH:-main}"
+
+log() {
+  echo "[bootstrap] $*"
+}
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run bootstrap.sh as root." >&2
   exit 1
 fi
 
+export DEBIAN_FRONTEND=noninteractive
+
+log "Installing system packages."
 apt-get update
 apt-get install -y \
+  ca-certificates \
+  software-properties-common \
   build-essential \
   curl \
   git \
+  sudo \
   nginx \
   certbot \
   python3-certbot-nginx \
@@ -25,7 +36,14 @@ apt-get install -y \
   python3.11-venv \
   python3-pip
 
+if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+  echo "${PYTHON_BIN} is not available after package installation." >&2
+  echo "On older Ubuntu releases, install Python 3.11 or set PYTHON_BIN to the available interpreter." >&2
+  exit 1
+fi
+
 if ! id "${APP_USER}" >/dev/null 2>&1; then
+  log "Creating service user ${APP_USER}."
   useradd --system --create-home --shell /usr/sbin/nologin "${APP_USER}"
 fi
 
@@ -33,24 +51,44 @@ mkdir -p "${APP_DIR}" "${ENV_DIR}"
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
 
 if [[ ! -d "${APP_DIR}/.git" ]]; then
-  sudo -u "${APP_USER}" git clone "${REPO_URL}" "${APP_DIR}"
+  if [[ -n "$(find "${APP_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo "${APP_DIR} exists and is not empty, but it is not a Git repository." >&2
+    exit 1
+  fi
+  log "Cloning ${REPO_URL} into ${APP_DIR}."
+  sudo -u "${APP_USER}" git clone --branch "${BRANCH}" "${REPO_URL}" "${APP_DIR}"
 else
-  sudo -u "${APP_USER}" git -C "${APP_DIR}" fetch origin main
+  log "Refreshing existing repository."
+  sudo -u "${APP_USER}" git -C "${APP_DIR}" fetch origin "${BRANCH}"
 fi
 
 if [[ ! -f "${ENV_DIR}/production.env" ]]; then
+  log "Creating ${ENV_DIR}/production.env from template."
   cp "${APP_DIR}/deployment/production.env.example" "${ENV_DIR}/production.env"
   chmod 0640 "${ENV_DIR}/production.env"
   chown root:"${APP_USER}" "${ENV_DIR}/production.env"
+else
+  log "Keeping existing ${ENV_DIR}/production.env."
 fi
 
+log "Installing systemd service."
 cp "${APP_DIR}/deployment/systemd/askvera.service" /etc/systemd/system/askvera.service
 
+log "Creating/updating Python virtual environment."
 sudo -u "${APP_USER}" "${PYTHON_BIN}" -m venv "${APP_DIR}/.venv"
 sudo -u "${APP_USER}" "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip
 sudo -u "${APP_USER}" "${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
 
+log "Enabling systemd service."
 systemctl daemon-reload
 systemctl enable askvera
+
+log "Validating Python package import and application config."
+cd "${APP_DIR}"
+set -a
+source "${ENV_DIR}/production.env"
+set +a
+sudo -u "${APP_USER}" "${APP_DIR}/.venv/bin/python" -m compileall api config services utils scripts >/dev/null
+sudo -u "${APP_USER}" "${APP_DIR}/.venv/bin/python" scripts/validate_config.py
 
 echo "Bootstrap complete. Review ${ENV_DIR}/production.env, run deployment/ssl/certbot.sh, then run deployment/deploy.sh."
