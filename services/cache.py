@@ -8,6 +8,7 @@ import boto3
 import botocore.auth
 import botocore.awsrequest
 import redis
+from redis.credentials import CredentialProvider
 
 from config import settings
 from utils.exceptions import CacheConnectionError
@@ -17,7 +18,7 @@ LOGGER = get_logger("services.cache")
 _redis_client: redis.Redis | None = None
 
 
-class RedisIamCredentialProvider:
+class RedisIamCredentialProvider(CredentialProvider):
     """Generate Redis IAM credentials for each new connection."""
 
     def __init__(self, host: str, port: int, user_id: str, region: str) -> None:
@@ -28,7 +29,15 @@ class RedisIamCredentialProvider:
 
     def get_credentials(self) -> tuple[str, str]:
         """Return username and a fresh short-lived IAM auth token."""
-        return self.user_id, generate_iam_auth_token(self.host, self.port, self.user_id, self.region)
+        return (
+            self.user_id,
+            generate_iam_auth_token(
+                self.host,
+                self.port,
+                self.user_id,
+                self.region,
+            ),
+        )
 
 
 def generate_iam_auth_token(host: str, port: int, user_id: str, region: str) -> str:
