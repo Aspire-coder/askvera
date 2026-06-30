@@ -51,7 +51,7 @@ BEDROCK_DATA_SOURCE_ID = "JSAC3THB67"
 # Alias matching the SSM key naming used in the AWS setup notes.
 BEDROCK_DATASOURCE_ID = BEDROCK_DATA_SOURCE_ID
 # Bedrock model ARN or inference profile ARN. Found in Bedrock -> Model access or Inference profiles.
-BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6"
+BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
 # Bedrock Guardrail ID. Found in Bedrock -> Guardrails -> your guardrail -> Guardrail ID.
 BEDROCK_GUARDRAIL_ID = "idy33rbs9v1i"
 # Bedrock Guardrail version. Found in Bedrock -> Guardrails -> Versions.

@@ -39,7 +39,7 @@ FastAPI backend
 | Redis / Valkey | `REDIS_USER` | `askverachat-app-user` |
 | Bedrock KB | `BEDROCK_KB_ID` | `P482AUAHKM` |
 | Bedrock KB | `BEDROCK_DATA_SOURCE_ID` | `JSAC3THB67` |
-| Bedrock Model | `BEDROCK_MODEL_ARN` | `arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6` |
+| Bedrock Model | `BEDROCK_MODEL_ARN` | `arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0` |
 | Bedrock Guardrail | `BEDROCK_GUARDRAIL_ID` | `idy33rbs9v1i` |
 | Bedrock Guardrail | `BEDROCK_GUARDRAIL_VERSION` | `DRAFT` |
 | S3 | `S3_BUCKET` | `askverachat-prod-kb` |
@@ -345,7 +345,7 @@ Current KB config:
 ```text
 Knowledge Base ID: P482AUAHKM
 Data Source ID: JSAC3THB67
-Model ARN: arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6
+Model ARN: arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0
 Guardrail ID: idy33rbs9v1i
 Guardrail version: DRAFT
 ```
