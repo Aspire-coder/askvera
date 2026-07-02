@@ -127,7 +127,7 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
                         "overrideSearchType": "HYBRID",
                         "filter": {
                             "andAll": [
-                                {"equals": {"key": "country_code", "value": country}},
+                                {"equals": {"key": "countrycode", "value": country}},
                             ]
                         },
                     }
