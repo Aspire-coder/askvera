@@ -125,7 +125,13 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
                     "vectorSearchConfiguration": {
                         "numberOfResults": settings.BEDROCK_RETRIEVAL_RESULT_COUNT,
                         "overrideSearchType": "HYBRID",
-                        "filter": {"equals": {"key": "country_code", "value": country}},
+                        "filter": {
+                            "andAll": [
+                                {"equals": {"key": "country_code", "value": country}},
+                                {"equals": {"key": "language", "value": language}},
+                                {"equals": {"key": "status", "value": "active"}},
+                            ]
+                        },
                     }
                 },
             },
