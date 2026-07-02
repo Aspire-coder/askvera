@@ -76,7 +76,7 @@ def _sources_from_response(response: dict[str, Any]) -> list[dict[str, Any]]:
                         "excerpt": ref.get("content", {}).get("text", "")[:240],
                         "page": _metadata_value(metadata, "page", "page_number", "x-amz-bedrock-kb-document-page-number"),
                         "documentVersion": _metadata_value(metadata, "document_version", "version", "policy_version"),
-                        "country": _metadata_value(metadata, "country_code", "country"),
+                        "country": _metadata_value(metadata, "country_code", "countrycode", "country"),
                         "language": _metadata_value(metadata, "language", "lang"),
                         "score": _reference_score(ref),
                     }
@@ -125,7 +125,7 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
                     "vectorSearchConfiguration": {
                         "numberOfResults": settings.BEDROCK_RETRIEVAL_RESULT_COUNT,
                         "overrideSearchType": "HYBRID",
-                        "filter": {"equals": {"key": "countrycode", "value": country}},
+                        "filter": {"equals": {"key": "country_code", "value": country}},
                     }
                 },
             },
