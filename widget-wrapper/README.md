@@ -4,9 +4,9 @@ Reusable React + TypeScript widget shell for wrapping any assistant, iframe, thi
 
 The implementation is generic. No brand-specific text, country list, language list, consent copy, response text, product copy, or starter content is hardcoded in the components. Visible content comes from `config` or caller-provided children/render functions.
 
-## AWS-Connected Local Demo
+## AWS-Connected Demo
 
-The default demo runs the widget locally and sends consent/chat events to the Python API at `http://127.0.0.1:8000`.
+The default demo runs the widget locally and sends consent/chat events to the production Python API at `https://api.vera-api.xyz`. This mirrors the deployed widget host at `https://chat.vera-api.xyz`.
 
 Start the API from the `chatbot python` folder:
 
@@ -29,6 +29,8 @@ To point the demo at a different API host, add the `api` query string:
 ```text
 http://127.0.0.1:5174/?api=https://your-api.example.com
 ```
+
+Local development on `5174` and `5175` is intentionally allowed by backend CORS. Production defaults should continue to use `https://api.vera-api.xyz`.
 
 The API needs AWS access for RDS, Valkey, Bedrock, Firehose, SQS, and Comprehend before real answers will return. If you are running locally with the defaults in `config/settings.py`, use `SSM_CONFIG_ENABLED=false` only when you do not want startup to read SSM Parameter Store.
 

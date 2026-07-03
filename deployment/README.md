@@ -2,11 +2,15 @@
 
 This folder contains repeatable deployment assets for the EC2-hosted FastAPI API.
 
+Production API: `https://api.vera-api.xyz`
+
+Widget host: `https://chat.vera-api.xyz`
+
 Production runtime configuration should come from IAM, SSM Parameter Store, and Secrets Manager. Do not place AWS access keys, database passwords, private certificates, or Redis passwords in this folder.
 
 ## Files
 
-- `bootstrap.sh` - prepares a fresh Ubuntu EC2 instance.
+- `bootstrap.sh` - prepares a fresh Ubuntu/Debian or Amazon Linux EC2 instance.
 - `deploy.sh` - pulls the latest code, installs dependencies, validates config, restarts the service, and checks health.
 - `rollback.sh` - rolls back to a previous Git revision and restarts the service.
 - `healthcheck.sh` - checks `/health` and `/health/deep`.
@@ -25,6 +29,21 @@ sudo ./deployment/deploy.sh
 ```
 
 `bootstrap.sh` does not enable the HTTPS Nginx site because the certificate does not exist yet. `ssl/certbot.sh` installs a temporary HTTP proxy, obtains the certificate, then installs the production HTTPS config.
+
+## Production Architecture
+
+```mermaid
+flowchart TD
+    Browser["Browser"] --> Widget["React Widget"]
+    Widget --> HTTPS["HTTPS"]
+    HTTPS --> Nginx["Nginx Reverse Proxy"]
+    Nginx --> FastAPI["FastAPI systemd service"]
+    FastAPI --> Bedrock["AWS Bedrock"]
+    Bedrock --> KB["Knowledge Base"]
+    KB --> Response["Response"]
+```
+
+DNS is managed through Porkbun/Cloudflare. `api.vera-api.xyz` terminates HTTPS at Nginx on EC2, then proxies to Uvicorn on `127.0.0.1:8000`.
 
 ## Normal Deploy
 
@@ -65,7 +84,7 @@ sudo ./deployment/rollback.sh 4380931
 
 ## Widget Deployment
 
-The widget should be built and deployed separately to static hosting such as S3 plus CloudFront for `chat.vera-api.xyz`.
+The widget is built separately and deployed to static hosting for `chat.vera-api.xyz`. The production widget should call `https://api.vera-api.xyz`.
 
 ```bash
 cd widget-wrapper

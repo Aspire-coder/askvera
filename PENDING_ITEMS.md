@@ -44,10 +44,10 @@ This file tracks the remaining setup and production-readiness gaps for the ASK V
 
 ## Widget Wrapper Items
 
-1. Decide how the generic widget wrapper should be delivered.
+1. Maintain the production widget delivery path.
    - Current wrapper code lives in `widget-wrapper`.
-   - Local demo is wired to the Python API.
-   - Production delivery still needs to confirm whether the widget is served from `chat.vera-api.xyz`, FastAPI static hosting, or a separate frontend/CDN deployment.
+   - Local demo is wired to the production Python API by default and can be overridden with the `api` query string.
+   - Production widget delivery is assigned to `https://chat.vera-api.xyz`.
 
 2. Add the Chatwoot deployment values.
    - Chatwoot base URL.
@@ -84,8 +84,18 @@ This file tracks the remaining setup and production-readiness gaps for the ASK V
 
 - AWS account ID is configured as `615592621509`.
 - Production CORS origins are configured for `https://chat.vera-api.xyz` and `https://vera-api.xyz`.
+- Local widget development CORS origins are configured for `http://127.0.0.1:5174`, `http://localhost:5174`, `http://127.0.0.1:5175`, and `http://localhost:5175`.
 - API domain is recorded as `api.vera-api.xyz`.
 - Widget domain is recorded as `chat.vera-api.xyz`.
+
+## Completed Production Deployment
+
+- EC2 runtime is provisioned.
+- IAM role, security groups, Nginx, systemd, and HTTPS are configured.
+- Let's Encrypt SSL is active for `https://api.vera-api.xyz`.
+- Porkbun/Cloudflare DNS records are configured for the API and widget domains.
+- React widget is connected to the production backend.
+- End-to-end widget to FastAPI to Bedrock flow has been verified.
 
 ## Completed Hardening Items
 

@@ -1,6 +1,6 @@
 import { BackendChatDemo } from "../../src/generic-widget/examples/BackendChatDemo";
 
-const apiBaseUrl = new URLSearchParams(window.location.search).get("api") || "http://127.0.0.1:8000";
+const apiBaseUrl = new URLSearchParams(window.location.search).get("api") || "https://api.vera-api.xyz";
 
 export function App() {
   return (

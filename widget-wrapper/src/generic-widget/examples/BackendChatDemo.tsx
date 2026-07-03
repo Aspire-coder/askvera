@@ -43,7 +43,7 @@ async function postJson<T>(baseUrl: string, path: string, body: unknown): Promis
   return envelope;
 }
 
-export function BackendChatDemo({ apiBaseUrl = "http://127.0.0.1:8000" }: BackendChatDemoProps) {
+export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: BackendChatDemoProps) {
   const config = useMemo(
     () => ({
       ...foreverDemoConfig,

@@ -2,6 +2,28 @@
 
 ASK Vera is an AWS-native FastAPI chatbot backend for a public website widget. It uses IAM instance-role authentication only, Bedrock Knowledge Bases for RAG-only answers, Comprehend for PII scrubbing, RDS PostgreSQL for sessions and consent, ElastiCache Valkey for response caching, Kinesis Firehose for audit logs, and SQS for feedback.
 
+## Production Deployment
+
+The production deployment is live on AWS EC2 behind Nginx and HTTPS.
+
+- Production API: `https://api.vera-api.xyz`
+- Widget domain: `https://chat.vera-api.xyz`
+- Runtime user: `askvera`
+- Service manager: `systemd`
+- TLS: Let's Encrypt certificate installed through `deployment/ssl/certbot.sh`
+- DNS: Porkbun/Cloudflare records point the API and widget hostnames to the production entry points.
+
+```mermaid
+flowchart TD
+    Browser["Browser"] --> Widget["React Widget"]
+    Widget --> HTTPS["HTTPS"]
+    HTTPS --> Nginx["Nginx Reverse Proxy"]
+    Nginx --> FastAPI["FastAPI"]
+    FastAPI --> Bedrock["AWS Bedrock"]
+    Bedrock --> KB["Knowledge Base"]
+    KB --> Response["Response"]
+```
+
 ## Project Structure
 
 - `api/` - FastAPI routes and middleware.
@@ -40,6 +62,12 @@ Production can override `config/settings.py` with SSM parameters under `/askvera
 - `SQS_FEEDBACK_QUEUE_URL`
 - `S3_BUCKET`
 
+Production SSM path:
+
+```text
+/askverachat/prod/
+```
+
 ## Configure
 
 Current dev/QA values already configured:
@@ -70,7 +98,7 @@ make run
 
 ## Deploy
 
-Deploy behind CloudFront, WAF, ALB, and an Auto Scaling Group on private EC2 instances. Attach `ChatbotAppRole` to the launch template. Health checks must use `GET /health`, which makes no AWS calls.
+Deploy on EC2 with `ChatbotAppRole`, Nginx, systemd, and HTTPS. Health checks must use `GET /health`, which makes no AWS calls. Use `GET /health/deep` for PostgreSQL, Redis, and dependency diagnostics.
 
 Repeatable deployment assets live in `deployment/`:
 
@@ -81,6 +109,20 @@ sudo ./deployment/deploy.sh
 ```
 
 See `deployment/README.md` before running these on EC2.
+
+## CORS
+
+Production CORS allows:
+
+- `https://chat.vera-api.xyz`
+- `https://vera-api.xyz`
+
+Local widget development origins are intentionally allowed:
+
+- `http://127.0.0.1:5174`
+- `http://localhost:5174`
+- `http://127.0.0.1:5175`
+- `http://localhost:5175`
 
 ## Tests
 

@@ -20,6 +20,7 @@ app/
 graphify-out/
 output/
 ASK_VERA_FULL_CODE_EXPORT.md
+ASK_VERA_CODE_EXPORT_CURRENT.md
 *.pdf
 public/documents/*.docx
 widget-wrapper/dist/
