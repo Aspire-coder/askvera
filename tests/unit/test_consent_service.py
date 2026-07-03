@@ -84,7 +84,11 @@ def test_chat_blocks_when_consent_missing() -> None:
     request.state.correlation_id = "cid"
     body = ChatRequest(message="hello", sessionId="session-1", country="US", language="en")
 
-    with patch("api.routes.has_valid_consent", return_value=False), patch("api.routes.check_text") as check_text:
+    with (
+        patch("api.routes.validate_and_touch_session", return_value=False),
+        patch("api.routes.has_valid_consent", return_value=False),
+        patch("api.routes.check_text") as check_text,
+    ):
         response = routes.chat(body, request)
 
     assert isinstance(response, JSONResponse)
@@ -99,7 +103,11 @@ def test_chat_blocks_when_consent_version_is_invalid() -> None:
     request.state.correlation_id = "cid"
     body = ChatRequest(message="hello", sessionId="session-1", country="US", language="en")
 
-    with patch("api.routes.has_valid_consent", return_value=False), patch("api.routes.retrieve_and_generate") as bedrock:
+    with (
+        patch("api.routes.validate_and_touch_session", return_value=True),
+        patch("api.routes.has_valid_consent", return_value=False),
+        patch("api.routes.retrieve_and_generate") as bedrock,
+    ):
         response = routes.chat(body, request)
 
     assert response.status_code == 403
