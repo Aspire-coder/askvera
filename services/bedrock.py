@@ -101,6 +101,37 @@ def _confidence_from_sources(sources: list[dict[str, Any]]) -> float:
     return round(min(score_confidence, 0.99), 3)
 
 
+def _score_summary(sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarise source scores for retrieval quality logging."""
+    scores: list[float] = []
+    for source in sources:
+        if source.get("score") is None:
+            continue
+        try:
+            scores.append(float(source["score"]))
+        except (TypeError, ValueError):
+            continue
+    return {
+        "top_score": round(max(scores), 3) if scores else None,
+        "average_score": round(sum(scores) / len(scores), 3) if scores else None,
+        "source_count": len(sources),
+    }
+
+
+def _source_log_summary(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return compact source details that are useful in production logs."""
+    return [
+        {
+            "title": source.get("title", ""),
+            "page": source.get("page", ""),
+            "score": source.get("score"),
+            "country": source.get("country", ""),
+            "language": source.get("language", ""),
+        }
+        for source in sources[: settings.BEDROCK_RETRIEVAL_RESULT_COUNT]
+    ]
+
+
 def _retrieve_sources(message: str, country: str, language: str, correlation_id: str) -> list[dict[str, Any]]:
     """Call the standalone Retrieve API to get reliable scores/sources.
 
@@ -148,6 +179,14 @@ def _retrieve_sources(message: str, country: str, language: str, correlation_id:
                     "score": result.get("score"),
                 }
             )
+    LOGGER.info(
+        "bedrock_retrieve_sources",
+        correlation_id=correlation_id,
+        country=country,
+        language=language,
+        **_score_summary(sources),
+        sources=_source_log_summary(sources),
+    )
     return sources
 
 
@@ -202,8 +241,33 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
         LOGGER.warning("bedrock_citations_empty_fallback", correlation_id=correlation_id)
         sources = _retrieve_sources(message, country, language, correlation_id)
     confidence = _confidence_from_sources(sources)
-    if confidence < settings.BEDROCK_MIN_CONFIDENCE:
-        LOGGER.warning("bedrock_low_confidence", correlation_id=correlation_id, confidence=confidence)
+    score_summary = _score_summary(sources)
+    if not sources:
+        LOGGER.warning(
+            "bedrock_no_sources",
+            correlation_id=correlation_id,
+            country=country,
+            language=language,
+            confidence=confidence,
+        )
         raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
-    LOGGER.info("bedrock_success", correlation_id=correlation_id, source_count=len(sources), confidence=confidence)
+    if confidence < settings.BEDROCK_MIN_CONFIDENCE:
+        LOGGER.warning(
+            "bedrock_low_confidence_with_sources",
+            correlation_id=correlation_id,
+            country=country,
+            language=language,
+            confidence=confidence,
+            **score_summary,
+            sources=_source_log_summary(sources),
+        )
+    LOGGER.info(
+        "bedrock_success",
+        correlation_id=correlation_id,
+        country=country,
+        language=language,
+        confidence=confidence,
+        **score_summary,
+        sources=_source_log_summary(sources),
+    )
     return {"response": answer, "sources": sources, "confidence": confidence}

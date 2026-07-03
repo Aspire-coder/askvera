@@ -3,7 +3,10 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from services.bedrock import _confidence_from_sources, build_prompt, retrieve_and_generate
+from utils.exceptions import LowConfidenceError
 
 
 def test_build_prompt_replaces_all_variables() -> None:
@@ -56,3 +59,40 @@ def test_confidence_falls_back_to_citation_quality() -> None:
         ]
     )
     assert confidence > 0.65
+
+
+def test_retrieve_and_generate_returns_low_score_answer_with_sources() -> None:
+    """Low retrieval scores should be logged, not rejected, when citations exist."""
+    runtime = MagicMock()
+    runtime.retrieve_and_generate.return_value = {
+        "output": {"text": "Return policy answer"},
+        "citations": [
+            {
+                "retrievedReferences": [
+                    {
+                        "location": {"s3Location": {"uri": "s3://kb/return-policy.pdf"}},
+                        "content": {"text": "Return policy excerpt"},
+                        "metadata": {"score": 0.39, "page": 8, "country_code": "CA", "language": "en"},
+                    }
+                ]
+            }
+        ],
+    }
+    clients = SimpleNamespace(bedrock_agent_runtime=runtime)
+    with patch("services.bedrock.get_aws_clients", return_value=clients):
+        result = retrieve_and_generate("return policy", "CA", "en", "new_prospect", "", "cid")
+
+    assert result["response"] == "Return policy answer"
+    assert result["confidence"] < 0.5
+    assert result["sources"][0]["uri"] == "s3://kb/return-policy.pdf"
+
+
+def test_retrieve_and_generate_raises_when_no_sources_after_fallback() -> None:
+    """No citations and no retrieve fallback sources should still produce the fallback."""
+    runtime = MagicMock()
+    runtime.retrieve_and_generate.return_value = {"output": {"text": "Ungrounded answer"}, "citations": []}
+    runtime.retrieve.return_value = {"retrievalResults": []}
+    clients = SimpleNamespace(bedrock_agent_runtime=runtime)
+
+    with patch("services.bedrock.get_aws_clients", return_value=clients), pytest.raises(LowConfidenceError):
+        retrieve_and_generate("unrelated", "CA", "en", "new_prospect", "", "cid")

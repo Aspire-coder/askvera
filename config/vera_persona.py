@@ -29,7 +29,7 @@ ROLE_CONTENT_SCOPES = {
 }
 
 FALLBACK_RESPONSES = {
-    "low_confidence": "I do not have authorised information on that yet. Please contact Forever Living support for confirmed guidance.",
+    "low_confidence": "I could not find sufficient approved information for this question. Please contact your upline or Forever Living support if you require an official interpretation.",
     "income_claim": "I cannot provide income projections or guarantees. Please refer to the official Income Disclosure Statement for approved information.",
     "medical_claim": "I cannot provide medical advice or make medical claims. Please speak with a qualified healthcare professional.",
     "bedrock_error": "I am having a brief technical issue reaching the knowledge base. Please try again in a moment.",
