@@ -101,6 +101,51 @@ def _confidence_from_sources(sources: list[dict[str, Any]]) -> float:
     return round(min(score_confidence, 0.99), 3)
 
 
+def _retrieve_sources(message: str, country: str, language: str, correlation_id: str) -> list[dict[str, Any]]:
+    """Call standalone Retrieve for reliable scores when citations are empty."""
+    try:
+        response = get_aws_clients().bedrock_agent_runtime.retrieve(
+            knowledgeBaseId=settings.BEDROCK_KB_ID,
+            retrievalQuery={"text": message},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {
+                    "numberOfResults": settings.BEDROCK_RETRIEVAL_RESULT_COUNT,
+                    "overrideSearchType": "HYBRID",
+                    "filter": {
+                        "andAll": [
+                            {"equals": {"key": "country_code", "value": country}},
+                            {"equals": {"key": "language", "value": language}},
+                            {"equals": {"key": "status", "value": "active"}},
+                        ]
+                    },
+                }
+            },
+        )
+    except (BotoCoreError, ClientError):
+        LOGGER.exception("bedrock_retrieve_fallback_failed", correlation_id=correlation_id)
+        return []
+
+    sources: list[dict[str, Any]] = []
+    for result in response.get("retrievalResults", []):
+        location = result.get("location", {})
+        uri = location.get("s3Location", {}).get("uri", "")
+        metadata = result.get("metadata", {}) or {}
+        if uri:
+            sources.append(
+                {
+                    "title": _metadata_value(metadata, "title", "document_title") or uri.rsplit("/", 1)[-1],
+                    "uri": uri,
+                    "excerpt": result.get("content", {}).get("text", "")[:240],
+                    "page": _metadata_value(metadata, "page", "page_number", "x-amz-bedrock-kb-document-page-number"),
+                    "documentVersion": _metadata_value(metadata, "document_version", "version", "policy_version"),
+                    "country": _metadata_value(metadata, "country_code", "countrycode", "country"),
+                    "language": _metadata_value(metadata, "language", "lang"),
+                    "score": result.get("score"),
+                }
+            )
+    return sources
+
+
 def retrieve_and_generate(message: str, country: str, language: str, role: str, session_history: str, correlation_id: str) -> dict[str, Any]:
     """Call Bedrock Knowledge Base with country, language, and role scoping."""
     for name in ["BEDROCK_KB_ID", "BEDROCK_MODEL_ARN", "BEDROCK_GUARDRAIL_ID", "BEDROCK_GUARDRAIL_VERSION"]:
@@ -149,6 +194,9 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
 
     answer = response.get("output", {}).get("text", "")
     sources = _sources_from_response(response)
+    if not sources:
+        LOGGER.warning("bedrock_citations_empty_fallback", correlation_id=correlation_id)
+        sources = _retrieve_sources(message, country, language, correlation_id)
     confidence = _confidence_from_sources(sources)
     if confidence < settings.BEDROCK_MIN_CONFIDENCE:
         LOGGER.warning("bedrock_low_confidence", correlation_id=correlation_id, confidence=confidence)
