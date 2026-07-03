@@ -164,6 +164,7 @@ export type GenericWidgetWrapperProps = {
   openByDefault?: boolean;
   initialConsentAccepted?: boolean;
   initialShowSuccess?: boolean;
+  consentRequiredSignal?: number;
   showLocaleSelector?: boolean;
   visitorId?: string;
   sessionId?: string;
@@ -172,7 +173,7 @@ export type GenericWidgetWrapperProps = {
   renderMessages?: (messages: WidgetMessage[], state: GenericWidgetRenderState) => ReactNode;
   onOpen?: () => void;
   onClose?: () => void;
-  onAcceptConsent?: (payload: ConsentEventPayload) => void;
+  onAcceptConsent?: (payload: ConsentEventPayload) => void | Promise<void>;
   onRejectConsent?: (payload: ConsentEventPayload) => void;
   onCountryChange?: (payload: LocaleChangePayload) => void;
   onLanguageChange?: (payload: LocaleChangePayload) => void;

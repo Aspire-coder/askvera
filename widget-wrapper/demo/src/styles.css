@@ -181,6 +181,103 @@ body::before {
   white-space: nowrap;
 }
 
+.legal-page {
+  position: relative;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 42px 28px 72px;
+}
+
+.legal-back-link {
+  display: inline-flex;
+  margin-bottom: 22px;
+  color: #111111;
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-color: #ffc400;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+}
+
+.legal-document {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 22px 60px rgba(23, 32, 51, 0.12);
+}
+
+.legal-document header {
+  padding: 28px 32px;
+  color: #ffffff;
+  background: #000000;
+}
+
+.legal-eyebrow {
+  margin: 0 0 8px;
+  color: #ffc400;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.legal-document h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.legal-html {
+  padding: 30px 34px 42px;
+  color: #1f2933;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.legal-html h1,
+.legal-html h2,
+.legal-html h3,
+.legal-html strong {
+  color: #111111;
+}
+
+.legal-html a {
+  color: #111111;
+  font-weight: 750;
+  text-decoration-color: #ffc400;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.legal-html table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.legal-html th,
+.legal-html td {
+  padding: 10px;
+  border: 1px solid #d8dee6;
+  vertical-align: top;
+}
+
+.legal-status,
+.legal-error {
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  font-weight: 750;
+}
+
+.legal-error {
+  color: #8a1f11;
+  border-color: rgba(138, 31, 17, 0.28);
+}
+
 @media (max-width: 980px) {
   .demo-page {
     padding: 36px 22px 680px;

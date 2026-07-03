@@ -1,4 +1,4 @@
-import { FormEvent, type CSSProperties, useMemo, useState } from "react";
+import { FormEvent, type CSSProperties, useEffect, useMemo, useState } from "react";
 import { ConsentPanel } from "./ConsentPanel";
 import { FloatingLauncher } from "./FloatingLauncher";
 import { Header } from "./Header";
@@ -48,6 +48,7 @@ export function GenericWidgetWrapper({
   openByDefault = false,
   initialConsentAccepted = false,
   initialShowSuccess = false,
+  consentRequiredSignal = 0,
   showLocaleSelector = true,
   visitorId: providedVisitorId,
   sessionId: providedSessionId,
@@ -74,6 +75,8 @@ export function GenericWidgetWrapper({
   const [selectedLanguage, setSelectedLanguage] = useState(initialLocale.language);
   const [message, setMessage] = useState("");
   const [showSuccess, setShowSuccess] = useState(initialShowSuccess);
+  const [consentSubmitting, setConsentSubmitting] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [visitorId] = useState(providedVisitorId || createVisitorId());
   const [sessionId] = useState(providedSessionId || createSessionId());
   const [consentAccepted, setConsentAccepted] = useState(
@@ -94,6 +97,14 @@ export function GenericWidgetWrapper({
     selectedCountry: selectedCountry?.code || "",
     selectedLanguage: selectedLanguage?.code || ""
   });
+
+  useEffect(() => {
+    if (!consentRequiredSignal) return;
+    setConsentAccepted(false);
+    setShowSuccess(false);
+    setConsentError("Please review and accept the legal documents before chatting.");
+    if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
+  }, [config.consent.storageKey, config.persistConsent, consentRequiredSignal]);
 
   const closeWidget = () => {
     setIsOpen(false);
@@ -121,7 +132,7 @@ export function GenericWidgetWrapper({
     );
   };
 
-  const handleConsent = (actionType: "accepted" | "rejected") => {
+  const handleConsent = async (actionType: "accepted" | "rejected") => {
     const payload = createConsentRecord({
       actionType,
       config,
@@ -131,10 +142,26 @@ export function GenericWidgetWrapper({
       sessionId
     });
     const accepted = actionType === "accepted";
-    setConsentAccepted(accepted);
-    setShowSuccess(accepted);
-    if (config.persistConsent) writeConsentFlag(config.consent.storageKey, accepted);
-    accepted ? onAcceptConsent?.(payload) : onRejectConsent?.(payload);
+    setConsentError(null);
+
+    if (!accepted) {
+      onRejectConsent?.(payload);
+      return;
+    }
+
+    try {
+      setConsentSubmitting(true);
+      await onAcceptConsent?.(payload);
+      setConsentAccepted(true);
+      setShowSuccess(true);
+      if (config.persistConsent) writeConsentFlag(config.consent.storageKey, true);
+    } catch {
+      setConsentAccepted(false);
+      setShowSuccess(false);
+      setConsentError("Unable to record your consent. Please try again.");
+    } finally {
+      setConsentSubmitting(false);
+    }
   };
 
   const handleSubmit = (event: FormEvent) => {
@@ -189,7 +216,13 @@ export function GenericWidgetWrapper({
               />
             ) : null}
             {config.consent.requireConsentBeforeMessaging !== false && !consentAccepted ? (
-              <ConsentPanel config={config} onAccept={() => handleConsent("accepted")} onReject={() => handleConsent("rejected")} />
+              <ConsentPanel
+                config={config}
+                accepting={consentSubmitting}
+                error={consentError}
+                onAccept={() => handleConsent("accepted")}
+                onReject={() => handleConsent("rejected")}
+              />
             ) : null}
             <MessageFeed config={config} messages={messages} state={state} renderMessages={renderMessages} />
             {suggestedTopics.length ? (

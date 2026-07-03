@@ -21,8 +21,14 @@ export const foreverDemoConfig: GenericWidgetConfig = {
   },
   consent: {
     ...exampleWidgetConfig.consent,
-    title: "Privacy and terms",
-    body: "To personalize this chat for your selected market and language, this assistant may process your message and basic session details according to the linked policies.",
+    title: "Privacy and Terms",
+    body: (
+      <>
+        <p><strong>To use ASK Vera, you must review and accept the legal documents below.</strong></p>
+        <p>Your consent will be recorded for this session before you can start chatting.</p>
+        <p>Please review the following legal documents before continuing.</p>
+      </>
+    ),
     categories: ["chat-processing", "market-language-preferences"],
     storageKey: "forever-style-widget-demo-consent"
   },

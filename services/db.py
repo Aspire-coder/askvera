@@ -75,11 +75,17 @@ def create_schema(correlation_id: str = "startup") -> None:
                         session_id TEXT PRIMARY KEY,
                         messages JSONB NOT NULL DEFAULT '[]'::jsonb,
                         expires_at TIMESTAMPTZ NOT NULL,
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        consent_accepted BOOLEAN NOT NULL DEFAULT false,
+                        consent_legal_version TEXT,
+                        consent_accepted_at TIMESTAMPTZ
                     )
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false"))
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_legal_version TEXT"))
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ"))
             connection.execute(
                 text(
                     """
@@ -90,11 +96,15 @@ def create_schema(correlation_id: str = "startup") -> None:
                         lang TEXT NOT NULL,
                         accepted_at TIMESTAMPTZ NOT NULL,
                         version TEXT NOT NULL,
+                        accepted BOOLEAN NOT NULL DEFAULT true,
+                        correlation_id TEXT,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE consent_log ADD COLUMN IF NOT EXISTS accepted BOOLEAN NOT NULL DEFAULT true"))
+            connection.execute(text("ALTER TABLE consent_log ADD COLUMN IF NOT EXISTS correlation_id TEXT"))
     except SQLAlchemyError as exc:
         LOGGER.exception("postgres_schema_failed", correlation_id=correlation_id)
         raise AwsServiceError("PostgreSQL schema setup failed.") from exc

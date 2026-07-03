@@ -14,7 +14,7 @@ from services import cache as cache_service
 from services.audit import write_audit_event
 from services.bedrock import retrieve_and_generate
 from services.cache import build_cache_key, get_cache_value, set_cache_value
-from services.consent import record_consent
+from services.consent_service import has_valid_consent, record_consent
 from services.db import get_engine
 from services.feedback import enqueue_feedback
 from services.guardrails import check_text
@@ -49,6 +49,20 @@ def error_response(exc: AskVeraError, correlation_id: str) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=envelope.model_dump())
 
 
+def consent_required_response(correlation_id: str) -> JSONResponse:
+    """Return a business-rule error when chat is attempted before legal consent."""
+    envelope = Envelope(
+        success=False,
+        error={
+            "code": "CONSENT_REQUIRED",
+            "message": "You must accept the legal documents before chatting.",
+            "legalVersion": settings.LEGAL_VERSION,
+        },
+        correlationId=correlation_id,
+    )
+    return JSONResponse(status_code=403, content=envelope.model_dump())
+
+
 def _valid_language_codes(country_code: str) -> set[str]:
     return get_language_codes_for_country(country_code)
 
@@ -58,6 +72,8 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
     try:
+        if not has_valid_consent(body.sessionId, correlation_id):
+            return consent_required_response(correlation_id)
         check_text(body.message, correlation_id)
         scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
         cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
@@ -108,7 +124,7 @@ def consent(body: ConsentRequest, request: Request) -> Envelope | JSONResponse:
     correlation_id = _correlation_id(request)
     try:
         record_consent(body, correlation_id)
-        return success({"recorded": True}, correlation_id)
+        return success({"recorded": True, "legalVersion": settings.LEGAL_VERSION}, correlation_id)
     except AskVeraError as exc:
         return error_response(exc, correlation_id)
 

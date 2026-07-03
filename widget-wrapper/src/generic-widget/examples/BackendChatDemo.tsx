@@ -6,9 +6,21 @@ import { foreverDemoConfig } from "./foreverDemoConfig";
 type ApiEnvelope<T> = {
   success: boolean;
   data?: T;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; legalVersion?: string };
   correlationId: string;
 };
+
+class ApiRequestError extends Error {
+  code?: string;
+  legalVersion?: string;
+
+  constructor(message: string, code?: string, legalVersion?: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.code = code;
+    this.legalVersion = legalVersion;
+  }
+}
 
 type ChatResponseData = {
   response: string;
@@ -28,6 +40,18 @@ type ConfigResponseData = {
   privacyVersion: string;
 };
 
+type LegalDocument = {
+  id: string;
+  title: string;
+  required: boolean;
+  html: string;
+};
+
+type PrivacyResponseData = {
+  version: string;
+  documents: LegalDocument[];
+};
+
 export type BackendChatDemoProps = {
   apiBaseUrl?: string;
 };
@@ -41,6 +65,16 @@ const buildId = (prefix: string) => {
 
 const joinUrl = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, "")}${path}`;
 
+const legalViewerHref = (apiBaseUrl: string, country: string, language: string, documentId: string) => {
+  const params = new URLSearchParams({
+    api: apiBaseUrl,
+    country,
+    lang: language,
+    doc: documentId
+  });
+  return `/legal?${params.toString()}`;
+};
+
 async function postJson<T>(baseUrl: string, path: string, body: unknown): Promise<ApiEnvelope<T>> {
   const response = await fetch(joinUrl(baseUrl, path), {
     method: "POST",
@@ -49,7 +83,11 @@ async function postJson<T>(baseUrl: string, path: string, body: unknown): Promis
   });
   const envelope = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok || !envelope.success) {
-    throw new Error(envelope.error?.message || `Request failed with status ${response.status}`);
+    throw new ApiRequestError(
+      envelope.error?.message || `Request failed with status ${response.status}`,
+      envelope.error?.code,
+      envelope.error?.legalVersion
+    );
   }
   return envelope;
 }
@@ -65,8 +103,9 @@ async function getJson<T>(baseUrl: string, path: string): Promise<ApiEnvelope<T>
 
 function buildLocaleOptions(countries: ApiCountry[]) {
   const languageMap = new Map<string, { label: string; countryCodes: string[] }>();
+  const sortedCountries = [...countries].sort((first, second) => first.name.localeCompare(second.name));
 
-  for (const country of countries) {
+  for (const country of sortedCountries) {
     for (const language of country.languages) {
       const current = languageMap.get(language.code) || { label: language.name, countryCodes: [] };
       if (!current.countryCodes.includes(country.code)) {
@@ -77,7 +116,7 @@ function buildLocaleOptions(countries: ApiCountry[]) {
   }
 
   return {
-    countries: countries.map((country) => ({
+    countries: sortedCountries.map((country) => ({
       code: country.code,
       label: country.name,
       languageCodes: country.languages.map((language) => language.code)
@@ -92,26 +131,42 @@ function buildLocaleOptions(countries: ApiCountry[]) {
 
 export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: BackendChatDemoProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
+  const [selectedLocale, setSelectedLocale] = useState({ country: "US", language: "en" });
+  const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
+  const [legalVersion, setLegalVersion] = useState<string | null>(null);
+  const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
+  const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
   const config = useMemo(
     () => {
       const localeOptions = apiConfig ? buildLocaleOptions(apiConfig.countries) : null;
+      const policyLinks = legalDocuments.length
+        ? legalDocuments.map((document) => ({
+            id: document.id,
+            label: document.title,
+            href: legalViewerHref(apiBaseUrl, selectedLocale.country, selectedLocale.language, document.id),
+            target: "_blank" as const
+          }))
+        : foreverDemoConfig.policyLinks.map((link) => ({
+            ...link,
+            href: legalViewerHref(apiBaseUrl, selectedLocale.country, selectedLocale.language, link.id === "terms" ? "privacy" : link.id),
+            target: "_blank" as const
+          }));
 
       return {
         ...foreverDemoConfig,
         provider: { name: "ASK Vera API", type: "custom-react" as const },
         consent: {
           ...foreverDemoConfig.consent,
-          policyVersion: apiConfig?.privacyVersion || foreverDemoConfig.consent.policyVersion
+          policyVersion: legalVersion || apiConfig?.privacyVersion || foreverDemoConfig.consent.policyVersion
         },
         countries: localeOptions?.countries || foreverDemoConfig.countries,
         languages: localeOptions?.languages || foreverDemoConfig.languages,
-        policyLinks: foreverDemoConfig.policyLinks.map((link) => ({
-          ...link,
-          href: link.href.startsWith("/api/") ? joinUrl(apiBaseUrl, link.href) : link.href
-        }))
+        defaultCountryCode: selectedLocale.country,
+        defaultLanguageCode: selectedLocale.language,
+        policyLinks
       };
     },
-    [apiBaseUrl, apiConfig]
+    [apiBaseUrl, apiConfig, legalDocuments, legalVersion, selectedLocale.country, selectedLocale.language]
   );
   const [messages, setMessages] = useState<WidgetMessage[]>([
     {
@@ -150,26 +205,50 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     };
   }, [apiBaseUrl]);
 
+  useEffect(() => {
+    let active = true;
+    const path = `/api/privacy?country=${encodeURIComponent(selectedLocale.country)}&lang=${encodeURIComponent(selectedLocale.language)}`;
+
+    getJson<PrivacyResponseData>(apiBaseUrl, path)
+      .then((envelope) => {
+        if (active && envelope.data) {
+          setLegalDocuments(envelope.data.documents);
+          setLegalVersion(envelope.data.version);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setLegalDocuments([]);
+          appendMessage({
+            id: buildId("privacy-warning"),
+            role: "system",
+            content: error instanceof Error ? `Legal documents could not load yet: ${error.message}` : "Legal documents could not load yet."
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, selectedLocale.country, selectedLocale.language]);
+
   const handleConsent = async (payload: ConsentEventPayload) => {
-    try {
-      await postJson(apiBaseUrl, "/api/consent", {
-        sessionId: payload.sessionId,
-        country: payload.selectedCountry,
-        lang: payload.selectedLanguage,
-        timestamp: payload.timestamp,
-        version: payload.policyVersion
-      });
-    } catch (error) {
-      appendMessage({
-        id: buildId("consent-warning"),
-        role: "system",
-        content: error instanceof Error ? `Consent accepted locally, but the API could not record it: ${error.message}` : "Consent accepted locally, but the API could not record it."
-      });
+    await postJson(apiBaseUrl, "/api/consent", {
+      sessionId: payload.sessionId,
+      country: payload.selectedCountry,
+      lang: payload.selectedLanguage,
+      timestamp: payload.timestamp,
+      version: payload.policyVersion
+    });
+    if (pendingMessage) {
+      const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
+      setPendingMessage(null);
+      await sendChat(retryPayload, false);
     }
   };
 
-  const handleMessage = async (payload: MessageEventPayload) => {
-    appendMessage({ id: buildId("user"), role: "user", content: payload.message });
+  const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
+    if (showUserMessage) appendMessage({ id: buildId("user"), role: "user", content: payload.message });
     setLoading(true);
     try {
       const envelope = await postJson<ChatResponseData>(apiBaseUrl, "/api/chat", {
@@ -190,6 +269,16 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
         }
       });
     } catch (error) {
+      if (error instanceof ApiRequestError && error.code === "CONSENT_REQUIRED") {
+        setPendingMessage(payload);
+        setConsentRequiredSignal((value) => value + 1);
+        appendMessage({
+          id: buildId("consent-required"),
+          role: "system",
+          content: "Please accept the legal documents before chatting. Your message will be sent after consent is recorded."
+        });
+        return;
+      }
       appendMessage({
         id: buildId("api-error"),
         role: "system",
@@ -200,13 +289,20 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     }
   };
 
+  const handleMessage = async (payload: MessageEventPayload) => {
+    await sendChat(payload);
+  };
+
   return (
     <GenericWidgetWrapper
       config={config}
       messages={messages}
       loading={loading}
       openByDefault
+      consentRequiredSignal={consentRequiredSignal}
       onAcceptConsent={handleConsent}
+      onCountryChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
+      onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={handleMessage}
       onNewChat={() =>
         setMessages([
