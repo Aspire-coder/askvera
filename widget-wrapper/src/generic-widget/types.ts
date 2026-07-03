@@ -110,6 +110,9 @@ export type GenericWidgetConfig = {
   defaultCountryCode?: string;
   defaultLanguageCode?: string;
   persistConsent?: boolean;
+  sessionStorageKey?: string;
+  sessionMetadataStorageKey?: string;
+  visitorStorageKey?: string;
 };
 
 export type ConsentActionType = "accepted" | "rejected";

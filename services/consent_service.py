@@ -17,7 +17,7 @@ LOGGER = get_logger("services.consent_service")
 def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
     """Write consent metadata and mark the session as consented for the current legal version."""
     accepted_at = consent.timestamp or datetime.now(UTC).isoformat()
-    expires_at = datetime.now(UTC) + timedelta(seconds=settings.SESSION_TTL_SECONDS)
+    expires_at = datetime.now(UTC) + timedelta(hours=settings.SESSION_TIMEOUT_HOURS)
     try:
         with get_engine().begin() as connection:
             connection.execute(
@@ -42,6 +42,8 @@ def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
                     INSERT INTO chat_sessions (
                         session_id,
                         messages,
+                        created_at,
+                        last_activity_at,
                         expires_at,
                         updated_at,
                         consent_accepted,
@@ -51,6 +53,8 @@ def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
                     VALUES (
                         :session_id,
                         '[]'::jsonb,
+                        now(),
+                        now(),
                         :expires_at,
                         now(),
                         true,
@@ -62,6 +66,7 @@ def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
                         consent_accepted = true,
                         consent_legal_version = EXCLUDED.consent_legal_version,
                         consent_accepted_at = EXCLUDED.consent_accepted_at,
+                        last_activity_at = now(),
                         expires_at = GREATEST(chat_sessions.expires_at, EXCLUDED.expires_at),
                         updated_at = now()
                     """

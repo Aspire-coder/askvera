@@ -22,6 +22,7 @@ from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 from services.pii import scrub_pii
 from services.session import append_session_turn, get_session_history
+from services.session_service import validate_and_touch_session
 from utils.exceptions import AskVeraError, LowConfidenceError
 from utils.logging import get_logger
 from utils.validators import ChatRequest, ConsentRequest, Envelope, FeedbackRequest
@@ -72,6 +73,7 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
     try:
+        validate_and_touch_session(body.sessionId, correlation_id)
         if not has_valid_consent(body.sessionId, correlation_id):
             return consent_required_response(correlation_id)
         check_text(body.message, correlation_id)
@@ -102,15 +104,15 @@ def config(request: Request) -> Envelope:
 
 
 @router.get("/api/privacy", response_model=None)
-def privacy(country: str, lang: str, request: Request) -> Envelope | JSONResponse:
+def privacy(request: Request, country: str | None = None, lang: str | None = None) -> Envelope | JSONResponse:
     """Return legal documents for a country and language."""
     correlation_id = _correlation_id(request)
-    normalized_country = country.upper()
-    normalized_lang = lang.lower()
-    if normalized_country not in get_country_codes():
+    normalized_country = country.upper() if country else None
+    normalized_lang = lang.lower() if lang else None
+    if normalized_country and normalized_country not in get_country_codes():
         envelope = Envelope(success=False, error={"code": "UNSUPPORTED_COUNTRY", "message": "Unsupported country."}, correlationId=correlation_id)
         return JSONResponse(status_code=400, content=envelope.model_dump())
-    if normalized_lang not in _valid_language_codes(normalized_country):
+    if normalized_country and normalized_lang and normalized_lang not in _valid_language_codes(normalized_country):
         envelope = Envelope(success=False, error={"code": "UNSUPPORTED_LANGUAGE", "message": "Unsupported language."}, correlationId=correlation_id)
         return JSONResponse(status_code=400, content=envelope.model_dump())
     documents = get_legal_documents()

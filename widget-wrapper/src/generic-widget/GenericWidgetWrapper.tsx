@@ -16,6 +16,10 @@ import {
   ensureLanguageForCountry,
   filterLanguagesByCountry,
   readConsentFlag,
+  readSessionMetadata,
+  readStoredId,
+  writeSessionMetadata,
+  writeStoredId,
   writeConsentFlag
 } from "./utils";
 import "./generic-widget.css";
@@ -69,16 +73,28 @@ export function GenericWidgetWrapper({
     () => detectInitialLocale(config.countries, config.languages, config.defaultCountryCode, config.defaultLanguageCode),
     [config.countries, config.defaultCountryCode, config.defaultLanguageCode, config.languages]
   );
+  const [storedSessionMetadata] = useState(() => readSessionMetadata(config.sessionMetadataStorageKey));
+  const [visitorId] = useState(() => providedVisitorId || readStoredId(config.visitorStorageKey) || createVisitorId());
+  const [sessionId] = useState(() => providedSessionId || readStoredId(config.sessionStorageKey) || createSessionId());
+  const storedLocale = useMemo(() => {
+    if (!storedSessionMetadata || storedSessionMetadata.sessionId !== sessionId) return undefined;
+    const country = config.countries.find((option) => option.code === storedSessionMetadata.market);
+    if (!country) return undefined;
+    const languageOptions = filterLanguagesByCountry(config.languages, country.code, config.countries);
+    const language = languageOptions.find((option) => option.code === storedSessionMetadata.language);
+    return language ? { country, language } : undefined;
+  }, [config.countries, config.languages, sessionId, storedSessionMetadata]);
   const [isOpen, setIsOpen] = useState(openByDefault);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [selectedCountry, setSelectedCountry] = useState(initialLocale.country);
-  const [selectedLanguage, setSelectedLanguage] = useState(initialLocale.language);
+  const [selectedCountry, setSelectedCountry] = useState(storedLocale?.country || initialLocale.country);
+  const [selectedLanguage, setSelectedLanguage] = useState(storedLocale?.language || initialLocale.language);
   const [message, setMessage] = useState("");
   const [showSuccess, setShowSuccess] = useState(initialShowSuccess);
   const [consentSubmitting, setConsentSubmitting] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
-  const [visitorId] = useState(providedVisitorId || createVisitorId());
-  const [sessionId] = useState(providedSessionId || createSessionId());
+  const [sessionCreatedAt] = useState(
+    () => storedSessionMetadata?.createdAt || new Date().toISOString()
+  );
   const [consentAccepted, setConsentAccepted] = useState(
     Boolean(initialConsentAccepted || (config.persistConsent && readConsentFlag(config.consent.storageKey)))
   );
@@ -97,6 +113,42 @@ export function GenericWidgetWrapper({
     selectedCountry: selectedCountry?.code || "",
     selectedLanguage: selectedLanguage?.code || ""
   });
+
+  useEffect(() => {
+    writeStoredId(config.visitorStorageKey, visitorId);
+    writeStoredId(config.sessionStorageKey, sessionId);
+    const storedSession = readSessionMetadata(config.sessionMetadataStorageKey);
+    const legalVersionChanged = Boolean(
+      storedSession &&
+        storedSession.sessionId === sessionId &&
+        storedSession.legalVersion &&
+        storedSession.legalVersion !== config.consent.policyVersion
+    );
+    if (legalVersionChanged) {
+      setConsentAccepted(false);
+      setShowSuccess(false);
+      if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
+    }
+    writeSessionMetadata(config.sessionMetadataStorageKey, {
+      sessionId,
+      createdAt: storedSession?.sessionId === sessionId ? storedSession.createdAt : sessionCreatedAt,
+      legalVersion: config.consent.policyVersion,
+      market: selectedCountry?.code,
+      language: selectedLanguage?.code
+    });
+  }, [
+    config.consent.policyVersion,
+    config.consent.storageKey,
+    config.persistConsent,
+    config.sessionMetadataStorageKey,
+    config.sessionStorageKey,
+    config.visitorStorageKey,
+    sessionCreatedAt,
+    sessionId,
+    selectedCountry?.code,
+    selectedLanguage?.code,
+    visitorId
+  ]);
 
   useEffect(() => {
     if (!consentRequiredSignal) return;

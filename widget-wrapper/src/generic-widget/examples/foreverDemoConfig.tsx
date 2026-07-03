@@ -32,6 +32,10 @@ export const foreverDemoConfig: GenericWidgetConfig = {
     categories: ["chat-processing", "market-language-preferences"],
     storageKey: "forever-style-widget-demo-consent"
   },
+  persistConsent: true,
+  sessionStorageKey: "askvera_session_id",
+  sessionMetadataStorageKey: "askvera_session_metadata",
+  visitorStorageKey: "askvera_visitor_id",
   policyLinks: [
     { id: "privacy", label: "Privacy Notice", href: "/api/privacy?country=US&lang=en" },
     { id: "terms", label: "Terms of Use", href: "/terms" }

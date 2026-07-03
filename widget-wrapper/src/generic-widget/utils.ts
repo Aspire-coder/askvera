@@ -14,6 +14,46 @@ export const createVisitorId = () => createId("visitor");
 
 export const createSessionId = () => createId("session");
 
+export const readStoredId = (storageKey?: string) =>
+  storageKey && typeof localStorage !== "undefined" ? localStorage.getItem(storageKey) || undefined : undefined;
+
+export const writeStoredId = (storageKey: string | undefined, value: string) => {
+  if (!storageKey || typeof localStorage === "undefined") return;
+  localStorage.setItem(storageKey, value);
+};
+
+export type StoredSessionMetadata = {
+  sessionId: string;
+  createdAt: string;
+  legalVersion: string;
+  market?: string;
+  language?: string;
+};
+
+export const readSessionMetadata = (storageKey?: string): StoredSessionMetadata | undefined => {
+  if (!storageKey || typeof localStorage === "undefined") return undefined;
+  const raw = localStorage.getItem(storageKey);
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredSessionMetadata>;
+    if (!parsed.sessionId || !parsed.createdAt || !parsed.legalVersion) return undefined;
+    return {
+      sessionId: parsed.sessionId,
+      createdAt: parsed.createdAt,
+      legalVersion: parsed.legalVersion,
+      market: parsed.market,
+      language: parsed.language
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const writeSessionMetadata = (storageKey: string | undefined, metadata: StoredSessionMetadata) => {
+  if (!storageKey || typeof localStorage === "undefined") return;
+  localStorage.setItem(storageKey, JSON.stringify(metadata));
+};
+
 export const filterLanguagesByCountry = (
   languages: WidgetLanguageOption[],
   countryCode?: string,

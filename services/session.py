@@ -47,7 +47,11 @@ def append_session_turn(session_id: str, user_message: str, vera_response: str, 
                     INSERT INTO chat_sessions (session_id, messages, expires_at, updated_at)
                     VALUES (:session_id, CAST(:messages AS jsonb), :expires_at, now())
                     ON CONFLICT (session_id)
-                    DO UPDATE SET messages = EXCLUDED.messages, expires_at = EXCLUDED.expires_at, updated_at = now()
+                    DO UPDATE SET
+                        messages = EXCLUDED.messages,
+                        last_activity_at = now(),
+                        expires_at = EXCLUDED.expires_at,
+                        updated_at = now()
                     """
                 ),
                 {"session_id": session_id, "messages": json.dumps(messages), "expires_at": expires_at},

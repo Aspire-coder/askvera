@@ -74,6 +74,8 @@ def create_schema(correlation_id: str = "startup") -> None:
                     CREATE TABLE IF NOT EXISTS chat_sessions (
                         session_id TEXT PRIMARY KEY,
                         messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         expires_at TIMESTAMPTZ NOT NULL,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         consent_accepted BOOLEAN NOT NULL DEFAULT false,
@@ -83,6 +85,8 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_legal_version TEXT"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ"))

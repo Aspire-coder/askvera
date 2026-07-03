@@ -73,7 +73,9 @@ LEGAL_BUCKET = "askverachat-prod-content"
 LEGAL_PREFIX = "legal"
 LEGAL_VERSION = "2026.1"
 # Session TTL in seconds. Used by PostgreSQL chat_sessions.expires_at.
-SESSION_TTL_SECONDS = 7200
+SESSION_TIMEOUT_HOURS = 2
+MAX_SESSION_DAYS = 7
+SESSION_TTL_SECONDS = SESSION_TIMEOUT_HOURS * 60 * 60
 # ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.
 REDIS_CACHE_NAME = "askverachat-cache"
 # ElastiCache Valkey primary endpoint hostname. Found in ElastiCache -> Valkey cache -> Connectivity.
