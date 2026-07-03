@@ -16,6 +16,9 @@ REQUIRED_VALUES = [
     "REDIS_HOST",
     "REDIS_CACHE_NAME",
     "REDIS_USER",
+    "LEGAL_BUCKET",
+    "LEGAL_PREFIX",
+    "LEGAL_VERSION",
 ]
 
 # AWS Region where all runtime resources are deployed. Found in AWS Console top-right region selector.
@@ -65,6 +68,10 @@ BEDROCK_FALLBACK_SOURCE_WEIGHT = 0.12
 BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
 # S3 bucket backing the Bedrock Knowledge Base approved documents.
 S3_BUCKET = "askverachat-prod-kb"
+# S3 location for legal HTML documents returned by /api/privacy.
+LEGAL_BUCKET = "askverachat-prod-content"
+LEGAL_PREFIX = "legal"
+LEGAL_VERSION = "2026.1"
 # Session TTL in seconds. Used by PostgreSQL chat_sessions.expires_at.
 SESSION_TTL_SECONDS = 7200
 # ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.

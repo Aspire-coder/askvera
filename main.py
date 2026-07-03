@@ -15,6 +15,7 @@ from scripts.validate_config import validate
 from services.aws_clients import init_aws_clients
 from services.cache import close_cache, init_cache
 from services.db import close_db, init_db
+from services.legal_service import load_legal_documents
 from services.market_config import load_market_config
 from utils.exceptions import ConfigurationError
 from utils.logging import configure_logging, get_logger
@@ -68,6 +69,8 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     LOGGER.info("market_config_loaded", market_count=len(market_config["markets"]))
     signal.signal(signal.SIGTERM, _handle_sigterm)
     init_aws_clients()
+    legal_documents = load_legal_documents()
+    LOGGER.info("legal_documents_ready", document_count=len(legal_documents["documents"]))
     init_db()
     _init_optional_cache()
     LOGGER.info("startup_complete")

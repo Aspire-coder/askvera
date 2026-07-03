@@ -1,11 +1,10 @@
 """FastAPI route definitions for ASK Vera."""
 
 from datetime import UTC, datetime
-from html import escape
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -19,6 +18,7 @@ from services.consent import record_consent
 from services.db import get_engine
 from services.feedback import enqueue_feedback
 from services.guardrails import check_text
+from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 from services.pii import scrub_pii
 from services.session import append_session_turn, get_session_history
@@ -85,27 +85,21 @@ def config(request: Request) -> Envelope:
     return success({"countries": get_countries(), "privacyVersion": settings.PRIVACY_VERSION}, correlation_id)
 
 
-@router.get("/api/privacy", response_class=HTMLResponse)
-def privacy(country: str, lang: str, request: Request) -> HTMLResponse:
-    """Return a privacy notice HTML snippet for a country and language."""
+@router.get("/api/privacy", response_model=None)
+def privacy(country: str, lang: str, request: Request) -> Envelope | JSONResponse:
+    """Return legal documents for a country and language."""
     correlation_id = _correlation_id(request)
     normalized_country = country.upper()
     normalized_lang = lang.lower()
     if normalized_country not in get_country_codes():
-        return HTMLResponse(content="<section><h1>Privacy Notice</h1><p>Unsupported country.</p></section>", status_code=400)
+        envelope = Envelope(success=False, error={"code": "UNSUPPORTED_COUNTRY", "message": "Unsupported country."}, correlationId=correlation_id)
+        return JSONResponse(status_code=400, content=envelope.model_dump())
     if normalized_lang not in _valid_language_codes(normalized_country):
-        return HTMLResponse(content="<section><h1>Privacy Notice</h1><p>Unsupported language.</p></section>", status_code=400)
-    safe_country = escape(normalized_country)
-    safe_lang = escape(normalized_lang)
-    safe_version = escape(settings.PRIVACY_VERSION)
-    html = (
-        f"<section><h1>Privacy Notice</h1><p>Version {safe_version}</p>"
-        f"<p>This ASK Vera privacy notice applies to {safe_country} in language {safe_lang}.</p>"
-        "<p>ASK Vera stores consent, chat session metadata, feedback, and audit records in AWS for support, compliance, and safety.</p>"
-        "<p>Do not enter sensitive personal data into chat unless required for support.</p></section>"
-    )
+        envelope = Envelope(success=False, error={"code": "UNSUPPORTED_LANGUAGE", "message": "Unsupported language."}, correlationId=correlation_id)
+        return JSONResponse(status_code=400, content=envelope.model_dump())
+    documents = get_legal_documents()
     LOGGER.info("privacy_returned", correlation_id=correlation_id, country=normalized_country, lang=normalized_lang)
-    return HTMLResponse(content=html)
+    return success(documents, correlation_id)
 
 
 @router.post("/api/consent", response_model=None)

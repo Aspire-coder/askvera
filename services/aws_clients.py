@@ -21,6 +21,7 @@ class AwsClients:
         self.comprehend = boto3.client("comprehend", region_name=settings.AWS_REGION, config=client_config)
         self.firehose = boto3.client("firehose", region_name=settings.AWS_REGION, config=client_config)
         self.secretsmanager = boto3.client("secretsmanager", region_name=settings.AWS_REGION, config=client_config)
+        self.s3 = boto3.client("s3", region_name=settings.AWS_REGION, config=client_config)
         self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION, config=client_config)
 
 
