@@ -102,7 +102,12 @@ def _confidence_from_sources(sources: list[dict[str, Any]]) -> float:
 
 
 def _retrieve_sources(message: str, country: str, language: str, correlation_id: str) -> list[dict[str, Any]]:
-    """Call standalone Retrieve for reliable scores when citations are empty."""
+    """Call the standalone Retrieve API to get reliable scores/sources.
+
+    retrieve_and_generate's citations field has been observed to return a
+    placeholder entry with empty retrievedReferences even when generation
+    succeeds with a real, correctly cited answer.
+    """
     try:
         response = get_aws_clients().bedrock_agent_runtime.retrieve(
             knowledgeBaseId=settings.BEDROCK_KB_ID,
@@ -184,7 +189,6 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
     }
     try:
         response = get_aws_clients().bedrock_agent_runtime.retrieve_and_generate(**params)
-        LOGGER.warning("bedrock_raw_response_debug", correlation_id=correlation_id, raw=str(response)[:3000])
     except ReadTimeoutError as exc:
         LOGGER.exception("bedrock_timeout", correlation_id=correlation_id)
         raise BedrockTimeoutError(FALLBACK_RESPONSES["bedrock_error"]) from exc
