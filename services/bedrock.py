@@ -139,6 +139,7 @@ def retrieve_and_generate(message: str, country: str, language: str, role: str, 
     }
     try:
         response = get_aws_clients().bedrock_agent_runtime.retrieve_and_generate(**params)
+        LOGGER.warning("bedrock_raw_response_debug", correlation_id=correlation_id, raw=str(response)[:3000])
     except ReadTimeoutError as exc:
         LOGGER.exception("bedrock_timeout", correlation_id=correlation_id)
         raise BedrockTimeoutError(FALLBACK_RESPONSES["bedrock_error"]) from exc
