@@ -1,0 +1,2775 @@
+{
+  "version": 1,
+  "lastUpdated": "2026-07-03",
+  "defaultFeatures": {
+    "feedback": true,
+    "sources": true,
+    "productCards": false
+  },
+  "markets": [
+    {
+      "code": "AR",
+      "name": "Argentina",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 1,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BO",
+      "name": "Bolivia",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 2,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BR",
+      "name": "Brazil",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 3,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "pt",
+          "name": "Portuguese",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CL",
+      "name": "Chile",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 4,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CO",
+      "name": "Colombia",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 5,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "EC",
+      "name": "Ecuador",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 6,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SV",
+      "name": "El Salvador",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 7,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GF",
+      "name": "French Guiana",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 8,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GT",
+      "name": "Guatemala",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 9,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "HN",
+      "name": "Honduras",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 10,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MX",
+      "name": "Mexico",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 11,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PA",
+      "name": "Panama",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 12,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PY",
+      "name": "Paraguay",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 13,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PE",
+      "name": "Peru",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 14,
+      "defaultLanguage": "es",
+      "languages": [
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "UY",
+      "name": "Uruguay",
+      "enabled": true,
+      "region": "Latin America",
+      "displayOrder": 15,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AL",
+      "name": "Albania",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 101,
+      "defaultLanguage": "sq",
+      "languages": [
+        {
+          "code": "sq",
+          "name": "Albanian",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AD",
+      "name": "Andorra",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 102,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AT",
+      "name": "Austria",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 103,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AZ",
+      "name": "Azerbaijan",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 104,
+      "defaultLanguage": "az",
+      "languages": [
+        {
+          "code": "az",
+          "name": "Azerbaijani",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ru",
+          "name": "Russian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BALTICS",
+      "name": "Baltics",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 105,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "et",
+          "name": "Estonian",
+          "enabled": true
+        },
+        {
+          "code": "lv",
+          "name": "Latvian",
+          "enabled": true
+        },
+        {
+          "code": "lt",
+          "name": "Lithuanian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BE",
+      "name": "Belgium",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 106,
+      "defaultLanguage": "nl",
+      "languages": [
+        {
+          "code": "nl",
+          "name": "Dutch",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BA",
+      "name": "Bosnia and Herzegovina",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 107,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "sr",
+          "name": "Serbian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BG",
+      "name": "Bulgaria",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 108,
+      "defaultLanguage": "bg",
+      "languages": [
+        {
+          "code": "bg",
+          "name": "Bulgarian",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "HR",
+      "name": "Croatia",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 109,
+      "defaultLanguage": "hr",
+      "languages": [
+        {
+          "code": "hr",
+          "name": "Croatian",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CY",
+      "name": "Cyprus",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 110,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "el",
+          "name": "Greek",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CZ",
+      "name": "Czech Republic",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 111,
+      "defaultLanguage": "cs",
+      "languages": [
+        {
+          "code": "cs",
+          "name": "Czech",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "DK",
+      "name": "Denmark",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 112,
+      "defaultLanguage": "da",
+      "languages": [
+        {
+          "code": "da",
+          "name": "Danish",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "FI",
+      "name": "Finland",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 113,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fi",
+          "name": "Finnish",
+          "enabled": true
+        },
+        {
+          "code": "sv",
+          "name": "Swedish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "FR",
+      "name": "France",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 114,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GE",
+      "name": "Georgia",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 115,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ka",
+          "name": "Georgian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "DE",
+      "name": "Germany",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 116,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GI",
+      "name": "Gibraltar",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 117,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GR",
+      "name": "Greece",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 118,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "el",
+          "name": "Greek",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "HU",
+      "name": "Hungary",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 119,
+      "defaultLanguage": "sq",
+      "languages": [
+        {
+          "code": "sq",
+          "name": "Albanian",
+          "enabled": true
+        },
+        {
+          "code": "bs",
+          "name": "Bosnian",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "hu",
+          "name": "Hungarian",
+          "enabled": true
+        },
+        {
+          "code": "sr-ME",
+          "name": "Montenegrin",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "IS",
+      "name": "Iceland",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 120,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "IE",
+      "name": "Ireland",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 121,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "IT",
+      "name": "Italy",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 122,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "it",
+          "name": "Italian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "KZ",
+      "name": "Kazakhstan",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 123,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "kk",
+          "name": "Kazakh",
+          "enabled": true
+        },
+        {
+          "code": "ru",
+          "name": "Russian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "XK",
+      "name": "Kosovo",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 124,
+      "defaultLanguage": "sq",
+      "languages": [
+        {
+          "code": "sq",
+          "name": "Albanian",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "KG",
+      "name": "Kyrgyzstan",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 125,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ky",
+          "name": "Kyrgyz",
+          "enabled": true
+        },
+        {
+          "code": "ru",
+          "name": "Russian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "LU",
+      "name": "Luxembourg",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 126,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MT",
+      "name": "Malta",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 127,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "it",
+          "name": "Italian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MD",
+      "name": "Moldova",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 128,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ro",
+          "name": "Romanian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ME",
+      "name": "Montenegro",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 129,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "sr",
+          "name": "Serbian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NL",
+      "name": "Netherlands",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 130,
+      "defaultLanguage": "nl",
+      "languages": [
+        {
+          "code": "nl",
+          "name": "Dutch",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MK",
+      "name": "North Macedonia",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 131,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "mk",
+          "name": "Macedonian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "XI",
+      "name": "Northern Ireland",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 132,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NO",
+      "name": "Norway",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 133,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "no",
+          "name": "Norwegian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PL",
+      "name": "Poland",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 134,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "pl",
+          "name": "Polish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PT",
+      "name": "Portugal",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 135,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "pt",
+          "name": "Portuguese",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "RO",
+      "name": "Romania",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 136,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ro",
+          "name": "Romanian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "RU",
+      "name": "Russia",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 137,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ru",
+          "name": "Russian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "RS",
+      "name": "Serbia",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 138,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "sr",
+          "name": "Serbian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SK",
+      "name": "Slovak Republic",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 139,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "sk",
+          "name": "Slovak",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SI",
+      "name": "Slovenia",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 140,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "hu",
+          "name": "Hungarian",
+          "enabled": true
+        },
+        {
+          "code": "sl",
+          "name": "Slovenian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ES",
+      "name": "Spain",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 141,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SE",
+      "name": "Sweden",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 142,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "sv",
+          "name": "Swedish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CH",
+      "name": "Switzerland",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 143,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "enabled": true
+        },
+        {
+          "code": "it",
+          "name": "Italian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "TR",
+      "name": "Turkey",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 144,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "tr",
+          "name": "Turkish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "UA",
+      "name": "Ukraine",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 145,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "uk",
+          "name": "Ukrainian",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GB",
+      "name": "United Kingdom",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 146,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "UZ",
+      "name": "Uzbekistan",
+      "enabled": true,
+      "region": "Europe",
+      "displayOrder": 147,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ru",
+          "name": "Russian",
+          "enabled": true
+        },
+        {
+          "code": "uz",
+          "name": "Uzbek",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AO",
+      "name": "Angola",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 201,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "pt",
+          "name": "Portuguese",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BJ",
+      "name": "Benin",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 202,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BW",
+      "name": "Botswana",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 203,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BF",
+      "name": "Burkina Faso",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 204,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BI",
+      "name": "Burundi",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 205,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CM",
+      "name": "Cameroon",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 206,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CV",
+      "name": "Cape Verde",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 207,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CF",
+      "name": "Central African Republic",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 208,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "TD",
+      "name": "Chad",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 209,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CI",
+      "name": "Cote d'Ivoire (Ivory Coast)",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 210,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CD",
+      "name": "Democratic Republic of Congo",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 211,
+      "defaultLanguage": "fr",
+      "languages": [
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GQ",
+      "name": "Equatorial Guinea",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 212,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ER",
+      "name": "Eritrea",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 213,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GA",
+      "name": "Gabon",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 214,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GM",
+      "name": "Gambia",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 215,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GH",
+      "name": "Ghana",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 216,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GN",
+      "name": "Guinea",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 217,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GW",
+      "name": "Guinea-Bissau",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 218,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "KE",
+      "name": "Kenya",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 219,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "LS",
+      "name": "Lesotho",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 220,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MG",
+      "name": "Madagascar",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 221,
+      "defaultLanguage": "fr",
+      "languages": [
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MW",
+      "name": "Malawi",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 222,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ML",
+      "name": "Mali",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 223,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MR",
+      "name": "Mauritania",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 224,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MU",
+      "name": "Mauritius",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 225,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MA",
+      "name": "Morocco",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 226,
+      "defaultLanguage": "fr",
+      "languages": [
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MZ",
+      "name": "Mozambique",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 227,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NA",
+      "name": "Namibia",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 228,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NE",
+      "name": "Niger",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 229,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NG",
+      "name": "Nigeria",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 230,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CG",
+      "name": "Republic of Congo",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 231,
+      "defaultLanguage": "fr",
+      "languages": [
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "RE",
+      "name": "Reunion Islands",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 232,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "RW",
+      "name": "Rwanda",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 233,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SN",
+      "name": "Senegal",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 234,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SL",
+      "name": "Sierra Leone",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 235,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ZA",
+      "name": "South Africa",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 236,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SZ",
+      "name": "Swaziland",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 237,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "TZ",
+      "name": "Tanzania, United Republic of",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 238,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "TG",
+      "name": "Togo",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 239,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "TN",
+      "name": "Tunisia",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 240,
+      "defaultLanguage": "fr",
+      "languages": [
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "UG",
+      "name": "Uganda",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 241,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ZM",
+      "name": "Zambia",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 242,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "ZW",
+      "name": "Zimbabwe",
+      "enabled": true,
+      "region": "Africa",
+      "displayOrder": 243,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AI",
+      "name": "Anguilla",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 301,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AW",
+      "name": "Aruba",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 302,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BQ-BO",
+      "name": "BONAIRE",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 303,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BS",
+      "name": "Bahamas",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 304,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CW",
+      "name": "Curacao",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 305,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "DO",
+      "name": "Dominican Republic",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 306,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GP",
+      "name": "Guadeloupe",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 307,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GY",
+      "name": "Guyana",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 308,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "MQ",
+      "name": "Martinique",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 309,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AN",
+      "name": "Netherlands Antilles",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 310,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PR",
+      "name": "Puerto Rico",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 311,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BQ-SA",
+      "name": "Saba",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 312,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BQ-SE",
+      "name": "Saint Eustastius",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 313,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "LC",
+      "name": "Saint Lucia",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 314,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "BL",
+      "name": "Saint-Barthélemy",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 315,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SX",
+      "name": "St. Maarten",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 316,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SR",
+      "name": "Suriname",
+      "enabled": true,
+      "region": "Caribbean",
+      "displayOrder": 317,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AS",
+      "name": "American Samoa",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 401,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AU",
+      "name": "Australia",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 402,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "FM",
+      "name": "Federated States of Micronesia",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 403,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "FJ",
+      "name": "Fiji",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 404,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "GU",
+      "name": "Guam",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 405,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NC",
+      "name": "New Caledonia",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 406,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "NZ",
+      "name": "New Zealand",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 407,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "PG",
+      "name": "Papua New Guinea",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 408,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "WS",
+      "name": "Samoa",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 409,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "VU",
+      "name": "Vanuatu",
+      "enabled": true,
+      "region": "Oceania",
+      "displayOrder": 410,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "CA",
+      "name": "Canada",
+      "enabled": true,
+      "region": "North America",
+      "displayOrder": 501,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "US",
+      "name": "United States",
+      "enabled": true,
+      "region": "North America",
+      "displayOrder": 502,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "IQ",
+      "name": "Iraq",
+      "enabled": true,
+      "region": "Middle East",
+      "displayOrder": 601,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "ku",
+          "name": "Kurdish",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "IL",
+      "name": "Israel",
+      "enabled": true,
+      "region": "Middle East",
+      "displayOrder": 602,
+      "defaultLanguage": "en",
+      "languages": [
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "QA",
+      "name": "Qatar",
+      "enabled": true,
+      "region": "Middle East",
+      "displayOrder": 603,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "SA",
+      "name": "Saudi Arabia",
+      "enabled": true,
+      "region": "Middle East",
+      "displayOrder": 604,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    },
+    {
+      "code": "AE",
+      "name": "United Arab Emirates",
+      "enabled": true,
+      "region": "Middle East",
+      "displayOrder": 605,
+      "defaultLanguage": "ar",
+      "languages": [
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "enabled": true
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "enabled": true
+        }
+      ],
+      "privacyVersion": "2026.1"
+    }
+  ]
+}

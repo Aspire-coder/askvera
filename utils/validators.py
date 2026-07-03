@@ -5,19 +5,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from config import settings
 from config.vera_persona import ROLE_CONTENT_SCOPES
+from services.market_config import get_country_codes, get_language_codes_for_country
 
 
 def _country_codes() -> set[str]:
-    return {country["code"] for country in settings.COUNTRIES}
+    return get_country_codes()
 
 
 def _language_codes_for_country(country_code: str) -> set[str]:
-    for country in settings.COUNTRIES:
-        if country["code"] == country_code:
-            return {language["code"] for language in country["languages"]}
-    return set()
+    return get_language_codes_for_country(country_code)
 
 
 class Envelope(BaseModel):

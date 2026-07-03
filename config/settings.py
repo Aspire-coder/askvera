@@ -6,6 +6,7 @@ from SSM Parameter Store at startup using the `/askverachat/prod/` path.
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 # Required values checked by scripts/validate_config.py before startup accepts traffic.
@@ -103,12 +104,7 @@ ALLOWED_ORIGINS = [
 ]
 API_DOMAIN = "api.vera-api.xyz"
 WIDGET_DOMAIN = "chat.vera-api.xyz"
-# Country and language list returned to the widget by /api/config.
-COUNTRIES = [
-    {"code": "US", "name": "United States", "languages": [{"code": "en", "name": "English"}, {"code": "es", "name": "Spanish"}]},
-    {"code": "CA", "name": "Canada", "languages": [{"code": "en", "name": "English"}, {"code": "fr", "name": "French"}]},
-    {"code": "GB", "name": "United Kingdom", "languages": [{"code": "en", "name": "English"}]},
-]
+MARKETS_CONFIG_PATH = os.environ.get("MARKETS_CONFIG_PATH", str(Path(__file__).with_name("markets.json")))
 
 SSM_PARAMETER_PATH = os.environ.get("SSM_PARAMETER_PATH", "/askverachat/prod/")
 SSM_CONFIG_ENABLED = os.environ.get("SSM_CONFIG_ENABLED", "true").lower() == "true"

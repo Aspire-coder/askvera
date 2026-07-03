@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
 import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
@@ -15,6 +15,17 @@ type ChatResponseData = {
   sources?: Array<{ title: string; uri: string; excerpt?: string }>;
   confidence?: number;
   correlationId?: string;
+};
+
+type ApiCountry = {
+  code: string;
+  name: string;
+  languages: Array<{ code: string; name: string }>;
+};
+
+type ConfigResponseData = {
+  countries: ApiCountry[];
+  privacyVersion: string;
 };
 
 export type BackendChatDemoProps = {
@@ -43,17 +54,64 @@ async function postJson<T>(baseUrl: string, path: string, body: unknown): Promis
   return envelope;
 }
 
+async function getJson<T>(baseUrl: string, path: string): Promise<ApiEnvelope<T>> {
+  const response = await fetch(joinUrl(baseUrl, path));
+  const envelope = (await response.json()) as ApiEnvelope<T>;
+  if (!response.ok || !envelope.success) {
+    throw new Error(envelope.error?.message || `Request failed with status ${response.status}`);
+  }
+  return envelope;
+}
+
+function buildLocaleOptions(countries: ApiCountry[]) {
+  const languageMap = new Map<string, { label: string; countryCodes: string[] }>();
+
+  for (const country of countries) {
+    for (const language of country.languages) {
+      const current = languageMap.get(language.code) || { label: language.name, countryCodes: [] };
+      if (!current.countryCodes.includes(country.code)) {
+        current.countryCodes.push(country.code);
+      }
+      languageMap.set(language.code, current);
+    }
+  }
+
+  return {
+    countries: countries.map((country) => ({
+      code: country.code,
+      label: country.name,
+      languageCodes: country.languages.map((language) => language.code)
+    })),
+    languages: Array.from(languageMap.entries()).map(([code, language]) => ({
+      code,
+      label: language.label,
+      countryCodes: language.countryCodes
+    }))
+  };
+}
+
 export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: BackendChatDemoProps) {
+  const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const config = useMemo(
-    () => ({
-      ...foreverDemoConfig,
-      provider: { name: "ASK Vera API", type: "custom-react" },
-      policyLinks: foreverDemoConfig.policyLinks.map((link) => ({
-        ...link,
-        href: link.href.startsWith("/api/") ? joinUrl(apiBaseUrl, link.href) : link.href
-      }))
-    }),
-    [apiBaseUrl]
+    () => {
+      const localeOptions = apiConfig ? buildLocaleOptions(apiConfig.countries) : null;
+
+      return {
+        ...foreverDemoConfig,
+        provider: { name: "ASK Vera API", type: "custom-react" as const },
+        consent: {
+          ...foreverDemoConfig.consent,
+          policyVersion: apiConfig?.privacyVersion || foreverDemoConfig.consent.policyVersion
+        },
+        countries: localeOptions?.countries || foreverDemoConfig.countries,
+        languages: localeOptions?.languages || foreverDemoConfig.languages,
+        policyLinks: foreverDemoConfig.policyLinks.map((link) => ({
+          ...link,
+          href: link.href.startsWith("/api/") ? joinUrl(apiBaseUrl, link.href) : link.href
+        }))
+      };
+    },
+    [apiBaseUrl, apiConfig]
   );
   const [messages, setMessages] = useState<WidgetMessage[]>([
     {
@@ -67,6 +125,30 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const appendMessage = (message: WidgetMessage) => {
     setMessages((current) => [...current, message]);
   };
+
+  useEffect(() => {
+    let active = true;
+
+    getJson<ConfigResponseData>(apiBaseUrl, "/api/config")
+      .then((envelope) => {
+        if (active && envelope.data) {
+          setApiConfig(envelope.data);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          appendMessage({
+            id: buildId("config-warning"),
+            role: "system",
+            content: error instanceof Error ? `Using demo market list because API config could not load: ${error.message}` : "Using demo market list because API config could not load."
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl]);
 
   const handleConsent = async (payload: ConsentEventPayload) => {
     try {

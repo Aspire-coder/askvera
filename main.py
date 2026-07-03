@@ -15,6 +15,7 @@ from scripts.validate_config import validate
 from services.aws_clients import init_aws_clients
 from services.cache import close_cache, init_cache
 from services.db import close_db, init_db
+from services.market_config import load_market_config
 from utils.exceptions import ConfigurationError
 from utils.logging import configure_logging, get_logger
 
@@ -63,6 +64,8 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     missing = validate()
     if missing:
         raise ConfigurationError(f"Missing required config values: {', '.join(missing)}")
+    market_config = load_market_config()
+    LOGGER.info("market_config_loaded", market_count=len(market_config["markets"]))
     signal.signal(signal.SIGTERM, _handle_sigterm)
     init_aws_clients()
     init_db()

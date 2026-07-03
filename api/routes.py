@@ -19,6 +19,7 @@ from services.consent import record_consent
 from services.db import get_engine
 from services.feedback import enqueue_feedback
 from services.guardrails import check_text
+from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 from services.pii import scrub_pii
 from services.session import append_session_turn, get_session_history
 from utils.exceptions import AskVeraError, LowConfidenceError
@@ -49,10 +50,7 @@ def error_response(exc: AskVeraError, correlation_id: str) -> JSONResponse:
 
 
 def _valid_language_codes(country_code: str) -> set[str]:
-    for country in settings.COUNTRIES:
-        if country["code"] == country_code:
-            return {language["code"] for language in country["languages"]}
-    return set()
+    return get_language_codes_for_country(country_code)
 
 
 @router.post("/api/chat", response_model=None)
@@ -84,7 +82,7 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
 def config(request: Request) -> Envelope:
     """Return country list, supported languages, and privacy version."""
     correlation_id = _correlation_id(request)
-    return success({"countries": settings.COUNTRIES, "privacyVersion": settings.PRIVACY_VERSION}, correlation_id)
+    return success({"countries": get_countries(), "privacyVersion": settings.PRIVACY_VERSION}, correlation_id)
 
 
 @router.get("/api/privacy", response_class=HTMLResponse)
@@ -93,7 +91,7 @@ def privacy(country: str, lang: str, request: Request) -> HTMLResponse:
     correlation_id = _correlation_id(request)
     normalized_country = country.upper()
     normalized_lang = lang.lower()
-    if normalized_country not in {item["code"] for item in settings.COUNTRIES}:
+    if normalized_country not in get_country_codes():
         return HTMLResponse(content="<section><h1>Privacy Notice</h1><p>Unsupported country.</p></section>", status_code=400)
     if normalized_lang not in _valid_language_codes(normalized_country):
         return HTMLResponse(content="<section><h1>Privacy Notice</h1><p>Unsupported language.</p></section>", status_code=400)
