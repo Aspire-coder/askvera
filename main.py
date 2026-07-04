@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.middleware import RateLimitMiddleware
 from api.routes import router
-from app.audit import audit_lifecycle
+from app.audit import audit_dispatcher, audit_lifecycle
 from app.audit.sinks.firehose import initialize_firehose_sink
 from app.middleware.audit import AuditMiddleware
 from app.middleware.correlation import CorrelationIdMiddleware
@@ -77,8 +77,8 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     LOGGER.info("legal_documents_ready", document_count=len(legal_documents["documents"]))
     init_db()
     _init_optional_cache()
-    audit_lifecycle.start()
-    initialize_firehose_sink()
+    audit_dispatcher.add_sink(initialize_firehose_sink())
+    await audit_lifecycle.start()
     LOGGER.info("startup_complete")
     yield
     await audit_lifecycle.stop()

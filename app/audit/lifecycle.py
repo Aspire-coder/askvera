@@ -17,10 +17,11 @@ class AuditLifecycle:
         self._dispatcher = dispatcher
         self._worker_task: asyncio.Task[None] | None = None
 
-    def start(self) -> None:
+    async def start(self) -> None:
         """Start the audit worker if it is not already running."""
         if self._worker_task and not self._worker_task.done():
             return
+        await self._dispatcher.start_sinks()
         self._worker_task = asyncio.create_task(audit_worker(self._dispatcher))
         LOGGER.info("audit_lifecycle_started")
 
@@ -28,6 +29,7 @@ class AuditLifecycle:
         """Drain queued events and stop the audit worker."""
         LOGGER.info("audit_lifecycle_draining", queue_size=queue_size())
         await audit_queue.join()
+        await self._dispatcher.stop_sinks()
         if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
             try:

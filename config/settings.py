@@ -94,6 +94,16 @@ CACHE_TTL_SECONDS = 7200
 # Audit Firehose sink configuration. Disabled by default until delivery is wired.
 AUDIT_FIREHOSE_ENABLED = False
 AUDIT_FIREHOSE_STREAM = "askvera-audit"
+# Maximum number of audit events to send in one future Firehose PutRecordBatch call.
+AUDIT_BATCH_SIZE = 100
+# Maximum time in seconds to wait before flushing a future partial audit batch.
+AUDIT_BATCH_TIMEOUT_SECONDS = 2.0
+# Maximum number of retry attempts for future transient Firehose failures.
+AUDIT_RETRY_MAX_ATTEMPTS = 4
+# Initial delay in seconds before the first future Firehose retry.
+AUDIT_RETRY_BASE_DELAY_SECONDS = 1.0
+# Maximum delay in seconds between future Firehose retries.
+AUDIT_RETRY_MAX_DELAY_SECONDS = 8.0
 # Kinesis Firehose delivery stream for audit logs. Found in Kinesis -> Delivery streams.
 FIREHOSE_STREAM_NAME = "vera-audit-stream"
 KINESIS_FIREHOSE_STREAM_NAME = FIREHOSE_STREAM_NAME

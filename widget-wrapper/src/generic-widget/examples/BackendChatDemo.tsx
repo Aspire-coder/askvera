@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
 import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
@@ -13,12 +13,30 @@ type ApiEnvelope<T> = {
 class ApiRequestError extends Error {
   code?: string;
   legalVersion?: string;
+  status?: number;
+  correlationId?: string;
 
-  constructor(message: string, code?: string, legalVersion?: string) {
+  constructor(message: string, code?: string, legalVersion?: string, status?: number, correlationId?: string) {
     super(message);
     this.name = "ApiRequestError";
     this.code = code;
     this.legalVersion = legalVersion;
+    this.status = status;
+    this.correlationId = correlationId;
+  }
+}
+
+class ApiTimeoutError extends Error {
+  constructor(message = "The request timed out. Please try again.") {
+    super(message);
+    this.name = "ApiTimeoutError";
+  }
+}
+
+class ApiNetworkError extends Error {
+  constructor(message = "The API could not be reached. Please check the connection and try again.") {
+    super(message);
+    this.name = "ApiNetworkError";
   }
 }
 
@@ -56,6 +74,8 @@ export type BackendChatDemoProps = {
   apiBaseUrl?: string;
 };
 
+const REQUEST_TIMEOUT_MS = 30000;
+
 const buildId = (prefix: string) => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}-${crypto.randomUUID()}`;
@@ -75,30 +95,88 @@ const legalViewerHref = (apiBaseUrl: string, country: string, language: string, 
   return `/legal?${params.toString()}`;
 };
 
+async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiTimeoutError();
+    }
+    throw new ApiNetworkError(error instanceof Error ? error.message : undefined);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function parseEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
+  try {
+    return (await response.json()) as ApiEnvelope<T>;
+  } catch {
+    return {
+      success: false,
+      correlationId: response.headers.get("x-correlation-id") || "",
+      error: { code: "INVALID_RESPONSE", message: "The API returned an unreadable response." }
+    };
+  }
+}
+
 async function postJson<T>(baseUrl: string, path: string, body: unknown): Promise<ApiEnvelope<T>> {
-  const response = await fetch(joinUrl(baseUrl, path), {
+  const response = await fetchWithTimeout(joinUrl(baseUrl, path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  const envelope = (await response.json()) as ApiEnvelope<T>;
+  const envelope = await parseEnvelope<T>(response);
   if (!response.ok || !envelope.success) {
     throw new ApiRequestError(
       envelope.error?.message || `Request failed with status ${response.status}`,
       envelope.error?.code,
-      envelope.error?.legalVersion
+      envelope.error?.legalVersion,
+      response.status,
+      envelope.correlationId || response.headers.get("x-correlation-id") || undefined
     );
   }
   return envelope;
 }
 
 async function getJson<T>(baseUrl: string, path: string): Promise<ApiEnvelope<T>> {
-  const response = await fetch(joinUrl(baseUrl, path));
-  const envelope = (await response.json()) as ApiEnvelope<T>;
+  const response = await fetchWithTimeout(joinUrl(baseUrl, path));
+  const envelope = await parseEnvelope<T>(response);
   if (!response.ok || !envelope.success) {
-    throw new Error(envelope.error?.message || `Request failed with status ${response.status}`);
+    throw new ApiRequestError(
+      envelope.error?.message || `Request failed with status ${response.status}`,
+      envelope.error?.code,
+      envelope.error?.legalVersion,
+      response.status,
+      envelope.correlationId || response.headers.get("x-correlation-id") || undefined
+    );
   }
   return envelope;
+}
+
+function describeApiError(error: unknown): string {
+  if (error instanceof ApiTimeoutError) {
+    return "The request timed out. Please try again in a moment.";
+  }
+  if (error instanceof ApiNetworkError) {
+    return `The API could not be reached: ${error.message}`;
+  }
+  if (error instanceof ApiRequestError) {
+    const status = error.status ? `HTTP ${error.status}` : "API error";
+    return `${status}: ${error.message}`;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "An unexpected API error occurred.";
+}
+
+function logCorrelationId(label: string, correlationId?: string) {
+  if (!correlationId || window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") return;
+  console.info(`[ASK Vera] ${label} correlation ID: ${correlationId}`);
 }
 
 function buildLocaleOptions(countries: ApiCountry[]) {
@@ -136,6 +214,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const [legalVersion, setLegalVersion] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
+  const requestInFlightRef = useRef(false);
   const config = useMemo(
     () => {
       const localeOptions = apiConfig ? buildLocaleOptions(apiConfig.countries) : null;
@@ -177,9 +256,17 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   ]);
   const [loading, setLoading] = useState(false);
 
-  const appendMessage = (message: WidgetMessage) => {
+  const appendMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => [...current, message]);
-  };
+  }, []);
+
+  const upsertMessage = useCallback((message: WidgetMessage) => {
+    setMessages((current) => {
+      const existingIndex = current.findIndex((item) => item.id === message.id);
+      if (existingIndex === -1) return [...current, message];
+      return current.map((item, index) => (index === existingIndex ? message : item));
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -187,15 +274,16 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     getJson<ConfigResponseData>(apiBaseUrl, "/api/config")
       .then((envelope) => {
         if (active && envelope.data) {
+          logCorrelationId("config", envelope.correlationId);
           setApiConfig(envelope.data);
         }
       })
       .catch((error) => {
         if (active) {
-          appendMessage({
-            id: buildId("config-warning"),
+          upsertMessage({
+            id: "config-warning",
             role: "system",
-            content: error instanceof Error ? `Using demo market list because API config could not load: ${error.message}` : "Using demo market list because API config could not load."
+            content: `Using demo market list because API config could not load. ${describeApiError(error)}`
           });
         }
       });
@@ -203,7 +291,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     return () => {
       active = false;
     };
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, upsertMessage]);
 
   useEffect(() => {
     let active = true;
@@ -212,6 +300,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     getJson<PrivacyResponseData>(apiBaseUrl, path)
       .then((envelope) => {
         if (active && envelope.data) {
+          logCorrelationId("privacy", envelope.correlationId);
           setLegalDocuments(envelope.data.documents);
           setLegalVersion(envelope.data.version);
         }
@@ -219,10 +308,10 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
       .catch((error) => {
         if (active) {
           setLegalDocuments([]);
-          appendMessage({
-            id: buildId("privacy-warning"),
+          upsertMessage({
+            id: "privacy-warning",
             role: "system",
-            content: error instanceof Error ? `Legal documents could not load yet: ${error.message}` : "Legal documents could not load yet."
+            content: `Legal documents could not load yet. ${describeApiError(error)}`
           });
         }
       });
@@ -230,16 +319,17 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, selectedLocale.country, selectedLocale.language]);
+  }, [apiBaseUrl, selectedLocale.country, selectedLocale.language, upsertMessage]);
 
   const handleConsent = async (payload: ConsentEventPayload) => {
-    await postJson(apiBaseUrl, "/api/consent", {
+    const envelope = await postJson(apiBaseUrl, "/api/consent", {
       sessionId: payload.sessionId,
       country: payload.selectedCountry,
       lang: payload.selectedLanguage,
       timestamp: payload.timestamp,
       version: payload.policyVersion
     });
+    logCorrelationId("consent", envelope.correlationId);
     if (pendingMessage) {
       const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
       setPendingMessage(null);
@@ -248,6 +338,8 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   };
 
   const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
+    if (requestInFlightRef.current) return;
+    requestInFlightRef.current = true;
     if (showUserMessage) appendMessage({ id: buildId("user"), role: "user", content: payload.message });
     setLoading(true);
     try {
@@ -258,6 +350,8 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
         language: payload.selectedLanguage,
         role: "new_prospect"
       });
+      const correlationId = envelope.data?.correlationId || envelope.correlationId;
+      logCorrelationId("chat", correlationId);
       appendMessage({
         id: buildId("assistant"),
         role: "assistant",
@@ -265,7 +359,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
         metadata: {
           sources: envelope.data?.sources || [],
           confidence: envelope.data?.confidence,
-          correlationId: envelope.data?.correlationId || envelope.correlationId
+          correlationId
         }
       });
     } catch (error) {
@@ -282,9 +376,10 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
       appendMessage({
         id: buildId("api-error"),
         role: "system",
-        content: error instanceof Error ? `The API is not ready yet: ${error.message}` : "The API is not ready yet."
+        content: `The message could not be sent. ${describeApiError(error)}`
       });
     } finally {
+      requestInFlightRef.current = false;
       setLoading(false);
     }
   };
