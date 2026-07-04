@@ -15,7 +15,15 @@ dist/
 .coverage
 htmlcov/
 tmp/
-app/
+app/*
+!app/audit/
+!app/audit/*.py
+!app/audit/sinks/
+!app/audit/sinks/*.py
+!app/middleware/
+!app/middleware/*.py
+!app/utils/
+!app/utils/*.py
 .codex/
 graphify-out/
 output/

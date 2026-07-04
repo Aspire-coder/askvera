@@ -8,8 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.middleware import CorrelationIdMiddleware, RateLimitMiddleware
+from api.middleware import RateLimitMiddleware
 from api.routes import router
+from app.audit import audit_lifecycle
+from app.audit.sinks.firehose import initialize_firehose_sink
+from app.middleware.audit import AuditMiddleware
+from app.middleware.correlation import CorrelationIdMiddleware
 from config import settings
 from scripts.validate_config import validate
 from services.aws_clients import init_aws_clients
@@ -73,8 +77,11 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     LOGGER.info("legal_documents_ready", document_count=len(legal_documents["documents"]))
     init_db()
     _init_optional_cache()
+    audit_lifecycle.start()
+    initialize_firehose_sink()
     LOGGER.info("startup_complete")
     yield
+    await audit_lifecycle.stop()
     close_cache()
     close_db()
     LOGGER.info("shutdown_complete")
@@ -82,7 +89,6 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
 
 app = FastAPI(title="ASK Vera", version=settings.APP_VERSION, lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
-app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -90,4 +96,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.add_middleware(AuditMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 app.include_router(router)

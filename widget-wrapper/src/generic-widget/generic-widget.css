@@ -481,6 +481,44 @@
   margin-bottom: 0;
 }
 
+.gw-message h3,
+.gw-message h4,
+.gw-message h5 {
+  margin: 0 0 10px;
+  color: #1f1f1f;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.gw-message h3 {
+  font-size: 18px;
+}
+
+.gw-message h4,
+.gw-message h5 {
+  font-size: 16px;
+}
+
+.gw-message strong {
+  color: #1f1f1f;
+  font-weight: 800;
+}
+
+.gw-message ul,
+.gw-message ol {
+  margin: 0 0 16px 20px;
+  padding: 0;
+}
+
+.gw-message li {
+  margin: 0 0 8px;
+  padding-left: 2px;
+}
+
+.gw-message li:last-child {
+  margin-bottom: 0;
+}
+
 .gw-loading {
   display: flex;
   align-items: center;

@@ -91,6 +91,9 @@ ELASTICACHE_REDIS_HOST = REDIS_HOST
 ELASTICACHE_REDIS_PORT = REDIS_PORT
 # Redis TTL for answer cache in seconds. Found in architecture plan for cache layer.
 CACHE_TTL_SECONDS = 7200
+# Audit Firehose sink configuration. Disabled by default until delivery is wired.
+AUDIT_FIREHOSE_ENABLED = False
+AUDIT_FIREHOSE_STREAM = "askvera-audit"
 # Kinesis Firehose delivery stream for audit logs. Found in Kinesis -> Delivery streams.
 FIREHOSE_STREAM_NAME = "vera-audit-stream"
 KINESIS_FIREHOSE_STREAM_NAME = FIREHOSE_STREAM_NAME
