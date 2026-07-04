@@ -8,11 +8,7 @@ LOGGER = get_logger("app.audit.sinks.firehose")
 
 
 class FirehoseAuditSink:
-    """Future sink for Amazon Kinesis Data Firehose delivery.
-
-    This step only makes the backend aware of Firehose. It intentionally does
-    not call PutRecord or PutRecordBatch yet.
-    """
+    """Send audit events to Amazon Kinesis Data Firehose when enabled."""
 
     name = "firehose"
 
@@ -30,8 +26,24 @@ class FirehoseAuditSink:
         self.client = boto3.client("firehose", region_name=settings.AWS_REGION)
         LOGGER.info("firehose_audit_sink_initialized", stream=self.stream_name, region=settings.AWS_REGION)
 
-    async def write(self, _event: AuditEvent) -> None:
-        """Firehose delivery is intentionally not implemented yet."""
+    async def write(self, event: AuditEvent) -> None:
+        """Send one audit event to Firehose as newline-delimited JSON."""
+        if not self.enabled or self.client is None:
+            return None
+
+        payload = event.model_dump_json() + "\n"
+        try:
+            self.client.put_record(
+                DeliveryStreamName=self.stream_name,
+                Record={"Data": payload.encode("utf-8")},
+            )
+        except Exception:
+            LOGGER.exception(
+                "firehose_audit_write_failed",
+                correlation_id=event.correlation_id,
+                stream=self.stream_name,
+                event_type=event.event_type.value,
+            )
         return None
 
 
