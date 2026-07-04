@@ -185,7 +185,7 @@ def deep_health() -> JSONResponse:
             for name in ["BEDROCK_KB_ID", "BEDROCK_MODEL_ARN", "BEDROCK_GUARDRAIL_ID", "BEDROCK_GUARDRAIL_VERSION"]
         ),
         "comprehend": bool(settings.COMPREHEND_PII_LANGUAGE_CODE),
-        "firehose": bool(settings.KINESIS_FIREHOSE_STREAM_NAME),
+        "firehose": bool(settings.AUDIT_FIREHOSE_STREAM),
         "sqs": bool(settings.SQS_FEEDBACK_QUEUE_URL),
     }
     checks.update({name: "configured" if value else "missing_config" for name, value in configured.items()})

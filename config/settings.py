@@ -9,6 +9,36 @@ import os
 from pathlib import Path
 from typing import Any
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean from the process environment with a safe default."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return raw_value.lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer from the process environment with a safe default."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return int(raw_value)
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float from the process environment with a safe default."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return float(raw_value)
+
+
+def _env_str(name: str, default: str) -> str:
+    """Read a string from the process environment with a safe default."""
+    return os.environ.get(name, default)
+
+
 # Required values checked by scripts/validate_config.py before startup accepts traffic.
 REQUIRED_VALUES = [
     "AWS_REGION",
@@ -91,19 +121,19 @@ ELASTICACHE_REDIS_HOST = REDIS_HOST
 ELASTICACHE_REDIS_PORT = REDIS_PORT
 # Redis TTL for answer cache in seconds. Found in architecture plan for cache layer.
 CACHE_TTL_SECONDS = 7200
-# Audit Firehose sink configuration. Disabled by default until delivery is wired.
-AUDIT_FIREHOSE_ENABLED = False
-AUDIT_FIREHOSE_STREAM = "askvera-audit"
+# Audit Firehose sink configuration. Defaults are overridden by production.env, then by SSM.
+AUDIT_FIREHOSE_ENABLED = _env_bool("AUDIT_FIREHOSE_ENABLED", False)
+AUDIT_FIREHOSE_STREAM = _env_str("AUDIT_FIREHOSE_STREAM", "askvera-audit")
 # Maximum number of audit events to send in one future Firehose PutRecordBatch call.
-AUDIT_BATCH_SIZE = 100
+AUDIT_BATCH_SIZE = _env_int("AUDIT_BATCH_SIZE", 100)
 # Maximum time in seconds to wait before flushing a future partial audit batch.
-AUDIT_BATCH_TIMEOUT_SECONDS = 2.0
+AUDIT_BATCH_TIMEOUT_SECONDS = _env_float("AUDIT_BATCH_TIMEOUT_SECONDS", 2.0)
 # Maximum number of retry attempts for future transient Firehose failures.
-AUDIT_RETRY_MAX_ATTEMPTS = 4
+AUDIT_RETRY_MAX_ATTEMPTS = _env_int("AUDIT_RETRY_MAX_ATTEMPTS", 4)
 # Initial delay in seconds before the first future Firehose retry.
-AUDIT_RETRY_BASE_DELAY_SECONDS = 1.0
+AUDIT_RETRY_BASE_DELAY_SECONDS = _env_float("AUDIT_RETRY_BASE_DELAY_SECONDS", 1.0)
 # Maximum delay in seconds between future Firehose retries.
-AUDIT_RETRY_MAX_DELAY_SECONDS = 8.0
+AUDIT_RETRY_MAX_DELAY_SECONDS = _env_float("AUDIT_RETRY_MAX_DELAY_SECONDS", 8.0)
 # Kinesis Firehose delivery stream for audit logs. Found in Kinesis -> Delivery streams.
 FIREHOSE_STREAM_NAME = "vera-audit-stream"
 KINESIS_FIREHOSE_STREAM_NAME = FIREHOSE_STREAM_NAME
