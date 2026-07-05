@@ -106,10 +106,10 @@ def test_chat_blocks_when_consent_version_is_invalid() -> None:
     with (
         patch("app.orchestrator.chat_orchestrator.validate_and_touch_session", return_value=True),
         patch("app.orchestrator.chat_orchestrator.has_valid_consent", return_value=False),
-        patch("app.orchestrator.chat_orchestrator.retrieve_and_generate") as bedrock,
+        patch("app.orchestrator.chat_orchestrator.ai_orchestrator.model_router.generate") as model_generate,
     ):
         response = routes.chat(body, request)
 
     assert response.status_code == 403
     assert b"CONSENT_REQUIRED" in response.body
-    bedrock.assert_not_called()
+    model_generate.assert_not_called()
