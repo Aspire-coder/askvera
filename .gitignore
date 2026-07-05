@@ -32,6 +32,10 @@ app/*
 !app/response/*.py
 !app/retrieval/
 !app/retrieval/*.py
+!app/validation/
+!app/validation/*.py
+!app/validation/validators/
+!app/validation/validators/*.py
 !app/utils/
 !app/utils/*.py
 .codex/
