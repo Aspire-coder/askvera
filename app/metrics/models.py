@@ -2,7 +2,19 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import os
+from socket import gethostname
 from typing import Any
+
+
+def _environment() -> str:
+    """Return current deployment environment label."""
+    return os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "local"))
+
+
+def _version() -> str:
+    """Return current application version label."""
+    return os.environ.get("APP_VERSION", "unknown")
 
 
 @dataclass(frozen=True)
@@ -16,6 +28,9 @@ class RequestMetric:
     success: bool
     correlation_id: str
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    environment: str = field(default_factory=_environment)
+    version: str = field(default_factory=_version)
+    hostname: str = field(default_factory=gethostname)
     dimensions: dict[str, Any] = field(default_factory=dict)
 
 
@@ -39,6 +54,9 @@ class PipelineMetric:
     success: bool
     correlation_id: str
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    environment: str = field(default_factory=_environment)
+    version: str = field(default_factory=_version)
+    hostname: str = field(default_factory=gethostname)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

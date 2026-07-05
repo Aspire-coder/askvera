@@ -1,6 +1,6 @@
 """In-process metrics collector."""
 
-from threading import Lock
+from threading import RLock
 
 from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
 
@@ -9,7 +9,7 @@ class MetricsCollector:
     """Collect lightweight request metrics in memory."""
 
     def __init__(self) -> None:
-        self._lock = Lock()
+        self._lock = RLock()
         self._request_count = 0
         self._success_count = 0
         self._failure_count = 0
@@ -44,6 +44,15 @@ class MetricsCollector:
             stage["min_duration_ms"] = min(float(stage["min_duration_ms"]), metric.duration_ms)
             stage["max_duration_ms"] = max(float(stage["max_duration_ms"]), metric.duration_ms)
             return self.pipeline_snapshot(metric.stage)
+
+    def reset(self) -> None:
+        """Reset all in-memory counters and stage timing aggregates."""
+        with self._lock:
+            self._request_count = 0
+            self._success_count = 0
+            self._failure_count = 0
+            self._total_duration_ms = 0.0
+            self._stage_metrics.clear()
 
     def snapshot(self) -> RequestMetricSnapshot:
         """Return current in-memory request metrics."""

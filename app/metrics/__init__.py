@@ -2,7 +2,9 @@
 
 from .collector import MetricsCollector, metrics_collector
 from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
+from .provider import MetricsProvider
 from .publisher import MetricsPublisher, metrics_publisher
+from .registry import MetricsRegistry, metrics_registry
 
 STAGE_GOVERNANCE = "governance"
 STAGE_MODEL_GENERATE = "model_generate"
@@ -13,7 +15,9 @@ STAGE_VALIDATION = "validation"
 
 __all__ = [
     "MetricsCollector",
+    "MetricsProvider",
     "MetricsPublisher",
+    "MetricsRegistry",
     "PipelineMetric",
     "PipelineStageSnapshot",
     "RequestMetric",
@@ -26,4 +30,5 @@ __all__ = [
     "STAGE_VALIDATION",
     "metrics_collector",
     "metrics_publisher",
+    "metrics_registry",
 ]

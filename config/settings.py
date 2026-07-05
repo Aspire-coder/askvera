@@ -139,6 +139,9 @@ AUDIT_RETRY_MAX_DELAY_SECONDS = _env_float("AUDIT_RETRY_MAX_DELAY_SECONDS", 8.0)
 # Kinesis Firehose delivery stream for audit logs. Found in Kinesis -> Delivery streams.
 FIREHOSE_STREAM_NAME = "vera-audit-stream"
 KINESIS_FIREHOSE_STREAM_NAME = FIREHOSE_STREAM_NAME
+# Metrics provider selection. CloudWatch will be added later as a provider.
+ENABLE_METRICS = _env_bool("ENABLE_METRICS", True)
+METRICS_PROVIDER = _env_str("METRICS_PROVIDER", "null")
 # SQS feedback queue URL. Found in SQS -> Queues -> your feedback queue -> URL.
 SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askverachat-feedback"
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
