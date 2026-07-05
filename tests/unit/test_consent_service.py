@@ -87,14 +87,14 @@ def test_chat_blocks_when_consent_missing() -> None:
     with (
         patch("app.orchestrator.chat_orchestrator.validate_and_touch_session", return_value=False),
         patch("app.orchestrator.chat_orchestrator.has_valid_consent", return_value=False),
-        patch("app.orchestrator.chat_orchestrator.check_text") as check_text,
+        patch("app.orchestrator.chat_orchestrator.ai_orchestrator.governance_engine.evaluate") as governance_evaluate,
     ):
         response = routes.chat(body, request)
 
     assert isinstance(response, JSONResponse)
     assert response.status_code == 403
     assert b"CONSENT_REQUIRED" in response.body
-    check_text.assert_not_called()
+    governance_evaluate.assert_not_called()
 
 
 def test_chat_blocks_when_consent_version_is_invalid() -> None:
