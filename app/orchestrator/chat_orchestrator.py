@@ -6,6 +6,7 @@ from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
+from app.risk import RiskContext, RiskDecision, RiskEngine, RiskLevel, risk_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
@@ -35,12 +36,14 @@ class AIOrchestrator:
         router: ModelRouter | None = None,
         builder: ResponseBuilder | None = None,
         validator: OutputValidator | None = None,
+        risk: RiskEngine | None = None,
     ) -> None:
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.retriever = retriever or retrieval_service
         self.model_router = router or model_router
         self.response_builder = builder or response_builder
         self.output_validator = validator or output_validator
+        self.risk_engine = risk or risk_engine
 
     def handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Run the existing chat flow and return response data."""
@@ -58,6 +61,13 @@ class AIOrchestrator:
 
         check_text(body.message, correlation_id)
         scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
+        risk_decision = self._evaluate_input_risk(scrubbed_input, body, correlation_id)
+        if risk_decision.is_critical():
+            return self.response_builder.fallback(
+                "I cannot help with that request. Please ask a different question or contact Forever Living support.",
+                correlation_id,
+            )
+
         cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
         if cached:
@@ -132,6 +142,47 @@ class AIOrchestrator:
         )
         set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
         return chat_response
+
+    def _evaluate_input_risk(self, message: str, body: ChatRequest, correlation_id: str) -> RiskDecision:
+        """Run input risk policies before retrieval and model execution."""
+        decision = self.risk_engine.evaluate(
+            RiskContext(
+                user_message=message,
+                country=body.country,
+                language=body.language,
+                role=body.role,
+                correlation_id=correlation_id,
+            )
+        )
+        if decision.issues:
+            LOGGER.warning(
+                "risk_engine_decision",
+                correlation_id=correlation_id,
+                highest_risk=decision.highest_risk.value,
+                recommended_action=decision.recommended_action,
+                allowed=decision.allowed,
+                issue_count=len(decision.issues),
+                issues=[
+                    {
+                        "code": issue.code,
+                        "level": issue.level.value,
+                        "source": issue.source,
+                        "policy": issue.policy,
+                        "policy_version": issue.policy_version,
+                    }
+                    for issue in decision.issues
+                ],
+            )
+        elif decision.highest_risk in {RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH}:
+            LOGGER.info(
+                "risk_engine_decision",
+                correlation_id=correlation_id,
+                highest_risk=decision.highest_risk.value,
+                recommended_action=decision.recommended_action,
+                allowed=decision.allowed,
+                issue_count=0,
+            )
+        return decision
 
     def _validate_response(
         self,

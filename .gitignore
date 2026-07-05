@@ -32,6 +32,10 @@ app/*
 !app/response/*.py
 !app/retrieval/
 !app/retrieval/*.py
+!app/risk/
+!app/risk/*.py
+!app/risk/policies/
+!app/risk/policies/*.py
 !app/validation/
 !app/validation/*.py
 !app/validation/validators/
