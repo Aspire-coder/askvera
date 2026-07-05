@@ -10,20 +10,28 @@ from config import settings
 from utils.logging import get_logger
 
 from app.metrics.models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot, SystemMetric
+from app.metrics.names import (
+    AVERAGE_REQUEST_DURATION,
+    FAILED_REQUESTS,
+    PIPELINE_STAGE_METRIC_NAMES,
+    REQUEST_COUNT,
+    REQUEST_DURATION,
+    SUCCESSFUL_REQUESTS,
+    SYSTEM_METRIC_NAMES,
+    TOTAL_REQUESTS,
+)
 
 LOGGER = get_logger("app.metrics.cloudwatch")
 
 CLOUDWATCH_METRIC_NAMES = {
-    "request_count": "RequestCount",
-    "request_duration": "RequestDuration",
-    "governance": "GovernanceLatency",
-    "retrieval": "RetrievalLatency",
-    "prompt_build": "PromptBuildLatency",
-    "model_generate": "ModelLatency",
-    "validation": "ValidationLatency",
-    "response_build": "ResponseBuildLatency",
-    "cache_hit_ratio": "CacheHitRatio",
-    "audit_queue_depth": "AuditQueueDepth",
+    "request_count": REQUEST_COUNT,
+    "request_duration": REQUEST_DURATION,
+    "total_requests": TOTAL_REQUESTS,
+    "successful_requests": SUCCESSFUL_REQUESTS,
+    "failed_requests": FAILED_REQUESTS,
+    "average_request_duration": AVERAGE_REQUEST_DURATION,
+    **PIPELINE_STAGE_METRIC_NAMES,
+    **SYSTEM_METRIC_NAMES,
 }
 
 
@@ -55,7 +63,7 @@ class CloudWatchMetricsProvider:
             return
         self._queue_metric(
             {
-                "MetricName": CLOUDWATCH_METRIC_NAMES["request_count"],
+                "MetricName": REQUEST_COUNT,
                 "Dimensions": self._base_dimensions(metric.environment, metric.version, metric.hostname)
                 + [
                     {"Name": "Method", "Value": metric.method},
@@ -69,7 +77,7 @@ class CloudWatchMetricsProvider:
         )
         self._queue_metric(
             {
-                "MetricName": CLOUDWATCH_METRIC_NAMES["request_duration"],
+                "MetricName": REQUEST_DURATION,
                 "Dimensions": self._base_dimensions(metric.environment, metric.version, metric.hostname)
                 + [
                     {"Name": "Method", "Value": metric.method},
@@ -80,16 +88,64 @@ class CloudWatchMetricsProvider:
                 "Unit": "Milliseconds",
             }
         )
+        self._queue_metric(
+            {
+                "MetricName": TOTAL_REQUESTS,
+                "Dimensions": self._aggregate_request_dimensions(metric.environment, metric.version, metric.hostname),
+                "Timestamp": self._timestamp(metric.timestamp),
+                "Value": 1.0,
+                "Unit": "Count",
+            }
+        )
+        if metric.success:
+            self._queue_metric(
+                {
+                    "MetricName": SUCCESSFUL_REQUESTS,
+                    "Dimensions": self._aggregate_request_dimensions(metric.environment, metric.version, metric.hostname),
+                    "Timestamp": self._timestamp(metric.timestamp),
+                    "Value": 1.0,
+                    "Unit": "Count",
+                }
+            )
+        else:
+            self._queue_metric(
+                {
+                    "MetricName": FAILED_REQUESTS,
+                    "Dimensions": self._aggregate_request_dimensions(metric.environment, metric.version, metric.hostname),
+                    "Timestamp": self._timestamp(metric.timestamp),
+                    "Value": 1.0,
+                    "Unit": "Count",
+                }
+            )
+        self._queue_metric(
+            {
+                "MetricName": AVERAGE_REQUEST_DURATION,
+                "Dimensions": self._aggregate_request_dimensions(metric.environment, metric.version, metric.hostname),
+                "Timestamp": self._timestamp(metric.timestamp),
+                "Value": metric.duration_ms,
+                "Unit": "Milliseconds",
+            }
+        )
 
     def publish_pipeline(self, metric: PipelineMetric, snapshot: PipelineStageSnapshot) -> None:
         """Publish one pipeline stage timing metric."""
         if not self.enabled:
             return
+        metric_name = PIPELINE_STAGE_METRIC_NAMES.get(metric.stage, self._metric_name(metric.stage))
         self._queue_metric(
             {
-                "MetricName": CLOUDWATCH_METRIC_NAMES.get(metric.stage, self._metric_name(metric.stage)),
+                "MetricName": metric_name,
                 "Dimensions": self._base_dimensions(metric.environment, metric.version, metric.hostname)
                 + [{"Name": "Stage", "Value": metric.stage}],
+                "Timestamp": self._timestamp(metric.timestamp),
+                "Value": metric.duration_ms,
+                "Unit": "Milliseconds",
+            }
+        )
+        self._queue_metric(
+            {
+                "MetricName": metric_name,
+                "Dimensions": self._aggregate_dimensions(metric.environment, metric.version),
                 "Timestamp": self._timestamp(metric.timestamp),
                 "Value": metric.duration_ms,
                 "Unit": "Milliseconds",
@@ -100,15 +156,26 @@ class CloudWatchMetricsProvider:
         """Publish one system metric sample."""
         if not self.enabled:
             return
+        metric_name = SYSTEM_METRIC_NAMES.get(metric.name, self._metric_name(metric.name))
         self._queue_metric(
             {
-                "MetricName": CLOUDWATCH_METRIC_NAMES.get(metric.name, self._metric_name(metric.name)),
+                "MetricName": metric_name,
                 "Dimensions": self._base_dimensions(metric.environment, metric.version, metric.hostname),
-                "Timestamp": metric.timestamp,
+                "Timestamp": self._timestamp(metric.timestamp),
                 "Value": metric.value,
                 "Unit": self._cloudwatch_unit(metric.unit),
             }
         )
+        if metric.name in SYSTEM_METRIC_NAMES:
+            self._queue_metric(
+                {
+                    "MetricName": metric_name,
+                    "Dimensions": self._aggregate_dimensions(metric.environment, metric.version),
+                    "Timestamp": self._timestamp(metric.timestamp),
+                    "Value": metric.value,
+                    "Unit": self._cloudwatch_unit(metric.unit),
+                }
+            )
 
     def flush(self) -> None:
         """Flush pending metric data to CloudWatch."""
@@ -160,8 +227,23 @@ class CloudWatchMetricsProvider:
         ]
 
     @staticmethod
+    def _aggregate_request_dimensions(environment: str, version: str, hostname: str) -> list[dict[str, str]]:
+        return [
+            {"Name": "Environment", "Value": environment},
+            {"Name": "Version", "Value": version},
+            {"Name": "Hostname", "Value": hostname},
+        ]
+
+    @staticmethod
+    def _aggregate_dimensions(environment: str, version: str) -> list[dict[str, str]]:
+        return [
+            {"Name": "Environment", "Value": environment},
+            {"Name": "Version", "Value": version},
+        ]
+
+    @staticmethod
     def _cloudwatch_unit(unit: str) -> str:
-        if unit == "Ratio":
+        if unit in {"Ratio", "None"}:
             return "None"
         return unit
 

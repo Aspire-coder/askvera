@@ -77,6 +77,24 @@ def test_health_summary_generation() -> None:
     assert summary.audit_queue_depth == 12
 
 
+def test_health_gauges_are_recorded_from_system_helpers() -> None:
+    collector = MetricsCollector()
+
+    collector.record_governance_allow()
+    collector.record_validation_passed()
+
+    assert collector.system_snapshot("governance_health").value == 1.0
+    assert collector.system_snapshot("validation_health").value == 1.0
+
+    collector.record_retrieval_failure()
+    collector.record_governance_provider_failure()
+    collector.record_validation_critical()
+
+    assert collector.system_snapshot("retrieval_health").value == 0.0
+    assert collector.system_snapshot("governance_health").value == 0.0
+    assert collector.system_snapshot("validation_health").value == 0.0
+
+
 def test_reset_clears_system_metrics() -> None:
     collector = MetricsCollector()
     collector.record_request(_request_metric())

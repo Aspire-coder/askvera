@@ -79,18 +79,22 @@ class MetricsCollector:
     def record_retrieval_failure(self) -> None:
         """Track one retrieval failure."""
         self.increment_system_metric("retrieval_failures")
+        self.record_system(SystemMetric(name="retrieval_health", value=0.0, unit="None"))
 
     def record_low_confidence(self) -> None:
         """Track one low-confidence retrieval/model outcome."""
         self.increment_system_metric("low_confidence")
+        self.record_system(SystemMetric(name="retrieval_health", value=0.0, unit="None"))
 
     def record_empty_retrieval(self) -> None:
         """Track one empty retrieval result."""
         self.increment_system_metric("empty_retrievals")
+        self.record_system(SystemMetric(name="retrieval_health", value=0.0, unit="None"))
 
     def record_governance_allow(self) -> None:
         """Track one governance allow decision."""
         self.increment_system_metric("governance_allows")
+        self.record_system(SystemMetric(name="governance_health", value=1.0, unit="None"))
 
     def record_governance_block(self) -> None:
         """Track one governance block decision."""
@@ -99,14 +103,17 @@ class MetricsCollector:
     def record_governance_critical(self) -> None:
         """Track one critical governance decision."""
         self.increment_system_metric("governance_critical")
+        self.record_system(SystemMetric(name="governance_health", value=0.0, unit="None"))
 
     def record_governance_provider_failure(self) -> None:
         """Track one governance provider failure."""
         self.increment_system_metric("governance_provider_failures")
+        self.record_system(SystemMetric(name="governance_health", value=0.0, unit="None"))
 
     def record_validation_passed(self) -> None:
         """Track one passed validation."""
         self.increment_system_metric("validation_passed")
+        self.record_system(SystemMetric(name="validation_health", value=1.0, unit="None"))
 
     def record_validation_warning(self) -> None:
         """Track one warning validation result."""
@@ -115,6 +122,7 @@ class MetricsCollector:
     def record_validation_critical(self) -> None:
         """Track one critical validation result."""
         self.increment_system_metric("validation_critical")
+        self.record_system(SystemMetric(name="validation_health", value=0.0, unit="None"))
 
     def record_audit_queue_depth(self, depth: int) -> None:
         """Track current audit queue depth."""
