@@ -162,6 +162,14 @@ PROMPT_BUILD_LATENCY_THRESHOLD = _env_int("PROMPT_BUILD_LATENCY_THRESHOLD", 500)
 PIPELINE_HEALTH_THRESHOLD = _env_float("PIPELINE_HEALTH_THRESHOLD", 95.0)
 AUDIT_QUEUE_DEPTH_THRESHOLD = _env_int("AUDIT_QUEUE_DEPTH_THRESHOLD", 100)
 FIREHOSE_DELIVERY_FAILURE_THRESHOLD = _env_int("FIREHOSE_DELIVERY_FAILURE_THRESHOLD", 0)
+# SNS alarm notification configuration. Disabled by default until operators opt in.
+ENABLE_ALARM_NOTIFICATIONS = _env_bool("ENABLE_ALARM_NOTIFICATIONS", False)
+SNS_TOPIC_NAME = _env_str("SNS_TOPIC_NAME", "askvera-alerts")
+SNS_TOPIC_ARN = _env_str("SNS_TOPIC_ARN", "")
+SNS_EMAIL_SUBSCRIPTIONS = _env_str("SNS_EMAIL_SUBSCRIPTIONS", "")
+CREATE_SNS_TOPIC_IF_MISSING = _env_bool("CREATE_SNS_TOPIC_IF_MISSING", False)
+ENABLE_OK_NOTIFICATIONS = _env_bool("ENABLE_OK_NOTIFICATIONS", True)
+ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS = _env_bool("ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS", False)
 # SQS feedback queue URL. Found in SQS -> Queues -> your feedback queue -> URL.
 SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askverachat-feedback"
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.

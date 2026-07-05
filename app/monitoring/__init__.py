@@ -7,11 +7,21 @@ from .alarms import (
     CloudWatchAlarmManager,
     build_alarm_definitions,
 )
+from .notifications import (
+    AlarmNotificationActions,
+    NotificationSetupResult,
+    SNSNotificationManager,
+    SubscriptionResult,
+)
 
 __all__ = [
     "ALARM_NAMES",
+    "AlarmNotificationActions",
     "AlarmDefinition",
     "AlarmSetupResult",
     "CloudWatchAlarmManager",
+    "NotificationSetupResult",
+    "SNSNotificationManager",
+    "SubscriptionResult",
     "build_alarm_definitions",
 ]

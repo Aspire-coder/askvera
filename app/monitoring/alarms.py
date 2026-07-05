@@ -22,6 +22,7 @@ from app.metrics.names import (
     TOTAL_REQUESTS,
     VALIDATION_HEALTH,
 )
+from app.monitoring.notifications import AlarmNotificationActions
 
 LOGGER = get_logger("app.monitoring.alarms")
 
@@ -114,8 +115,14 @@ class AlarmSetupResult:
 class CloudWatchAlarmManager:
     """Create or update CloudWatch alarms from centralized definitions."""
 
-    def __init__(self, client: Any | None = None, enabled: bool | None = None) -> None:
+    def __init__(
+        self,
+        client: Any | None = None,
+        enabled: bool | None = None,
+        notification_actions: AlarmNotificationActions | None = None,
+    ) -> None:
         self.enabled = settings.ENABLE_CLOUDWATCH_ALARMS if enabled is None else enabled
+        self.notification_actions = notification_actions or AlarmNotificationActions()
         self.client = client
         if self.enabled and self.client is None:
             self.client = self._build_client()
@@ -148,6 +155,13 @@ class CloudWatchAlarmManager:
         }
         if definition.datapoints_to_alarm is not None:
             payload["DatapointsToAlarm"] = definition.datapoints_to_alarm
+        if self.notification_actions.alarm_actions:
+            payload["AlarmActions"] = self.notification_actions.alarm_actions
+            LOGGER.info("cloudwatch_alarm_actions_attached", alarm_name=definition.name)
+        if self.notification_actions.ok_actions:
+            payload["OKActions"] = self.notification_actions.ok_actions
+        if self.notification_actions.insufficient_data_actions:
+            payload["InsufficientDataActions"] = self.notification_actions.insufficient_data_actions
         if definition.metric_queries:
             payload["Metrics"] = definition.metric_queries
         else:
@@ -187,7 +201,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
         _high_error_rate_alarm(app_dimensions),
         AlarmDefinition(
             name=ALARM_NAMES["high_latency"],
-            description="ASK Vera average request latency is above 3 seconds.",
+            description=_description(
+                "ASK Vera average request latency is above 3 seconds.",
+                "Users may see slow chatbot responses.",
+                "Check API CPU, Bedrock latency, Redis latency, and recent deployment logs.",
+            ),
             metric_name=AVERAGE_REQUEST_DURATION,
             namespace=APP_NAMESPACE,
             statistic="Average",
@@ -200,7 +218,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["no_requests"],
-            description="ASK Vera received no requests for 15 minutes.",
+            description=_description(
+                "ASK Vera received no requests for 15 minutes.",
+                "The widget, DNS, CDN, or API route may be unreachable.",
+                "Verify CloudFront, ALB/API health, DNS, and widget network calls.",
+            ),
             metric_name=TOTAL_REQUESTS,
             namespace=APP_NAMESPACE,
             statistic="Sum",
@@ -212,12 +234,43 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
             treat_missing_data="breaching",
             unit="Count",
         ),
-        _health_alarm(ALARM_NAMES["governance_health"], GOVERNANCE_HEALTH, "Governance health dropped below 95%.", aggregate_dimensions),
-        _health_alarm(ALARM_NAMES["retrieval_health"], RETRIEVAL_HEALTH, "Retrieval health dropped below 95%.", aggregate_dimensions),
-        _health_alarm(ALARM_NAMES["validation_health"], VALIDATION_HEALTH, "Validation health dropped below 95%.", aggregate_dimensions),
+        _health_alarm(
+            ALARM_NAMES["governance_health"],
+            GOVERNANCE_HEALTH,
+            _description(
+                "Governance health dropped below 95%.",
+                "Safety checks may be blocking or failing more often than expected.",
+                "Review governance provider logs, guardrail configuration, and recent content/policy changes.",
+            ),
+            aggregate_dimensions,
+        ),
+        _health_alarm(
+            ALARM_NAMES["retrieval_health"],
+            RETRIEVAL_HEALTH,
+            _description(
+                "Retrieval health dropped below 95%.",
+                "The assistant may return low-confidence or fallback answers.",
+                "Check Bedrock Knowledge Base retrieval logs, filters, and source document sync status.",
+            ),
+            aggregate_dimensions,
+        ),
+        _health_alarm(
+            ALARM_NAMES["validation_health"],
+            VALIDATION_HEALTH,
+            _description(
+                "Validation health dropped below 95%.",
+                "Generated answers may be failing output quality or compliance checks.",
+                "Review validation logs, model responses, and recent prompt/model changes.",
+            ),
+            aggregate_dimensions,
+        ),
         AlarmDefinition(
             name=ALARM_NAMES["high_model_latency"],
-            description="ASK Vera model latency is above 5 seconds.",
+            description=_description(
+                "ASK Vera model latency is above 5 seconds.",
+                "Users may experience delayed AI responses.",
+                "Check Bedrock service latency, model/inference profile health, and upstream retries.",
+            ),
             metric_name=MODEL_LATENCY,
             namespace=APP_NAMESPACE,
             statistic="Average",
@@ -230,7 +283,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["high_prompt_build_latency"],
-            description="ASK Vera prompt build latency is above 500 ms.",
+            description=_description(
+                "ASK Vera prompt build latency is above 500 ms.",
+                "Prompt assembly is slower than expected before model invocation.",
+                "Check retrieval payload sizes, conversation history size, and prompt builder logs.",
+            ),
             metric_name=PROMPT_BUILD_LATENCY,
             namespace=APP_NAMESPACE,
             statistic="Average",
@@ -243,7 +300,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["low_cache_hit"],
-            description="ASK Vera cache hit ratio is below 60%.",
+            description=_description(
+                "ASK Vera cache hit ratio is below 60%.",
+                "The application may be calling Bedrock more often than expected.",
+                "Check Redis connectivity, cache keys, TTLs, and recent prompt/KB version changes.",
+            ),
             metric_name=CACHE_HIT_RATIO,
             namespace=APP_NAMESPACE,
             statistic="Average",
@@ -256,7 +317,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["audit_queue_depth"],
-            description="ASK Vera audit queue depth is above 100 events.",
+            description=_description(
+                "ASK Vera audit queue depth is above 100 events.",
+                "Audit delivery may be lagging behind request volume.",
+                "Check audit worker logs, Firehose sink logs, and Firehose delivery status.",
+            ),
             metric_name=AUDIT_QUEUE_DEPTH,
             namespace=APP_NAMESPACE,
             statistic="Maximum",
@@ -269,7 +334,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["firehose_delivery_failures"],
-            description="ASK Vera audit Firehose reported delivery failures.",
+            description=_description(
+                "ASK Vera audit Firehose reported delivery failures.",
+                "Audit records may not be reaching S3 reliably.",
+                "Check Firehose error logs, S3 permissions, stream status, and delivery configuration.",
+            ),
             metric_name="DeliveryToS3.Failures",
             namespace=FIREHOSE_NAMESPACE,
             statistic="Sum",
@@ -289,7 +358,11 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
 def _high_error_rate_alarm(dimensions: dict[str, str]) -> AlarmDefinition:
     return AlarmDefinition(
         name=ALARM_NAMES["high_error_rate"],
-        description="ASK Vera request error rate is above 5%.",
+        description=_description(
+            "ASK Vera request error rate is above 5%.",
+            "Users may be receiving failed chat, consent, config, or privacy responses.",
+            "Check API logs by correlation ID, recent deploys, and dependency health.",
+        ),
         threshold=ERROR_RATE_THRESHOLD,
         comparison_operator="GreaterThanThreshold",
         period=300,
@@ -327,7 +400,11 @@ def _ec2_alarm_definitions(instance_id: str) -> list[AlarmDefinition]:
     return [
         AlarmDefinition(
             name=ALARM_NAMES["high_cpu"],
-            description="ASK Vera EC2 CPU utilization is above 80%.",
+            description=_description(
+                "ASK Vera EC2 CPU utilization is above 80%.",
+                "API throughput and response times may degrade.",
+                "Check process load, traffic spikes, and whether scaling is required.",
+            ),
             metric_name="CPUUtilization",
             namespace=EC2_NAMESPACE,
             statistic="Average",
@@ -340,7 +417,11 @@ def _ec2_alarm_definitions(instance_id: str) -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["high_memory"],
-            description="ASK Vera EC2 memory utilization is above 80%. Requires CloudWatch Agent.",
+            description=_description(
+                "ASK Vera EC2 memory utilization is above 80%. Requires CloudWatch Agent.",
+                "The API process may become unstable or be terminated by the OS.",
+                "Check memory growth, worker count, and recent changes that increase buffering.",
+            ),
             metric_name="mem_used_percent",
             namespace=CW_AGENT_NAMESPACE,
             statistic="Average",
@@ -353,7 +434,11 @@ def _ec2_alarm_definitions(instance_id: str) -> list[AlarmDefinition]:
         ),
         AlarmDefinition(
             name=ALARM_NAMES["high_disk"],
-            description="ASK Vera EC2 disk utilization is above 85%. Requires CloudWatch Agent.",
+            description=_description(
+                "ASK Vera EC2 disk utilization is above 85%. Requires CloudWatch Agent.",
+                "Logs, temp files, or deployments may run out of disk space.",
+                "Check journald logs, application logs, deployment artifacts, and disk cleanup policy.",
+            ),
             metric_name="disk_used_percent",
             namespace=CW_AGENT_NAMESPACE,
             statistic="Average",
@@ -403,3 +488,10 @@ def _aggregate_dimensions() -> dict[str, str]:
 
 def _environment() -> str:
     return os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "production"))
+
+
+def _description(trigger: str, impact: str, first_step: str) -> str:
+    return (
+        f"{trigger} Impact: {impact} "
+        f"First step: {first_step} Runbook: Sprint 9 runbook placeholder."
+    )

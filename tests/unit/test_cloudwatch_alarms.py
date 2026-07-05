@@ -46,6 +46,17 @@ def test_build_alarm_definitions_contains_core_alarms() -> None:
     assert ALARM_NAMES["firehose_delivery_failures"] in names
 
 
+def test_alarm_descriptions_include_operational_context() -> None:
+    definition = next(
+        alarm for alarm in build_alarm_definitions()
+        if alarm.name == ALARM_NAMES["high_latency"]
+    )
+
+    assert "Impact:" in definition.description
+    assert "First step:" in definition.description
+    assert "Runbook:" in definition.description
+
+
 def test_alarm_definition_validation_requires_metric_or_query() -> None:
     definition = AlarmDefinition(name="AskVera-Test", description="Missing metric")
 
