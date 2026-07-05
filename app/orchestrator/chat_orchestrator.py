@@ -152,6 +152,21 @@ class AIOrchestrator:
                 correlation_id=correlation_id,
             )
         )
+        if result.issues:
+            LOGGER.warning(
+                "output_validator_issues_detected",
+                correlation_id=correlation_id,
+                issue_count=len(result.issues),
+                highest_severity=result.highest_severity.value,
+                issues=[
+                    {
+                        "code": issue.code,
+                        "severity": issue.severity.value,
+                        "field": issue.field,
+                    }
+                    for issue in result.issues
+                ],
+            )
         if result.has_critical():
             LOGGER.warning(
                 "output_validator_critical_fallback",
