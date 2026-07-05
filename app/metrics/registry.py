@@ -1,7 +1,7 @@
 """Metrics provider registry."""
 
 from .provider import MetricsProvider
-from .providers import NullMetricsProvider
+from .providers import CloudWatchMetricsProvider, NullMetricsProvider
 
 
 class MetricsRegistry:
@@ -25,3 +25,4 @@ class MetricsRegistry:
 
 metrics_registry = MetricsRegistry()
 metrics_registry.register(NullMetricsProvider())
+metrics_registry.register(CloudWatchMetricsProvider())
