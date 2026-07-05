@@ -84,7 +84,7 @@ sudo -u "${APP_USER}" .venv/bin/python -m pip install --upgrade pip
 sudo -u "${APP_USER}" .venv/bin/python -m pip install -r requirements.txt
 
 log "Compiling Python source."
-sudo -u "${APP_USER}" .venv/bin/python -m compileall api config services utils scripts tests >/dev/null
+sudo -u "${APP_USER}" .venv/bin/python -m compileall app api config services utils scripts tests >/dev/null
 
 log "Validating configuration."
 sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py

@@ -24,7 +24,7 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Compile Python source
-        run: python -m compileall api config services utils scripts tests
+        run: python -m compileall app api config services utils scripts tests
 
       - name: Test
         run: python -m pytest tests/unit -q
