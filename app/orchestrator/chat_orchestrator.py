@@ -6,7 +6,7 @@ from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
-from app.validation import OutputValidator, ValidationContext, output_validator
+from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
 from services.consent_service import has_valid_consent
@@ -126,6 +126,7 @@ class AIOrchestrator:
                 "country": body.country,
                 "language": body.language,
                 "confidence": chat_response.confidence,
+                "validation": chat_response.metadata.get("validation"),
             },
             correlation_id,
         )
@@ -174,11 +175,29 @@ class AIOrchestrator:
                 issue_count=len(result.issues),
                 highest_severity=result.highest_severity.value,
             )
-            return self.response_builder.fallback(
-                "I could not generate a complete approved response. Please try again or contact Forever Living support.",
-                correlation_id,
+            return self._with_validation_metadata(
+                self.response_builder.fallback(
+                    "I could not generate a complete approved response. Please try again or contact Forever Living support.",
+                    correlation_id,
+                ),
+                result,
             )
-        return chat_response
+        return self._with_validation_metadata(chat_response, result)
+
+    def _with_validation_metadata(self, chat_response: ChatResponse, result: ValidationResult) -> ChatResponse:
+        """Attach validation summary metadata without changing the public API response."""
+        return ChatResponse(
+            answer=chat_response.answer,
+            citations=chat_response.citations,
+            suggestions=chat_response.suggestions,
+            cards=chat_response.cards,
+            confidence=chat_response.confidence,
+            metadata={
+                **(chat_response.metadata or {}),
+                "validation": validation_summary(result),
+            },
+            correlation_id=chat_response.correlation_id,
+        )
 
 
 ai_orchestrator = AIOrchestrator()
