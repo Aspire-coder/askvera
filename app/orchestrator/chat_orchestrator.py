@@ -62,7 +62,7 @@ class AIOrchestrator:
         check_text(body.message, correlation_id)
         scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
         risk_decision = self._evaluate_input_risk(scrubbed_input, body, correlation_id)
-        if risk_decision.is_critical():
+        if risk_decision.should_refuse():
             return self.response_builder.fallback(
                 "I cannot help with that request. Please ask a different question or contact Forever Living support.",
                 correlation_id,
@@ -159,6 +159,7 @@ class AIOrchestrator:
                 "risk_engine_decision",
                 correlation_id=correlation_id,
                 highest_risk=decision.highest_risk.value,
+                action=decision.action.value,
                 recommended_action=decision.recommended_action,
                 allowed=decision.allowed,
                 issue_count=len(decision.issues),
@@ -166,6 +167,7 @@ class AIOrchestrator:
                     {
                         "code": issue.code,
                         "level": issue.level.value,
+                        "action": issue.action.value,
                         "source": issue.source,
                         "policy": issue.policy,
                         "policy_version": issue.policy_version,
@@ -178,6 +180,7 @@ class AIOrchestrator:
                 "risk_engine_decision",
                 correlation_id=correlation_id,
                 highest_risk=decision.highest_risk.value,
+                action=decision.action.value,
                 recommended_action=decision.recommended_action,
                 allowed=decision.allowed,
                 issue_count=0,

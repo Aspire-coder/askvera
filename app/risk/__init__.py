@@ -1,10 +1,11 @@
 """Risk and policy engine package."""
 
 from .engine import RiskEngine, default_policies, risk_engine
-from .models import RiskContext, RiskDecision, RiskIssue, RiskLevel
+from .models import PolicyAction, RiskContext, RiskDecision, RiskIssue, RiskLevel
 from .rules import RiskPolicy
 
 __all__ = [
+    "PolicyAction",
     "RiskContext",
     "RiskDecision",
     "RiskEngine",

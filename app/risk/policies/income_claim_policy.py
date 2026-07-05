@@ -1,6 +1,6 @@
 """Income claim risk policy."""
 
-from app.risk.models import RiskContext, RiskIssue, RiskLevel
+from app.risk.models import PolicyAction, RiskContext, RiskIssue, RiskLevel
 from app.risk.rules import RiskPolicyMetadata
 
 
@@ -13,6 +13,7 @@ class IncomeClaimPolicy:
         description="Detects guaranteed-income or earnings-claim language.",
         enabled=True,
         risk_level=RiskLevel.HIGH,
+        action=PolicyAction.WARN,
     )
     phrases = ("guaranteed income", "get rich", "earnings guarantee", "passive income")
 
@@ -25,6 +26,7 @@ class IncomeClaimPolicy:
                 code="INCOME_CLAIM_RISK",
                 message="User message contains income or earnings claim language.",
                 level=RiskLevel.HIGH,
+                action=PolicyAction.WARN,
                 source="business_policy",
                 policy=self.metadata.name,
                 policy_version=self.metadata.version,

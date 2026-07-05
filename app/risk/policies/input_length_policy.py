@@ -1,6 +1,6 @@
 """Input length risk policy."""
 
-from app.risk.models import RiskContext, RiskIssue, RiskLevel
+from app.risk.models import PolicyAction, RiskContext, RiskIssue, RiskLevel
 from app.risk.rules import RiskPolicyMetadata
 
 
@@ -13,6 +13,7 @@ class InputLengthPolicy:
         description="Detects oversized user prompts that may affect stability or cost.",
         enabled=True,
         risk_level=RiskLevel.CRITICAL,
+        action=PolicyAction.REFUSE,
     )
     max_length = 25000
 
@@ -24,6 +25,7 @@ class InputLengthPolicy:
                 code="INPUT_TOO_LONG",
                 message="User message exceeds maximum risk policy length.",
                 level=RiskLevel.CRITICAL,
+                action=PolicyAction.REFUSE,
                 source="input",
                 policy=self.metadata.name,
                 policy_version=self.metadata.version,

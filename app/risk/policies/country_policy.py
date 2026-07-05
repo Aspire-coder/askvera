@@ -1,6 +1,6 @@
 """Country support risk policy."""
 
-from app.risk.models import RiskContext, RiskIssue, RiskLevel
+from app.risk.models import PolicyAction, RiskContext, RiskIssue, RiskLevel
 from app.risk.rules import RiskPolicyMetadata
 from services.market_config import get_country_codes
 
@@ -13,7 +13,8 @@ class CountryPolicy:
         version="2026.1",
         description="Detects requests for unsupported country or market codes.",
         enabled=True,
-        risk_level=RiskLevel.CRITICAL,
+        risk_level=RiskLevel.HIGH,
+        action=PolicyAction.REFUSE,
     )
 
     def evaluate(self, context: RiskContext) -> list[RiskIssue]:
@@ -24,7 +25,8 @@ class CountryPolicy:
             RiskIssue(
                 code="UNSUPPORTED_COUNTRY",
                 message="Requested country is not configured as a supported market.",
-                level=RiskLevel.CRITICAL,
+                level=RiskLevel.HIGH,
+                action=PolicyAction.REFUSE,
                 source="input",
                 policy=self.metadata.name,
                 policy_version=self.metadata.version,

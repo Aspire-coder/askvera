@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from .models import RiskContext, RiskIssue, RiskLevel
+from .models import PolicyAction, RiskContext, RiskIssue, RiskLevel
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,7 @@ class RiskPolicyMetadata:
     description: str
     enabled: bool
     risk_level: RiskLevel
+    action: PolicyAction
 
 
 class RiskPolicy(Protocol):
