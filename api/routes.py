@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.orchestrator import ConsentRequiredError, ai_orchestrator
+from app.response import ChatResponse
 from config import settings
 from services import cache as cache_service
 from services.consent_service import record_consent
@@ -67,6 +68,8 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     correlation_id = _correlation_id(request)
     try:
         result = ai_orchestrator.handle_chat(body, correlation_id)
+        if isinstance(result, ChatResponse):
+            return success(result.to_api_result(), correlation_id)
         return success(result, correlation_id)
     except ConsentRequiredError:
         return consent_required_response(correlation_id)

@@ -28,6 +28,8 @@ app/*
 !app/orchestrator/*.py
 !app/prompts/
 !app/prompts/*.py
+!app/response/
+!app/response/*.py
 !app/retrieval/
 !app/retrieval/*.py
 !app/utils/

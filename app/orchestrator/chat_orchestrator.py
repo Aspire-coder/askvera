@@ -1,9 +1,8 @@
 """AI chat orchestration for ASK Vera."""
 
-from typing import Any
-
 from app.models import ModelRouter, model_router
 from app.prompts import PromptBuilder
+from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.retrieval import RetrievalService, retrieval_service
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
@@ -31,12 +30,14 @@ class AIOrchestrator:
         prompt_builder: PromptBuilder | None = None,
         retriever: RetrievalService | None = None,
         router: ModelRouter | None = None,
+        builder: ResponseBuilder | None = None,
     ) -> None:
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.retriever = retriever or retrieval_service
         self.model_router = router or model_router
+        self.response_builder = builder or response_builder
 
-    def handle_chat(self, body: ChatRequest, correlation_id: str) -> dict[str, Any]:
+    def handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Run the existing chat flow and return response data."""
         LOGGER.info(
             "ai_orchestrator_request_started",
@@ -55,7 +56,7 @@ class AIOrchestrator:
         cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
         if cached:
-            return {**cached, "correlationId": correlation_id}
+            return self.response_builder.from_cached(cached, correlation_id)
 
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_result = self.retriever.retrieve(scrubbed_input, body.country, body.language, body.role, correlation_id)
@@ -69,24 +70,46 @@ class AIOrchestrator:
             metadata={"correlation_id": correlation_id},
         )
         try:
-            result = self.model_router.generate(prompt_package, retrieval_result, correlation_id).to_chat_result()
+            model_response = self.model_router.generate(prompt_package, retrieval_result, correlation_id)
         except LowConfidenceError as exc:
-            return {"response": exc.message, "sources": [], "confidence": 0.0, "correlationId": correlation_id}
+            return self.response_builder.fallback(exc.message, correlation_id)
 
-        result["response"] = scrub_pii(result["response"], correlation_id, body.language)
-        check_text(result["response"], correlation_id)
-        append_session_turn(body.sessionId, scrubbed_input, result["response"], correlation_id)
+        chat_response = self.response_builder.build(
+            model_response=model_response,
+            retrieval_result=retrieval_result,
+            correlation_id=correlation_id,
+            session_metadata={
+                "session_id": body.sessionId,
+                "country": body.country,
+                "language": body.language,
+                "role": body.role,
+                "cache": "miss",
+            },
+        )
+        safe_answer = scrub_pii(chat_response.answer, correlation_id, body.language)
+        if safe_answer != chat_response.answer:
+            chat_response = ChatResponse(
+                answer=safe_answer,
+                citations=chat_response.citations,
+                suggestions=chat_response.suggestions,
+                cards=chat_response.cards,
+                confidence=chat_response.confidence,
+                metadata={**chat_response.metadata, "response_pii_scrubbed": True},
+                correlation_id=chat_response.correlation_id,
+            )
+        check_text(chat_response.answer, correlation_id)
+        append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
                 "type": "chat",
                 "country": body.country,
                 "language": body.language,
-                "confidence": result["confidence"],
+                "confidence": chat_response.confidence,
             },
             correlation_id,
         )
-        set_cache_value(cache_key, result, correlation_id)
-        return {**result, "correlationId": correlation_id}
+        set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
+        return chat_response
 
 
 ai_orchestrator = AIOrchestrator()

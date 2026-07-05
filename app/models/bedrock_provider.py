@@ -1,11 +1,11 @@
 """Bedrock Claude model provider."""
 
 from time import perf_counter
-from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
 
 from app.prompts import PromptPackage
+from app.response.normalizer import response_normalizer
 from app.retrieval import RetrievalResult, score_summary, source_log_summary
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
@@ -60,15 +60,13 @@ class BedrockClaudeProvider:
             raise BedrockServiceError(FALLBACK_RESPONSES["bedrock_error"]) from exc
 
         latency_ms = int((perf_counter() - start) * 1000)
-        model_response = ModelResponse(
-            text=self._answer_from_response(response),
+        model_response = response_normalizer.from_bedrock_converse(
+            response,
             citations=sources,
             confidence=confidence,
             provider=self.name,
             model_name=settings.BEDROCK_MODEL_ARN,
             latency_ms=latency_ms,
-            token_usage=response.get("usage"),
-            finish_reason=response.get("stopReason", ""),
             metadata={"retrieval": retrieval_result.metadata, "prompt_version": prompt.prompt_version},
         )
         if confidence < settings.BEDROCK_MIN_CONFIDENCE:
@@ -100,9 +98,3 @@ class BedrockClaudeProvider:
         for name in ["BEDROCK_MODEL_ARN", "BEDROCK_GUARDRAIL_ID", "BEDROCK_GUARDRAIL_VERSION"]:
             if getattr(settings, name).startswith("REPLACE_WITH"):
                 raise ConfigurationError(f"{name} is not configured yet.")
-
-    def _answer_from_response(self, response: dict[str, Any]) -> str:
-        """Extract generated text from a Bedrock Converse response."""
-        content = response.get("output", {}).get("message", {}).get("content", [])
-        parts = [part.get("text", "") for part in content if isinstance(part, dict)]
-        return "\n".join(part for part in parts if part).strip()
