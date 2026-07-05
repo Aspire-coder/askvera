@@ -28,6 +28,8 @@ app/*
 !app/metrics/*.py
 !app/metrics/providers/
 !app/metrics/providers/*.py
+!app/monitoring/
+!app/monitoring/*.py
 !app/middleware/
 !app/middleware/*.py
 !app/models/
