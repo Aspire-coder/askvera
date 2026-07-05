@@ -2,7 +2,7 @@
 
 from .models import ValidationContext, ValidationResult
 from .rules import ResponseValidator
-from .validators import AnswerValidator, ConfidenceValidator, LengthValidator, MetadataValidator
+from .validators import AnswerValidator, CitationValidator, ConfidenceValidator, LengthValidator, MetadataValidator
 
 
 class OutputValidator:
@@ -24,6 +24,7 @@ def default_validators() -> list[ResponseValidator]:
     return [
         AnswerValidator(),
         ConfidenceValidator(),
+        CitationValidator(),
         MetadataValidator(),
         LengthValidator(),
     ]
