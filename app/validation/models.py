@@ -1,11 +1,15 @@
 """Typed validation framework models."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from app.models import ModelResponse
-from app.response import ChatResponse
-from app.retrieval import RetrievalResult
+if TYPE_CHECKING:
+    from app.models.responses import ModelResponse
+    from app.response.models import ChatResponse
+    from app.retrieval.models import RetrievalResult
 
 
 class ValidationSeverity(str, Enum):
