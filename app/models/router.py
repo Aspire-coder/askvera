@@ -1,5 +1,9 @@
 """Model routing layer."""
 
+from time import perf_counter
+
+from app.metrics import STAGE_MODEL_GENERATE
+from app.metrics.pipeline import record_pipeline_metric
 from app.prompts import PromptPackage
 from app.retrieval import RetrievalResult
 from config import settings
@@ -20,19 +24,34 @@ class ModelRouter:
 
     def generate(self, prompt: PromptPackage, retrieval_result: RetrievalResult, correlation_id: str) -> ModelResponse:
         """Generate through the configured provider."""
-        provider = self.registry.get(self.default_provider)
-        LOGGER.info(
-            "model_router_provider_selected",
-            correlation_id=correlation_id,
-            provider=provider.name,
-            configured_provider=self.default_provider,
-            country=prompt.country,
-            language=prompt.language,
-            role=prompt.role,
-            source_count=len(retrieval_result.documents),
-            confidence=retrieval_result.confidence,
-        )
-        return provider.generate(prompt, retrieval_result, correlation_id)
+        started = perf_counter()
+        success = False
+        provider_name = self.default_provider
+        try:
+            provider = self.registry.get(self.default_provider)
+            provider_name = provider.name
+            LOGGER.info(
+                "model_router_provider_selected",
+                correlation_id=correlation_id,
+                provider=provider.name,
+                configured_provider=self.default_provider,
+                country=prompt.country,
+                language=prompt.language,
+                role=prompt.role,
+                source_count=len(retrieval_result.documents),
+                confidence=retrieval_result.confidence,
+            )
+            response = provider.generate(prompt, retrieval_result, correlation_id)
+            success = True
+            return response
+        finally:
+            record_pipeline_metric(
+                stage=STAGE_MODEL_GENERATE,
+                duration_ms=round((perf_counter() - started) * 1000, 2),
+                success=success,
+                correlation_id=correlation_id,
+                metadata={"provider": provider_name, "sourceCount": len(retrieval_result.documents)},
+            )
 
 
 model_router = ModelRouter()

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
+from app.metrics import STAGE_PROMPT_BUILD
+from app.metrics.pipeline import record_pipeline_metric
 from config.vera_persona import role_scope_for
 from utils.logging import get_logger
 
@@ -35,43 +38,56 @@ class PromptBuilder:
         metadata: dict[str, Any] | None = None,
     ) -> PromptPackage:
         """Assemble a complete prompt package."""
-        retrieved_context = retrieved_documents if retrieved_documents is not None else self._format_retrieval_context(retrieval_result)
-        rendered_system = (
-            persona.replace("{{user_language}}", language)
-            .replace("{{user_country}}", country)
-            .replace("{{user_role}}", role)
-            .replace("{{role_content_scope}}", role_scope_for(role))
-            .replace("{{retrieved_chunks}}", retrieved_context)
-            .replace("{{session_history}}", conversation)
-        ).strip()
-        system_prompt = "\n\n".join([rendered_system, compliance_rules.strip(), FOLLOWUP_PROMPT.strip()])
-        package = PromptPackage(
-            system_prompt=system_prompt,
-            user_prompt=RAG_PROMPT.replace("$query$", user_question),
-            retrieved_context=retrieved_context,
-            country=country,
-            language=language,
-            role=role,
-            prompt_version=prompt_version,
-            metadata={
-                "user_question": user_question,
-                "has_conversation": bool(conversation.strip()),
-                "retrieval_confidence": retrieval_result.confidence if retrieval_result else None,
-                "retrieval_source_count": len(retrieval_result.documents) if retrieval_result else 0,
-                **(metadata or {}),
-            },
-        )
-        LOGGER.info(
-            "prompt_builder_prompt_built",
-            correlation_id=package.metadata.get("correlation_id", ""),
-            country=country,
-            language=language,
-            role=role,
-            prompt_version=prompt_version,
-            source_count=package.metadata["retrieval_source_count"],
-            has_conversation=package.metadata["has_conversation"],
-        )
-        return package
+        started = perf_counter()
+        success = False
+        correlation_id = (metadata or {}).get("correlation_id", "")
+        try:
+            retrieved_context = retrieved_documents if retrieved_documents is not None else self._format_retrieval_context(retrieval_result)
+            rendered_system = (
+                persona.replace("{{user_language}}", language)
+                .replace("{{user_country}}", country)
+                .replace("{{user_role}}", role)
+                .replace("{{role_content_scope}}", role_scope_for(role))
+                .replace("{{retrieved_chunks}}", retrieved_context)
+                .replace("{{session_history}}", conversation)
+            ).strip()
+            system_prompt = "\n\n".join([rendered_system, compliance_rules.strip(), FOLLOWUP_PROMPT.strip()])
+            package = PromptPackage(
+                system_prompt=system_prompt,
+                user_prompt=RAG_PROMPT.replace("$query$", user_question),
+                retrieved_context=retrieved_context,
+                country=country,
+                language=language,
+                role=role,
+                prompt_version=prompt_version,
+                metadata={
+                    "user_question": user_question,
+                    "has_conversation": bool(conversation.strip()),
+                    "retrieval_confidence": retrieval_result.confidence if retrieval_result else None,
+                    "retrieval_source_count": len(retrieval_result.documents) if retrieval_result else 0,
+                    **(metadata or {}),
+                },
+            )
+            LOGGER.info(
+                "prompt_builder_prompt_built",
+                correlation_id=package.metadata.get("correlation_id", ""),
+                country=country,
+                language=language,
+                role=role,
+                prompt_version=prompt_version,
+                source_count=package.metadata["retrieval_source_count"],
+                has_conversation=package.metadata["has_conversation"],
+            )
+            success = True
+            return package
+        finally:
+            record_pipeline_metric(
+                stage=STAGE_PROMPT_BUILD,
+                duration_ms=round((perf_counter() - started) * 1000, 2),
+                success=success,
+                correlation_id=correlation_id,
+                metadata={"country": country, "language": language, "role": role, "promptVersion": prompt_version},
+            )
 
     def _format_retrieval_context(self, retrieval_result: RetrievalResult | None) -> str:
         """Render retrieved documents into model-ready context."""

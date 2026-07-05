@@ -1,5 +1,9 @@
 """Governance engine entry point."""
 
+from time import perf_counter
+
+from app.metrics import STAGE_GOVERNANCE
+from app.metrics.pipeline import record_pipeline_metric
 from app.risk import PolicyAction, RiskContext, RiskDecision, RiskEngine, risk_engine
 from utils.logging import get_logger
 
@@ -32,58 +36,72 @@ class GovernanceEngine:
         role: str = "new_prospect",
     ) -> GovernanceDecision:
         """Evaluate text through risk policies and guardrail provider."""
-        risk_decision = self.risk_engine.evaluate(
-            RiskContext(
-                user_message=text,
-                country=country,
-                language=language,
-                role=role,
-                correlation_id=correlation_id,
-            )
-        )
-        if risk_decision.should_refuse():
-            decision = self._from_risk_refusal(risk_decision, correlation_id)
-            self._log_decision(decision, correlation_id)
-            return decision
-
-        provider = self.registry.get(self.default_provider)
-        LOGGER.info(
-            "governance_provider_selected",
-            correlation_id=correlation_id,
-            provider=provider.name,
-            configured_provider=self.default_provider,
-            country=country,
-            language=language,
-        )
+        started = perf_counter()
+        success = False
         try:
-            guardrail_decision = provider.evaluate(
-                text=text, country=country, language=language, correlation_id=correlation_id
+            risk_decision = self.risk_engine.evaluate(
+                RiskContext(
+                    user_message=text,
+                    country=country,
+                    language=language,
+                    role=role,
+                    correlation_id=correlation_id,
+                )
             )
-        except Exception as exc:
-            LOGGER.exception(
-                "governance_provider_failed",
+            if risk_decision.should_refuse():
+                decision = self._from_risk_refusal(risk_decision, correlation_id)
+                self._log_decision(decision, correlation_id)
+                success = True
+                return decision
+
+            provider = self.registry.get(self.default_provider)
+            LOGGER.info(
+                "governance_provider_selected",
                 correlation_id=correlation_id,
                 provider=provider.name,
                 configured_provider=self.default_provider,
+                country=country,
+                language=language,
             )
-            decision = GovernanceDecision(
-                allowed=False,
-                action=GovernanceAction.BLOCK,
-                provider=provider.name,
-                reason="Governance provider failed.",
-                risk_level=risk_decision.highest_risk,
-                risk_action=risk_decision.action,
-                guardrail_action=GovernanceAction.BLOCK,
-                metadata={
-                    "risk": _risk_metadata(risk_decision),
-                    "providerError": type(exc).__name__,
-                },
-            )
+            try:
+                guardrail_decision = provider.evaluate(
+                    text=text, country=country, language=language, correlation_id=correlation_id
+                )
+            except Exception as exc:
+                LOGGER.exception(
+                    "governance_provider_failed",
+                    correlation_id=correlation_id,
+                    provider=provider.name,
+                    configured_provider=self.default_provider,
+                )
+                decision = GovernanceDecision(
+                    allowed=False,
+                    action=GovernanceAction.BLOCK,
+                    provider=provider.name,
+                    reason="Governance provider failed.",
+                    risk_level=risk_decision.highest_risk,
+                    risk_action=risk_decision.action,
+                    guardrail_action=GovernanceAction.BLOCK,
+                    metadata={
+                        "risk": _risk_metadata(risk_decision),
+                        "providerError": type(exc).__name__,
+                    },
+                )
+                self._log_decision(decision, correlation_id)
+                success = False
+                return decision
+            decision = self._merge_decisions(risk_decision, guardrail_decision)
             self._log_decision(decision, correlation_id)
+            success = decision.allowed
             return decision
-        decision = self._merge_decisions(risk_decision, guardrail_decision)
-        self._log_decision(decision, correlation_id)
-        return decision
+        finally:
+            record_pipeline_metric(
+                stage=STAGE_GOVERNANCE,
+                duration_ms=round((perf_counter() - started) * 1000, 2),
+                success=success,
+                correlation_id=correlation_id,
+                metadata={"country": country, "language": language, "role": role},
+            )
 
     def _from_risk_refusal(self, risk_decision: RiskDecision, correlation_id: str) -> GovernanceDecision:
         """Build a governance decision when risk refuses before guardrails run."""

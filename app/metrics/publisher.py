@@ -1,6 +1,6 @@
 """Structured metrics publisher."""
 
-from .models import RequestMetric, RequestMetricSnapshot
+from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
 from utils.logging import get_logger
 
 LOGGER = get_logger("app.metrics")
@@ -24,6 +24,21 @@ class MetricsPublisher:
             failure_count=snapshot.failure_count,
             average_duration_ms=snapshot.average_duration_ms,
             dimensions=metric.dimensions,
+        )
+
+    def publish_pipeline(self, metric: PipelineMetric, snapshot: PipelineStageSnapshot) -> None:
+        """Publish one pipeline stage timing metric."""
+        LOGGER.info(
+            "pipeline_metric_recorded",
+            correlation_id=metric.correlation_id,
+            stage=metric.stage,
+            success=metric.success,
+            duration_ms=metric.duration_ms,
+            stage_count=snapshot.count,
+            average_duration_ms=snapshot.average_duration_ms,
+            min_duration_ms=snapshot.min_duration_ms,
+            max_duration_ms=snapshot.max_duration_ms,
+            metadata=metric.metadata,
         )
 
 

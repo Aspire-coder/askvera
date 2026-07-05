@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
+from app.metrics import STAGE_RESPONSE_BUILD
+from app.metrics.pipeline import record_pipeline_metric
 from utils.logging import get_logger
 
 from .models import ChatResponse
@@ -27,36 +30,48 @@ class ResponseBuilder:
         session_metadata: dict[str, Any] | None = None,
     ) -> ChatResponse:
         """Build the final internal chat response."""
-        chat_response = ChatResponse(
-            answer=model_response.text,
-            citations=model_response.citations,
-            suggestions=[],
-            cards=[],
-            confidence=model_response.confidence,
-            correlation_id=correlation_id,
-            metadata={
-                "provider": model_response.provider,
-                "model_name": model_response.model_name,
-                "latency_ms": model_response.latency_ms,
-                "token_usage": model_response.token_usage,
-                "finish_reason": model_response.finish_reason,
-                "retrieval_confidence": retrieval_result.confidence,
-                "retrieved_document_count": len(retrieval_result.documents),
-                "correlation_id": correlation_id,
-                **(model_response.metadata or {}),
-                **(session_metadata or {}),
-            },
-        )
-        LOGGER.info(
-            "response_builder_chat_response_built",
-            correlation_id=correlation_id,
-            provider=model_response.provider,
-            model_name=model_response.model_name,
-            confidence=model_response.confidence,
-            source_count=len(model_response.citations),
-            response_source=chat_response.metadata.get("cache", "model"),
-        )
-        return chat_response
+        started = perf_counter()
+        success = False
+        try:
+            chat_response = ChatResponse(
+                answer=model_response.text,
+                citations=model_response.citations,
+                suggestions=[],
+                cards=[],
+                confidence=model_response.confidence,
+                correlation_id=correlation_id,
+                metadata={
+                    "provider": model_response.provider,
+                    "model_name": model_response.model_name,
+                    "latency_ms": model_response.latency_ms,
+                    "token_usage": model_response.token_usage,
+                    "finish_reason": model_response.finish_reason,
+                    "retrieval_confidence": retrieval_result.confidence,
+                    "retrieved_document_count": len(retrieval_result.documents),
+                    "correlation_id": correlation_id,
+                    **(model_response.metadata or {}),
+                    **(session_metadata or {}),
+                },
+            )
+            LOGGER.info(
+                "response_builder_chat_response_built",
+                correlation_id=correlation_id,
+                provider=model_response.provider,
+                model_name=model_response.model_name,
+                confidence=model_response.confidence,
+                source_count=len(model_response.citations),
+                response_source=chat_response.metadata.get("cache", "model"),
+            )
+            success = True
+            return chat_response
+        finally:
+            record_pipeline_metric(
+                stage=STAGE_RESPONSE_BUILD,
+                duration_ms=round((perf_counter() - started) * 1000, 2),
+                success=success,
+                correlation_id=correlation_id,
+                metadata={"responseSource": "model"},
+            )
 
     def from_cached(self, cached: dict[str, Any], correlation_id: str) -> ChatResponse:
         """Build a canonical response from the existing cache shape."""

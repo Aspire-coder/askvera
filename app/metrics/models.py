@@ -28,3 +28,27 @@ class RequestMetricSnapshot:
     failure_count: int
     total_duration_ms: float
     average_duration_ms: float
+
+
+@dataclass(frozen=True)
+class PipelineMetric:
+    """One pipeline stage timing sample."""
+
+    stage: str
+    duration_ms: float
+    success: bool
+    correlation_id: str
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PipelineStageSnapshot:
+    """Aggregated in-process timing counters for one pipeline stage."""
+
+    stage: str
+    count: int
+    total_duration_ms: float
+    average_duration_ms: float
+    min_duration_ms: float
+    max_duration_ms: float
