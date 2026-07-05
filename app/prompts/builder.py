@@ -58,7 +58,7 @@ class PromptBuilder:
             },
         )
         LOGGER.info(
-            "prompt_builder_prompt_assembled",
+            "prompt_builder_prompt_built",
             correlation_id=package.metadata.get("correlation_id", ""),
             country=country,
             language=language,
