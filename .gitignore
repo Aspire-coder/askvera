@@ -20,6 +20,10 @@ app/*
 !app/audit/*.py
 !app/audit/sinks/
 !app/audit/sinks/*.py
+!app/governance/
+!app/governance/*.py
+!app/governance/providers/
+!app/governance/providers/*.py
 !app/middleware/
 !app/middleware/*.py
 !app/models/
