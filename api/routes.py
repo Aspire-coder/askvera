@@ -8,22 +8,15 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.orchestrator import ConsentRequiredError, ai_orchestrator
 from config import settings
-from config.vera_persona import FALLBACK_RESPONSES
 from services import cache as cache_service
-from services.audit import write_audit_event
-from services.bedrock import retrieve_and_generate
-from services.cache import build_cache_key, get_cache_value, set_cache_value
-from services.consent_service import has_valid_consent, record_consent
+from services.consent_service import record_consent
 from services.db import get_engine
 from services.feedback import enqueue_feedback
-from services.guardrails import check_text
 from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
-from services.pii import scrub_pii
-from services.session import append_session_turn, get_session_history
-from services.session_service import validate_and_touch_session
-from utils.exceptions import AskVeraError, LowConfidenceError
+from utils.exceptions import AskVeraError
 from utils.logging import get_logger
 from utils.validators import ChatRequest, ConsentRequest, Envelope, FeedbackRequest
 
@@ -73,25 +66,10 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
     try:
-        validate_and_touch_session(body.sessionId, correlation_id)
-        if not has_valid_consent(body.sessionId, correlation_id):
-            return consent_required_response(correlation_id)
-        check_text(body.message, correlation_id)
-        scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
-        cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
-        cached = get_cache_value(cache_key, correlation_id)
-        if cached:
-            return success({**cached, "correlationId": correlation_id}, correlation_id)
-        history = get_session_history(body.sessionId, correlation_id)
-        result = retrieve_and_generate(scrubbed_input, body.country, body.language, body.role, history, correlation_id)
-        result["response"] = scrub_pii(result["response"], correlation_id, body.language)
-        check_text(result["response"], correlation_id)
-        append_session_turn(body.sessionId, scrubbed_input, result["response"], correlation_id)
-        write_audit_event({"type": "chat", "country": body.country, "language": body.language, "confidence": result["confidence"]}, correlation_id)
-        set_cache_value(cache_key, result, correlation_id)
-        return success({**result, "correlationId": correlation_id}, correlation_id)
-    except LowConfidenceError as exc:
-        return success({"response": exc.message, "sources": [], "confidence": 0.0, "correlationId": correlation_id}, correlation_id)
+        result = ai_orchestrator.handle_chat(body, correlation_id)
+        return success(result, correlation_id)
+    except ConsentRequiredError:
+        return consent_required_response(correlation_id)
     except AskVeraError as exc:
         return error_response(exc, correlation_id)
 

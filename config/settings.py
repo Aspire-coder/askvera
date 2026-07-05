@@ -90,6 +90,8 @@ BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1:615592621509:inference-profile/gl
 BEDROCK_GUARDRAIL_ID = "idy33rbs9v1i"
 # Bedrock Guardrail version. Found in Bedrock -> Guardrails -> Versions.
 BEDROCK_GUARDRAIL_VERSION = "DRAFT"
+# Default model provider selected by the model router.
+DEFAULT_MODEL_PROVIDER = _env_str("DEFAULT_MODEL_PROVIDER", "claude")
 # Minimum retrieval confidence required before answering. Raw HYBRID scores for relevant matches often land around 0.5-0.7.
 BEDROCK_MIN_CONFIDENCE = 0.5
 # Retrieval configuration and fallback confidence weighting.

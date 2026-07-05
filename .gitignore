@@ -22,6 +22,14 @@ app/*
 !app/audit/sinks/*.py
 !app/middleware/
 !app/middleware/*.py
+!app/models/
+!app/models/*.py
+!app/orchestrator/
+!app/orchestrator/*.py
+!app/prompts/
+!app/prompts/*.py
+!app/retrieval/
+!app/retrieval/*.py
 !app/utils/
 !app/utils/*.py
 .codex/

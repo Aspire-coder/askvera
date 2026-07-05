@@ -85,9 +85,9 @@ def test_chat_blocks_when_consent_missing() -> None:
     body = ChatRequest(message="hello", sessionId="session-1", country="US", language="en")
 
     with (
-        patch("api.routes.validate_and_touch_session", return_value=False),
-        patch("api.routes.has_valid_consent", return_value=False),
-        patch("api.routes.check_text") as check_text,
+        patch("app.orchestrator.chat_orchestrator.validate_and_touch_session", return_value=False),
+        patch("app.orchestrator.chat_orchestrator.has_valid_consent", return_value=False),
+        patch("app.orchestrator.chat_orchestrator.check_text") as check_text,
     ):
         response = routes.chat(body, request)
 
@@ -104,9 +104,9 @@ def test_chat_blocks_when_consent_version_is_invalid() -> None:
     body = ChatRequest(message="hello", sessionId="session-1", country="US", language="en")
 
     with (
-        patch("api.routes.validate_and_touch_session", return_value=True),
-        patch("api.routes.has_valid_consent", return_value=False),
-        patch("api.routes.retrieve_and_generate") as bedrock,
+        patch("app.orchestrator.chat_orchestrator.validate_and_touch_session", return_value=True),
+        patch("app.orchestrator.chat_orchestrator.has_valid_consent", return_value=False),
+        patch("app.orchestrator.chat_orchestrator.retrieve_and_generate") as bedrock,
     ):
         response = routes.chat(body, request)
 

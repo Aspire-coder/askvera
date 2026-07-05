@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services.bedrock import _confidence_from_sources, build_prompt, retrieve_and_generate
+from app.prompts import build_prompt
+from app.retrieval import RetrievedDocument, RetrievalResult, confidence_from_sources
+from services.bedrock import generate, retrieve_and_generate
 from utils.exceptions import LowConfidenceError
 
 
@@ -20,23 +22,28 @@ def test_build_prompt_replaces_all_variables() -> None:
 def test_retrieve_and_generate_returns_sources() -> None:
     """Bedrock response is transformed into API data."""
     runtime = MagicMock()
-    runtime.retrieve_and_generate.return_value = {
-        "output": {"text": "Answer"},
-        "citations": [
-            {
-                "retrievedReferences": [
-                    {
-                        "location": {"s3Location": {"uri": "s3://kb/doc.pdf"}},
-                        "content": {"text": "excerpt"},
-                        "metadata": {"score": 0.91, "page": 4, "document_version": "v2", "country_code": "US", "language": "en"},
-                    }
-                ]
-            }
+    runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Answer"}]}}}
+    clients = SimpleNamespace(bedrock_runtime=runtime)
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id="doc",
+                title="doc.pdf",
+                content="excerpt",
+                source="s3://kb/doc.pdf",
+                excerpt="excerpt",
+                page="4",
+                document_version="v2",
+                country="US",
+                language="en",
+                score=0.91,
+            )
         ],
-    }
-    clients = SimpleNamespace(bedrock_agent_runtime=runtime)
-    with patch("services.bedrock.get_aws_clients", return_value=clients):
-        result = retrieve_and_generate("q", "US", "en", "new_prospect", "", "cid")
+        citations=[],
+        confidence=0.91,
+    )
+    with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
+        result = retrieve_and_generate("q", "US", "en", "new_prospect", "", "cid", retrieval_result=retrieval_result)
     assert result["response"] == "Answer"
     assert result["confidence"] >= 0.65
     assert result["sources"][0]["uri"] == "s3://kb/doc.pdf"
@@ -46,13 +53,13 @@ def test_retrieve_and_generate_returns_sources() -> None:
 
 def test_confidence_uses_scores_when_available() -> None:
     """Confidence uses retrieval scores rather than a binary source check."""
-    confidence = _confidence_from_sources([{"score": 0.7}, {"score": 0.9}])
+    confidence = confidence_from_sources([{"score": 0.7}, {"score": 0.9}])
     assert confidence == 0.87
 
 
 def test_confidence_falls_back_to_citation_quality() -> None:
     """Confidence still works when Bedrock omits explicit scores."""
-    confidence = _confidence_from_sources(
+    confidence = confidence_from_sources(
         [
             {"uri": "s3://kb/one.pdf", "excerpt": "one"},
             {"uri": "s3://kb/two.pdf", "excerpt": "two"},
@@ -64,23 +71,27 @@ def test_confidence_falls_back_to_citation_quality() -> None:
 def test_retrieve_and_generate_returns_low_score_answer_with_sources() -> None:
     """Low retrieval scores should be logged, not rejected, when citations exist."""
     runtime = MagicMock()
-    runtime.retrieve_and_generate.return_value = {
-        "output": {"text": "Return policy answer"},
-        "citations": [
-            {
-                "retrievedReferences": [
-                    {
-                        "location": {"s3Location": {"uri": "s3://kb/return-policy.pdf"}},
-                        "content": {"text": "Return policy excerpt"},
-                        "metadata": {"score": 0.39, "page": 8, "country_code": "CA", "language": "en"},
-                    }
-                ]
-            }
+    runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Return policy answer"}]}}}
+    clients = SimpleNamespace(bedrock_runtime=runtime)
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id="return-policy",
+                title="return-policy.pdf",
+                content="Return policy excerpt",
+                source="s3://kb/return-policy.pdf",
+                excerpt="Return policy excerpt",
+                page="8",
+                country="CA",
+                language="en",
+                score=0.39,
+            )
         ],
-    }
-    clients = SimpleNamespace(bedrock_agent_runtime=runtime)
-    with patch("services.bedrock.get_aws_clients", return_value=clients):
-        result = retrieve_and_generate("return policy", "CA", "en", "new_prospect", "", "cid")
+        citations=[],
+        confidence=0.39,
+    )
+    with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
+        result = retrieve_and_generate("return policy", "CA", "en", "new_prospect", "", "cid", retrieval_result=retrieval_result)
 
     assert result["response"] == "Return policy answer"
     assert result["confidence"] < 0.5
@@ -89,10 +100,20 @@ def test_retrieve_and_generate_returns_low_score_answer_with_sources() -> None:
 
 def test_retrieve_and_generate_raises_when_no_sources_after_fallback() -> None:
     """No citations and no retrieve fallback sources should still produce the fallback."""
-    runtime = MagicMock()
-    runtime.retrieve_and_generate.return_value = {"output": {"text": "Ungrounded answer"}, "citations": []}
-    runtime.retrieve.return_value = {"retrievalResults": []}
-    clients = SimpleNamespace(bedrock_agent_runtime=runtime)
+    retrieval_result = RetrievalResult(documents=[], citations=[], confidence=0.0)
 
-    with patch("services.bedrock.get_aws_clients", return_value=clients), pytest.raises(LowConfidenceError):
-        retrieve_and_generate("unrelated", "CA", "en", "new_prospect", "", "cid")
+    with pytest.raises(LowConfidenceError):
+        generate(build_prompt_package("unrelated", "CA", "en", "new_prospect", retrieval_result), retrieval_result, "cid")
+
+
+def build_prompt_package(message: str, country: str, language: str, role: str, retrieval_result: RetrievalResult):
+    from app.prompts import PromptBuilder
+
+    return PromptBuilder().build(
+        user_question=message,
+        conversation="",
+        country=country,
+        language=language,
+        role=role,
+        retrieval_result=retrieval_result,
+    )
