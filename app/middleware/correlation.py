@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.metrics import RequestMetric, metrics_collector, metrics_publisher
 from app.utils.context import correlation_id_ctx
 from utils.logging import get_logger
 
@@ -47,11 +48,35 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             return response
+        except Exception:
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            metric = RequestMetric(
+                method=request.method,
+                path=request.url.path,
+                status_code=500,
+                duration_ms=duration_ms,
+                success=False,
+                correlation_id=correlation_id,
+                dimensions={"exception": True},
+            )
+            snapshot = metrics_collector.record_request(metric)
+            metrics_publisher.publish_request(metric, snapshot)
+            raise
         finally:
             duration_ms = round((perf_counter() - started) * 1000, 2)
             correlation_id_ctx.reset(token)
             if "response" in locals():
                 response.headers[CORRELATION_ID_HEADER] = correlation_id
+                metric = RequestMetric(
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                    success=response.status_code < 400,
+                    correlation_id=correlation_id,
+                )
+                snapshot = metrics_collector.record_request(metric)
+                metrics_publisher.publish_request(metric, snapshot)
                 LOGGER.info(
                     "request_complete",
                     correlation_id=correlation_id,

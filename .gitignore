@@ -24,6 +24,8 @@ app/*
 !app/governance/*.py
 !app/governance/providers/
 !app/governance/providers/*.py
+!app/metrics/
+!app/metrics/*.py
 !app/middleware/
 !app/middleware/*.py
 !app/models/
