@@ -140,6 +140,22 @@ def test_citations_pass_when_documents_were_retrieved() -> None:
     assert result.issues == []
 
 
+def test_incomplete_citation_warns_when_documents_were_retrieved() -> None:
+    response = _chat_response(citations=[{"title": "Policy"}])
+    result = _validator().validate(_context(response, _retrieval_result()))
+
+    assert result.valid is True
+    assert result.issues[0].code == "CITATIONS_INCOMPLETE"
+
+
+def test_citation_source_alias_passes() -> None:
+    response = _chat_response(citations=[{"title": "Policy", "source": "s3://bucket/policy.pdf"}])
+    result = _validator().validate(_context(response, _retrieval_result()))
+
+    assert result.valid is True
+    assert result.issues == []
+
+
 def test_language_mismatch_warns() -> None:
     response = _chat_response(metadata={"language": "fr"})
     result = _validator().validate(_context(response))
