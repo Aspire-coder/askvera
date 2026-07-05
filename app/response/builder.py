@@ -1,12 +1,16 @@
 """Final chat response assembly."""
 
-from typing import Any
+from __future__ import annotations
 
-from app.models.responses import ModelResponse
-from app.retrieval import RetrievalResult
+from typing import TYPE_CHECKING, Any
+
 from utils.logging import get_logger
 
 from .models import ChatResponse
+
+if TYPE_CHECKING:
+    from app.models.responses import ModelResponse
+    from app.retrieval.models import RetrievalResult
 
 LOGGER = get_logger("app.response")
 

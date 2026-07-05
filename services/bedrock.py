@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from app.models import ModelResponse, model_router
+from app.models.responses import ModelResponse
+from app.models.router import model_router
 from app.prompts import PromptBuilder, PromptPackage
 from app.retrieval import RetrievalResult, confidence_from_sources, retrieval_service
 from config import settings

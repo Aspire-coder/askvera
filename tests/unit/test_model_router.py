@@ -1,6 +1,8 @@
 """Unit tests for model routing."""
 
-from app.models import ModelRegistry, ModelResponse, ModelRouter
+from app.models.registry import ModelRegistry
+from app.models.responses import ModelResponse
+from app.models.router import ModelRouter
 from app.prompts import PromptPackage
 from app.retrieval import RetrievalResult
 

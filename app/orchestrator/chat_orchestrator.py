@@ -1,9 +1,12 @@
 """AI chat orchestration for ASK Vera."""
 
-from app.models import ModelRouter, model_router
+from app.models.responses import ModelResponse
+from app.models.router import ModelRouter, model_router
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.retrieval import RetrievalService, retrieval_service
+from app.retrieval.models import RetrievalResult
+from app.validation import OutputValidator, ValidationContext, output_validator
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
 from services.consent_service import has_valid_consent
@@ -31,11 +34,13 @@ class AIOrchestrator:
         retriever: RetrievalService | None = None,
         router: ModelRouter | None = None,
         builder: ResponseBuilder | None = None,
+        validator: OutputValidator | None = None,
     ) -> None:
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.retriever = retriever or retrieval_service
         self.model_router = router or model_router
         self.response_builder = builder or response_builder
+        self.output_validator = validator or output_validator
 
     def handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Run the existing chat flow and return response data."""
@@ -56,7 +61,11 @@ class AIOrchestrator:
         cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
         if cached:
-            return self.response_builder.from_cached(cached, correlation_id)
+            return self._validate_response(
+                self.response_builder.from_cached(cached, correlation_id),
+                body,
+                correlation_id,
+            )
 
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_result = self.retriever.retrieve(scrubbed_input, body.country, body.language, body.role, correlation_id)
@@ -72,7 +81,12 @@ class AIOrchestrator:
         try:
             model_response = self.model_router.generate(prompt_package, retrieval_result, correlation_id)
         except LowConfidenceError as exc:
-            return self.response_builder.fallback(exc.message, correlation_id)
+            return self._validate_response(
+                self.response_builder.fallback(exc.message, correlation_id),
+                body,
+                correlation_id,
+                retrieval_result=retrieval_result,
+            )
 
         chat_response = self.response_builder.build(
             model_response=model_response,
@@ -97,6 +111,13 @@ class AIOrchestrator:
                 metadata={**chat_response.metadata, "response_pii_scrubbed": True},
                 correlation_id=chat_response.correlation_id,
             )
+        chat_response = self._validate_response(
+            chat_response,
+            body,
+            correlation_id,
+            model_response=model_response,
+            retrieval_result=retrieval_result,
+        )
         check_text(chat_response.answer, correlation_id)
         append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
@@ -109,6 +130,39 @@ class AIOrchestrator:
             correlation_id,
         )
         set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
+        return chat_response
+
+    def _validate_response(
+        self,
+        chat_response: ChatResponse,
+        body: ChatRequest,
+        correlation_id: str,
+        model_response: ModelResponse | None = None,
+        retrieval_result: RetrievalResult | None = None,
+    ) -> ChatResponse:
+        """Validate a chat response and return a safe fallback for critical failures."""
+        result = self.output_validator.validate(
+            ValidationContext(
+                chat_response=chat_response,
+                model_response=model_response,
+                retrieval_result=retrieval_result,
+                country=body.country,
+                language=body.language,
+                role=body.role,
+                correlation_id=correlation_id,
+            )
+        )
+        if result.has_critical():
+            LOGGER.warning(
+                "output_validator_critical_fallback",
+                correlation_id=correlation_id,
+                issue_count=len(result.issues),
+                highest_severity=result.highest_severity.value,
+            )
+            return self.response_builder.fallback(
+                "I could not generate a complete approved response. Please try again or contact Forever Living support.",
+                correlation_id,
+            )
         return chat_response
 
 

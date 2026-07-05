@@ -1,11 +1,14 @@
 """Model provider interface."""
 
-from typing import Protocol
+from __future__ import annotations
 
-from app.prompts import PromptPackage
-from app.retrieval import RetrievalResult
+from typing import TYPE_CHECKING, Protocol
 
 from .responses import ModelResponse
+
+if TYPE_CHECKING:
+    from app.prompts.models import PromptPackage
+    from app.retrieval.models import RetrievalResult
 
 
 class ModelProvider(Protocol):

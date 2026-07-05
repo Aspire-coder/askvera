@@ -1,13 +1,17 @@
 """Prompt assembly for ASK Vera."""
 
-from typing import Any
+from __future__ import annotations
 
-from app.retrieval import RetrievalResult
+from typing import TYPE_CHECKING, Any
+
 from config.vera_persona import role_scope_for
 from utils.logging import get_logger
 
 from .models import PromptPackage
 from .templates import COMPLIANCE_PROMPT, FOLLOWUP_PROMPT, RAG_PROMPT, SYSTEM_PROMPT
+
+if TYPE_CHECKING:
+    from app.retrieval.models import RetrievalResult
 
 LOGGER = get_logger("app.prompts")
 
