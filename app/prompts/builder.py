@@ -4,9 +4,12 @@ from typing import Any
 
 from app.retrieval import RetrievalResult
 from config.vera_persona import role_scope_for
+from utils.logging import get_logger
 
 from .models import PromptPackage
 from .templates import COMPLIANCE_PROMPT, FOLLOWUP_PROMPT, RAG_PROMPT, SYSTEM_PROMPT
+
+LOGGER = get_logger("app.prompts")
 
 
 class PromptBuilder:
@@ -38,7 +41,7 @@ class PromptBuilder:
             .replace("{{session_history}}", conversation)
         ).strip()
         system_prompt = "\n\n".join([rendered_system, compliance_rules.strip(), FOLLOWUP_PROMPT.strip()])
-        return PromptPackage(
+        package = PromptPackage(
             system_prompt=system_prompt,
             user_prompt=RAG_PROMPT.replace("$query$", user_question),
             retrieved_context=retrieved_context,
@@ -54,6 +57,17 @@ class PromptBuilder:
                 **(metadata or {}),
             },
         )
+        LOGGER.info(
+            "prompt_builder_prompt_assembled",
+            correlation_id=package.metadata.get("correlation_id", ""),
+            country=country,
+            language=language,
+            role=role,
+            prompt_version=prompt_version,
+            source_count=package.metadata["retrieval_source_count"],
+            has_conversation=package.metadata["has_conversation"],
+        )
+        return package
 
     def _format_retrieval_context(self, retrieval_result: RetrievalResult | None) -> str:
         """Render retrieved documents into model-ready context."""

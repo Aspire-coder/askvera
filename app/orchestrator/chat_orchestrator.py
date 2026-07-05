@@ -13,7 +13,10 @@ from services.pii import scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import LowConfidenceError
+from utils.logging import get_logger
 from utils.validators import ChatRequest
+
+LOGGER = get_logger("app.orchestrator")
 
 
 class ConsentRequiredError(Exception):
@@ -35,6 +38,14 @@ class AIOrchestrator:
 
     def handle_chat(self, body: ChatRequest, correlation_id: str) -> dict[str, Any]:
         """Run the existing chat flow and return response data."""
+        LOGGER.info(
+            "ai_orchestrator_request_started",
+            correlation_id=correlation_id,
+            country=body.country,
+            language=body.language,
+            role=body.role,
+            session_id=body.sessionId,
+        )
         validate_and_touch_session(body.sessionId, correlation_id)
         if not has_valid_consent(body.sessionId, correlation_id):
             raise ConsentRequiredError()
