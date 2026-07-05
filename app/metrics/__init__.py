@@ -1,7 +1,7 @@
 """Metrics package."""
 
 from .collector import MetricsCollector, metrics_collector
-from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
+from .models import HealthSummary, MetricsSnapshot, PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot, SystemMetric
 from .provider import MetricsProvider
 from .publisher import MetricsPublisher, metrics_publisher
 from .registry import MetricsRegistry, metrics_registry
@@ -18,10 +18,13 @@ __all__ = [
     "MetricsProvider",
     "MetricsPublisher",
     "MetricsRegistry",
+    "HealthSummary",
+    "MetricsSnapshot",
     "PipelineMetric",
     "PipelineStageSnapshot",
     "RequestMetric",
     "RequestMetricSnapshot",
+    "SystemMetric",
     "STAGE_GOVERNANCE",
     "STAGE_MODEL_GENERATE",
     "STAGE_PROMPT_BUILD",

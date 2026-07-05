@@ -28,7 +28,7 @@ def test_metrics_collector_tracks_request_counts() -> None:
 
 
 def test_metrics_collector_starts_empty() -> None:
-    snapshot = MetricsCollector().snapshot()
+    snapshot = MetricsCollector().request_snapshot()
 
     assert snapshot.request_count == 0
     assert snapshot.success_count == 0

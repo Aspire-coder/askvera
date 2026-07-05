@@ -46,6 +46,20 @@ class RequestMetricSnapshot:
 
 
 @dataclass(frozen=True)
+class SystemMetric:
+    """One application health or operational metric sample."""
+
+    name: str
+    value: float
+    unit: str
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    environment: str = field(default_factory=_environment)
+    version: str = field(default_factory=_version)
+    hostname: str = field(default_factory=gethostname)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PipelineMetric:
     """One pipeline stage timing sample."""
 
@@ -70,3 +84,24 @@ class PipelineStageSnapshot:
     average_duration_ms: float
     min_duration_ms: float
     max_duration_ms: float
+
+
+@dataclass(frozen=True)
+class MetricsSnapshot:
+    """Full in-process metrics snapshot."""
+
+    request: RequestMetricSnapshot
+    pipeline: dict[str, PipelineStageSnapshot]
+    system: dict[str, SystemMetric]
+
+
+@dataclass(frozen=True)
+class HealthSummary:
+    """Compact application health metric summary."""
+
+    status: str
+    cache_hit_ratio: float
+    retrieval_failure_rate: float
+    governance_blocks: int
+    validation_failures: int
+    audit_queue_depth: int

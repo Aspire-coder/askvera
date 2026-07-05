@@ -1,6 +1,6 @@
 """No-op metrics provider."""
 
-from app.metrics.models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
+from app.metrics.models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot, SystemMetric
 
 
 class NullMetricsProvider:
@@ -14,6 +14,10 @@ class NullMetricsProvider:
 
     def publish_pipeline(self, metric: PipelineMetric, snapshot: PipelineStageSnapshot) -> None:
         """Discard pipeline metric."""
+        return None
+
+    def publish_system(self, metric: SystemMetric) -> None:
+        """Discard system metric."""
         return None
 
     def flush(self) -> None:

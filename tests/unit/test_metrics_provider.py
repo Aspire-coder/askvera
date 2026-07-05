@@ -1,6 +1,6 @@
 """Unit tests for metrics providers and publisher behavior."""
 
-from app.metrics import MetricsPublisher, PipelineMetric, RequestMetric
+from app.metrics import MetricsPublisher, PipelineMetric, RequestMetric, SystemMetric
 from app.metrics.collector import MetricsCollector
 from app.metrics.models import PipelineStageSnapshot, RequestMetricSnapshot
 from app.metrics.providers import NullMetricsProvider
@@ -13,6 +13,7 @@ class RecordingProvider:
     def __init__(self) -> None:
         self.requests = []
         self.pipelines = []
+        self.system = []
         self.flushed = False
 
     def publish_request(self, metric, snapshot) -> None:
@@ -20,6 +21,9 @@ class RecordingProvider:
 
     def publish_pipeline(self, metric, snapshot) -> None:
         self.pipelines.append((metric, snapshot))
+
+    def publish_system(self, metric) -> None:
+        self.system.append(metric)
 
     def flush(self) -> None:
         self.flushed = True
@@ -40,11 +44,16 @@ def _pipeline_metric() -> PipelineMetric:
     return PipelineMetric(stage="retrieval", duration_ms=10.0, success=True, correlation_id="cid")
 
 
+def _system_metric() -> SystemMetric:
+    return SystemMetric(name="cache_hit_ratio", value=0.75, unit="Ratio")
+
+
 def test_null_metrics_provider_discards_metrics() -> None:
     provider = NullMetricsProvider()
 
     provider.publish_request(_request_metric(), RequestMetricSnapshot(1, 1, 0, 10.0, 10.0))
     provider.publish_pipeline(_pipeline_metric(), PipelineStageSnapshot("retrieval", 1, 10.0, 10.0, 10.0, 10.0))
+    provider.publish_system(_system_metric())
     provider.flush()
 
     assert provider.name == "null"
@@ -58,10 +67,12 @@ def test_metrics_publisher_uses_configured_provider() -> None:
 
     publisher.publish_request(_request_metric(), RequestMetricSnapshot(1, 1, 0, 10.0, 10.0))
     publisher.publish_pipeline(_pipeline_metric(), PipelineStageSnapshot("retrieval", 1, 10.0, 10.0, 10.0, 10.0))
+    publisher.publish_system(_system_metric())
     publisher.flush()
 
     assert len(provider.requests) == 1
     assert len(provider.pipelines) == 1
+    assert len(provider.system) == 1
     assert provider.flushed is True
 
 
@@ -73,10 +84,12 @@ def test_metrics_publisher_respects_disabled_metrics() -> None:
 
     publisher.publish_request(_request_metric(), RequestMetricSnapshot(1, 1, 0, 10.0, 10.0))
     publisher.publish_pipeline(_pipeline_metric(), PipelineStageSnapshot("retrieval", 1, 10.0, 10.0, 10.0, 10.0))
+    publisher.publish_system(_system_metric())
     publisher.flush()
 
     assert provider.requests == []
     assert provider.pipelines == []
+    assert provider.system == []
     assert provider.flushed is False
 
 
@@ -87,5 +100,5 @@ def test_metrics_collector_reset_clears_snapshots() -> None:
 
     collector.reset()
 
-    assert collector.snapshot().request_count == 0
+    assert collector.snapshot().request.request_count == 0
     assert collector.pipeline_snapshot("retrieval").count == 0

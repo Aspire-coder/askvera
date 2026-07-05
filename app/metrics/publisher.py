@@ -2,7 +2,7 @@
 
 from config import settings
 
-from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
+from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot, SystemMetric
 from .provider import MetricsProvider
 from .registry import MetricsRegistry, metrics_registry
 from utils.logging import get_logger
@@ -64,6 +64,22 @@ class MetricsPublisher:
             average_duration_ms=snapshot.average_duration_ms,
             min_duration_ms=snapshot.min_duration_ms,
             max_duration_ms=snapshot.max_duration_ms,
+            metadata=metric.metadata,
+        )
+
+    def publish_system(self, metric: SystemMetric) -> None:
+        """Publish one system health metric."""
+        if not self.enabled:
+            return
+        self.provider.publish_system(metric)
+        LOGGER.info(
+            "system_metric_recorded",
+            name=metric.name,
+            value=metric.value,
+            unit=metric.unit,
+            environment=metric.environment,
+            version=metric.version,
+            hostname=metric.hostname,
             metadata=metric.metadata,
         )
 

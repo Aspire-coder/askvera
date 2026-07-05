@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot
+from .models import PipelineMetric, PipelineStageSnapshot, RequestMetric, RequestMetricSnapshot, SystemMetric
 
 
 class MetricsProvider(Protocol):
@@ -16,6 +16,10 @@ class MetricsProvider(Protocol):
 
     def publish_pipeline(self, metric: PipelineMetric, snapshot: PipelineStageSnapshot) -> None:
         """Publish one pipeline stage metric sample."""
+        ...
+
+    def publish_system(self, metric: SystemMetric) -> None:
+        """Publish one system metric sample."""
         ...
 
     def flush(self) -> None:
