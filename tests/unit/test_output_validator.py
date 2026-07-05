@@ -7,6 +7,7 @@ from app.validation.validators import (
     AnswerValidator,
     CitationValidator,
     ConfidenceValidator,
+    LanguageValidator,
     LengthValidator,
     MetadataValidator,
 )
@@ -41,6 +42,7 @@ def _validator() -> OutputValidator:
             AnswerValidator(),
             ConfidenceValidator(),
             CitationValidator(),
+            LanguageValidator(),
             MetadataValidator(),
             LengthValidator(),
         ]
@@ -133,6 +135,29 @@ def test_missing_citations_warns_when_documents_were_retrieved() -> None:
 def test_citations_pass_when_documents_were_retrieved() -> None:
     response = _chat_response(citations=[{"title": "Policy", "uri": "s3://bucket/policy.pdf"}])
     result = _validator().validate(_context(response, _retrieval_result()))
+
+    assert result.valid is True
+    assert result.issues == []
+
+
+def test_language_mismatch_warns() -> None:
+    response = _chat_response(metadata={"language": "fr"})
+    result = _validator().validate(_context(response))
+
+    assert result.valid is True
+    assert result.issues[0].code == "LANGUAGE_MISMATCH"
+
+
+def test_language_locale_match_passes() -> None:
+    response = _chat_response(metadata={"language": "en-US"})
+    result = _validator().validate(_context(response))
+
+    assert result.valid is True
+    assert result.issues == []
+
+
+def test_missing_language_metadata_passes() -> None:
+    result = _validator().validate(_context(_chat_response(metadata={})))
 
     assert result.valid is True
     assert result.issues == []
