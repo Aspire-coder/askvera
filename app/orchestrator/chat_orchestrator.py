@@ -6,12 +6,11 @@ from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
-from app.risk import RiskContext, RiskDecision, RiskEngine, RiskLevel, risk_engine
+from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
 from services.consent_service import has_valid_consent
-from services.guardrails import check_text
 from services.pii import scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -36,14 +35,14 @@ class AIOrchestrator:
         router: ModelRouter | None = None,
         builder: ResponseBuilder | None = None,
         validator: OutputValidator | None = None,
-        risk: RiskEngine | None = None,
+        governance: GovernanceEngine | None = None,
     ) -> None:
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.retriever = retriever or retrieval_service
         self.model_router = router or model_router
         self.response_builder = builder or response_builder
         self.output_validator = validator or output_validator
-        self.risk_engine = risk or risk_engine
+        self.governance_engine = governance or governance_engine
 
     def handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Run the existing chat flow and return response data."""
@@ -59,14 +58,10 @@ class AIOrchestrator:
         if not has_valid_consent(body.sessionId, correlation_id):
             raise ConsentRequiredError()
 
-        check_text(body.message, correlation_id)
         scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
-        risk_decision = self._evaluate_input_risk(scrubbed_input, body, correlation_id)
-        if risk_decision.should_refuse():
-            return self.response_builder.fallback(
-                "I cannot help with that request. Please ask a different question or contact Forever Living support.",
-                correlation_id,
-            )
+        governance_decision = self._evaluate_governance(scrubbed_input, body, correlation_id)
+        if not governance_decision.allowed:
+            return self._governance_fallback(governance_decision, correlation_id)
 
         cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
@@ -128,7 +123,9 @@ class AIOrchestrator:
             model_response=model_response,
             retrieval_result=retrieval_result,
         )
-        check_text(chat_response.answer, correlation_id)
+        governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
+        if not governance_decision.allowed:
+            return self._governance_fallback(governance_decision, correlation_id)
         append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
@@ -143,49 +140,23 @@ class AIOrchestrator:
         set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
         return chat_response
 
-    def _evaluate_input_risk(self, message: str, body: ChatRequest, correlation_id: str) -> RiskDecision:
-        """Run input risk policies before retrieval and model execution."""
-        decision = self.risk_engine.evaluate(
-            RiskContext(
-                user_message=message,
-                country=body.country,
-                language=body.language,
-                role=body.role,
-                correlation_id=correlation_id,
-            )
+    def _evaluate_governance(self, text: str, body: ChatRequest, correlation_id: str) -> GovernanceDecision:
+        """Run unified governance checks for input or output text."""
+        return self.governance_engine.evaluate(
+            text=text,
+            country=body.country,
+            language=body.language,
+            role=body.role,
+            correlation_id=correlation_id,
         )
-        if decision.issues:
-            LOGGER.warning(
-                "risk_engine_decision",
-                correlation_id=correlation_id,
-                highest_risk=decision.highest_risk.value,
-                action=decision.action.value,
-                recommended_action=decision.recommended_action,
-                allowed=decision.allowed,
-                issue_count=len(decision.issues),
-                issues=[
-                    {
-                        "code": issue.code,
-                        "level": issue.level.value,
-                        "action": issue.action.value,
-                        "source": issue.source,
-                        "policy": issue.policy,
-                        "policy_version": issue.policy_version,
-                    }
-                    for issue in decision.issues
-                ],
-            )
-        elif decision.highest_risk in {RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH}:
-            LOGGER.info(
-                "risk_engine_decision",
-                correlation_id=correlation_id,
-                highest_risk=decision.highest_risk.value,
-                action=decision.action.value,
-                recommended_action=decision.recommended_action,
-                allowed=decision.allowed,
-                issue_count=0,
-            )
-        return decision
+
+    def _governance_fallback(self, decision: GovernanceDecision, correlation_id: str) -> ChatResponse:
+        """Return a safe fallback when governance blocks the request or response."""
+        return self.response_builder.fallback(
+            decision.reason
+            or "I cannot help with that request. Please ask a different question or contact Forever Living support.",
+            correlation_id,
+        )
 
     def _validate_response(
         self,

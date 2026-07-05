@@ -28,6 +28,7 @@ class BedrockGuardrailsProvider:
                 action=GovernanceAction.BLOCK,
                 provider=self.name,
                 reason=exc.message,
+                guardrail_action=GovernanceAction.BLOCK,
                 metadata={
                     "country": country,
                     "language": language,
@@ -38,6 +39,7 @@ class BedrockGuardrailsProvider:
             allowed=True,
             action=GovernanceAction.ALLOW,
             provider=self.name,
+            guardrail_action=GovernanceAction.ALLOW,
             metadata={
                 "country": country,
                 "language": language,
