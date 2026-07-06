@@ -40,10 +40,10 @@ def test_refresh_issues_new_token_for_same_session(monkeypatch) -> None:
         "cid",
         "203.0.113.10",
     )
+    initial_claims = decode_widget_token(initial.token)
 
     refreshed = service.refresh(initial.token, "cid", "https://company.com")
 
-    initial_claims = decode_widget_token(initial.token)
     refreshed_claims = decode_widget_token(refreshed.token)
     assert refreshed.sessionId == initial.sessionId
     assert refreshed_claims["sessionId"] == initial_claims["sessionId"]
