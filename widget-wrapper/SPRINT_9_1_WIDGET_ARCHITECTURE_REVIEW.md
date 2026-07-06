@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, and 1.8 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, and 1.9 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -963,3 +963,62 @@ CSS now uses more semantic variables, including:
 - `--gw-motion-easing`
 
 This step preserves the existing default appearance while making the widget more white-label ready.
+
+## Step 1.9 Implementation Notes
+
+Step 1.9 added provider-neutral analytics and expanded feature flags.
+
+New analytics modules:
+
+```text
+src/events/
+  analytics.ts
+  analyticsTypes.ts
+
+src/services/
+  analyticsService.ts
+```
+
+The analytics layer now supports:
+
+- `trackEvent()`
+- `identify()`
+- `setContext()`
+- `flush()`
+- provider-neutral analytics interfaces
+- console analytics provider for debug use
+- null analytics provider for disabled mode
+- event-bus-based tracking
+
+Analytics is intentionally decoupled from React components.
+
+Current flow:
+
+```text
+Widget Component
+  ↓
+Event Bus
+  ↓
+AnalyticsService
+  ↓
+AnalyticsProvider
+```
+
+Feature flags now include:
+
+```ts
+{
+  streaming: false,
+  markdown: true,
+  feedback: true,
+  typingIndicator: true,
+  darkMode: true,
+  citations: false,
+  attachments: false,
+  analytics: true
+}
+```
+
+`BackendChatDemo` initializes analytics from the merged widget configuration and attaches it to the shared widget event bus.
+
+No vendor-specific analytics system is hardcoded. Future providers can be added for CloudWatch, Google Analytics, Adobe Analytics, Mixpanel, Segment, or enterprise logging without changing widget components.

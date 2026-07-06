@@ -12,6 +12,7 @@ import {
 } from "../../api";
 import { buildWidgetConfig, type BackendConfig } from "../../config";
 import { widgetEventBus, widgetEventTypes } from "../../events";
+import { createAnalyticsService } from "../../services";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
 import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
@@ -54,7 +55,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
-  const config = useMemo(
+  const widgetConfig = useMemo(
     () => {
       const backendConfig: BackendConfig | undefined = apiConfig
         ? {
@@ -77,10 +78,33 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
         selectedCountry: selectedLocale.country,
         selectedLanguage: selectedLocale.language,
         legalLinkBuilder: legalViewerHref
-      }).genericConfig;
+      });
     },
     [apiBaseUrl, apiConfig, legalDocuments, legalVersion, selectedLocale.country, selectedLocale.language]
   );
+  const config = widgetConfig.genericConfig;
+
+  useEffect(() => {
+    const analytics = createAnalyticsService({
+      enabled: widgetConfig.features.analytics,
+      debug: widgetConfig.runtime.debug,
+      context: {
+        companyName: widgetConfig.runtime.companyName,
+        apiUrl: widgetConfig.runtime.apiUrl,
+        country: selectedLocale.country,
+        language: selectedLocale.language
+      }
+    });
+    analytics.attachToEventBus(widgetEventBus);
+    return () => analytics.detach();
+  }, [
+    selectedLocale.country,
+    selectedLocale.language,
+    widgetConfig.features.analytics,
+    widgetConfig.runtime.apiUrl,
+    widgetConfig.runtime.companyName,
+    widgetConfig.runtime.debug
+  ]);
   const [messages, setMessages] = useState<WidgetMessage[]>([
     {
       id: "backend-welcome",

@@ -6,6 +6,7 @@ export type WidgetFeatureFlags = {
   darkMode: boolean;
   citations: boolean;
   attachments: boolean;
+  analytics: boolean;
 };
 
 export const defaultFeatureFlags: Readonly<WidgetFeatureFlags> = Object.freeze({
@@ -15,7 +16,8 @@ export const defaultFeatureFlags: Readonly<WidgetFeatureFlags> = Object.freeze({
   typingIndicator: true,
   darkMode: true,
   citations: false,
-  attachments: false
+  attachments: false,
+  analytics: true
 });
 
 export function mergeFeatureFlags(overrides?: Partial<WidgetFeatureFlags>): WidgetFeatureFlags {
