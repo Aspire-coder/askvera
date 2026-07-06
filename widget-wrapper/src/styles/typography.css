@@ -1,0 +1,39 @@
+.gw-type-display {
+  font-family: var(--gw-font-display);
+  font-size: var(--gw-text-display-size);
+  font-weight: var(--gw-weight-medium);
+  line-height: var(--gw-line-tight);
+  letter-spacing: 0.2em;
+}
+
+.gw-type-title {
+  font-size: var(--gw-text-title-size);
+  font-weight: var(--gw-weight-heavy);
+  line-height: var(--gw-line-heading);
+}
+
+.gw-type-heading {
+  font-size: var(--gw-text-heading-size);
+  font-weight: var(--gw-weight-bold);
+  line-height: var(--gw-line-heading);
+}
+
+.gw-type-body {
+  font-size: var(--gw-text-body-size);
+  font-weight: var(--gw-weight-regular);
+  line-height: var(--gw-line-body);
+}
+
+.gw-type-caption {
+  font-size: var(--gw-text-caption-size);
+  font-weight: var(--gw-weight-semibold);
+  line-height: var(--gw-line-body);
+}
+
+.gw-type-label {
+  font-size: var(--gw-text-label-size);
+  font-weight: var(--gw-weight-heavy);
+  letter-spacing: 0.05em;
+  line-height: var(--gw-line-tight);
+  text-transform: uppercase;
+}

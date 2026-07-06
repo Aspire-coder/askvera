@@ -1,0 +1,23 @@
+.gw-field select,
+.gw-composer input {
+  transition:
+    border-color var(--gw-motion-fast) var(--gw-motion-standard),
+    box-shadow var(--gw-motion-fast) var(--gw-motion-standard),
+    background-color var(--gw-motion-fast) var(--gw-motion-standard);
+}
+
+.gw-field select:disabled,
+.gw-composer input:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.gw-field select:focus,
+.gw-composer input:focus,
+.gw-primary-button:focus-visible,
+.gw-secondary-button:focus-visible,
+.gw-topic:focus-visible,
+.gw-icon-button:focus-visible {
+  outline: var(--gw-focus-outline);
+  outline-offset: 2px;
+}

@@ -1,0 +1,17 @@
+.gw-card {
+  background: var(--gw-panel);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius-md);
+  box-shadow: var(--gw-elevation-2);
+}
+
+.gw-card-flat {
+  background: var(--gw-surface);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius-md);
+  box-shadow: none;
+}
+
+.gw-card-accent {
+  border-left: 5px solid var(--gw-accent);
+}

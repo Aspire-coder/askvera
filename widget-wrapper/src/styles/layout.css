@@ -1,0 +1,14 @@
+.gw-root * {
+  box-sizing: border-box;
+}
+
+.gw-shell {
+  background: var(--gw-background);
+  border-radius: var(--gw-radius);
+  box-shadow: var(--gw-elevation-modal);
+}
+
+.gw-scroll-area {
+  min-height: 0;
+  overflow-y: auto;
+}

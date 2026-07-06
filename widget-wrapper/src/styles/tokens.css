@@ -1,0 +1,63 @@
+.gw-root {
+  --gw-space-0: 0;
+  --gw-space-1: 4px;
+  --gw-space-2: 8px;
+  --gw-space-3: 12px;
+  --gw-space-4: 16px;
+  --gw-space-5: 20px;
+  --gw-space-6: 24px;
+  --gw-space-8: 32px;
+  --gw-space-10: 40px;
+  --gw-space-12: 48px;
+  --gw-space-16: 64px;
+
+  --gw-font-display: Georgia, "Times New Roman", serif;
+  --gw-font-sans: var(--gw-font);
+  --gw-text-display-size: 23px;
+  --gw-text-title-size: 18px;
+  --gw-text-heading-size: 16px;
+  --gw-text-body-size: 14px;
+  --gw-text-chat-size: 17px;
+  --gw-text-caption-size: 12px;
+  --gw-text-label-size: 11px;
+  --gw-line-tight: 1.2;
+  --gw-line-heading: 1.25;
+  --gw-line-body: 1.45;
+  --gw-line-relaxed: 1.55;
+  --gw-weight-regular: 400;
+  --gw-weight-medium: 500;
+  --gw-weight-semibold: 700;
+  --gw-weight-bold: 800;
+  --gw-weight-heavy: 850;
+
+  --gw-radius-xs: 4px;
+  --gw-radius-sm: 6px;
+  --gw-radius-md: 8px;
+  --gw-radius-lg: 12px;
+  --gw-radius-xl: 16px;
+  --gw-radius-2xl: 24px;
+  --gw-radius-pill: 999px;
+
+  --gw-icon-sm: 16px;
+  --gw-icon-md: 20px;
+  --gw-icon-lg: 24px;
+  --gw-icon-xl: 32px;
+
+  --gw-elevation-1: 0 3px 8px rgba(15, 23, 42, 0.16);
+  --gw-elevation-2: 0 12px 32px rgba(15, 23, 42, 0.12);
+  --gw-elevation-3: 0 18px 50px rgba(15, 23, 42, 0.18);
+  --gw-elevation-floating: 0 18px 42px rgba(15, 23, 42, 0.22);
+  --gw-elevation-modal: var(--gw-shadow);
+
+  --gw-motion-fast: 120ms;
+  --gw-motion-medium: var(--gw-motion-duration);
+  --gw-motion-slow: 260ms;
+  --gw-motion-standard: var(--gw-motion-easing);
+  --gw-motion-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --gw-control-height-sm: 40px;
+  --gw-control-height-md: 42px;
+  --gw-control-height-lg: 56px;
+  --gw-control-padding-x: 13px;
+  --gw-focus-outline: 3px solid var(--gw-focus-ring);
+}

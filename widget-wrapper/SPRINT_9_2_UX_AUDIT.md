@@ -2,7 +2,7 @@
 
 ## Status
 
-Step 2.0 is complete.
+Steps 2.0 and 2.1 are complete.
 
 Sprint 9.2 is focused on product experience only. The architecture from Sprint 9.1 should remain intact.
 
@@ -509,7 +509,43 @@ src/styles/
 src/themes/
 ```
 
-No behavior changes.
+Status: complete.
+
+Implementation files:
+
+```text
+src/styles/
+  animations.css
+  buttons.css
+  cards.css
+  forms.css
+  index.css
+  layout.css
+  spacing.css
+  tokens.css
+  typography.css
+  utilities.css
+```
+
+The design system now defines:
+
+- 4/8/12/16/20/24/32/40/48/64 spacing scale
+- typography roles for display, title, heading, body, caption, and label
+- icon sizes
+- radius scale
+- elevation scale
+- motion timings
+- control heights
+- focus outline
+- button foundations
+- card foundations
+- form foundations
+- reduced-motion behavior
+- screen-reader utility
+
+`generic-widget.css` now imports `src/styles/index.css` and consumes these design tokens for key widget surfaces.
+
+No component behavior changed.
 
 ### Step 2.2 - Widget Shell
 

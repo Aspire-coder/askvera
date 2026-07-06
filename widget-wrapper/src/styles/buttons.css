@@ -1,0 +1,40 @@
+.gw-primary-button,
+.gw-secondary-button,
+.gw-topic,
+.gw-icon-button {
+  align-items: center;
+  justify-content: center;
+  transition:
+    background-color var(--gw-motion-fast) var(--gw-motion-standard),
+    border-color var(--gw-motion-fast) var(--gw-motion-standard),
+    color var(--gw-motion-fast) var(--gw-motion-standard),
+    transform var(--gw-motion-fast) var(--gw-motion-standard);
+}
+
+.gw-primary-button,
+.gw-secondary-button,
+.gw-topic {
+  border-radius: var(--gw-radius-md);
+  min-height: var(--gw-control-height-sm);
+  padding: 0 var(--gw-control-padding-x);
+  font-weight: var(--gw-weight-semibold);
+  cursor: pointer;
+}
+
+.gw-icon-button {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--gw-radius-md);
+  min-width: var(--gw-space-8);
+  min-height: var(--gw-space-8);
+  cursor: pointer;
+}
+
+.gw-primary-button:disabled,
+.gw-secondary-button:disabled,
+.gw-topic:disabled,
+.gw-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
