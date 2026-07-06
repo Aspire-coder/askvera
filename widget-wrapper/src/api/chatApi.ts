@@ -1,0 +1,30 @@
+import type { ApiClient } from "./client";
+
+export type ChatRequest = {
+  message: string;
+  sessionId: string;
+  country: string;
+  language: string;
+  role: string;
+};
+
+export type ChatSource = {
+  title: string;
+  uri: string;
+  excerpt?: string;
+};
+
+export type ChatResponseData = {
+  response: string;
+  sources?: ChatSource[];
+  confidence?: number;
+  correlationId?: string;
+};
+
+export function sendMessage(client: ApiClient, request: ChatRequest) {
+  return client.post<ChatResponseData>("/api/chat", request);
+}
+
+export function streamMessage() {
+  throw new Error("Streaming chat is not implemented yet.");
+}

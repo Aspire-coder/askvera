@@ -1,81 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiRequestError,
+  createApiClient,
+  describeApiError,
+  loadConfig,
+  loadPrivacy,
+  sendMessage,
+  submitConsent,
+  type ConfigResponseData,
+  type LegalDocument
+} from "../../api";
 import { buildWidgetConfig, type BackendConfig } from "../../config";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
 import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
 
-type ApiEnvelope<T> = {
-  success: boolean;
-  data?: T;
-  error?: { code: string; message: string; legalVersion?: string };
-  correlationId: string;
-};
-
-class ApiRequestError extends Error {
-  code?: string;
-  legalVersion?: string;
-  status?: number;
-  correlationId?: string;
-
-  constructor(message: string, code?: string, legalVersion?: string, status?: number, correlationId?: string) {
-    super(message);
-    this.name = "ApiRequestError";
-    this.code = code;
-    this.legalVersion = legalVersion;
-    this.status = status;
-    this.correlationId = correlationId;
-  }
-}
-
-class ApiTimeoutError extends Error {
-  constructor(message = "The request timed out. Please try again.") {
-    super(message);
-    this.name = "ApiTimeoutError";
-  }
-}
-
-class ApiNetworkError extends Error {
-  constructor(message = "The API could not be reached. Please check the connection and try again.") {
-    super(message);
-    this.name = "ApiNetworkError";
-  }
-}
-
-type ChatResponseData = {
-  response: string;
-  sources?: Array<{ title: string; uri: string; excerpt?: string }>;
-  confidence?: number;
-  correlationId?: string;
-};
-
-type ApiCountry = {
-  code: string;
-  name: string;
-  languages: Array<{ code: string; name: string }>;
-};
-
-type ConfigResponseData = {
-  countries: ApiCountry[];
-  privacyVersion: string;
-};
-
-type LegalDocument = {
-  id: string;
-  title: string;
-  required: boolean;
-  html: string;
-};
-
-type PrivacyResponseData = {
-  version: string;
-  documents: LegalDocument[];
-};
-
 export type BackendChatDemoProps = {
   apiBaseUrl?: string;
 };
-
-const REQUEST_TIMEOUT_MS = 30000;
 
 const buildId = (prefix: string) => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -96,85 +38,6 @@ const legalViewerHref = (apiBaseUrl: string, country: string, language: string, 
   return `/legal?${params.toString()}`;
 };
 
-async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiTimeoutError();
-    }
-    throw new ApiNetworkError(error instanceof Error ? error.message : undefined);
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
-async function parseEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
-  try {
-    return (await response.json()) as ApiEnvelope<T>;
-  } catch {
-    return {
-      success: false,
-      correlationId: response.headers.get("x-correlation-id") || "",
-      error: { code: "INVALID_RESPONSE", message: "The API returned an unreadable response." }
-    };
-  }
-}
-
-async function postJson<T>(baseUrl: string, path: string, body: unknown): Promise<ApiEnvelope<T>> {
-  const response = await fetchWithTimeout(joinUrl(baseUrl, path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const envelope = await parseEnvelope<T>(response);
-  if (!response.ok || !envelope.success) {
-    throw new ApiRequestError(
-      envelope.error?.message || `Request failed with status ${response.status}`,
-      envelope.error?.code,
-      envelope.error?.legalVersion,
-      response.status,
-      envelope.correlationId || response.headers.get("x-correlation-id") || undefined
-    );
-  }
-  return envelope;
-}
-
-async function getJson<T>(baseUrl: string, path: string): Promise<ApiEnvelope<T>> {
-  const response = await fetchWithTimeout(joinUrl(baseUrl, path));
-  const envelope = await parseEnvelope<T>(response);
-  if (!response.ok || !envelope.success) {
-    throw new ApiRequestError(
-      envelope.error?.message || `Request failed with status ${response.status}`,
-      envelope.error?.code,
-      envelope.error?.legalVersion,
-      response.status,
-      envelope.correlationId || response.headers.get("x-correlation-id") || undefined
-    );
-  }
-  return envelope;
-}
-
-function describeApiError(error: unknown): string {
-  if (error instanceof ApiTimeoutError) {
-    return "The request timed out. Please try again in a moment.";
-  }
-  if (error instanceof ApiNetworkError) {
-    return `The API could not be reached: ${error.message}`;
-  }
-  if (error instanceof ApiRequestError) {
-    const status = error.status ? `HTTP ${error.status}` : "API error";
-    return `${status}: ${error.message}`;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "An unexpected API error occurred.";
-}
-
 function logCorrelationId(label: string, correlationId?: string) {
   if (!correlationId || window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") return;
   console.info(`[ASK Vera] ${label} correlation ID: ${correlationId}`);
@@ -188,6 +51,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
   const requestInFlightRef = useRef(false);
+  const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
   const config = useMemo(
     () => {
       const backendConfig: BackendConfig | undefined = apiConfig
@@ -239,7 +103,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   useEffect(() => {
     let active = true;
 
-    getJson<ConfigResponseData>(apiBaseUrl, "/api/config")
+    loadConfig(apiClient)
       .then((envelope) => {
         if (active && envelope.data) {
           logCorrelationId("config", envelope.correlationId);
@@ -259,13 +123,11 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, upsertMessage]);
+  }, [apiClient, upsertMessage]);
 
   useEffect(() => {
     let active = true;
-    const path = `/api/privacy?country=${encodeURIComponent(selectedLocale.country)}&lang=${encodeURIComponent(selectedLocale.language)}`;
-
-    getJson<PrivacyResponseData>(apiBaseUrl, path)
+    loadPrivacy(apiClient, selectedLocale.country, selectedLocale.language)
       .then((envelope) => {
         if (active && envelope.data) {
           logCorrelationId("privacy", envelope.correlationId);
@@ -287,10 +149,10 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, selectedLocale.country, selectedLocale.language, upsertMessage]);
+  }, [apiClient, selectedLocale.country, selectedLocale.language, upsertMessage]);
 
   const handleConsent = async (payload: ConsentEventPayload) => {
-    const envelope = await postJson(apiBaseUrl, "/api/consent", {
+    const envelope = await submitConsent(apiClient, {
       sessionId: payload.sessionId,
       country: payload.selectedCountry,
       lang: payload.selectedLanguage,
@@ -311,7 +173,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     if (showUserMessage) appendMessage({ id: buildId("user"), role: "user", content: payload.message });
     setLoading(true);
     try {
-      const envelope = await postJson<ChatResponseData>(apiBaseUrl, "/api/chat", {
+      const envelope = await sendMessage(apiClient, {
         message: payload.message,
         sessionId: payload.sessionId,
         country: payload.selectedCountry,

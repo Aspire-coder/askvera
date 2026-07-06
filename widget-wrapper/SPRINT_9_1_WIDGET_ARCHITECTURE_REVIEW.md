@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, and 1.4 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, and 1.5 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -722,3 +722,57 @@ The state layer now includes:
 `GenericWidgetWrapper` now uses the centralized reducer for the global widget state it owns, while preserving the existing public props, callbacks, local storage behavior, consent flow, locale behavior, loading behavior, and message composer behavior.
 
 This step intentionally does not extract the backend API layer yet. API communication remains in the backend demo until the event bus and API layer steps are completed.
+
+## Step 1.5 Implementation Notes
+
+Step 1.5 extracted backend communication from UI code into a dedicated API layer.
+
+New API modules:
+
+```text
+src/api/
+  apiInterceptor.ts
+  chatApi.ts
+  client.ts
+  configApi.ts
+  consentApi.ts
+  envelope.ts
+  errors.ts
+  feedbackApi.ts
+  healthApi.ts
+  index.ts
+  privacyApi.ts
+```
+
+The API layer now owns:
+
+- the fetch wrapper
+- request timeouts
+- backend envelope parsing
+- HTTP error handling
+- network error handling
+- timeout error handling
+- correlation ID request headers
+- future interceptor hooks
+- endpoint-specific functions for chat, config, privacy, consent, feedback, and health
+
+`BackendChatDemo.tsx` now uses API services instead of direct `fetch()` helpers:
+
+- `loadConfig()`
+- `loadPrivacy()`
+- `submitConsent()`
+- `sendMessage()`
+
+The permanent rule after this step is:
+
+```text
+No widget UI component should call fetch() directly.
+```
+
+Verification confirmed the only remaining `fetch()` call under `src/` is inside:
+
+```text
+src/api/client.ts
+```
+
+This step reduced `BackendChatDemo.tsx` substantially and kept the existing backend-connected demo behavior intact.
