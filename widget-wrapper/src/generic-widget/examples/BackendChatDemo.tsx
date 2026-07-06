@@ -52,6 +52,10 @@ function logCorrelationId(label: string, correlationId?: string) {
   console.info(`[ASK Vera] ${label} correlation ID: ${correlationId}`);
 }
 
+function isConsentInstructionMessage(message: WidgetMessage): boolean {
+  return message.id === "backend-welcome" || message.id.includes("consent-required");
+}
+
 export function BackendChatDemo({
   apiBaseUrl = "https://api.vera-api.xyz",
   openSignal = 0,
@@ -121,13 +125,7 @@ export function BackendChatDemo({
     widgetConfig.runtime.companyName,
     widgetConfig.runtime.debug
   ]);
-  const [messages, setMessages] = useState<WidgetMessage[]>([
-    {
-      id: "backend-welcome",
-      role: "assistant",
-      content: "Accept the privacy terms, then ask a question. This demo sends messages to the Python API."
-    }
-  ]);
+  const [messages, setMessages] = useState<WidgetMessage[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -225,6 +223,7 @@ export function BackendChatDemo({
       version: payload.policyVersion
     });
     logCorrelationId("consent", envelope.correlationId);
+    setMessages((current) => current.filter((message) => !isConsentInstructionMessage(message)));
     if (pendingMessage) {
       const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
       setPendingMessage(null);

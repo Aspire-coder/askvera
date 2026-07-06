@@ -395,6 +395,7 @@ export function GenericWidgetWrapper({
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
+    event.stopPropagation();
     const trimmed = message.trim();
     if (!trimmed || composerDisabled) return;
     const payload: MessageEventPayload = {
@@ -414,6 +415,7 @@ export function GenericWidgetWrapper({
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
+    event.stopPropagation();
     if (canSendMessage) event.currentTarget.form?.requestSubmit();
   };
 
