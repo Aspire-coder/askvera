@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, 1.5, and 1.6 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, and 1.7 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -840,3 +840,72 @@ Centralized event categories include:
 The wrapper accepts an optional custom event bus and falls back to the shared `widgetEventBus`, which keeps the future SDK and plugin architecture straightforward.
 
 This step preserves existing widget behavior while making future analytics, plugins, SDK callbacks, and integrations independent from React component internals.
+
+## Step 1.7 Implementation Notes
+
+Step 1.7 extracted session and storage responsibilities into dedicated services.
+
+New storage modules:
+
+```text
+src/storage/
+  index.ts
+  localStorageAdapter.ts
+  storageAdapter.ts
+```
+
+New session modules:
+
+```text
+src/services/
+  index.ts
+  sessionManager.ts
+```
+
+The session manager now owns:
+
+- visitor ID creation
+- session ID creation
+- session restoration
+- metadata validation
+- corrupt metadata handling
+- consent flag persistence
+- locale persistence
+- legal version persistence
+- session reset
+- session destroy
+- reconnect support
+- expiration checks
+- session schema versioning
+
+Session metadata now supports:
+
+```json
+{
+  "schemaVersion": 1,
+  "visitorId": "...",
+  "sessionId": "...",
+  "legalVersion": "...",
+  "country": "...",
+  "language": "...",
+  "createdAt": "...",
+  "expiresAt": "...",
+  "consentAccepted": true
+}
+```
+
+`GenericWidgetWrapper` now restores and persists session state through `SessionManager` instead of using direct storage helpers.
+
+The permanent rule after this step is:
+
+```text
+No React component should call localStorage directly.
+```
+
+Verification confirmed the only remaining `localStorage` references under `src/` are inside:
+
+```text
+src/storage/localStorageAdapter.ts
+```
+
+This keeps storage replaceable later with session storage, IndexedDB, cookies, or an enterprise-provided storage adapter without changing widget components.

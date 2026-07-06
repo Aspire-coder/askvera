@@ -8,6 +8,7 @@ import { RegionSelector } from "./RegionSelector";
 import { defaultTheme } from "./config/defaultTheme";
 import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetTheme } from "./types";
 import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
+import { createSessionManager } from "../services";
 import {
   createWidgetInitialState,
   selectConsentAccepted,
@@ -26,17 +27,9 @@ import {
 import {
   createConsentRecord,
   createLocalePayload,
-  createSessionId,
-  createVisitorId,
   detectInitialLocale,
   ensureLanguageForCountry,
-  filterLanguagesByCountry,
-  readConsentFlag,
-  readSessionMetadata,
-  readStoredId,
-  writeSessionMetadata,
-  writeStoredId,
-  writeConsentFlag
+  filterLanguagesByCountry
 } from "./utils";
 import "./generic-widget.css";
 
@@ -95,35 +88,58 @@ export function GenericWidgetWrapper({
     () => detectInitialLocale(config.countries, config.languages, config.defaultCountryCode, config.defaultLanguageCode),
     [config.countries, config.defaultCountryCode, config.defaultLanguageCode, config.languages]
   );
-  const storedSessionMetadata = useMemo(() => readSessionMetadata(config.sessionMetadataStorageKey), [config.sessionMetadataStorageKey]);
-  const visitorId = useMemo(
-    () => providedVisitorId || readStoredId(config.visitorStorageKey) || createVisitorId(),
-    [config.visitorStorageKey, providedVisitorId]
+  const sessionManager = useMemo(
+    () =>
+      createSessionManager({
+        keys: {
+          visitorStorageKey: config.visitorStorageKey,
+          sessionStorageKey: config.sessionStorageKey,
+          sessionMetadataStorageKey: config.sessionMetadataStorageKey,
+          consentStorageKey: config.consent.storageKey
+        }
+      }),
+    [config.consent.storageKey, config.sessionMetadataStorageKey, config.sessionStorageKey, config.visitorStorageKey]
   );
-  const sessionId = useMemo(
-    () => providedSessionId || readStoredId(config.sessionStorageKey) || createSessionId(),
-    [config.sessionStorageKey, providedSessionId]
+  const restoredSession = useMemo(
+    () =>
+      sessionManager.restore({
+        providedVisitorId,
+        providedSessionId,
+        legalVersion: config.consent.policyVersion,
+        country: initialLocale.country?.code,
+        language: initialLocale.language?.code,
+        consentAccepted: Boolean(initialConsentAccepted || (config.persistConsent && sessionManager.readConsentFlag()))
+      }),
+    [
+      config.consent.policyVersion,
+      config.persistConsent,
+      initialConsentAccepted,
+      initialLocale.country?.code,
+      initialLocale.language?.code,
+      providedSessionId,
+      providedVisitorId,
+      sessionManager
+    ]
   );
+  const visitorId = restoredSession.visitorId;
+  const sessionId = restoredSession.sessionId;
   const storedLocale = useMemo(() => {
-    if (!storedSessionMetadata || storedSessionMetadata.sessionId !== sessionId) return undefined;
-    const country = config.countries.find((option) => option.code === storedSessionMetadata.market);
+    const country = config.countries.find((option) => option.code === restoredSession.country);
     if (!country) return undefined;
     const languageOptions = filterLanguagesByCountry(config.languages, country.code, config.countries);
-    const language = languageOptions.find((option) => option.code === storedSessionMetadata.language);
+    const language = languageOptions.find((option) => option.code === restoredSession.language);
     return language ? { country, language } : undefined;
-  }, [config.countries, config.languages, sessionId, storedSessionMetadata]);
+  }, [config.countries, config.languages, restoredSession.country, restoredSession.language]);
   const sessionCreatedAt = useMemo(
-    () => storedSessionMetadata?.createdAt || new Date().toISOString(),
-    [storedSessionMetadata?.createdAt]
+    () => restoredSession.createdAt,
+    [restoredSession.createdAt]
   );
   const initialState = useMemo(
     () =>
       createWidgetInitialState({
         openByDefault,
         loading,
-        initialConsentAccepted: Boolean(
-          initialConsentAccepted || (config.persistConsent && readConsentFlag(config.consent.storageKey))
-        ),
+        initialConsentAccepted: Boolean(restoredSession.consentAccepted),
         initialShowSuccess,
         visitorId,
         sessionId,
@@ -135,9 +151,6 @@ export function GenericWidgetWrapper({
       }),
     [
       config.consent.policyVersion,
-      config.consent.storageKey,
-      config.persistConsent,
-      initialConsentAccepted,
       initialLocale.country,
       initialLocale.language,
       initialShowSuccess,
@@ -148,7 +161,8 @@ export function GenericWidgetWrapper({
       sessionId,
       storedLocale?.country,
       storedLocale?.language,
-      visitorId
+      visitorId,
+      restoredSession.consentAccepted
     ]
   );
   const [widgetState, dispatch] = useReducer(widgetReducer, initialState);
@@ -191,14 +205,11 @@ export function GenericWidgetWrapper({
   }, [loading]);
 
   useEffect(() => {
-    writeStoredId(config.visitorStorageKey, visitorId);
-    writeStoredId(config.sessionStorageKey, sessionId);
-    const storedSession = readSessionMetadata(config.sessionMetadataStorageKey);
+    const validation = sessionManager.validate(restoredSession, config.consent.policyVersion);
     const legalVersionChanged = Boolean(
-      storedSession &&
-        storedSession.sessionId === sessionId &&
-        storedSession.legalVersion &&
-        storedSession.legalVersion !== config.consent.policyVersion
+      restoredSession.sessionId === sessionId &&
+        restoredSession.legalVersion &&
+        !validation.legalVersionMatches
     );
     if (legalVersionChanged) {
       dispatch({ type: "REQUIRE_CONSENT" });
@@ -207,28 +218,25 @@ export function GenericWidgetWrapper({
         sessionId,
         reason: "legal_version_changed"
       });
-      if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
+      if (config.persistConsent) sessionManager.updateConsent(restoredSession, false, config.consent.policyVersion);
     }
-    writeSessionMetadata(config.sessionMetadataStorageKey, {
-      sessionId,
-      createdAt: storedSession?.sessionId === sessionId ? storedSession.createdAt : sessionCreatedAt,
+    sessionManager.persist(restoredSession, {
       legalVersion: config.consent.policyVersion,
-      market: selectedCountry?.code,
-      language: selectedLanguage?.code
+      country: selectedCountry?.code,
+      language: selectedLanguage?.code,
+      consentAccepted
     });
   }, [
     config.consent.policyVersion,
-    config.consent.storageKey,
     config.persistConsent,
-    config.sessionMetadataStorageKey,
-    config.sessionStorageKey,
-    config.visitorStorageKey,
-    sessionCreatedAt,
+    consentAccepted,
+    events,
+    restoredSession,
     sessionId,
+    sessionManager,
     selectedCountry?.code,
     selectedLanguage?.code,
-    visitorId,
-    events
+    visitorId
   ]);
 
   useEffect(() => {
@@ -239,8 +247,8 @@ export function GenericWidgetWrapper({
       sessionId,
       reason: "backend_required_consent"
     });
-    if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
-  }, [config.consent.storageKey, config.persistConsent, consentRequiredSignal, events, sessionId, visitorId]);
+    if (config.persistConsent) sessionManager.updateConsent(restoredSession, false, config.consent.policyVersion);
+  }, [config.consent.policyVersion, config.persistConsent, consentRequiredSignal, events, restoredSession, sessionId, sessionManager, visitorId]);
 
   const closeWidget = () => {
     dispatch({ type: "CLOSE_WIDGET" });
@@ -290,7 +298,7 @@ export function GenericWidgetWrapper({
       await onAcceptConsent?.(payload);
       dispatch({ type: "ACCEPT_CONSENT" });
       events.emit(widgetEventTypes.CONSENT_ACCEPTED, { visitorId, sessionId, consent: payload });
-      if (config.persistConsent) writeConsentFlag(config.consent.storageKey, true);
+      if (config.persistConsent) sessionManager.updateConsent(restoredSession, true, config.consent.policyVersion);
     } catch {
       dispatch({ type: "REQUIRE_CONSENT", error: "Unable to record your consent. Please try again." });
     } finally {
