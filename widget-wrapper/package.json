@@ -1,15 +1,32 @@
 {
-  "name": "generic-widget-wrapper",
+  "name": "@askvera/widget",
   "version": "1.0.0",
   "type": "module",
   "private": true,
+  "main": "./dist/widget.js",
+  "module": "./dist/widget.es.js",
+  "types": "./dist/types/generic-widget/index.d.ts",
+  "style": "./dist/widget.css",
   "scripts": {
     "dev": "vite demo --host 127.0.0.1 --port 5174",
     "demo": "vite demo --host 127.0.0.1 --port 5174",
-    "build": "vite build",
+    "build": "node scripts/build-widget.mjs",
+    "build:lib": "node scripts/build-widget.mjs",
     "build:demo": "vite build demo",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "types": "tsc -p tsconfig.types.json"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/types/generic-widget/index.d.ts",
+      "import": "./dist/widget.es.js",
+      "default": "./dist/widget.js"
+    },
+    "./styles.css": "./dist/widget.css"
+  },
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@vitejs/plugin-react": "6.0.1",
     "react": "19.2.6",

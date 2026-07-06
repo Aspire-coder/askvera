@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, and 1.10 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, and 1.11 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -1087,3 +1087,79 @@ Plugins receive the SDK instance and can subscribe to events, open or close the 
 The existing package entrypoint now re-exports the SDK so consumers can import it from the widget package.
 
 Step 1.11 should focus on the build pipeline and produce dedicated distributable assets such as `widget.js`, `widget.min.js`, `widget.css`, source maps, and version metadata.
+
+## Step 1.11 Implementation Notes
+
+Step 1.11 added the production widget build pipeline.
+
+Build configuration now supports:
+
+- ES module output for bundled applications
+- browser script output for plain HTML integrations
+- minified browser script output
+- TypeScript declaration output
+- source maps
+- generated build metadata
+- generated distribution README
+- generated distribution license file
+
+The package name is now:
+
+```text
+@askvera/widget
+```
+
+The package metadata exposes:
+
+- `main` -> `dist/widget.js`
+- `module` -> `dist/widget.es.js`
+- `types` -> `dist/types/generic-widget/index.d.ts`
+- `style` -> `dist/widget.css`
+- package exports for the main SDK and styles
+
+The build command:
+
+```text
+npm run build
+```
+
+now produces:
+
+```text
+dist/
+  widget.es.js
+  widget.es.js.map
+  widget.js
+  widget.js.map
+  widget.min.js
+  widget.min.js.map
+  widget.css
+  widget.min.css
+  types/
+  version.json
+  README.md
+  LICENSE
+```
+
+New build support files:
+
+```text
+scripts/
+  build-widget.mjs
+  generate-dist-assets.mjs
+
+tsconfig.types.json
+```
+
+`version.json` records:
+
+- package name
+- package version
+- build type
+- commit hash when available
+- build timestamp
+- expected artifact names
+
+This completes the engineering packaging layer required for another team to consume ASK Vera without building from source.
+
+Step 1.12 should focus on documentation for installation, configuration, SDK usage, themes, events, plugins, deployment, troubleshooting, and release notes.
