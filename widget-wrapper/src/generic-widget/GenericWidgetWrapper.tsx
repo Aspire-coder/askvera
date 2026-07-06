@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useReducer } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useReducer, useRef } from "react";
 import { ConsentPanel } from "./ConsentPanel";
 import { FloatingLauncher } from "./FloatingLauncher";
 import { Header } from "./Header";
@@ -162,6 +162,15 @@ export function GenericWidgetWrapper({
   const consentAccepted = selectConsentAccepted(widgetState);
   const connection = selectConnection(widgetState);
   const effectiveLoading = selectLoading(widgetState);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const consentRequired = config.consent.requireConsentBeforeMessaging !== false && !consentAccepted;
+  const composerDisabledReason = consentRequired
+    ? "Accept the privacy agreement to begin."
+    : effectiveLoading
+      ? "Waiting for the current response to finish."
+      : "";
+  const composerDisabled = Boolean(composerDisabledReason);
+  const canSendMessage = Boolean(message.trim()) && !composerDisabled;
   const availableLanguages = useMemo(
     () => filterLanguagesByCountry(config.languages, selectedCountry?.code, config.countries),
     [config.countries, config.languages, selectedCountry?.code]
@@ -358,7 +367,7 @@ export function GenericWidgetWrapper({
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const trimmed = message.trim();
-    if (!trimmed || (config.consent.requireConsentBeforeMessaging !== false && !consentAccepted)) return;
+    if (!trimmed || composerDisabled) return;
     const payload: MessageEventPayload = {
       visitorId,
       sessionId,
@@ -372,6 +381,19 @@ export function GenericWidgetWrapper({
     events.emit(widgetEventTypes.MESSAGE_SENT, { visitorId, sessionId, message: payload });
     onSendMessage?.(payload);
   };
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    if (canSendMessage) event.currentTarget.form?.requestSubmit();
+  };
+
+  useEffect(() => {
+    const textarea = composerTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
+  }, [message]);
 
   return (
     <div className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
@@ -433,16 +455,30 @@ export function GenericWidgetWrapper({
             {effectiveLoading ? <div className="gw-loading" role="status"><span className="gw-spinner" aria-hidden="true" /><span>{config.loadingText}</span></div> : null}
             {children ? <section className="gw-child-slot" aria-label={config.labels.childrenRegionLabel}>{typeof children === "function" ? children(state) : children}</section> : null}
           </div>
-          <form className="gw-composer" onSubmit={handleSubmit}>
+          <form className={`gw-composer ${composerDisabled ? "gw-composer-disabled" : ""}`} onSubmit={handleSubmit}>
             <label className="gw-sr-only" htmlFor="gw-message-input">{config.labels.messageInputLabel}</label>
-            <input
-              id="gw-message-input"
-              value={message}
-              onChange={(event) => dispatch({ type: "SET_DRAFT_MESSAGE", message: event.target.value })}
-              placeholder={config.labels.messageInputPlaceholder}
-              disabled={effectiveLoading || (config.consent.requireConsentBeforeMessaging !== false && !consentAccepted)}
-            />
-            <button type="submit" className="gw-primary-button" disabled={!message.trim() || effectiveLoading}>{config.labels.sendMessageLabel}</button>
+            <div className="gw-composer-shell">
+              <button type="button" className="gw-composer-tool" aria-label="Attach a file" disabled>
+                <span aria-hidden="true">+</span>
+              </button>
+              <textarea
+                ref={composerTextareaRef}
+                id="gw-message-input"
+                rows={1}
+                value={message}
+                onChange={(event) => dispatch({ type: "SET_DRAFT_MESSAGE", message: event.target.value })}
+                onKeyDown={handleComposerKeyDown}
+                placeholder={config.labels.messageInputPlaceholder}
+                disabled={composerDisabled}
+                aria-describedby={composerDisabledReason ? "gw-composer-status" : undefined}
+              />
+              <button type="button" className="gw-composer-tool gw-composer-tool-voice" aria-label="Voice input" disabled>
+                <span aria-hidden="true">mic</span>
+              </button>
+              <button type="submit" className="gw-primary-button" disabled={!canSendMessage}>{config.labels.sendMessageLabel}</button>
+            </div>
+            {composerDisabledReason ? <div id="gw-composer-status" className="gw-composer-status">{composerDisabledReason}</div> : null}
+            <div className="gw-composer-hint">Enter to send. Shift + Enter for a new line.</div>
           </form>
         </section>
       ) : null}
