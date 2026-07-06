@@ -627,6 +627,29 @@ Improve:
 - copy action
 - feedback placeholders
 
+Status: complete.
+
+Implementation files:
+
+```text
+src/generic-widget/MessageFeed.tsx
+src/generic-widget/generic-widget.css
+```
+
+Message experience improvements:
+
+- assistant, user, and system messages now have distinct visual treatments
+- assistant messages include an identity mark, assistant label, timestamp, and structured card layout
+- user messages use a cleaner right-aligned bubble with improved spacing and timestamp treatment
+- system and welcome messages use the same message shell for consistency
+- assistant responses have a reserved action footer for future copy and feedback controls
+- message width is constrained for more comfortable reading
+- markdown rendering now supports headings, unordered lists, ordered lists, inline code, code blocks, blockquotes, links, and simple tables
+- message tables and code blocks are horizontally scrollable when needed
+- styling uses the existing design-system tokens for spacing, typography, radius, elevation, and colors
+
+Interactive copy, feedback, retry, citations, and richer content cards remain reserved for Steps 2.11 and 2.12.
+
 ### Step 2.5 - Composer
 
 Improve:
