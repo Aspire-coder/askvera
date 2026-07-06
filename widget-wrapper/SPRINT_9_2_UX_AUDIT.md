@@ -691,6 +691,34 @@ Replace generic spinner with:
 - progressive loading state
 - reduced-motion support
 
+Status: complete.
+
+Implementation files:
+
+```text
+src/generic-widget/GenericWidgetWrapper.tsx
+src/generic-widget/MessageFeed.tsx
+src/generic-widget/generic-widget.css
+src/generic-widget/types.ts
+src/generic-widget/config/exampleWidgetConfig.ts
+src/generic-widget/examples/foreverDemoConfig.tsx
+src/styles/animations.css
+```
+
+Loading and typing improvements:
+
+- generic spinner removed from the conversation area
+- waiting state now renders as an assistant message using the same message layout as final answers
+- assistant identity, timestamp, animated typing dots, and configurable loading copy are visible while waiting
+- progressive delay behavior avoids flashing for fast responses
+- loading is hidden for the first 300 ms, shows typing dots after 300 ms, shows skeleton lines after 800 ms, and switches to slow-response copy after 5 seconds
+- existing connection state switches the loading message into reconnecting mode when appropriate
+- skeleton lines reduce layout shift by reserving space close to the eventual assistant answer
+- loading copy supports `loadingMessages` with fallback to the existing `loadingText`
+- reduced-motion users receive static dots and skeletons instead of animated bouncing or shimmer
+
+No API, event bus, state architecture, message delivery, or backend behavior changed.
+
 ### Step 2.7 - Empty State
 
 Create a guided welcome state:
