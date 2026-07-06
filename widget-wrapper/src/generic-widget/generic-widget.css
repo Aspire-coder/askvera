@@ -21,12 +21,19 @@
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: transform var(--gw-motion-medium) var(--gw-motion-standard);
+  transition:
+    transform var(--gw-motion-medium) var(--gw-motion-standard),
+    box-shadow var(--gw-motion-medium) var(--gw-motion-standard);
 }
 
 .gw-launcher:hover,
 .gw-launcher:focus-visible {
   transform: translateY(-2px);
+  box-shadow: var(--gw-elevation-modal);
+}
+
+.gw-launcher:active {
+  transform: translateY(0) scale(0.97);
 }
 
 .gw-launcher-mark {
@@ -52,7 +59,8 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  animation: gw-panel-in var(--gw-motion-medium) var(--gw-motion-enter);
+  transform-origin: bottom right;
+  animation: gw-panel-in var(--gw-motion-slow) var(--gw-motion-enter);
 }
 
 .gw-panel:focus {
@@ -189,6 +197,10 @@
   min-width: var(--gw-space-8);
   min-height: var(--gw-space-8);
   cursor: pointer;
+  transition:
+    background var(--gw-motion-fast) var(--gw-motion-standard),
+    color var(--gw-motion-fast) var(--gw-motion-standard),
+    transform var(--gw-motion-fast) var(--gw-motion-standard);
 }
 
 .gw-icon-button {
@@ -213,6 +225,11 @@
   background: color-mix(in srgb, var(--gw-success), white 84%);
 }
 
+.gw-icon-button:active,
+.gw-success-banner button:active {
+  transform: scale(0.94);
+}
+
 .gw-menu {
   position: absolute;
   right: var(--gw-space-4);
@@ -223,6 +240,7 @@
   border-radius: var(--gw-radius-md);
   box-shadow: var(--gw-elevation-3);
   padding: var(--gw-space-2);
+  animation: gw-toast-in var(--gw-motion-medium) var(--gw-motion-enter);
 }
 
 .gw-menu-item {
@@ -258,6 +276,7 @@
   box-shadow: var(--gw-elevation-1);
   font-size: var(--gw-text-body-size);
   line-height: var(--gw-line-body);
+  animation: gw-toast-in var(--gw-motion-medium) var(--gw-motion-enter);
 }
 
 .gw-success-banner::before {
@@ -438,6 +457,7 @@
   position: absolute;
   inset: 0;
   background: rgba(15, 23, 42, 0.42);
+  animation: gw-modal-backdrop-in var(--gw-motion-medium) var(--gw-motion-enter);
 }
 
 .gw-legal-modal-panel {
@@ -452,6 +472,8 @@
   border: 1px solid var(--gw-border);
   border-radius: var(--gw-radius-lg);
   box-shadow: var(--gw-elevation-modal);
+  transform-origin: center;
+  animation: gw-modal-panel-in var(--gw-motion-medium) var(--gw-motion-enter);
 }
 
 .gw-legal-modal-header {
@@ -576,6 +598,12 @@
   padding: 0 var(--gw-control-padding-x);
   font-weight: var(--gw-weight-semibold);
   cursor: pointer;
+  transition:
+    background var(--gw-motion-fast) var(--gw-motion-standard),
+    border-color var(--gw-motion-fast) var(--gw-motion-standard),
+    box-shadow var(--gw-motion-fast) var(--gw-motion-standard),
+    color var(--gw-motion-fast) var(--gw-motion-standard),
+    transform var(--gw-motion-fast) var(--gw-motion-standard);
 }
 
 .gw-primary-button {
@@ -617,6 +645,12 @@
   background: color-mix(in srgb, var(--gw-accent), white 94%);
 }
 
+.gw-primary-button:not(:disabled):active,
+.gw-secondary-button:not(:disabled):active,
+.gw-topic:active {
+  transform: scale(0.97);
+}
+
 .gw-topic {
   min-height: 40px;
   padding: 0 var(--gw-space-5);
@@ -634,6 +668,8 @@
   border-color: var(--gw-accent);
   background: var(--gw-accent);
   color: var(--gw-secondary);
+  box-shadow: var(--gw-elevation-2);
+  transform: translateY(-1px);
 }
 
 .gw-section-title {
@@ -671,6 +707,7 @@
   align-items: start;
   font-size: inherit;
   line-height: inherit;
+  animation: gw-message-in var(--gw-motion-medium) var(--gw-motion-enter);
 }
 
 .gw-message-assistant {
@@ -713,6 +750,10 @@
   background: var(--gw-panel);
   border: 1px solid color-mix(in srgb, var(--gw-border), transparent 22%);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  transition:
+    border-color var(--gw-motion-fast) var(--gw-motion-standard),
+    box-shadow var(--gw-motion-fast) var(--gw-motion-standard),
+    transform var(--gw-motion-fast) var(--gw-motion-standard);
 }
 
 .gw-message-assistant .gw-message-card {
@@ -775,7 +816,8 @@
   transition:
     background var(--gw-motion-fast) var(--gw-motion-standard),
     border-color var(--gw-motion-fast) var(--gw-motion-standard),
-    color var(--gw-motion-fast) var(--gw-motion-standard);
+    color var(--gw-motion-fast) var(--gw-motion-standard),
+    transform var(--gw-motion-fast) var(--gw-motion-standard);
 }
 
 .gw-inline-action-button:hover,
@@ -788,6 +830,10 @@
 .gw-inline-action-button:focus-visible {
   outline: var(--gw-focus-outline);
   outline-offset: 2px;
+}
+
+.gw-inline-action-button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 .gw-message-user .gw-message-card {
@@ -1129,7 +1175,8 @@
   transition:
     background var(--gw-motion-fast) var(--gw-motion-standard),
     border-color var(--gw-motion-fast) var(--gw-motion-standard),
-    color var(--gw-motion-fast) var(--gw-motion-standard);
+    color var(--gw-motion-fast) var(--gw-motion-standard),
+    transform var(--gw-motion-fast) var(--gw-motion-standard);
 }
 
 .gw-message-action:hover,
@@ -1143,6 +1190,10 @@
 .gw-message-action:focus-visible {
   outline: var(--gw-focus-outline);
   outline-offset: 2px;
+}
+
+.gw-message-action:not(:disabled):active {
+  transform: scale(0.96);
 }
 
 .gw-message-action:disabled {
@@ -1294,6 +1345,16 @@
   border-color: var(--gw-secondary);
   color: var(--gw-header-text);
   font-size: 0;
+}
+
+.gw-composer .gw-primary-button:not(:disabled):hover,
+.gw-composer .gw-primary-button:not(:disabled):focus-visible {
+  box-shadow: var(--gw-elevation-1);
+  transform: translateY(-1px);
+}
+
+.gw-composer .gw-primary-button:not(:disabled):active {
+  transform: scale(0.94);
 }
 
 .gw-composer .gw-primary-button:disabled {

@@ -3,6 +3,26 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+@keyframes gw-message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes gw-toast-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes gw-modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes gw-modal-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @keyframes gw-spin {
   to { transform: rotate(360deg); }
 }
@@ -30,7 +50,12 @@
   }
 
   .gw-typing-dots span,
-  .gw-skeleton-line {
+  .gw-skeleton-line,
+  .gw-message,
+  .gw-panel,
+  .gw-success-banner,
+  .gw-legal-modal-backdrop,
+  .gw-legal-modal-panel {
     animation: none !important;
   }
 }
