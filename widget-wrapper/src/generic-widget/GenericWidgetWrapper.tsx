@@ -164,6 +164,8 @@ export function GenericWidgetWrapper({
   const connection = selectConnection(widgetState);
   const effectiveLoading = selectLoading(widgetState);
   const [loadingDisplayState, setLoadingDisplayState] = useState<LoadingDisplayState>("hidden");
+  const launcherButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const consentRequired = config.consent.requireConsentBeforeMessaging !== false && !consentAccepted;
   const composerDisabledReason = consentRequired
@@ -218,6 +220,12 @@ export function GenericWidgetWrapper({
       window.clearTimeout(slowTimer);
     };
   }, [effectiveLoading]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const focusTimer = window.setTimeout(() => panelRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [isOpen]);
 
   useEffect(() => {
     const validation = sessionManager.validate(restoredSession, config.consent.policyVersion);
@@ -332,6 +340,7 @@ export function GenericWidgetWrapper({
     dispatch({ type: "CLOSE_WIDGET" });
     events.emit(widgetEventTypes.WIDGET_CLOSED, { visitorId, sessionId });
     onClose?.();
+    window.setTimeout(() => launcherButtonRef.current?.focus(), 0);
   };
 
   const handleCountryChange = (countryCode: string) => {
@@ -433,6 +442,7 @@ export function GenericWidgetWrapper({
     <div className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
       {!isOpen ? (
         <FloatingLauncher
+          ref={launcherButtonRef}
           config={config}
           onClick={() => {
             dispatch({ type: "OPEN_WIDGET" });
@@ -443,7 +453,17 @@ export function GenericWidgetWrapper({
       ) : null}
 
       {isOpen ? (
-        <section className={`gw-panel ${showSuccess ? "gw-panel-has-success" : ""} ${consentAccepted ? "gw-panel-consented" : "gw-panel-needs-consent"}`} aria-label={config.brandName}>
+        <section
+          ref={panelRef}
+          className={`gw-panel ${showSuccess ? "gw-panel-has-success" : ""} ${consentAccepted ? "gw-panel-consented" : "gw-panel-needs-consent"}`}
+          role="dialog"
+          aria-modal="false"
+          aria-label={`${config.brandName} assistant widget`}
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeWidget();
+          }}
+        >
           <Header config={config} selectedCountry={selectedCountry} connection={connection} menuOpen={menuOpen} onToggleMenu={() => dispatch({ type: "TOGGLE_MENU" })} onClose={closeWidget} />
           {menuOpen ? <Menu config={config} payload={localePayload} onEscalate={onEscalate} onNewChat={onNewChat} /> : null}
           {showSuccess ? (
@@ -512,12 +532,12 @@ export function GenericWidgetWrapper({
                 onKeyDown={handleComposerKeyDown}
                 placeholder={config.labels.messageInputPlaceholder}
                 disabled={composerDisabled}
-                aria-describedby={composerDisabledReason ? "gw-composer-status" : undefined}
+                aria-describedby={composerDisabledReason ? "gw-composer-status gw-composer-hint" : "gw-composer-hint"}
               />
               <button type="submit" className="gw-primary-button" disabled={!canSendMessage}>{config.labels.sendMessageLabel}</button>
             </div>
             {composerDisabledReason ? <div id="gw-composer-status" className="gw-composer-status">{composerDisabledReason}</div> : null}
-            <div className="gw-composer-hint">Enter to send. Shift + Enter for a new line.</div>
+            <div id="gw-composer-hint" className="gw-composer-hint">Enter to send. Shift + Enter for a new line.</div>
           </form>
         </section>
       ) : null}

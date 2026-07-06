@@ -313,7 +313,7 @@ export function MessageFeed({
   if (renderMessages) return <div className="gw-message-feed">{renderMessages(messages, state)}</div>;
 
   return (
-    <div className="gw-message-feed" role="log" aria-live="polite">
+    <div className="gw-message-feed" role="log" aria-live="polite" aria-busy={loadingState !== "hidden"}>
       {config.welcomeText ? (
         <MessageCard message={{ id: "gw-welcome-message", role: "system", content: config.welcomeText }} config={config} />
       ) : null}

@@ -55,6 +55,10 @@
   animation: gw-panel-in var(--gw-motion-medium) var(--gw-motion-enter);
 }
 
+.gw-panel:focus {
+  outline: none;
+}
+
 .gw-header {
   position: relative;
   min-height: 82px;
@@ -413,6 +417,13 @@
 .gw-legal-item a:focus-visible,
 .gw-legal-link-button:hover,
 .gw-legal-link-button:focus-visible { color: color-mix(in srgb, var(--gw-secondary), var(--gw-accent) 22%); }
+
+.gw-legal-item a:focus-visible,
+.gw-legal-link-button:focus-visible {
+  outline: var(--gw-focus-outline);
+  outline-offset: 3px;
+  border-radius: var(--gw-radius-sm);
+}
 
 .gw-legal-modal {
   position: absolute;
@@ -1039,7 +1050,7 @@
 }
 
 .gw-composer textarea::placeholder {
-  color: #a7a7a7;
+  color: color-mix(in srgb, var(--gw-muted), var(--gw-text) 18%);
 }
 
 .gw-composer .gw-primary-button {
@@ -1081,6 +1092,11 @@
 .gw-composer-tool:disabled {
   opacity: 0.58;
   cursor: not-allowed;
+}
+
+.gw-composer-tool:focus-visible {
+  outline: var(--gw-focus-outline);
+  outline-offset: 2px;
 }
 
 .gw-composer-tool span {
