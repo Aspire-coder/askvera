@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { GenericWidgetConfig, GenericWidgetRenderState, WidgetMessage } from "./types";
 
 type MessageRole = WidgetMessage["role"];
@@ -220,17 +220,98 @@ function assistantMark(config: GenericWidgetConfig): string {
   return label.trim().slice(0, 1) || "A";
 }
 
-function MessageActions() {
+function messageCopyText(message: WidgetMessage): string {
+  if (typeof message.content === "string") return message.content;
+  const copyText = message.metadata?.copyText;
+  return typeof copyText === "string" ? copyText : "";
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function MessageActions({
+  message,
+  state,
+  onCopyMessage,
+  onMessageFeedback
+}: {
+  message: WidgetMessage;
+  state: GenericWidgetRenderState;
+  onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [rating, setRating] = useState<number | null>(null);
+  const copyText = messageCopyText(message);
+
+  const handleCopy = async () => {
+    if (!copyText) return;
+    await copyTextToClipboard(copyText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+    await onCopyMessage?.(message, state);
+  };
+
+  const handleFeedback = async (nextRating: number) => {
+    setRating(nextRating);
+    await onMessageFeedback?.(message, nextRating, state);
+  };
+
   return (
-    <div className="gw-message-actions" aria-hidden="true">
-      <span className="gw-message-action">Copy</span>
-      <span className="gw-message-action">Helpful</span>
-      <span className="gw-message-action">Not helpful</span>
+    <div className="gw-message-actions" aria-label="Message actions">
+      <button type="button" className="gw-message-action" onClick={handleCopy} disabled={!copyText} aria-label="Copy assistant response">
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <button
+        type="button"
+        className={`gw-message-action ${rating === 1 ? "gw-message-action-active" : ""}`}
+        onClick={() => void handleFeedback(1)}
+        aria-label="Mark response as helpful"
+        aria-pressed={rating === 1}
+      >
+        Helpful
+      </button>
+      <button
+        type="button"
+        className={`gw-message-action ${rating === -1 ? "gw-message-action-active" : ""}`}
+        onClick={() => void handleFeedback(-1)}
+        aria-label="Mark response as not helpful"
+        aria-pressed={rating === -1}
+      >
+        Not helpful
+      </button>
+      {copied ? <span className="gw-sr-only" role="status">Response copied.</span> : null}
     </div>
   );
 }
 
-function MessageCard({ message, config }: { message: WidgetMessage; config: GenericWidgetConfig }) {
+function MessageCard({
+  message,
+  config,
+  state,
+  onCopyMessage,
+  onMessageFeedback
+}: {
+  message: WidgetMessage;
+  config: GenericWidgetConfig;
+  state: GenericWidgetRenderState;
+  onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+}) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
   const label = roleLabel(message.role, config);
@@ -250,7 +331,14 @@ function MessageCard({ message, config }: { message: WidgetMessage; config: Gene
           <time>{formatMessageTimestamp(message.timestamp)}</time>
         </header>
         <div className="gw-message-body">{content}</div>
-        {isAssistant ? <MessageActions /> : null}
+        {isAssistant ? (
+          <MessageActions
+            message={message}
+            state={state}
+            onCopyMessage={onCopyMessage}
+            onMessageFeedback={onMessageFeedback}
+          />
+        ) : null}
       </div>
     </article>
   );
@@ -301,7 +389,9 @@ export function MessageFeed({
   state,
   renderMessages,
   loadingState = "hidden",
-  loadingLabel
+  loadingLabel,
+  onCopyMessage,
+  onMessageFeedback
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
@@ -309,16 +399,31 @@ export function MessageFeed({
   renderMessages?: (messages: WidgetMessage[], state: GenericWidgetRenderState) => ReactNode;
   loadingState?: LoadingDisplayState;
   loadingLabel?: ReactNode;
+  onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   if (renderMessages) return <div className="gw-message-feed">{renderMessages(messages, state)}</div>;
 
   return (
     <div className="gw-message-feed" role="log" aria-live="polite" aria-busy={loadingState !== "hidden"}>
       {config.welcomeText ? (
-        <MessageCard message={{ id: "gw-welcome-message", role: "system", content: config.welcomeText }} config={config} />
+        <MessageCard
+          message={{ id: "gw-welcome-message", role: "system", content: config.welcomeText }}
+          config={config}
+          state={state}
+          onCopyMessage={onCopyMessage}
+          onMessageFeedback={onMessageFeedback}
+        />
       ) : null}
       {messages.map((message) => (
-        <MessageCard key={message.id} message={message} config={config} />
+        <MessageCard
+          key={message.id}
+          message={message}
+          config={config}
+          state={state}
+          onCopyMessage={onCopyMessage}
+          onMessageFeedback={onMessageFeedback}
+        />
       ))}
       {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}
     </div>

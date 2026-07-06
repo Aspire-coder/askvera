@@ -10,6 +10,7 @@ import {
   loadConfig,
   loadPrivacy,
   sendMessage,
+  submitFeedback,
   submitConsent,
   type ConfigResponseData,
   type LegalDocument
@@ -18,7 +19,7 @@ import { buildWidgetConfig, type BackendConfig } from "../../config";
 import { widgetEventBus, widgetEventTypes } from "../../events";
 import { createAnalyticsService } from "../../services";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
-import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
+import type { ConsentEventPayload, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
 
 type ChatErrorCategory =
@@ -479,6 +480,35 @@ export function BackendChatDemo({
     await sendChat(payload);
   };
 
+  const handleMessageFeedback = async (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => {
+    try {
+      await submitFeedback(apiClient, {
+        sessionId: state.sessionId,
+        messageId: message.id,
+        rating,
+        metadata: {
+          country: state.selectedCountry?.code,
+          language: state.selectedLanguage?.code,
+          correlationId: message.metadata?.correlationId,
+          confidence: message.metadata?.confidence
+        }
+      });
+      widgetEventBus.emit(widgetEventTypes.FEEDBACK_SUBMITTED, {
+        visitorId: state.visitorId,
+        sessionId: state.sessionId,
+        correlationId: typeof message.metadata?.correlationId === "string" ? message.metadata.correlationId : undefined,
+        metadata: { messageId: message.id, rating }
+      });
+    } catch (error) {
+      widgetEventBus.emit(widgetEventTypes.API_ERROR, {
+        visitorId: state.visitorId,
+        sessionId: state.sessionId,
+        error: describeApiError(error),
+        metadata: { action: "message_feedback", messageId: message.id, rating }
+      });
+    }
+  };
+
   return (
     <GenericWidgetWrapper
       config={config}
@@ -494,6 +524,7 @@ export function BackendChatDemo({
       onCountryChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={handleMessage}
+      onMessageFeedback={handleMessageFeedback}
       onNewChat={() =>
         setMessages([
           {

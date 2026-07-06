@@ -977,12 +977,37 @@
   display: inline-flex;
   align-items: center;
   min-height: 28px;
+  border: 1px solid transparent;
   border-radius: var(--gw-radius-pill);
   padding: 0 var(--gw-space-3);
   background: var(--gw-surface);
   color: var(--gw-muted);
+  font: inherit;
   font-size: var(--gw-text-caption-size);
   font-weight: var(--gw-weight-semibold);
+  cursor: pointer;
+  transition:
+    background var(--gw-motion-fast) var(--gw-motion-standard),
+    border-color var(--gw-motion-fast) var(--gw-motion-standard),
+    color var(--gw-motion-fast) var(--gw-motion-standard);
+}
+
+.gw-message-action:hover,
+.gw-message-action:focus-visible,
+.gw-message-action-active {
+  border-color: color-mix(in srgb, var(--gw-accent), transparent 30%);
+  background: color-mix(in srgb, var(--gw-accent), transparent 82%);
+  color: var(--gw-secondary);
+}
+
+.gw-message-action:focus-visible {
+  outline: var(--gw-focus-outline);
+  outline-offset: 2px;
+}
+
+.gw-message-action:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 .gw-message-loading .gw-message-card {

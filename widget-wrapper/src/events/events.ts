@@ -18,6 +18,9 @@ export type WidgetEventPayloadMap = {
   MESSAGE_RECEIVED: BaseWidgetEventPayload & { message: WidgetMessage };
   MESSAGE_FAILED: BaseWidgetEventPayload & { error: string };
   MESSAGE_RETRIED: BaseWidgetEventPayload & { message: MessageEventPayload };
+  MESSAGE_COPIED: BaseWidgetEventPayload & { message: WidgetMessage };
+  MESSAGE_HELPFUL: BaseWidgetEventPayload & { message: WidgetMessage; rating: number };
+  MESSAGE_NOT_HELPFUL: BaseWidgetEventPayload & { message: WidgetMessage; rating: number };
   CONSENT_REQUIRED: BaseWidgetEventPayload & { reason?: string };
   CONSENT_ACCEPTED: BaseWidgetEventPayload & { consent: ConsentEventPayload };
   CONSENT_REJECTED: BaseWidgetEventPayload & { consent: ConsentEventPayload };

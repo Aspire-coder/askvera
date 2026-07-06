@@ -5,7 +5,7 @@ import { Header } from "./Header";
 import { Menu } from "./Menu";
 import { MessageFeed, type LoadingDisplayState } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
-import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetTheme } from "./types";
+import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetMessage, WidgetTheme } from "./types";
 import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
 import { createSessionManager } from "../services";
 import { buildThemeVars } from "../themes";
@@ -62,6 +62,8 @@ export function GenericWidgetWrapper({
   onCountryChange,
   onLanguageChange,
   onSendMessage,
+  onMessageCopied,
+  onMessageFeedback,
   onEscalate,
   onNewChat
 }: GenericWidgetWrapperProps) {
@@ -419,6 +421,33 @@ export function GenericWidgetWrapper({
     if (canSendMessage) event.currentTarget.form?.requestSubmit();
   };
 
+  const messageCorrelationId = (message: WidgetMessage) =>
+    typeof message.metadata?.correlationId === "string" ? message.metadata.correlationId : undefined;
+
+  const handleMessageCopied = async (message: WidgetMessage, renderState: GenericWidgetRenderState) => {
+    events.emit(widgetEventTypes.MESSAGE_COPIED, {
+      visitorId,
+      sessionId,
+      correlationId: messageCorrelationId(message),
+      message,
+      metadata: { messageId: message.id }
+    });
+    await onMessageCopied?.(message, renderState);
+  };
+
+  const handleMessageFeedback = async (message: WidgetMessage, rating: number, renderState: GenericWidgetRenderState) => {
+    const eventType = rating > 0 ? widgetEventTypes.MESSAGE_HELPFUL : widgetEventTypes.MESSAGE_NOT_HELPFUL;
+    events.emit(eventType, {
+      visitorId,
+      sessionId,
+      correlationId: messageCorrelationId(message),
+      message,
+      rating,
+      metadata: { messageId: message.id }
+    });
+    await onMessageFeedback?.(message, rating, renderState);
+  };
+
   useEffect(() => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
@@ -503,6 +532,8 @@ export function GenericWidgetWrapper({
                 renderMessages={renderMessages}
                 loadingState={effectiveLoadingDisplayState}
                 loadingLabel={loadingLabel}
+                onCopyMessage={handleMessageCopied}
+                onMessageFeedback={handleMessageFeedback}
               />
             ) : null}
             {chatContentVisible && suggestedTopics.length ? (
