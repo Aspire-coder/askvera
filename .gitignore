@@ -52,6 +52,8 @@ app/*
 !app/validation/validators/*.py
 !app/utils/
 !app/utils/*.py
+!app/widget_auth/
+!app/widget_auth/*.py
 .codex/
 graphify-out/
 output/
