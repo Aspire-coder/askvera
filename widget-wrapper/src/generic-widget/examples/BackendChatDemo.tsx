@@ -40,6 +40,7 @@ type ChatErrorPresentation = {
 
 export type BackendChatDemoProps = {
   apiBaseUrl?: string;
+  authToken?: string;
   openSignal?: number;
   closeSignal?: number;
   resetSignal?: number;
@@ -204,6 +205,7 @@ function ErrorMessageContent({
 
 export function BackendChatDemo({
   apiBaseUrl = "https://api.vera-api.xyz",
+  authToken,
   openSignal = 0,
   closeSignal = 0,
   resetSignal = 0,
@@ -220,7 +222,7 @@ export function BackendChatDemo({
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
-  const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
+  const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken }), [apiBaseUrl, authToken]);
   const widgetConfig = useMemo(
     () => {
       const backendConfig: BackendConfig | undefined = apiConfig

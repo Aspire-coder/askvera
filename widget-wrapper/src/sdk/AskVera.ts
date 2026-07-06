@@ -2,6 +2,7 @@ import type { RuntimeConfig } from "../config";
 import { defaultRuntimeConfig } from "../config";
 import { widgetEventBus, widgetEventTypes, type WidgetEventListener, type WidgetEventSubscription, type WidgetEventType } from "../events";
 import { createSessionManager, type WidgetSessionMetadata } from "../services";
+import { authenticateWidget } from "./auth";
 import { mountWidget, type MountedWidget } from "./mount";
 
 const SDK_VERSION = "1.0.0";
@@ -90,12 +91,18 @@ class AskVeraSdkImpl implements AskVeraSdk {
   };
 
   async init(config: Partial<AskVeraRuntimeConfig> = {}) {
+    const nextConfig = {
+      ...this.state.config,
+      ...config,
+      apiUrl: config.apiUrl || this.state.config.apiUrl
+    };
+    const auth = await authenticateWidget(nextConfig);
     this.state = {
       ...this.state,
       config: {
-        ...this.state.config,
-        ...config,
-        apiUrl: config.apiUrl || this.state.config.apiUrl
+        ...nextConfig,
+        widgetAuthToken: auth.token,
+        widgetAuthExpiresAt: auth.expiresAt
       },
       country: config.defaultCountry || this.state.country,
       language: config.defaultLanguage || this.state.language,

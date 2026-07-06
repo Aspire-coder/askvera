@@ -10,6 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.orchestrator import ConsentRequiredError, ai_orchestrator
 from app.response import ChatResponse
+from app.widget_auth import WidgetInitRequest, widget_auth_service
+from app.widget_auth.service import WidgetAuthError
 from config import settings
 from services import cache as cache_service
 from services.consent_service import record_consent
@@ -56,6 +58,25 @@ def consent_required_response(correlation_id: str) -> JSONResponse:
         correlationId=correlation_id,
     )
     return JSONResponse(status_code=403, content=envelope.model_dump())
+
+
+@router.post("/api/widget/init", response_model=None)
+def widget_init(body: WidgetInitRequest, request: Request) -> Envelope | JSONResponse:
+    """Initialize a short-lived authenticated widget session."""
+    correlation_id = _correlation_id(request)
+    origin_header = request.headers.get("origin")
+    if origin_header and origin_header.rstrip("/") != body.origin:
+        envelope = Envelope(
+            success=False,
+            error={"code": "WIDGET_AUTH_FAILED", "message": "Widget origin could not be verified."},
+            correlationId=correlation_id,
+        )
+        return JSONResponse(status_code=403, content=envelope.model_dump())
+    try:
+        result = widget_auth_service.initialize(body, correlation_id)
+        return success(result.model_dump(), correlation_id)
+    except WidgetAuthError as exc:
+        return error_response(exc, correlation_id)
 
 
 def _valid_language_codes(country_code: str) -> set[str]:

@@ -15,6 +15,8 @@ from app.audit.sinks.firehose import initialize_firehose_sink
 from app.middleware.audit import AuditMiddleware
 from app.middleware.correlation import CorrelationIdMiddleware
 from app.monitoring.initializer import initialize_monitoring
+from app.widget_auth.middleware import WidgetAuthMiddleware
+from app.widget_auth import widget_auth_service
 from config import settings
 from scripts.validate_config import validate
 from services.aws_clients import init_aws_clients
@@ -70,6 +72,12 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     missing = validate()
     if missing:
         raise ConfigurationError(f"Missing required config values: {', '.join(missing)}")
+    widget_auth_service.reload()
+    LOGGER.info(
+        "widget_auth_ready",
+        enabled=settings.WIDGET_AUTH_REQUIRED,
+        protected_path_count=len(settings.WIDGET_AUTH_PROTECTED_PATHS),
+    )
     market_config = load_market_config()
     LOGGER.info("market_config_loaded", market_count=len(market_config["markets"]))
     signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -102,5 +110,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(AuditMiddleware)
+app.add_middleware(WidgetAuthMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 app.include_router(router)

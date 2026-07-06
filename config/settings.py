@@ -78,6 +78,34 @@ AWS_MAX_ATTEMPTS = 3
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
 RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback"]
+# Widget authentication. Keep disabled by default for local/dev until production
+# registry values and JWT secret are configured.
+WIDGET_AUTH_REQUIRED = _env_bool("WIDGET_AUTH_REQUIRED", False)
+WIDGET_JWT_SECRET = _env_str("WIDGET_JWT_SECRET", "dev-only-change-before-production")
+WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
+WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/privacy", "/api/config"]
+WIDGET_REGISTRY_JSON = _env_str(
+    "WIDGET_REGISTRY_JSON",
+    json.dumps(
+        [
+            {
+                "widgetId": "askvera-demo",
+                "publishableKey": "pk_demo_askvera",
+                "organizationId": "askvera",
+                "companyName": "ASK Vera",
+                "allowedOrigins": [
+                    "http://localhost:5174",
+                    "http://127.0.0.1:5174",
+                    "http://localhost:5175",
+                    "http://127.0.0.1:5175",
+                    "https://chat.vera-api.xyz",
+                    "https://vera-api.xyz",
+                ],
+                "status": "active",
+            }
+        ]
+    ),
+)
 # Bedrock Knowledge Base ID. Found in Bedrock -> Knowledge Bases -> your KB -> Knowledge base ID.
 BEDROCK_KB_ID = "P482AUAHKM"
 # Bedrock data source ID. Found in Bedrock -> Knowledge Bases -> Data sources.

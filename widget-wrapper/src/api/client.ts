@@ -8,6 +8,7 @@ export type ApiClientOptions = {
   baseUrl: string;
   timeoutMs?: number;
   interceptor?: ApiInterceptor;
+  authToken?: string | (() => string | undefined);
 };
 
 export type ApiClient = {
@@ -67,11 +68,14 @@ function createErrorFromEnvelope<T>(response: Response, envelope: ApiEnvelope<T>
 export function createApiClient({
   baseUrl,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  interceptor = noopApiInterceptor
+  interceptor = noopApiInterceptor,
+  authToken
 }: ApiClientOptions): ApiClient {
   const request = async <T>(path: string, init: RequestInit, metadata?: RequestMetadata) => {
+    const token = typeof authToken === "function" ? authToken() : authToken;
     const headers = {
       ...(metadata?.correlationId ? { "X-Correlation-ID": metadata.correlationId } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(metadata?.headers || {}),
       ...(init.headers || {})
     };

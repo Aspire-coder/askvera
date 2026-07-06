@@ -8,3 +8,5 @@ export type {
   SessionStorageKeys,
   WidgetSessionMetadata
 } from "./sessionManager";
+export { createWidgetSessionStore, WidgetSessionStore } from "./widgetSession";
+export type { WidgetAuthSession } from "./widgetSession";
