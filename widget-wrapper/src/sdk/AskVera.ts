@@ -5,12 +5,18 @@ import { createSessionManager, type WidgetSessionMetadata } from "../services";
 import { mountWidget, type MountedWidget } from "./mount";
 
 const SDK_VERSION = "1.0.0";
+const SDK_NAME = "@askvera/widget";
 const SDK_SESSION_KEYS = {
   visitorStorageKey: "askvera_visitor_id",
   sessionStorageKey: "askvera_session_id",
   sessionMetadataStorageKey: "askvera_session_metadata",
   consentStorageKey: "forever-style-widget-demo-consent"
 };
+
+declare const __ASKVERA_SDK_NAME__: string | undefined;
+declare const __ASKVERA_SDK_VERSION__: string | undefined;
+declare const __ASKVERA_BUILD_DATE__: string | undefined;
+declare const __ASKVERA_BUILD_COMMIT__: string | undefined;
 
 export type AskVeraRuntimeConfig = RuntimeConfig & {
   mountTarget?: string | HTMLElement;
@@ -19,6 +25,13 @@ export type AskVeraRuntimeConfig = RuntimeConfig & {
 export type AskVeraPlugin = {
   name: string;
   install: (api: AskVeraSdk) => void | Promise<void>;
+};
+
+export type AskVeraBuildInfo = {
+  sdk: string;
+  version: string;
+  buildDate: string;
+  commit: string;
 };
 
 export type SdkRenderState = {
@@ -53,6 +66,7 @@ export type AskVeraSdk = {
   isOpen(): boolean;
   isReady(): boolean;
   getVersion(): string;
+  getBuildInfo(): AskVeraBuildInfo;
   getConfig(): AskVeraRuntimeConfig;
   use(plugin: AskVeraPlugin): Promise<void>;
 };
@@ -209,6 +223,15 @@ class AskVeraSdkImpl implements AskVeraSdk {
 
   getVersion() {
     return SDK_VERSION;
+  }
+
+  getBuildInfo() {
+    return {
+      sdk: typeof __ASKVERA_SDK_NAME__ === "string" ? __ASKVERA_SDK_NAME__ : SDK_NAME,
+      version: typeof __ASKVERA_SDK_VERSION__ === "string" ? __ASKVERA_SDK_VERSION__ : SDK_VERSION,
+      buildDate: typeof __ASKVERA_BUILD_DATE__ === "string" ? __ASKVERA_BUILD_DATE__ : "development",
+      commit: typeof __ASKVERA_BUILD_COMMIT__ === "string" ? __ASKVERA_BUILD_COMMIT__ : "unknown"
+    };
   }
 
   getConfig() {

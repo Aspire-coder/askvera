@@ -1,8 +1,62 @@
-# Generic Widget Wrapper
+# ASK Vera Widget SDK
 
-Reusable React + TypeScript widget shell for wrapping any assistant, iframe, third-party script, or custom message feed.
+Reusable React + TypeScript widget SDK for embedding ASK Vera or another assistant experience into a host website.
 
 The implementation is generic. No brand-specific text, country list, language list, consent copy, response text, product copy, or starter content is hardcoded in the components. Visible content comes from `config` or caller-provided children/render functions.
+
+## Documentation
+
+Developer documentation lives in:
+
+```text
+docs/
+```
+
+Start here:
+
+- `docs/GettingStarted.md`
+- `docs/Installation.md`
+- `docs/SDK.md`
+- `docs/Configuration.md`
+- `docs/Themes.md`
+- `docs/Events.md`
+- `docs/Plugins.md`
+- `docs/Deployment.md`
+- `docs/Security.md`
+- `docs/Troubleshooting.md`
+- `docs/ReleaseNotes.md`
+- `docs/Architecture.md`
+
+## SDK Usage
+
+```ts
+import { AskVera } from "@askvera/widget";
+import "@askvera/widget/styles.css";
+
+await AskVera.init({
+  apiUrl: "https://api.vera-api.xyz"
+});
+
+AskVera.open();
+```
+
+For script-tag usage:
+
+```html
+<link rel="stylesheet" href="./widget.min.css" />
+<script src="./widget.min.js"></script>
+<script>
+  window.AskVera.init({
+    apiUrl: "https://api.vera-api.xyz"
+  });
+</script>
+```
+
+Build diagnostics:
+
+```ts
+AskVera.getBuildInfo();
+```
 
 ## AWS-Connected Demo
 

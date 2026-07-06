@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, and 1.11 are complete.
+Steps 1.1 through 1.12 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -1163,3 +1163,52 @@ tsconfig.types.json
 This completes the engineering packaging layer required for another team to consume ASK Vera without building from source.
 
 Step 1.12 should focus on documentation for installation, configuration, SDK usage, themes, events, plugins, deployment, troubleshooting, and release notes.
+
+## Step 1.12 Implementation Notes
+
+Step 1.12 added the developer documentation set.
+
+New documentation files:
+
+```text
+docs/
+  Architecture.md
+  Configuration.md
+  Deployment.md
+  Events.md
+  GettingStarted.md
+  Installation.md
+  Plugins.md
+  ReleaseNotes.md
+  SDK.md
+  Security.md
+  Themes.md
+  Troubleshooting.md
+```
+
+The documentation now covers:
+
+- local setup
+- package installation
+- SDK usage
+- runtime configuration
+- theme configuration
+- event subscriptions
+- plugin registration
+- deployment outputs
+- security boundaries
+- troubleshooting
+- release notes
+- architecture rules
+
+The root README now links to the documentation set and shows both module and script-tag usage.
+
+The SDK also exposes build diagnostics through:
+
+```ts
+AskVera.getBuildInfo()
+```
+
+This returns the SDK package name, version, build date, and commit value when supplied by the build environment.
+
+Sprint 9.1 is now complete. The widget has a reusable architecture, public SDK, production build pipeline, and developer documentation.
