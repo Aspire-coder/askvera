@@ -12,6 +12,7 @@ from utils.logging import get_logger
 
 from .jwt import encode_widget_token
 from .models import WidgetAuthClaims, WidgetInitRequest, WidgetInitResponse, WidgetRegistration
+from .origin_validator import is_origin_allowed
 
 LOGGER = get_logger("app.widget_auth.service")
 
@@ -51,12 +52,11 @@ class WidgetAuthService:
         """Return a widget registration by ID."""
         return self._registry.get(widget_id)
 
-    def validate_origin(self, registration: WidgetRegistration, origin: str) -> bool:
-        """Return True if the origin is exactly allowed for this widget."""
-        normalized_origin = origin.strip().rstrip("/")
-        return normalized_origin in registration.allowedOrigins
+    def validate_origin(self, registration: WidgetRegistration, origin: str | None) -> bool:
+        """Return True if the origin is allowed for this widget."""
+        return is_origin_allowed(origin, registration.allowedOrigins).allowed
 
-    def initialize(self, request: WidgetInitRequest, correlation_id: str) -> WidgetInitResponse:
+    def initialize(self, request: WidgetInitRequest, correlation_id: str, client_ip: str | None = None) -> WidgetInitResponse:
         """Validate widget credentials and issue a short-lived widget JWT."""
         registration = self.get_registration(request.widgetId)
         if registration is None:
@@ -71,12 +71,15 @@ class WidgetAuthService:
             LOGGER.warning("widget_auth_key_mismatch", correlation_id=correlation_id, widget_id=request.widgetId)
             raise WidgetAuthError()
 
-        if not self.validate_origin(registration, request.origin):
+        origin_validation = is_origin_allowed(request.origin, registration.allowedOrigins)
+        if not origin_validation.allowed:
             LOGGER.warning(
                 "widget_auth_origin_denied",
                 correlation_id=correlation_id,
                 widget_id=request.widgetId,
                 origin=request.origin,
+                ip_address=client_ip,
+                reason=origin_validation.reason,
             )
             raise WidgetAuthError()
 
@@ -87,12 +90,17 @@ class WidgetAuthService:
             widgetId=registration.widgetId,
             organizationId=registration.organizationId,
             companyName=registration.companyName,
-            origin=request.origin,
+            origin=origin_validation.normalized_origin,
             sessionId=session_id,
             iat=issued_at,
             exp=expires_at,
         )
-        LOGGER.info("widget_auth_initialized", correlation_id=correlation_id, widget_id=registration.widgetId, origin=request.origin)
+        LOGGER.info(
+            "widget_auth_initialized",
+            correlation_id=correlation_id,
+            widget_id=registration.widgetId,
+            origin=origin_validation.normalized_origin,
+        )
         return WidgetInitResponse(
             token=encode_widget_token(claims.model_dump()),
             expiresIn=settings.WIDGET_JWT_TTL_SECONDS,

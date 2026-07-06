@@ -11,6 +11,7 @@ from utils.logging import get_logger
 from utils.validators import Envelope
 
 from .jwt import WidgetTokenError, decode_widget_token
+from .origin_validator import is_origin_allowed, normalize_origin
 from .service import widget_auth_service
 
 LOGGER = get_logger("app.widget_auth.middleware")
@@ -52,7 +53,28 @@ class WidgetAuthMiddleware(BaseHTTPMiddleware):
             return _unauthorized(_correlation_id(request), "Widget is not active.")
 
         origin = str(claims.get("origin", ""))
-        if not widget_auth_service.validate_origin(registration, origin):
+        request_origin = request.headers.get("origin")
+        if request_origin and normalize_origin(request_origin) != normalize_origin(origin):
+            LOGGER.warning(
+                "widget_auth_token_origin_mismatch",
+                correlation_id=_correlation_id(request),
+                widget_id=registration.widgetId,
+                origin=request_origin,
+                token_origin=origin,
+                path=request.url.path,
+            )
+            return _unauthorized(_correlation_id(request), "Widget origin is not allowed.")
+
+        origin_validation = is_origin_allowed(origin, registration.allowedOrigins)
+        if not origin_validation.allowed:
+            LOGGER.warning(
+                "widget_auth_token_origin_denied",
+                correlation_id=_correlation_id(request),
+                widget_id=registration.widgetId,
+                origin=origin,
+                reason=origin_validation.reason,
+                path=request.url.path,
+            )
             return _unauthorized(_correlation_id(request), "Widget origin is not allowed.")
 
         request.state.widget_auth = claims

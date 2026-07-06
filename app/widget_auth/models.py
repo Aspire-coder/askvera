@@ -34,12 +34,14 @@ class WidgetInitRequest(BaseModel):
 
     widgetId: str = Field(min_length=1, max_length=128)
     publishableKey: str = Field(min_length=1, max_length=256)
-    origin: str = Field(min_length=1, max_length=512)
+    origin: str | None = Field(default=None, min_length=1, max_length=512)
 
     @field_validator("origin")
     @classmethod
-    def normalize_origin(cls, value: str) -> str:
+    def normalize_origin(cls, value: str | None) -> str | None:
         """Normalize the client-provided origin for registry comparison."""
+        if value is None:
+            return None
         return value.strip().rstrip("/")
 
 

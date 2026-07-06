@@ -65,7 +65,24 @@ def widget_init(body: WidgetInitRequest, request: Request) -> Envelope | JSONRes
     """Initialize a short-lived authenticated widget session."""
     correlation_id = _correlation_id(request)
     origin_header = request.headers.get("origin")
-    if origin_header and origin_header.rstrip("/") != body.origin:
+    if not origin_header and not body.origin:
+        LOGGER.warning("widget_auth_origin_missing", correlation_id=correlation_id, ip_address=request.client.host if request.client else None)
+        envelope = Envelope(
+            success=False,
+            error={"code": "WIDGET_AUTH_FAILED", "message": "Widget origin could not be verified."},
+            correlationId=correlation_id,
+        )
+        return JSONResponse(status_code=403, content=envelope.model_dump())
+
+    if origin_header and body.origin and origin_header.rstrip("/") != body.origin:
+        LOGGER.warning(
+            "widget_auth_origin_mismatch",
+            correlation_id=correlation_id,
+            widget_id=body.widgetId,
+            origin=origin_header,
+            body_origin=body.origin,
+            ip_address=request.client.host if request.client else None,
+        )
         envelope = Envelope(
             success=False,
             error={"code": "WIDGET_AUTH_FAILED", "message": "Widget origin could not be verified."},
@@ -73,7 +90,12 @@ def widget_init(body: WidgetInitRequest, request: Request) -> Envelope | JSONRes
         )
         return JSONResponse(status_code=403, content=envelope.model_dump())
     try:
-        result = widget_auth_service.initialize(body, correlation_id)
+        effective_origin = origin_header or body.origin
+        result = widget_auth_service.initialize(
+            body.model_copy(update={"origin": effective_origin}),
+            correlation_id,
+            request.client.host if request.client else None,
+        )
         return success(result.model_dump(), correlation_id)
     except WidgetAuthError as exc:
         return error_response(exc, correlation_id)

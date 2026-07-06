@@ -57,6 +57,8 @@ AWS_ACCOUNT_ID = "615592621509"
 BEDROCK_REGION = AWS_REGION
 # Public API version returned by /health. Found in release notes or deployment tag.
 APP_VERSION = "1.0.0"
+# Runtime environment. Production disables development-only auth conveniences.
+APP_ENV = _env_str("APP_ENV", "development").lower()
 # Prompt/cache version values used to invalidate stale AI responses after content or policy changes.
 PROMPT_VERSION = "2026-06-29"
 KB_VERSION = "2026-06-29"
@@ -84,6 +86,7 @@ WIDGET_AUTH_REQUIRED = _env_bool("WIDGET_AUTH_REQUIRED", False)
 WIDGET_JWT_SECRET = _env_str("WIDGET_JWT_SECRET", "dev-only-change-before-production")
 WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
 WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/privacy", "/api/config"]
+WIDGET_ALLOW_LOCALHOST_ORIGINS = _env_bool("WIDGET_ALLOW_LOCALHOST_ORIGINS", APP_ENV != "production")
 WIDGET_REGISTRY_JSON = _env_str(
     "WIDGET_REGISTRY_JSON",
     json.dumps(
@@ -94,6 +97,10 @@ WIDGET_REGISTRY_JSON = _env_str(
                 "organizationId": "askvera",
                 "companyName": "ASK Vera",
                 "allowedOrigins": [
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "http://localhost:4173",
+                    "http://127.0.0.1:4173",
                     "http://localhost:5174",
                     "http://127.0.0.1:5174",
                     "http://localhost:5175",
