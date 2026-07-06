@@ -660,6 +660,28 @@ Improve:
 - disabled explanations
 - attachment/microphone placeholders
 
+Status: complete.
+
+Implementation files:
+
+```text
+src/generic-widget/GenericWidgetWrapper.tsx
+src/generic-widget/generic-widget.css
+```
+
+Composer improvements:
+
+- single-line input replaced with an auto-resizing textarea
+- Enter sends the message and Shift + Enter inserts a new line
+- send behavior still uses the existing `onSendMessage` flow
+- composer explains disabled states for privacy consent and in-flight responses
+- send button is disabled until a message can actually be sent
+- attachment and voice slots are reserved as disabled future controls
+- textarea, shell, controls, focus state, and helper text use design-system tokens
+- mobile layout preserves the attachment slot and hides the lower-priority voice placeholder
+
+No API, state architecture, consent, or message delivery behavior changed.
+
 ### Step 2.6 - Loading And Typing
 
 Replace generic spinner with:
