@@ -23,6 +23,27 @@ class WidgetTokenError(AskVeraError):
         super().__init__(message)
 
 
+class WidgetTokenRevokedError(WidgetTokenError):
+    """Raised when a token has been explicitly revoked."""
+
+    def __init__(self) -> None:
+        super().__init__("Widget session token has been revoked.")
+
+
+_REVOKED_TOKEN_IDS: set[str] = set()
+
+
+def revoke_widget_token_id(jti: str) -> None:
+    """Revoke a widget token ID for the current process."""
+    if jti:
+        _REVOKED_TOKEN_IDS.add(jti)
+
+
+def is_widget_token_revoked(jti: str | None) -> bool:
+    """Return True when a widget token ID is revoked."""
+    return bool(jti and jti in _REVOKED_TOKEN_IDS)
+
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
@@ -67,7 +88,27 @@ def decode_widget_token(token: str) -> dict[str, Any]:
     if header.get("alg") != "HS256":
         raise WidgetTokenError()
 
-    if int(payload.get("exp", 0)) <= int(time()):
+    if payload.get("iss") != settings.WIDGET_JWT_ISSUER:
+        raise WidgetTokenError("Widget token issuer is invalid.")
+
+    if payload.get("aud") != settings.WIDGET_JWT_AUDIENCE:
+        raise WidgetTokenError("Widget token audience is invalid.")
+
+    if payload.get("sub") != "widget-session":
+        raise WidgetTokenError("Widget token subject is invalid.")
+
+    if is_widget_token_revoked(payload.get("jti")):
+        raise WidgetTokenRevokedError()
+
+    now = int(time())
+    skew = settings.WIDGET_JWT_CLOCK_SKEW_SECONDS
+    if int(payload.get("nbf", 0)) > now + skew:
+        raise WidgetTokenError("Widget token is not valid yet.")
+
+    if int(payload.get("iat", 0)) > now + skew:
+        raise WidgetTokenError("Widget token issued-at time is invalid.")
+
+    if int(payload.get("exp", 0)) <= now - skew:
         raise WidgetTokenError()
 
     return payload

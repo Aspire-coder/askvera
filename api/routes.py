@@ -10,7 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.orchestrator import ConsentRequiredError, ai_orchestrator
 from app.response import ChatResponse
-from app.widget_auth import WidgetInitRequest, widget_auth_service
+from app.widget_auth import WidgetInitRequest, WidgetRefreshRequest, widget_auth_service
+from app.widget_auth.jwt import WidgetTokenError
 from app.widget_auth.service import WidgetAuthError
 from config import settings
 from services import cache as cache_service
@@ -97,6 +98,19 @@ def widget_init(body: WidgetInitRequest, request: Request) -> Envelope | JSONRes
             request.client.host if request.client else None,
         )
         return success(result.model_dump(), correlation_id)
+    except WidgetAuthError as exc:
+        return error_response(exc, correlation_id)
+
+
+@router.post("/api/widget/refresh", response_model=None)
+def widget_refresh(body: WidgetRefreshRequest, request: Request) -> Envelope | JSONResponse:
+    """Refresh a short-lived authenticated widget session token."""
+    correlation_id = _correlation_id(request)
+    try:
+        result = widget_auth_service.refresh(body.token, correlation_id, request.headers.get("origin"))
+        return success(result.model_dump(), correlation_id)
+    except WidgetTokenError as exc:
+        return error_response(exc, correlation_id)
     except WidgetAuthError as exc:
         return error_response(exc, correlation_id)
 

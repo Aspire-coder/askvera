@@ -14,7 +14,11 @@ export class WidgetSessionStore {
       const raw = window.sessionStorage.getItem(this.storageKey);
       if (!raw) return undefined;
       const session = JSON.parse(raw) as WidgetAuthSession;
-      return session.expiresAt > Date.now() ? session : undefined;
+      if (!session.expiresAt || session.expiresAt <= Date.now()) {
+        this.clear();
+        return undefined;
+      }
+      return session;
     } catch {
       return undefined;
     }

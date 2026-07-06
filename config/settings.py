@@ -85,6 +85,9 @@ RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback"]
 WIDGET_AUTH_REQUIRED = _env_bool("WIDGET_AUTH_REQUIRED", False)
 WIDGET_JWT_SECRET = _env_str("WIDGET_JWT_SECRET", "dev-only-change-before-production")
 WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
+WIDGET_JWT_ISSUER = _env_str("WIDGET_JWT_ISSUER", "ask-vera")
+WIDGET_JWT_AUDIENCE = _env_str("WIDGET_JWT_AUDIENCE", "widget-api")
+WIDGET_JWT_CLOCK_SKEW_SECONDS = _env_int("WIDGET_JWT_CLOCK_SKEW_SECONDS", 60)
 WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/privacy", "/api/config"]
 WIDGET_ALLOW_LOCALHOST_ORIGINS = _env_bool("WIDGET_ALLOW_LOCALHOST_ORIGINS", APP_ENV != "production")
 WIDGET_REGISTRY_JSON = _env_str(

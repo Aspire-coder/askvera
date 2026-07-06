@@ -1,4 +1,4 @@
-import { createApiClient, initializeWidget } from "../api";
+import { createApiClient, initializeWidget, refreshWidget } from "../api";
 import { createWidgetSessionStore, type WidgetAuthSession } from "../services";
 import type { AskVeraRuntimeConfig } from "./AskVera";
 
@@ -22,6 +22,18 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig): Promise<
   }
 
   const client = createApiClient({ baseUrl: config.apiUrl });
+  if (existing && existing.widgetId === config.widgetId) {
+    try {
+      const refreshEnvelope = await refreshWidget(client, existing.token);
+      if (refreshEnvelope.data) {
+        const refreshed = store.write(refreshEnvelope.data);
+        return { token: refreshed.token, expiresAt: refreshed.expiresAt, session: refreshed };
+      }
+    } catch {
+      store.clear();
+    }
+  }
+
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
     publishableKey: config.publishableKey,

@@ -48,17 +48,39 @@ class WidgetInitRequest(BaseModel):
 class WidgetAuthClaims(BaseModel):
     """Claims carried by short-lived widget JWTs."""
 
+    iss: str
+    aud: str
+    sub: str
     widgetId: str
     organizationId: str
     companyName: str
     origin: str
     sessionId: str
+    jti: str
     iat: int
+    nbf: int
     exp: int
+
+
+class WidgetRefreshRequest(BaseModel):
+    """Request body for POST /api/widget/refresh."""
+
+    token: str = Field(min_length=1)
 
 
 class WidgetInitResponse(BaseModel):
     """Successful widget initialization payload."""
+
+    token: str
+    expiresIn: int
+    sessionId: str
+    widgetId: str
+    organizationId: str
+    companyName: str
+
+
+class WidgetRefreshResponse(BaseModel):
+    """Successful widget token refresh payload."""
 
     token: str
     expiresIn: int
