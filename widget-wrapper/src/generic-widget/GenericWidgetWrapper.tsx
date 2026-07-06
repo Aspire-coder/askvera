@@ -7,6 +7,7 @@ import { MessageFeed } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
 import { defaultTheme } from "./config/defaultTheme";
 import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetTheme } from "./types";
+import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
 import {
   createWidgetInitialState,
   selectConsentAccepted,
@@ -73,6 +74,8 @@ export function GenericWidgetWrapper({
   sessionId: providedSessionId,
   className = "",
   style,
+  eventBus,
+  debugEvents = false,
   renderMessages,
   onOpen,
   onClose,
@@ -84,6 +87,10 @@ export function GenericWidgetWrapper({
   onEscalate,
   onNewChat
 }: GenericWidgetWrapperProps) {
+  const events = useMemo(
+    () => eventBus || (debugEvents ? new WidgetEventBus({ debug: debugEvents }) : widgetEventBus),
+    [debugEvents, eventBus]
+  );
   const initialLocale = useMemo(
     () => detectInitialLocale(config.countries, config.languages, config.defaultCountryCode, config.defaultLanguageCode),
     [config.countries, config.defaultCountryCode, config.defaultLanguageCode, config.languages]
@@ -172,6 +179,10 @@ export function GenericWidgetWrapper({
   });
 
   useEffect(() => {
+    events.emit(widgetEventTypes.WIDGET_INITIALIZED, { visitorId, sessionId });
+  }, [events, sessionId, visitorId]);
+
+  useEffect(() => {
     dispatch({ type: "SET_MESSAGES", messages });
   }, [messages]);
 
@@ -191,6 +202,11 @@ export function GenericWidgetWrapper({
     );
     if (legalVersionChanged) {
       dispatch({ type: "REQUIRE_CONSENT" });
+      events.emit(widgetEventTypes.CONSENT_REQUIRED, {
+        visitorId,
+        sessionId,
+        reason: "legal_version_changed"
+      });
       if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
     }
     writeSessionMetadata(config.sessionMetadataStorageKey, {
@@ -211,17 +227,24 @@ export function GenericWidgetWrapper({
     sessionId,
     selectedCountry?.code,
     selectedLanguage?.code,
-    visitorId
+    visitorId,
+    events
   ]);
 
   useEffect(() => {
     if (!consentRequiredSignal) return;
     dispatch({ type: "REQUIRE_CONSENT", error: "Please review and accept the legal documents before chatting." });
+    events.emit(widgetEventTypes.CONSENT_REQUIRED, {
+      visitorId,
+      sessionId,
+      reason: "backend_required_consent"
+    });
     if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
-  }, [config.consent.storageKey, config.persistConsent, consentRequiredSignal]);
+  }, [config.consent.storageKey, config.persistConsent, consentRequiredSignal, events, sessionId, visitorId]);
 
   const closeWidget = () => {
     dispatch({ type: "CLOSE_WIDGET" });
+    events.emit(widgetEventTypes.WIDGET_CLOSED, { visitorId, sessionId });
     onClose?.();
   };
 
@@ -230,18 +253,18 @@ export function GenericWidgetWrapper({
     if (!nextCountry) return;
     const nextLanguage = ensureLanguageForCountry(config.languages, nextCountry.code, selectedLanguage?.code, config.countries);
     dispatch({ type: "SET_COUNTRY", country: nextCountry, language: nextLanguage });
-    onCountryChange?.(
-      createLocalePayload({ visitorId, sessionId, selectedCountry: nextCountry.code, selectedLanguage: nextLanguage?.code || "" })
-    );
+    const payload = createLocalePayload({ visitorId, sessionId, selectedCountry: nextCountry.code, selectedLanguage: nextLanguage?.code || "" });
+    events.emit(widgetEventTypes.COUNTRY_CHANGED, { visitorId, sessionId, locale: payload });
+    onCountryChange?.(payload);
   };
 
   const handleLanguageChange = (languageCode: string) => {
     const nextLanguage = availableLanguages.find((language) => language.code === languageCode);
     if (!nextLanguage) return;
     dispatch({ type: "SET_LANGUAGE", language: nextLanguage });
-    onLanguageChange?.(
-      createLocalePayload({ visitorId, sessionId, selectedCountry: selectedCountry?.code || "", selectedLanguage: nextLanguage.code })
-    );
+    const payload = createLocalePayload({ visitorId, sessionId, selectedCountry: selectedCountry?.code || "", selectedLanguage: nextLanguage.code });
+    events.emit(widgetEventTypes.LANGUAGE_CHANGED, { visitorId, sessionId, locale: payload });
+    onLanguageChange?.(payload);
   };
 
   const handleConsent = async (actionType: "accepted" | "rejected") => {
@@ -257,6 +280,7 @@ export function GenericWidgetWrapper({
     dispatch({ type: "SET_CONSENT_ERROR", error: null });
 
     if (!accepted) {
+      events.emit(widgetEventTypes.CONSENT_REJECTED, { visitorId, sessionId, consent: payload });
       onRejectConsent?.(payload);
       return;
     }
@@ -265,6 +289,7 @@ export function GenericWidgetWrapper({
       dispatch({ type: "START_CONSENT_SUBMIT" });
       await onAcceptConsent?.(payload);
       dispatch({ type: "ACCEPT_CONSENT" });
+      events.emit(widgetEventTypes.CONSENT_ACCEPTED, { visitorId, sessionId, consent: payload });
       if (config.persistConsent) writeConsentFlag(config.consent.storageKey, true);
     } catch {
       dispatch({ type: "REQUIRE_CONSENT", error: "Unable to record your consent. Please try again." });
@@ -287,6 +312,7 @@ export function GenericWidgetWrapper({
       widgetProviderType: config.provider.type
     };
     dispatch({ type: "CLEAR_DRAFT_MESSAGE" });
+    events.emit(widgetEventTypes.MESSAGE_SENT, { visitorId, sessionId, message: payload });
     onSendMessage?.(payload);
   };
 
@@ -297,6 +323,7 @@ export function GenericWidgetWrapper({
           config={config}
           onClick={() => {
             dispatch({ type: "OPEN_WIDGET" });
+            events.emit(widgetEventTypes.WIDGET_OPENED, { visitorId, sessionId });
             onOpen?.();
           }}
         />

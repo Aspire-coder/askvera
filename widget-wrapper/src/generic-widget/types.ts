@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { WidgetEventBus } from "../events";
 
 export type WidgetProviderType = "custom-react" | "script" | "iframe" | "message-feed" | string;
 
@@ -173,6 +174,8 @@ export type GenericWidgetWrapperProps = {
   sessionId?: string;
   className?: string;
   style?: CSSProperties;
+  eventBus?: WidgetEventBus;
+  debugEvents?: boolean;
   renderMessages?: (messages: WidgetMessage[], state: GenericWidgetRenderState) => ReactNode;
   onOpen?: () => void;
   onClose?: () => void;

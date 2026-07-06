@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, and 1.5 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, 1.5, and 1.6 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -776,3 +776,67 @@ src/api/client.ts
 ```
 
 This step reduced `BackendChatDemo.tsx` substantially and kept the existing backend-connected demo behavior intact.
+
+## Step 1.6 Implementation Notes
+
+Step 1.6 added the framework-independent widget event bus.
+
+New event modules:
+
+```text
+src/events/
+  eventBus.ts
+  eventListeners.ts
+  events.ts
+  eventTypes.ts
+  index.ts
+```
+
+The event bus now supports:
+
+- `emit()`
+- `subscribe()`
+- `unsubscribe()`
+- `once()`
+- optional debug logging
+- typed event payloads
+- listener isolation so one failed listener does not break the widget
+
+Centralized event categories include:
+
+- widget lifecycle
+- conversation
+- consent
+- locale
+- session
+- connection
+- errors
+- analytics
+
+`GenericWidgetWrapper` now emits events for:
+
+- widget initialized
+- widget opened
+- widget closed
+- consent required
+- consent accepted
+- consent rejected
+- country changed
+- language changed
+- message sent
+
+`BackendChatDemo` now emits events for:
+
+- backend connected
+- backend disconnected
+- API error
+- chat started
+- first message
+- message received
+- message failed
+- message retried
+- API-triggered consent required
+
+The wrapper accepts an optional custom event bus and falls back to the shared `widgetEventBus`, which keeps the future SDK and plugin architecture straightforward.
+
+This step preserves existing widget behavior while making future analytics, plugins, SDK callbacks, and integrations independent from React component internals.

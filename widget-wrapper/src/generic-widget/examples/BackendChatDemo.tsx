@@ -11,6 +11,7 @@ import {
   type LegalDocument
 } from "../../api";
 import { buildWidgetConfig, type BackendConfig } from "../../config";
+import { widgetEventBus, widgetEventTypes } from "../../events";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
 import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
@@ -50,6 +51,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const [legalVersion, setLegalVersion] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
+  const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
   const config = useMemo(
@@ -107,11 +109,13 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
       .then((envelope) => {
         if (active && envelope.data) {
           logCorrelationId("config", envelope.correlationId);
+          widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, { correlationId: envelope.correlationId });
           setApiConfig(envelope.data);
         }
       })
       .catch((error) => {
         if (active) {
+          widgetEventBus.emit(widgetEventTypes.BACKEND_DISCONNECTED, { error: describeApiError(error) });
           upsertMessage({
             id: "config-warning",
             role: "system",
@@ -131,12 +135,14 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
       .then((envelope) => {
         if (active && envelope.data) {
           logCorrelationId("privacy", envelope.correlationId);
+          widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, { correlationId: envelope.correlationId });
           setLegalDocuments(envelope.data.documents);
           setLegalVersion(envelope.data.version);
         }
       })
       .catch((error) => {
         if (active) {
+          widgetEventBus.emit(widgetEventTypes.API_ERROR, { error: describeApiError(error) });
           setLegalDocuments([]);
           upsertMessage({
             id: "privacy-warning",
@@ -163,6 +169,11 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     if (pendingMessage) {
       const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
       setPendingMessage(null);
+      widgetEventBus.emit(widgetEventTypes.MESSAGE_RETRIED, {
+        visitorId: payload.visitorId,
+        sessionId: payload.sessionId,
+        message: retryPayload
+      });
       await sendChat(retryPayload, false);
     }
   };
@@ -170,6 +181,18 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
     if (requestInFlightRef.current) return;
     requestInFlightRef.current = true;
+    widgetEventBus.emit(widgetEventTypes.CHAT_STARTED, {
+      visitorId: payload.visitorId,
+      sessionId: payload.sessionId
+    });
+    if (!firstMessageSentRef.current) {
+      firstMessageSentRef.current = true;
+      widgetEventBus.emit(widgetEventTypes.FIRST_MESSAGE, {
+        visitorId: payload.visitorId,
+        sessionId: payload.sessionId,
+        message: payload
+      });
+    }
     if (showUserMessage) appendMessage({ id: buildId("user"), role: "user", content: payload.message });
     setLoading(true);
     try {
@@ -182,7 +205,7 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
       });
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
       logCorrelationId("chat", correlationId);
-      appendMessage({
+      const assistantMessage: WidgetMessage = {
         id: buildId("assistant"),
         role: "assistant",
         content: envelope.data?.response || "I could not find a response for that question.",
@@ -191,11 +214,23 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
           confidence: envelope.data?.confidence,
           correlationId
         }
+      };
+      appendMessage(assistantMessage);
+      widgetEventBus.emit(widgetEventTypes.MESSAGE_RECEIVED, {
+        visitorId: payload.visitorId,
+        sessionId: payload.sessionId,
+        correlationId,
+        message: assistantMessage
       });
     } catch (error) {
       if (error instanceof ApiRequestError && error.code === "CONSENT_REQUIRED") {
         setPendingMessage(payload);
         setConsentRequiredSignal((value) => value + 1);
+        widgetEventBus.emit(widgetEventTypes.CONSENT_REQUIRED, {
+          visitorId: payload.visitorId,
+          sessionId: payload.sessionId,
+          reason: "api_consent_required"
+        });
         appendMessage({
           id: buildId("consent-required"),
           role: "system",
@@ -203,6 +238,11 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
         });
         return;
       }
+      widgetEventBus.emit(widgetEventTypes.MESSAGE_FAILED, {
+        visitorId: payload.visitorId,
+        sessionId: payload.sessionId,
+        error: describeApiError(error)
+      });
       appendMessage({
         id: buildId("api-error"),
         role: "system",
