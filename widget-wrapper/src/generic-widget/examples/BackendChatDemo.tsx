@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildWidgetConfig, type BackendConfig } from "../../config";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
 import type { ConsentEventPayload, MessageEventPayload, WidgetMessage } from "../types";
 import { foreverDemoConfig } from "./foreverDemoConfig";
@@ -179,34 +180,6 @@ function logCorrelationId(label: string, correlationId?: string) {
   console.info(`[ASK Vera] ${label} correlation ID: ${correlationId}`);
 }
 
-function buildLocaleOptions(countries: ApiCountry[]) {
-  const languageMap = new Map<string, { label: string; countryCodes: string[] }>();
-  const sortedCountries = [...countries].sort((first, second) => first.name.localeCompare(second.name));
-
-  for (const country of sortedCountries) {
-    for (const language of country.languages) {
-      const current = languageMap.get(language.code) || { label: language.name, countryCodes: [] };
-      if (!current.countryCodes.includes(country.code)) {
-        current.countryCodes.push(country.code);
-      }
-      languageMap.set(language.code, current);
-    }
-  }
-
-  return {
-    countries: sortedCountries.map((country) => ({
-      code: country.code,
-      label: country.name,
-      languageCodes: country.languages.map((language) => language.code)
-    })),
-    languages: Array.from(languageMap.entries()).map(([code, language]) => ({
-      code,
-      label: language.label,
-      countryCodes: language.countryCodes
-    }))
-  };
-}
-
 export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: BackendChatDemoProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState({ country: "US", language: "en" });
@@ -217,33 +190,28 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
   const requestInFlightRef = useRef(false);
   const config = useMemo(
     () => {
-      const localeOptions = apiConfig ? buildLocaleOptions(apiConfig.countries) : null;
-      const policyLinks = legalDocuments.length
-        ? legalDocuments.map((document) => ({
-            id: document.id,
-            label: document.title,
-            href: legalViewerHref(apiBaseUrl, selectedLocale.country, selectedLocale.language, document.id),
-            target: "_blank" as const
-          }))
-        : foreverDemoConfig.policyLinks.map((link) => ({
-            ...link,
-            href: legalViewerHref(apiBaseUrl, selectedLocale.country, selectedLocale.language, link.id === "terms" ? "privacy" : link.id),
-            target: "_blank" as const
-          }));
+      const backendConfig: BackendConfig | undefined = apiConfig
+        ? {
+            countries: apiConfig.countries,
+            privacyVersion: legalVersion || apiConfig.privacyVersion,
+            legalDocuments
+          }
+        : undefined;
 
-      return {
-        ...foreverDemoConfig,
-        provider: { name: "ASK Vera API", type: "custom-react" as const },
-        consent: {
-          ...foreverDemoConfig.consent,
-          policyVersion: legalVersion || apiConfig?.privacyVersion || foreverDemoConfig.consent.policyVersion
+      return buildWidgetConfig({
+        baseConfig: foreverDemoConfig,
+        runtimeConfig: {
+          apiUrl: apiBaseUrl,
+          companyName: foreverDemoConfig.brandName,
+          defaultCountry: selectedLocale.country,
+          defaultLanguage: selectedLocale.language,
+          theme: foreverDemoConfig.theme
         },
-        countries: localeOptions?.countries || foreverDemoConfig.countries,
-        languages: localeOptions?.languages || foreverDemoConfig.languages,
-        defaultCountryCode: selectedLocale.country,
-        defaultLanguageCode: selectedLocale.language,
-        policyLinks
-      };
+        backendConfig,
+        selectedCountry: selectedLocale.country,
+        selectedLanguage: selectedLocale.language,
+        legalLinkBuilder: legalViewerHref
+      }).genericConfig;
     },
     [apiBaseUrl, apiConfig, legalDocuments, legalVersion, selectedLocale.country, selectedLocale.language]
   );

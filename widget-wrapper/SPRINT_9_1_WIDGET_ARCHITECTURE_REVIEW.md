@@ -2,7 +2,7 @@
 
 ## Status
 
-Step 1.1 is complete.
+Steps 1.1, 1.2, and 1.3 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -633,3 +633,53 @@ The widget is ready for productization. It already has the correct UX foundation
 - public script API in `sdk`
 
 This will make ASK Vera reusable as a real embeddable widget product instead of only a React demo wrapper.
+
+## Step 1.3 Implementation Notes
+
+Step 1.3 added the first version of the centralized runtime configuration system.
+
+New configuration modules:
+
+```text
+src/config/
+  backendConfig.ts
+  configLoader.ts
+  configValidator.ts
+  defaults.ts
+  featureFlags.ts
+  index.ts
+  runtimeConfig.ts
+  themeConfig.ts
+```
+
+The configuration layer now separates:
+
+- `RuntimeConfig`: values passed by the host website or future `AskVera.init()`.
+- `BackendConfig`: values loaded from the backend, such as markets, languages, legal version, and legal documents.
+- `ThemeConfig`: visual settings only.
+- `WidgetFeatureFlags`: centralized feature toggles.
+- `WidgetConfig`: immutable merged configuration consumed by the widget.
+
+Current configuration flow:
+
+```text
+RuntimeConfig
+  +
+BackendConfig
+  +
+ThemeConfig
+  +
+Base GenericWidgetConfig
+  ↓
+buildWidgetConfig()
+  ↓
+Validate
+  ↓
+Freeze
+  ↓
+GenericWidgetWrapper
+```
+
+The existing backend demo now builds its current `GenericWidgetConfig` through `buildWidgetConfig()`, preserving the current visual behavior while introducing the new configuration architecture.
+
+Step 1.3 deliberately does not move API calls, state management, or SDK logic yet. Those remain in later steps so each change stays small and verifiable.
