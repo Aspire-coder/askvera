@@ -14,6 +14,7 @@ from app.audit import audit_dispatcher, audit_lifecycle
 from app.audit.sinks.firehose import initialize_firehose_sink
 from app.middleware.audit import AuditMiddleware
 from app.middleware.correlation import CorrelationIdMiddleware
+from app.monitoring.initializer import initialize_monitoring
 from config import settings
 from scripts.validate_config import validate
 from services.aws_clients import init_aws_clients
@@ -79,6 +80,10 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     _init_optional_cache()
     audit_dispatcher.add_sink(initialize_firehose_sink())
     await audit_lifecycle.start()
+    try:
+        initialize_monitoring()
+    except Exception:
+        LOGGER.exception("monitoring_initialization_failed", stage="startup")
     LOGGER.info("startup_complete")
     yield
     await audit_lifecycle.stop()
