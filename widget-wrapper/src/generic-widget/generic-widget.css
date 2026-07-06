@@ -724,6 +724,72 @@
   box-shadow: none;
 }
 
+.gw-error-message {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--gw-space-3);
+  align-items: start;
+  color: var(--gw-text);
+}
+
+.gw-error-message-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--gw-radius-pill);
+  background: color-mix(in srgb, var(--gw-danger), white 86%);
+  color: var(--gw-danger);
+}
+
+.gw-error-message-copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--gw-space-2);
+}
+
+.gw-error-message-copy strong {
+  color: var(--gw-text);
+  font-size: var(--gw-text-body-size);
+  line-height: var(--gw-line-heading);
+}
+
+.gw-error-message-copy p {
+  margin: 0;
+  color: var(--gw-muted);
+  line-height: var(--gw-line-relaxed);
+}
+
+.gw-inline-action-button {
+  width: fit-content;
+  min-height: 34px;
+  padding: 0 var(--gw-space-4);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius-pill);
+  background: var(--gw-panel);
+  color: var(--gw-secondary);
+  font: inherit;
+  font-size: var(--gw-text-caption-size);
+  font-weight: var(--gw-weight-bold);
+  cursor: pointer;
+  transition:
+    background var(--gw-motion-fast) var(--gw-motion-standard),
+    border-color var(--gw-motion-fast) var(--gw-motion-standard),
+    color var(--gw-motion-fast) var(--gw-motion-standard);
+}
+
+.gw-inline-action-button:hover,
+.gw-inline-action-button:focus-visible {
+  border-color: var(--gw-accent);
+  background: var(--gw-accent);
+  color: var(--gw-secondary);
+}
+
+.gw-inline-action-button:focus-visible {
+  outline: var(--gw-focus-outline);
+  outline-offset: 2px;
+}
+
 .gw-message-user .gw-message-card {
   border: 0;
   border-radius: 18px 18px 6px 18px;

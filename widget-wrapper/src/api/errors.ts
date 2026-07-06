@@ -36,9 +36,16 @@ export class ApiValidationError extends Error {
 }
 
 export class ApiUnauthorizedError extends Error {
-  constructor(message = "The API request is not authorized.") {
+  code?: string;
+  status?: number;
+  correlationId?: string;
+
+  constructor(message = "The API request is not authorized.", code?: string, status?: number, correlationId?: string) {
     super(message);
     this.name = "ApiUnauthorizedError";
+    this.code = code;
+    this.status = status;
+    this.correlationId = correlationId;
   }
 }
 

@@ -21,6 +21,7 @@ const trackedEvents: WidgetEventType[] = [
   widgetEventTypes.MESSAGE_SENT,
   widgetEventTypes.MESSAGE_RECEIVED,
   widgetEventTypes.MESSAGE_FAILED,
+  widgetEventTypes.MESSAGE_RETRIED,
   widgetEventTypes.SESSION_CREATED,
   widgetEventTypes.SESSION_RESTORED,
   widgetEventTypes.SESSION_EXPIRED,
@@ -30,7 +31,9 @@ const trackedEvents: WidgetEventType[] = [
   widgetEventTypes.LANGUAGE_CHANGED,
   widgetEventTypes.API_ERROR,
   widgetEventTypes.NETWORK_ERROR,
-  widgetEventTypes.TIMEOUT_ERROR
+  widgetEventTypes.TIMEOUT_ERROR,
+  widgetEventTypes.VALIDATION_ERROR,
+  widgetEventTypes.UNKNOWN_ERROR
 ];
 
 export class AnalyticsService {

@@ -51,7 +51,10 @@ function createErrorFromEnvelope<T>(response: Response, envelope: ApiEnvelope<T>
   const code = envelope.error?.code;
 
   if (response.status === 401 || response.status === 403) {
-    return new ApiUnauthorizedError(message);
+    if (code === "CONSENT_REQUIRED") {
+      return new ApiRequestError(message, code, envelope.error?.legalVersion, response.status, correlationId);
+    }
+    return new ApiUnauthorizedError(message, code, response.status, correlationId);
   }
 
   if (response.status >= 500) {
