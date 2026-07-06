@@ -169,6 +169,10 @@ export type GenericWidgetWrapperProps = {
   initialConsentAccepted?: boolean;
   initialShowSuccess?: boolean;
   consentRequiredSignal?: number;
+  openSignal?: number;
+  closeSignal?: number;
+  resetSignal?: number;
+  outboundMessage?: { id: string; text: string };
   showLocaleSelector?: boolean;
   visitorId?: string;
   sessionId?: string;

@@ -42,6 +42,10 @@ export function GenericWidgetWrapper({
   initialConsentAccepted = false,
   initialShowSuccess = false,
   consentRequiredSignal = 0,
+  openSignal = 0,
+  closeSignal = 0,
+  resetSignal = 0,
+  outboundMessage,
   showLocaleSelector = true,
   visitorId: providedVisitorId,
   sessionId: providedSessionId,
@@ -229,6 +233,69 @@ export function GenericWidgetWrapper({
     });
     if (config.persistConsent) sessionManager.updateConsent(restoredSession, false, config.consent.policyVersion);
   }, [config.consent.policyVersion, config.persistConsent, consentRequiredSignal, events, restoredSession, sessionId, sessionManager, visitorId]);
+
+  useEffect(() => {
+    if (!openSignal) return;
+    dispatch({ type: "OPEN_WIDGET" });
+    events.emit(widgetEventTypes.WIDGET_OPENED, { visitorId, sessionId, metadata: { source: "sdk" } });
+  }, [events, openSignal, sessionId, visitorId]);
+
+  useEffect(() => {
+    if (!closeSignal) return;
+    dispatch({ type: "CLOSE_WIDGET" });
+    events.emit(widgetEventTypes.WIDGET_CLOSED, { visitorId, sessionId, metadata: { source: "sdk" } });
+  }, [closeSignal, events, sessionId, visitorId]);
+
+  useEffect(() => {
+    if (!resetSignal) return;
+    const nextSession = sessionManager.reset({
+      legalVersion: config.consent.policyVersion,
+      country: selectedCountry?.code,
+      language: selectedLanguage?.code
+    });
+    dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt });
+    events.emit(widgetEventTypes.SESSION_RESET, { visitorId: nextSession.visitorId, sessionId: nextSession.sessionId });
+  }, [config.consent.policyVersion, events, resetSignal, selectedCountry?.code, selectedLanguage?.code, sessionManager]);
+
+  useEffect(() => {
+    if (!outboundMessage?.id || !outboundMessage.text.trim()) return;
+    dispatch({ type: "OPEN_WIDGET" });
+
+    if (config.consent.requireConsentBeforeMessaging !== false && !consentAccepted) {
+      dispatch({ type: "SET_DRAFT_MESSAGE", message: outboundMessage.text });
+      events.emit(widgetEventTypes.CONSENT_REQUIRED, {
+        visitorId,
+        sessionId,
+        reason: "sdk_message_requires_consent"
+      });
+      return;
+    }
+
+    const payload: MessageEventPayload = {
+      visitorId,
+      sessionId,
+      message: outboundMessage.text.trim(),
+      selectedCountry: selectedCountry?.code || "",
+      selectedLanguage: selectedLanguage?.code || "",
+      widgetProviderName: config.provider.name,
+      widgetProviderType: config.provider.type,
+      metadata: { source: "sdk" }
+    };
+    events.emit(widgetEventTypes.MESSAGE_SENT, { visitorId, sessionId, message: payload });
+    onSendMessage?.(payload);
+  }, [
+    config.consent.requireConsentBeforeMessaging,
+    config.provider.name,
+    config.provider.type,
+    consentAccepted,
+    events,
+    onSendMessage,
+    outboundMessage,
+    selectedCountry?.code,
+    selectedLanguage?.code,
+    sessionId,
+    visitorId
+  ]);
 
   const closeWidget = () => {
     dispatch({ type: "CLOSE_WIDGET" });

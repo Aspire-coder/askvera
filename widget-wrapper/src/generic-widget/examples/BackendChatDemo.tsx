@@ -19,6 +19,13 @@ import { foreverDemoConfig } from "./foreverDemoConfig";
 
 export type BackendChatDemoProps = {
   apiBaseUrl?: string;
+  openSignal?: number;
+  closeSignal?: number;
+  resetSignal?: number;
+  clearConversationSignal?: number;
+  sdkMessage?: { id: string; text: string };
+  country?: string;
+  language?: string;
 };
 
 const buildId = (prefix: string) => {
@@ -45,7 +52,16 @@ function logCorrelationId(label: string, correlationId?: string) {
   console.info(`[ASK Vera] ${label} correlation ID: ${correlationId}`);
 }
 
-export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: BackendChatDemoProps) {
+export function BackendChatDemo({
+  apiBaseUrl = "https://api.vera-api.xyz",
+  openSignal = 0,
+  closeSignal = 0,
+  resetSignal = 0,
+  clearConversationSignal = 0,
+  sdkMessage,
+  country,
+  language
+}: BackendChatDemoProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState({ country: "US", language: "en" });
   const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
@@ -113,6 +129,25 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
     }
   ]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!country && !language) return;
+    setSelectedLocale((current) => ({
+      country: country || current.country,
+      language: language || current.language
+    }));
+  }, [country, language]);
+
+  useEffect(() => {
+    if (!clearConversationSignal) return;
+    setMessages([
+      {
+        id: buildId("clear-chat"),
+        role: "assistant",
+        content: "Conversation cleared. Your selected market and language will stay active."
+      }
+    ]);
+  }, [clearConversationSignal]);
 
   const appendMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => [...current, message]);
@@ -288,6 +323,10 @@ export function BackendChatDemo({ apiBaseUrl = "https://api.vera-api.xyz" }: Bac
       messages={messages}
       loading={loading}
       openByDefault
+      openSignal={openSignal}
+      closeSignal={closeSignal}
+      resetSignal={resetSignal}
+      outboundMessage={sdkMessage}
       consentRequiredSignal={consentRequiredSignal}
       onAcceptConsent={handleConsent}
       onCountryChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}

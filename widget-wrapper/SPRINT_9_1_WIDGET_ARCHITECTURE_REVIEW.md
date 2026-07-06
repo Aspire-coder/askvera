@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, and 1.9 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, and 1.10 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -1022,3 +1022,68 @@ Feature flags now include:
 `BackendChatDemo` initializes analytics from the merged widget configuration and attaches it to the shared widget event bus.
 
 No vendor-specific analytics system is hardcoded. Future providers can be added for CloudWatch, Google Analytics, Adobe Analytics, Mixpanel, Segment, or enterprise logging without changing widget components.
+
+## Step 1.10 Implementation Notes
+
+Step 1.10 added the public widget SDK foundation.
+
+New SDK modules:
+
+```text
+src/sdk/
+  AskVera.ts
+  index.ts
+  mount.tsx
+```
+
+The SDK exposes a stable public API:
+
+- `AskVera.init()`
+- `AskVera.open()`
+- `AskVera.close()`
+- `AskVera.destroy()`
+- `AskVera.reset()`
+- `AskVera.updateConfig()`
+- `AskVera.getSession()`
+- `AskVera.resetSession()`
+- `AskVera.setCountry()`
+- `AskVera.setLanguage()`
+- `AskVera.setLocale()`
+- `AskVera.sendMessage()`
+- `AskVera.clearConversation()`
+- `AskVera.on()`
+- `AskVera.off()`
+- `AskVera.once()`
+- `AskVera.isOpen()`
+- `AskVera.isReady()`
+- `AskVera.getVersion()`
+- `AskVera.getConfig()`
+- `AskVera.use()`
+
+The SDK attaches itself to `window.AskVera` for script-tag style integrations while also exporting typed module APIs for bundled applications.
+
+SDK control flows are wired through explicit render signals into the existing demo-backed widget:
+
+- open signal
+- close signal
+- reset signal
+- clear conversation signal
+- outbound SDK message
+- selected country
+- selected language
+
+This preserves current widget behavior while giving host sites a simple public integration surface.
+
+`AskVera.sendMessage()` opens the widget and forwards the message through the existing consent-aware wrapper. If consent is still required, the wrapper keeps the message as the draft and shows the consent step instead of bypassing policy.
+
+The plugin API is intentionally minimal:
+
+```ts
+AskVera.use(plugin)
+```
+
+Plugins receive the SDK instance and can subscribe to events, open or close the widget, inspect configuration, and extend behavior without modifying core widget components.
+
+The existing package entrypoint now re-exports the SDK so consumers can import it from the widget package.
+
+Step 1.11 should focus on the build pipeline and produce dedicated distributable assets such as `widget.js`, `widget.min.js`, `widget.css`, source maps, and version metadata.
