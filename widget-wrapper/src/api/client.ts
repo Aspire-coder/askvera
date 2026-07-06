@@ -1,8 +1,9 @@
 import { ApiNetworkError, ApiRequestError, ApiTimeoutError, ApiUnauthorizedError, BackendUnavailableError } from "./errors";
 import type { ApiEnvelope, RequestMetadata } from "./envelope";
 import { noopApiInterceptor, type ApiInterceptor } from "./apiInterceptor";
+import { ApiErrorCodes, DEFAULT_REQUEST_TIMEOUT_MS } from "../constants";
 
-export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+export { DEFAULT_REQUEST_TIMEOUT_MS };
 
 export type ApiClientOptions = {
   baseUrl: string;
@@ -41,7 +42,7 @@ async function parseEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
     return {
       success: false,
       correlationId: response.headers.get("x-correlation-id") || "",
-      error: { code: "INVALID_RESPONSE", message: "The API returned an unreadable response." }
+      error: { code: ApiErrorCodes.INVALID_RESPONSE, message: "The API returned an unreadable response." }
     };
   }
 }
@@ -52,7 +53,7 @@ function createErrorFromEnvelope<T>(response: Response, envelope: ApiEnvelope<T>
   const code = envelope.error?.code;
 
   if (response.status === 401 || response.status === 403) {
-    if (code === "CONSENT_REQUIRED") {
+    if (code === ApiErrorCodes.CONSENT_REQUIRED) {
       return new ApiRequestError(message, code, envelope.error?.legalVersion, response.status, correlationId);
     }
     return new ApiUnauthorizedError(message, code, response.status, correlationId);

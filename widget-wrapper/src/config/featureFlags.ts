@@ -1,3 +1,5 @@
+import { WidgetFeatures } from "../constants";
+
 export type WidgetFeatureFlags = {
   streaming: boolean;
   markdown: boolean;
@@ -10,14 +12,14 @@ export type WidgetFeatureFlags = {
 };
 
 export const defaultFeatureFlags: Readonly<WidgetFeatureFlags> = Object.freeze({
-  streaming: false,
-  markdown: true,
-  feedback: true,
-  typingIndicator: true,
-  darkMode: true,
-  citations: false,
-  attachments: false,
-  analytics: true
+  streaming: WidgetFeatures.streaming,
+  markdown: WidgetFeatures.markdown,
+  feedback: WidgetFeatures.feedback,
+  typingIndicator: WidgetFeatures.typingIndicator,
+  darkMode: WidgetFeatures.darkMode,
+  citations: WidgetFeatures.citations,
+  attachments: WidgetFeatures.attachments,
+  analytics: WidgetFeatures.analytics
 });
 
 export function mergeFeatureFlags(overrides?: Partial<WidgetFeatureFlags>): WidgetFeatureFlags {

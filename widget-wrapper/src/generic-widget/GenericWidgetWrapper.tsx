@@ -9,6 +9,7 @@ import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventP
 import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
 import { createSessionManager } from "../services";
 import { buildThemeVars } from "../themes";
+import { LoadingTimingMs } from "../constants";
 import {
   createWidgetInitialState,
   selectConsentAccepted,
@@ -212,9 +213,9 @@ export function GenericWidgetWrapper({
     }
 
     setLoadingDisplayState("hidden");
-    const typingTimer = window.setTimeout(() => setLoadingDisplayState("typing"), 300);
-    const skeletonTimer = window.setTimeout(() => setLoadingDisplayState("skeleton"), 800);
-    const slowTimer = window.setTimeout(() => setLoadingDisplayState("slow"), 5000);
+    const typingTimer = window.setTimeout(() => setLoadingDisplayState("typing"), LoadingTimingMs.TYPING_INDICATOR_DELAY);
+    const skeletonTimer = window.setTimeout(() => setLoadingDisplayState("skeleton"), LoadingTimingMs.SKELETON_DELAY);
+    const slowTimer = window.setTimeout(() => setLoadingDisplayState("slow"), LoadingTimingMs.SLOW_RESPONSE_DELAY);
 
     return () => {
       window.clearTimeout(typingTimer);

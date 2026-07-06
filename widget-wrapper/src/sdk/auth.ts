@@ -1,8 +1,8 @@
 import { createApiClient, initializeWidget, refreshWidget } from "../api";
 import { createWidgetSessionStore, type WidgetAuthSession } from "../services";
+import { TOKEN_REFRESH_WINDOW_MS } from "../constants";
+import { getCurrentOrigin } from "../utils/browser";
 import type { AskVeraRuntimeConfig } from "./AskVera";
-
-const REFRESH_SKEW_MS = 60_000;
 
 export type WidgetAuthResult = {
   token?: string;
@@ -17,7 +17,7 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig): Promise<
 
   const store = createWidgetSessionStore(config.widgetAuthStorageKey);
   const existing = store.read();
-  if (existing && existing.widgetId === config.widgetId && existing.expiresAt - Date.now() > REFRESH_SKEW_MS) {
+  if (existing && existing.widgetId === config.widgetId && existing.expiresAt - Date.now() > TOKEN_REFRESH_WINDOW_MS) {
     return { token: existing.token, expiresAt: existing.expiresAt, session: existing };
   }
 
@@ -37,7 +37,7 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig): Promise<
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
     publishableKey: config.publishableKey,
-    origin: window.location.origin
+    origin: getCurrentOrigin()
   });
   if (!envelope.data) {
     throw new Error("Widget initialization did not return a session token.");

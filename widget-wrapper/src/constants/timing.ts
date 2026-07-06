@@ -1,0 +1,6 @@
+export const LoadingTimingMs = {
+  TYPING_INDICATOR_DELAY: 300,
+  SKELETON_DELAY: 800,
+  SLOW_RESPONSE_DELAY: 5_000,
+  COPY_FEEDBACK_DURATION: 1_800
+} as const;

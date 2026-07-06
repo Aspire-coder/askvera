@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { LoadingTimingMs } from "../constants";
 import { CitationRenderer, MarkdownRenderer } from "../renderers";
 import type { GenericWidgetConfig, GenericWidgetRenderState, WidgetMessage } from "./types";
 
@@ -65,7 +66,7 @@ function MessageActions({
     if (!copyText) return;
     await copyTextToClipboard(copyText);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    window.setTimeout(() => setCopied(false), LoadingTimingMs.COPY_FEEDBACK_DURATION);
     await onCopyMessage?.(message, state);
   };
 
