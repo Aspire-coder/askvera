@@ -81,11 +81,11 @@ function isValidationStatus(status?: number) {
   return status === 400 || status === 422;
 }
 
-function presentChatError(error: unknown): ChatErrorPresentation {
+function presentChatError(error: unknown, assistantName = "ASK Vera"): ChatErrorPresentation {
   if (error instanceof ApiTimeoutError) {
     return {
       category: "timeout",
-      title: "ASK Vera is taking longer than expected",
+      title: `${assistantName} is taking longer than expected`,
       body: "This can happen when searching large knowledge bases.",
       actionLabel: "Retry"
     };
@@ -103,7 +103,7 @@ function presentChatError(error: unknown): ChatErrorPresentation {
   if (error instanceof BackendUnavailableError) {
     return {
       category: "backend_unavailable",
-      title: "ASK Vera is temporarily unavailable",
+      title: `${assistantName} is temporarily unavailable`,
       body: "Please try again in a few moments.",
       actionLabel: "Retry"
     };
@@ -120,7 +120,7 @@ function presentChatError(error: unknown): ChatErrorPresentation {
   if (error instanceof ApiRequestError && error.status === 429) {
     return {
       category: "rate_limited",
-      title: "ASK Vera is receiving a lot of requests",
+      title: `${assistantName} is receiving a lot of requests`,
       body: "Please wait a moment, then try again.",
       actionLabel: "Retry"
     };
@@ -129,7 +129,7 @@ function presentChatError(error: unknown): ChatErrorPresentation {
   if (error instanceof ApiRequestError && isValidationStatus(error.status)) {
     return {
       category: "validation",
-      title: "ASK Vera could not send that request",
+      title: `${assistantName} could not send that request`,
       body: "Please review your message and try again.",
       actionLabel: "Retry"
     };
@@ -138,7 +138,7 @@ function presentChatError(error: unknown): ChatErrorPresentation {
   if (error instanceof ApiUnauthorizedError) {
     return {
       category: "validation",
-      title: "ASK Vera cannot complete this request",
+      title: `${assistantName} cannot complete this request`,
       body: "Please refresh your session or try again in a few moments.",
       actionLabel: "Retry"
     };
@@ -235,7 +235,12 @@ export function BackendChatDemo({
         baseConfig: foreverDemoConfig,
         runtimeConfig: {
           apiUrl: apiBaseUrl,
+          providerName: foreverDemoConfig.provider.name,
           companyName: foreverDemoConfig.brandName,
+          assistantName: foreverDemoConfig.assistantName,
+          assistantSubtitle: foreverDemoConfig.assistantSubtitle,
+          launcherTitle: foreverDemoConfig.launcherTitle,
+          footerText: typeof foreverDemoConfig.footerText === "string" ? foreverDemoConfig.footerText : undefined,
           defaultCountry: selectedLocale.country,
           defaultLanguage: selectedLocale.language,
           theme: foreverDemoConfig.theme
@@ -428,7 +433,7 @@ export function BackendChatDemo({
       });
     } catch (error) {
       if (error instanceof ApiRequestError && error.code === "CONSENT_REQUIRED") {
-        const presentation = presentChatError(error);
+        const presentation = presentChatError(error, config.assistantName || config.brandName);
         setPendingMessage(payload);
         setConsentRequiredSignal((value) => value + 1);
         widgetEventBus.emit(widgetEventTypes.CONSENT_REQUIRED, {
@@ -443,7 +448,7 @@ export function BackendChatDemo({
         });
         return;
       }
-      const presentation = presentChatError(error);
+      const presentation = presentChatError(error, config.assistantName || config.brandName);
       emitErrorEvent(error, presentation, payload);
       widgetEventBus.emit(widgetEventTypes.MESSAGE_FAILED, {
         visitorId: payload.visitorId,

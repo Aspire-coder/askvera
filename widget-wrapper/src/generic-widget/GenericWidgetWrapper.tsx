@@ -549,6 +549,7 @@ export function GenericWidgetWrapper({
               </section>
             ) : null}
             {children ? <section className="gw-child-slot" aria-label={config.labels.childrenRegionLabel}>{typeof children === "function" ? children(state) : children}</section> : null}
+            {config.footerText ? <footer className="gw-widget-footer">{config.footerText}</footer> : null}
           </div>
           <form className={`gw-composer ${composerDisabled ? "gw-composer-disabled" : ""}`} onSubmit={handleSubmit}>
             <label className="gw-sr-only" htmlFor="gw-message-input">{config.labels.messageInputLabel}</label>

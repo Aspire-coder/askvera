@@ -35,6 +35,11 @@ function freezeConfig<T extends Record<string, unknown>>(value: T): Readonly<T> 
   return Object.freeze(value);
 }
 
+function buildRuntimeWelcomeText(runtime: RuntimeConfig, fallback: GenericWidgetConfig["welcomeText"]) {
+  const parts = [runtime.welcomeTitle, runtime.welcomeMessage, runtime.assistantPromise].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : fallback;
+}
+
 export function buildWidgetConfig({
   baseConfig,
   runtimeConfig,
@@ -73,8 +78,18 @@ export function buildWidgetConfig({
   const genericConfig: GenericWidgetConfig = {
     ...baseConfig,
     brandName: runtime.companyName || baseConfig.brandName,
-    welcomeText: runtime.welcomeMessage || baseConfig.welcomeText,
-    provider: { name: "ASK Vera API", type: "custom-react" },
+    assistantName: runtime.assistantName || baseConfig.assistantName,
+    assistantSubtitle: runtime.assistantSubtitle || baseConfig.assistantSubtitle,
+    logoUrl: runtime.logoUrl || baseConfig.logoUrl,
+    launcherIconUrl: runtime.launcherIconUrl || runtime.logoUrl || baseConfig.launcherIconUrl,
+    launcherTitle: runtime.launcherTitle || baseConfig.launcherTitle,
+    footerText: runtime.footerText || baseConfig.footerText,
+    welcomeText: buildRuntimeWelcomeText(runtime, baseConfig.welcomeText),
+    provider: { name: runtime.providerName || baseConfig.provider.name, type: "custom-react" },
+    labels: {
+      ...baseConfig.labels,
+      ...(runtime.launcherAriaLabel ? { launcherAriaLabel: runtime.launcherAriaLabel } : {})
+    },
     theme: {
       ...baseConfig.theme,
       ...theme
@@ -88,8 +103,8 @@ export function buildWidgetConfig({
     defaultCountryCode: runtime.defaultCountry || selectedCountry || baseConfig.defaultCountryCode,
     defaultLanguageCode: runtime.defaultLanguage || selectedLanguage || baseConfig.defaultLanguageCode,
     policyLinks: normalizedBackend?.policyLinks || fallbackPolicyLinks,
-    starterTopics: normalizedBackend?.starterTopics || baseConfig.starterTopics,
-    contextualTopics: normalizedBackend?.contextualTopics || baseConfig.contextualTopics
+    starterTopics: runtime.starterTopics || normalizedBackend?.starterTopics || baseConfig.starterTopics,
+    contextualTopics: runtime.contextualTopics || normalizedBackend?.contextualTopics || baseConfig.contextualTopics
   };
 
   if (runtime.debug) {

@@ -46,6 +46,13 @@
   font-weight: var(--gw-weight-semibold);
 }
 
+.gw-launcher-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
 .gw-panel {
   position: relative;
   width: var(--gw-panel-width);
@@ -317,6 +324,14 @@
   border: 0;
   border-radius: 0;
   padding: 0;
+}
+
+.gw-widget-footer {
+  margin-top: var(--gw-space-2);
+  color: var(--gw-muted);
+  font-size: var(--gw-text-caption-size);
+  line-height: var(--gw-line-body);
+  text-align: center;
 }
 
 .gw-region-selector {

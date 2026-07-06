@@ -25,6 +25,14 @@ export function validateRuntimeConfig(config: RuntimeConfig): ConfigValidationRe
     errors.push("Runtime configuration requires a valid apiUrl.");
   }
 
+  if (config.logoUrl && !isValidUrl(config.logoUrl)) {
+    warnings.push("Runtime configuration logoUrl should be a valid URL.");
+  }
+
+  if (config.launcherIconUrl && !isValidUrl(config.launcherIconUrl)) {
+    warnings.push("Runtime configuration launcherIconUrl should be a valid URL.");
+  }
+
   if (config.width !== undefined && typeof config.width !== "number" && typeof config.width !== "string") {
     warnings.push("Widget width should be a number or CSS string.");
   }

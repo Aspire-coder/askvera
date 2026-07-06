@@ -44,18 +44,36 @@ export type WidgetMessage = {
 export type WidgetTheme = {
   accentColor?: string;
   accentTextColor?: string;
+  secondaryColor?: string;
   surfaceColor?: string;
   panelColor?: string;
+  backgroundColor?: string;
   textColor?: string;
   mutedTextColor?: string;
   borderColor?: string;
   launcherColor?: string;
   launcherTextColor?: string;
   successColor?: string;
+  warningColor?: string;
+  errorColor?: string;
   dangerColor?: string;
+  headerBackgroundColor?: string;
+  headerTextColor?: string;
+  fieldBackgroundColor?: string;
+  fieldTextColor?: string;
+  focusRingColor?: string;
   shadow?: string;
   radius?: string;
   fontFamily?: string;
+  headingWeight?: string;
+  bodyWeight?: string;
+  fontScale?: string;
+  panelWidth?: string;
+  panelHeight?: string;
+  launcherSize?: string;
+  animationDuration?: string;
+  animationEasing?: string;
+  spacingUnit?: string;
   zIndex?: number;
 };
 
@@ -108,6 +126,10 @@ export type GenericWidgetConfig = {
   assistantName?: string;
   assistantSubtitle?: string;
   logoUrl?: string;
+  launcherIconUrl?: string;
+  launcherTitle?: string;
+  footerText?: ReactNode;
+  emptyStateImageUrl?: string;
   statusLabels?: {
     online?: string;
     reconnecting?: string;

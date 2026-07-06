@@ -6,6 +6,8 @@ export const foreverDemoConfig: GenericWidgetConfig = {
   brandName: "FOREVER",
   assistantName: "ASK Vera",
   assistantSubtitle: "Enterprise Knowledge Assistant",
+  launcherTitle: "Open ASK Vera",
+  footerText: "Powered by approved company documentation.",
   statusLabels: {
     online: "Online",
     reconnecting: "Reconnecting",

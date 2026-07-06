@@ -2,7 +2,11 @@ import type { GenericWidgetConfig } from "../types";
 
 export const exampleWidgetConfig: GenericWidgetConfig = {
   brandName: "Demo Assistant",
-  welcomeText: "Choose your region and review the consent notice to begin.",
+  assistantName: "Demo Assistant",
+  assistantSubtitle: "Enterprise Knowledge Assistant",
+  launcherTitle: "Open Demo Assistant",
+  footerText: "Powered by approved company documentation.",
+  welcomeText: "Get trusted answers from approved company documentation for your selected region and language.",
   loadingText: "Loading response...",
   loadingMessages: {
     thinking: "Thinking...",
@@ -61,8 +65,9 @@ export const exampleWidgetConfig: GenericWidgetConfig = {
     { code: "fr", label: "French", countryCodes: ["CA"] }
   ],
   starterTopics: [
-    { id: "orders", label: "Orders", prompt: "I need help with an order." },
-    { id: "account", label: "Account", prompt: "I need help with my account." }
+    { id: "company-policies", label: "Company Policies", prompt: "What is the travel expense policy?" },
+    { id: "international-directory", label: "International Directory", prompt: "How do I contact the Germany office?" },
+    { id: "country-documentation", label: "Country Documentation", prompt: "Show me the policies for Canada." }
   ],
-  contextualTopics: [{ id: "support", label: "Support", prompt: "Connect me with support." }]
+  contextualTopics: []
 };
