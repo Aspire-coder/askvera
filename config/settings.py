@@ -80,16 +80,6 @@ AWS_MAX_ATTEMPTS = 3
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
 RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback"]
-RATE_LIMIT_POLICIES = {
-    "/api/chat": _env_int("RATE_LIMIT_CHAT_PER_MINUTE", 30),
-    "/api/consent": _env_int("RATE_LIMIT_CONSENT_PER_MINUTE", 20),
-    "/api/feedback": _env_int("RATE_LIMIT_FEEDBACK_PER_MINUTE", 15),
-    "/api/privacy": _env_int("RATE_LIMIT_PRIVACY_PER_MINUTE", 120),
-    "/api/config": _env_int("RATE_LIMIT_CONFIG_PER_MINUTE", 120),
-    "/api/widget/init": _env_int("RATE_LIMIT_WIDGET_INIT_PER_MINUTE", 10),
-    "/api/widget/refresh": _env_int("RATE_LIMIT_WIDGET_REFRESH_PER_MINUTE", 20),
-}
-MAX_REQUEST_BODY_BYTES = _env_int("MAX_REQUEST_BODY_BYTES", 32768)
 # Widget authentication. Keep disabled by default for local/dev until production
 # registry values and JWT secret are configured.
 WIDGET_AUTH_REQUIRED = _env_bool("WIDGET_AUTH_REQUIRED", False)
