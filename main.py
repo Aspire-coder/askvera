@@ -5,10 +5,12 @@ import time
 from collections.abc import Generator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
-from api.middleware import RateLimitMiddleware
+from api.middleware import ProtectedRequestLoggingMiddleware, RateLimitMiddleware, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from api.routes import router
 from app.audit import audit_dispatcher, audit_lifecycle
 from app.audit.sinks.firehose import initialize_firehose_sink
@@ -101,6 +103,8 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
 
 
 app = FastAPI(title="ASK Vera", version=settings.APP_VERSION, lifespan=lifespan)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -110,6 +114,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(AuditMiddleware)
+app.add_middleware(ProtectedRequestLoggingMiddleware)
 app.add_middleware(WidgetAuthMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 app.include_router(router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return clean validation errors without leaking framework internals."""
+    LOGGER.warning(
+        "request_validation_failed",
+        correlation_id=getattr(request.state, "correlation_id", "unknown"),
+        path=request.url.path,
+        error_count=len(exc.errors()),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error": {"code": "INVALID_REQUEST", "message": "Request validation failed."},
+            "correlationId": getattr(request.state, "correlation_id", "unknown"),
+        },
+    )
