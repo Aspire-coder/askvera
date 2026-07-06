@@ -1,9 +1,9 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useReducer, useRef } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ConsentPanel } from "./ConsentPanel";
 import { FloatingLauncher } from "./FloatingLauncher";
 import { Header } from "./Header";
 import { Menu } from "./Menu";
-import { MessageFeed } from "./MessageFeed";
+import { MessageFeed, type LoadingDisplayState } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
 import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetTheme } from "./types";
 import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
@@ -162,6 +162,7 @@ export function GenericWidgetWrapper({
   const consentAccepted = selectConsentAccepted(widgetState);
   const connection = selectConnection(widgetState);
   const effectiveLoading = selectLoading(widgetState);
+  const [loadingDisplayState, setLoadingDisplayState] = useState<LoadingDisplayState>("hidden");
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const consentRequired = config.consent.requireConsentBeforeMessaging !== false && !consentAccepted;
   const composerDisabledReason = consentRequired
@@ -198,6 +199,24 @@ export function GenericWidgetWrapper({
   useEffect(() => {
     dispatch({ type: "SET_LOADING", loading });
   }, [loading]);
+
+  useEffect(() => {
+    if (!effectiveLoading) {
+      setLoadingDisplayState("hidden");
+      return;
+    }
+
+    setLoadingDisplayState("hidden");
+    const typingTimer = window.setTimeout(() => setLoadingDisplayState("typing"), 300);
+    const skeletonTimer = window.setTimeout(() => setLoadingDisplayState("skeleton"), 800);
+    const slowTimer = window.setTimeout(() => setLoadingDisplayState("slow"), 5000);
+
+    return () => {
+      window.clearTimeout(typingTimer);
+      window.clearTimeout(skeletonTimer);
+      window.clearTimeout(slowTimer);
+    };
+  }, [effectiveLoading]);
 
   useEffect(() => {
     const validation = sessionManager.validate(restoredSession, config.consent.policyVersion);
@@ -395,6 +414,19 @@ export function GenericWidgetWrapper({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
   }, [message]);
 
+  const effectiveLoadingDisplayState: LoadingDisplayState =
+    effectiveLoading && connection.reconnecting ? "reconnecting" : loadingDisplayState;
+  const loadingLabel =
+    effectiveLoadingDisplayState === "reconnecting"
+      ? config.loadingMessages?.reconnecting || config.loadingText
+      : effectiveLoadingDisplayState === "slow"
+        ? config.loadingMessages?.slowResponse || config.loadingText
+        : effectiveLoadingDisplayState === "skeleton"
+          ? config.loadingMessages?.generating || config.loadingText
+          : effectiveLoadingDisplayState === "typing"
+            ? config.loadingMessages?.thinking || config.loadingText
+            : config.loadingText;
+
   return (
     <div className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
       {!isOpen ? (
@@ -439,7 +471,14 @@ export function GenericWidgetWrapper({
                 onReject={() => handleConsent("rejected")}
               />
             ) : null}
-            <MessageFeed config={config} messages={messages} state={state} renderMessages={renderMessages} />
+            <MessageFeed
+              config={config}
+              messages={messages}
+              state={state}
+              renderMessages={renderMessages}
+              loadingState={effectiveLoadingDisplayState}
+              loadingLabel={loadingLabel}
+            />
             {suggestedTopics.length ? (
               <section className="gw-section">
                 <div className="gw-section-title">{config.labels.suggestedTopicsLabel}</div>
@@ -452,7 +491,6 @@ export function GenericWidgetWrapper({
                 </div>
               </section>
             ) : null}
-            {effectiveLoading ? <div className="gw-loading" role="status"><span className="gw-spinner" aria-hidden="true" /><span>{config.loadingText}</span></div> : null}
             {children ? <section className="gw-child-slot" aria-label={config.labels.childrenRegionLabel}>{typeof children === "function" ? children(state) : children}</section> : null}
           </div>
           <form className={`gw-composer ${composerDisabled ? "gw-composer-disabled" : ""}`} onSubmit={handleSubmit}>

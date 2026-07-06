@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { GenericWidgetConfig, GenericWidgetRenderState, WidgetMessage } from "./types";
 
 type MessageRole = WidgetMessage["role"];
+export type LoadingDisplayState = "hidden" | "typing" | "skeleton" | "slow" | "reconnecting";
 
 function normalizeMessageContent(content: string): string {
   return content
@@ -255,16 +256,59 @@ function MessageCard({ message, config }: { message: WidgetMessage; config: Gene
   );
 }
 
+function LoadingMessage({
+  config,
+  state,
+  label
+}: {
+  config: GenericWidgetConfig;
+  state: Exclude<LoadingDisplayState, "hidden">;
+  label: ReactNode;
+}) {
+  const showSkeleton = state === "skeleton" || state === "slow";
+
+  return (
+    <article className={`gw-message gw-message-assistant gw-message-loading gw-message-loading-${state}`}>
+      <div className="gw-message-avatar" aria-hidden="true">{assistantMark(config)}</div>
+      <div className="gw-message-card">
+        <header className="gw-message-meta">
+          <span className="gw-message-author">{config.assistantName || config.brandName}</span>
+          <time>{formatMessageTimestamp()}</time>
+        </header>
+        <div className="gw-loading-body" role="status" aria-live="polite">
+          <div className="gw-typing-dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="gw-loading-label">{label}</div>
+          {showSkeleton ? (
+            <div className="gw-skeleton-lines" aria-hidden="true">
+              <span className="gw-skeleton-line gw-skeleton-line-wide" />
+              <span className="gw-skeleton-line gw-skeleton-line-medium" />
+              <span className="gw-skeleton-line gw-skeleton-line-long" />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function MessageFeed({
   config,
   messages,
   state,
-  renderMessages
+  renderMessages,
+  loadingState = "hidden",
+  loadingLabel
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
   state: GenericWidgetRenderState;
   renderMessages?: (messages: WidgetMessage[], state: GenericWidgetRenderState) => ReactNode;
+  loadingState?: LoadingDisplayState;
+  loadingLabel?: ReactNode;
 }) {
   if (renderMessages) return <div className="gw-message-feed">{renderMessages(messages, state)}</div>;
 
@@ -276,6 +320,7 @@ export function MessageFeed({
       {messages.map((message) => (
         <MessageCard key={message.id} message={message} config={config} />
       ))}
+      {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}
     </div>
   );
 }

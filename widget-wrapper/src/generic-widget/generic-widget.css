@@ -908,22 +908,84 @@
   font-weight: var(--gw-weight-semibold);
 }
 
-.gw-loading {
-  display: flex;
-  align-items: center;
-  gap: var(--gw-space-3);
-  color: var(--gw-muted);
-  font-size: var(--gw-text-body-size);
-  padding: var(--gw-space-2) var(--gw-space-1);
+.gw-message-loading .gw-message-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--gw-panel), var(--gw-surface) 28%), var(--gw-panel));
 }
 
-.gw-spinner {
-  width: 16px;
-  height: 16px;
+.gw-loading-body {
+  display: grid;
+  gap: var(--gw-space-3);
+}
+
+.gw-typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gw-space-2);
+  min-height: 12px;
+}
+
+.gw-typing-dots span {
+  width: 7px;
+  height: 7px;
   border-radius: var(--gw-radius-pill);
-  border: 2px solid var(--gw-border);
-  border-top-color: var(--gw-accent);
-  animation: gw-spin 900ms linear infinite;
+  background: var(--gw-accent);
+  animation: gw-typing-dot 1100ms ease-in-out infinite;
+}
+
+.gw-typing-dots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.gw-typing-dots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+.gw-loading-label {
+  color: var(--gw-text);
+  font-size: var(--gw-text-body-size);
+  font-weight: var(--gw-weight-semibold);
+  line-height: var(--gw-line-body);
+}
+
+.gw-message-loading-reconnecting .gw-loading-label {
+  color: var(--gw-danger);
+}
+
+.gw-message-loading-reconnecting .gw-typing-dots span {
+  background: var(--gw-danger);
+}
+
+.gw-skeleton-lines {
+  display: grid;
+  gap: var(--gw-space-2);
+  margin-top: var(--gw-space-1);
+}
+
+.gw-skeleton-line {
+  height: 11px;
+  border-radius: var(--gw-radius-pill);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--gw-surface), var(--gw-border) 34%) 0%,
+      color-mix(in srgb, var(--gw-panel), var(--gw-accent) 10%) 44%,
+      color-mix(in srgb, var(--gw-surface), var(--gw-border) 34%) 88%
+    );
+  background-size: 220% 100%;
+  animation: gw-skeleton-shimmer 1600ms ease-in-out infinite;
+}
+
+.gw-skeleton-line-wide {
+  width: 92%;
+}
+
+.gw-skeleton-line-medium {
+  width: 58%;
+}
+
+.gw-skeleton-line-long {
+  width: 76%;
 }
 
 .gw-composer {

@@ -95,6 +95,14 @@ export type WidgetConsentConfig = {
   requireConsentBeforeMessaging?: boolean;
 };
 
+export type WidgetLoadingMessages = {
+  thinking?: ReactNode;
+  searching?: ReactNode;
+  generating?: ReactNode;
+  reconnecting?: ReactNode;
+  slowResponse?: ReactNode;
+};
+
 export type GenericWidgetConfig = {
   brandName: string;
   assistantName?: string;
@@ -107,6 +115,7 @@ export type GenericWidgetConfig = {
   };
   welcomeText?: ReactNode;
   loadingText: ReactNode;
+  loadingMessages?: WidgetLoadingMessages;
   successText: ReactNode;
   labels: WidgetLabels;
   menu: WidgetMenuLabels;

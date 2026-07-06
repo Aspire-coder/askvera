@@ -17,6 +17,14 @@ export const foreverDemoConfig: GenericWidgetConfig = {
       <p>Choose a topic below or ask a question to start a conversation.</p>
     </>
   ),
+  loadingText: "Thinking...",
+  loadingMessages: {
+    thinking: "Thinking...",
+    searching: "Searching product documentation...",
+    generating: "Preparing your answer...",
+    reconnecting: "Connection interrupted. Retrying...",
+    slowResponse: "Still working..."
+  },
   successText: "Thank you. Your privacy choices have been saved and chat is ready.",
   labels: {
     ...exampleWidgetConfig.labels,

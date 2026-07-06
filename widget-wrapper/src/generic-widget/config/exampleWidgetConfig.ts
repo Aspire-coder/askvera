@@ -4,6 +4,13 @@ export const exampleWidgetConfig: GenericWidgetConfig = {
   brandName: "Demo Assistant",
   welcomeText: "Choose your region and review the consent notice to begin.",
   loadingText: "Loading response...",
+  loadingMessages: {
+    thinking: "Thinking...",
+    searching: "Searching documentation...",
+    generating: "Preparing your answer...",
+    reconnecting: "Connection interrupted. Retrying...",
+    slowResponse: "Still working..."
+  },
   successText: "Consent saved. You can now continue.",
   provider: { name: "Demo provider", type: "custom-react" },
   labels: {
