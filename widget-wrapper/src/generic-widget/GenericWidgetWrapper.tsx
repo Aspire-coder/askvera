@@ -119,12 +119,13 @@ export function GenericWidgetWrapper({
     () => restoredSession.createdAt,
     [restoredSession.createdAt]
   );
+  const initialConsentIsAccepted = Boolean(config.persistConsent ? restoredSession.consentAccepted : initialConsentAccepted);
   const initialState = useMemo(
     () =>
       createWidgetInitialState({
         openByDefault,
         loading,
-        initialConsentAccepted: Boolean(restoredSession.consentAccepted),
+        initialConsentAccepted: initialConsentIsAccepted,
         initialShowSuccess,
         visitorId,
         sessionId,
@@ -147,7 +148,7 @@ export function GenericWidgetWrapper({
       storedLocale?.country,
       storedLocale?.language,
       visitorId,
-      restoredSession.consentAccepted
+      initialConsentIsAccepted
     ]
   );
   const [widgetState, dispatch] = useReducer(widgetReducer, initialState);
@@ -426,6 +427,7 @@ export function GenericWidgetWrapper({
           : effectiveLoadingDisplayState === "typing"
             ? config.loadingMessages?.thinking || config.loadingText
             : config.loadingText;
+  const chatContentVisible = !consentRequired;
 
   return (
     <div className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
@@ -471,15 +473,17 @@ export function GenericWidgetWrapper({
                 onReject={() => handleConsent("rejected")}
               />
             ) : null}
-            <MessageFeed
-              config={config}
-              messages={messages}
-              state={state}
-              renderMessages={renderMessages}
-              loadingState={effectiveLoadingDisplayState}
-              loadingLabel={loadingLabel}
-            />
-            {suggestedTopics.length ? (
+            {chatContentVisible ? (
+              <MessageFeed
+                config={config}
+                messages={messages}
+                state={state}
+                renderMessages={renderMessages}
+                loadingState={effectiveLoadingDisplayState}
+                loadingLabel={loadingLabel}
+              />
+            ) : null}
+            {chatContentVisible && suggestedTopics.length ? (
               <section className="gw-section">
                 <div className="gw-section-title">{config.labels.suggestedTopicsLabel}</div>
                 <div className="gw-topic-list">
