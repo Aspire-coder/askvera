@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, and 1.7 are complete.
+Steps 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, and 1.8 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -909,3 +909,57 @@ src/storage/localStorageAdapter.ts
 ```
 
 This keeps storage replaceable later with session storage, IndexedDB, cookies, or an enterprise-provided storage adapter without changing widget components.
+
+## Step 1.8 Implementation Notes
+
+Step 1.8 added the widget theme manager and token system.
+
+New theme modules:
+
+```text
+src/themes/
+  cssVariables.ts
+  darkTheme.ts
+  defaultTheme.ts
+  index.ts
+  themeManager.ts
+  themeTokens.ts
+  themeTypes.ts
+```
+
+The theme layer now owns:
+
+- light theme tokens
+- dark theme tokens
+- custom theme merging
+- semantic CSS variable generation
+- runtime theme manager
+- theme mode support
+- visual token types
+
+The theme system supports:
+
+- `light`
+- `dark`
+- `custom`
+
+`GenericWidgetWrapper` now consumes `buildThemeVars()` from `src/themes` instead of owning CSS variable generation itself.
+
+The previous generic-widget default theme remains as a compatibility export, but now delegates to the centralized theme system.
+
+CSS now uses more semantic variables, including:
+
+- `--gw-background`
+- `--gw-secondary`
+- `--gw-header-bg`
+- `--gw-header-text`
+- `--gw-field-bg`
+- `--gw-field-text`
+- `--gw-focus-ring`
+- `--gw-panel-width`
+- `--gw-panel-height`
+- `--gw-launcher-size`
+- `--gw-motion-duration`
+- `--gw-motion-easing`
+
+This step preserves the existing default appearance while making the widget more white-label ready.

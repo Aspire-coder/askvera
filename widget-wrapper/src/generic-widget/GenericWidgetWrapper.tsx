@@ -1,14 +1,14 @@
-import { FormEvent, type CSSProperties, useEffect, useMemo, useReducer } from "react";
+import { FormEvent, useEffect, useMemo, useReducer } from "react";
 import { ConsentPanel } from "./ConsentPanel";
 import { FloatingLauncher } from "./FloatingLauncher";
 import { Header } from "./Header";
 import { Menu } from "./Menu";
 import { MessageFeed } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
-import { defaultTheme } from "./config/defaultTheme";
 import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetTheme } from "./types";
 import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
 import { createSessionManager } from "../services";
+import { buildThemeVars } from "../themes";
 import {
   createWidgetInitialState,
   selectConsentAccepted,
@@ -32,26 +32,6 @@ import {
   filterLanguagesByCountry
 } from "./utils";
 import "./generic-widget.css";
-
-const buildThemeVars = (theme?: WidgetTheme) => {
-  const merged = { ...defaultTheme, ...theme };
-  return {
-    "--gw-accent": merged.accentColor,
-    "--gw-accent-text": merged.accentTextColor,
-    "--gw-surface": merged.surfaceColor,
-    "--gw-panel": merged.panelColor,
-    "--gw-text": merged.textColor,
-    "--gw-muted": merged.mutedTextColor,
-    "--gw-border": merged.borderColor,
-    "--gw-launcher": merged.launcherColor,
-    "--gw-launcher-text": merged.launcherTextColor,
-    "--gw-success": merged.successColor,
-    "--gw-shadow": merged.shadow,
-    "--gw-radius": merged.radius,
-    "--gw-font": merged.fontFamily,
-    "--gw-z": String(merged.zIndex)
-  } as CSSProperties;
-};
 
 export function GenericWidgetWrapper({
   config,
