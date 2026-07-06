@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 2.0 and 2.1 are complete.
+Steps 2.0, 2.1, and 2.2 are complete.
 
 Sprint 9.2 is focused on product experience only. The architecture from Sprint 9.1 should remain intact.
 
@@ -557,6 +557,29 @@ Polish:
 - body spacing
 - footer/composer placement
 - mobile shell behavior
+
+Status: complete.
+
+Implementation file:
+
+```text
+src/generic-widget/generic-widget.css
+```
+
+Shell improvements:
+
+- intentional panel height with min/max viewport constraints
+- softer bordered enterprise panel edge
+- standardized panel radius and elevation
+- header separated from body with a subtle boundary
+- content area uses the design-system spacing scale
+- composer separated from conversation with a border and soft top shadow
+- composer padding accounts for mobile safe-area inset
+- success banner is smaller, softer, and less visually dominant
+- mobile panel uses more available viewport space
+- very small screens can use a full-height, edge-to-edge panel
+
+No component behavior changed.
 
 ### Step 2.3 - Header
 
