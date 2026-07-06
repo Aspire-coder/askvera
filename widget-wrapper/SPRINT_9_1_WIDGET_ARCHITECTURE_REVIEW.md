@@ -353,15 +353,23 @@ widget-wrapper/
   src/
     api/
     assets/
+    adapters/
     components/
     config/
+    constants/
     events/
     hooks/
     integrations/
+    localization/
+    plugins/
+    providers/
+    renderers/
     sdk/
     services/
     state/
+    storage/
     styles/
+    testing/
     themes/
     types/
     utils/
@@ -369,13 +377,18 @@ widget-wrapper/
 
 Move files in small groups:
 
-1. Move UI components into `src/components`.
-2. Move API helpers from `BackendChatDemo.tsx` into `src/api`.
-3. Move session helpers from `utils.ts` into `src/services/sessionManager.ts`.
-4. Move locale helpers into `src/utils/locale.ts`.
-5. Move markdown rendering helpers into `src/utils/markdown.tsx`.
-6. Move theme helpers into `src/themes`.
-7. Keep compatibility exports in `src/generic-widget/index.ts` until the new structure is stable.
+1. Create the full long-term folder structure with placeholder files so Git tracks it.
+2. Keep all existing imports and compatibility exports working.
+3. Move UI components into `src/components`.
+4. Move API helpers from `BackendChatDemo.tsx` into `src/api`.
+5. Move session helpers from `utils.ts` into `src/services/sessionManager.ts`.
+6. Move storage-specific code into `src/storage`.
+7. Move locale helpers into `src/utils/locale.ts`.
+8. Move widget-specific text helpers into `src/localization`.
+9. Move markdown rendering helpers into `src/renderers`.
+10. Move theme helpers into `src/themes`.
+11. Reserve `src/providers`, `src/adapters`, and `src/plugins` for future integrations.
+12. Keep compatibility exports in `src/generic-widget/index.ts` until the new structure is stable.
 
 ### Step 1.3 - Configuration System
 
@@ -446,7 +459,7 @@ src/api/
 
 No UI component should call `fetch` directly after this step.
 
-### Step 1.6 - Event System
+### Step 1.6 - Event Bus
 
 Create:
 
@@ -507,7 +520,30 @@ Support:
 - brand color overrides
 - font overrides
 
-### Step 1.9 - Widget SDK
+### Step 1.9 - Analytics and Feature Flags
+
+Create lightweight widget-side analytics and feature flag foundations:
+
+```text
+src/events/
+  analytics.ts
+src/config/
+  featureFlags.ts
+```
+
+Initial feature flags:
+
+- streaming
+- feedback
+- typing indicator
+- markdown
+- dark mode
+- citations
+- attachments
+
+Analytics events should be provider-neutral so they can later feed CloudWatch, Google Analytics, Adobe Analytics, Mixpanel, Segment, or a custom enterprise system.
+
+### Step 1.10 - Widget SDK
 
 Create:
 
@@ -528,7 +564,7 @@ AskVera.reset()
 AskVera.updateConfig(config)
 ```
 
-### Step 1.10 - Build Pipeline
+### Step 1.11 - Build Pipeline
 
 Update build output to produce:
 
@@ -544,18 +580,34 @@ dist/
 
 Keep the React library build separate from the standalone SDK build if needed.
 
+### Step 1.12 - Documentation and Examples
+
+Update documentation and examples after the architecture is stabilized:
+
+- React usage
+- Script-tag usage
+- iframe usage
+- Chatwoot usage
+- custom provider usage
+- theme customization
+- event subscriptions
+- feature flags
+- troubleshooting
+- local demo setup
+
 ## Recommended Sprint 9.1 Order
 
 1. Complete folder structure and compatibility exports.
-2. Extract API layer from `BackendChatDemo.tsx`.
-3. Extract session manager.
-4. Add centralized state provider/reducer.
-5. Add event system.
-6. Add runtime configuration system.
+2. Add runtime configuration system.
+3. Add centralized state provider/reducer.
+4. Extract API layer from `BackendChatDemo.tsx`.
+5. Add event bus.
+6. Extract session manager.
 7. Add theme manager.
-8. Add SDK API.
-9. Update build pipeline.
-10. Update README with installation and embedding instructions.
+8. Add analytics and feature flags.
+9. Add SDK API.
+10. Update build pipeline.
+11. Update documentation and examples.
 
 ## Risk Notes
 
@@ -567,6 +619,7 @@ Keep the React library build separate from the standalone SDK build if needed.
 - Keep consent-required retry behavior.
 - Keep request timeout handling.
 - Keep correlation ID logging in local development.
+- Every step must preserve behavior, pass `npm run typecheck`, and keep the local demo runnable before moving on.
 
 ## Step 1.1 Conclusion
 
