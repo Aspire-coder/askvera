@@ -56,34 +56,124 @@
 
 .gw-header {
   position: relative;
-  min-height: 70px;
-  padding: var(--gw-space-4) var(--gw-space-16);
+  min-height: 82px;
+  padding: var(--gw-space-4) var(--gw-space-5);
   background: var(--gw-header-bg);
   border-bottom: 1px solid color-mix(in srgb, var(--gw-header-text), transparent 88%);
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--gw-space-4);
+}
+
+.gw-header-identity {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
   gap: var(--gw-space-3);
+  min-width: 0;
+}
+
+.gw-header-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--gw-header-text), transparent 72%);
+  border-radius: var(--gw-radius-lg);
+  background: color-mix(in srgb, var(--gw-header-text), transparent 90%);
+  color: var(--gw-header-text);
+  font-family: var(--gw-font-display);
+  font-size: var(--gw-text-title-size);
+  font-weight: var(--gw-weight-semibold);
+  letter-spacing: 0.04em;
+}
+
+.gw-header-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gw-header-copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--gw-space-1);
 }
 
 .gw-title {
   color: var(--gw-header-text);
-  font-family: var(--gw-font-display);
-  font-size: var(--gw-text-display-size);
-  font-weight: var(--gw-weight-medium);
-  letter-spacing: 0.2em;
+  font-family: var(--gw-font-sans);
+  font-size: var(--gw-text-title-size);
+  font-weight: var(--gw-weight-bold);
+  letter-spacing: 0;
   line-height: var(--gw-line-tight);
-  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.gw-subtitle { display: none; }
-.gw-header-actions {
-  position: absolute;
-  right: var(--gw-space-5);
-  top: 50%;
+
+.gw-subtitle {
+  display: block;
+  color: color-mix(in srgb, var(--gw-header-text), transparent 24%);
+  font-size: var(--gw-text-caption-size);
+  font-weight: var(--gw-weight-medium);
+  line-height: var(--gw-line-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gw-status {
   display: flex;
-  gap: var(--gw-space-3);
-  transform: translateY(-50%);
+  align-items: center;
+  gap: var(--gw-space-1);
+  color: color-mix(in srgb, var(--gw-header-text), transparent 32%);
+  font-size: 11px;
+  font-weight: var(--gw-weight-semibold);
+  line-height: var(--gw-line-tight);
+}
+
+.gw-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: var(--gw-radius-pill);
+  background: var(--gw-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-success), transparent 78%);
+}
+
+.gw-status-reconnecting .gw-status-dot {
+  background: var(--gw-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-warning), transparent 78%);
+}
+
+.gw-status-offline .gw-status-dot {
+  background: var(--gw-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-danger), transparent 78%);
+}
+
+.gw-status-region {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gw-status-region::before {
+  content: "/";
+  margin: 0 var(--gw-space-1);
+  color: color-mix(in srgb, var(--gw-header-text), transparent 58%);
+}
+
+.gw-header-actions {
+  position: static;
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--gw-space-2);
 }
 
 .gw-icon-button,
@@ -98,6 +188,8 @@
 
 .gw-icon-button {
   color: color-mix(in srgb, var(--gw-header-text), transparent 22%);
+  display: inline-grid;
+  place-items: center;
 }
 
 .gw-success-banner button {
@@ -119,7 +211,7 @@
 .gw-menu {
   position: absolute;
   right: var(--gw-space-4);
-  top: 66px;
+  top: 78px;
   width: 190px;
   background: var(--gw-panel);
   border: 1px solid var(--gw-border);
@@ -595,8 +687,26 @@
   }
 
   .gw-header {
-    padding-left: var(--gw-space-6);
-    padding-right: var(--gw-space-16);
+    min-height: 78px;
+    padding-left: var(--gw-space-4);
+    padding-right: var(--gw-space-4);
+  }
+
+  .gw-header-identity {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .gw-header-mark {
+    width: 38px;
+    height: 38px;
+  }
+
+  .gw-subtitle {
+    display: none;
+  }
+
+  .gw-status-region {
+    display: none;
   }
 
   .gw-content {

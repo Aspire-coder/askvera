@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 2.0, 2.1, and 2.2 are complete.
+Steps 2.0, 2.1, 2.2, and 2.3 are complete.
 
 Sprint 9.2 is focused on product experience only. The architecture from Sprint 9.1 should remain intact.
 
@@ -590,6 +590,31 @@ Add:
 - better action buttons
 - optional minimize control
 - cleaner icon handling
+
+Status: complete.
+
+Implementation files:
+
+```text
+src/generic-widget/Header.tsx
+src/generic-widget/GenericWidgetWrapper.tsx
+src/generic-widget/generic-widget.css
+src/generic-widget/types.ts
+src/generic-widget/examples/foreverDemoConfig.tsx
+```
+
+Header improvements:
+
+- assistant identity is now separate from brand identity
+- optional `assistantName`, `assistantSubtitle`, `logoUrl`, and `statusLabels` config fields
+- existing connection state drives the visible online/reconnecting/offline status
+- header includes a brand/assistant mark area
+- title, subtitle, and status have clearer hierarchy
+- menu and close controls use SVG icon buttons instead of text symbols
+- icon controls retain accessible labels and keyboard focus states
+- mobile header hides lower-priority metadata to avoid cramped layout
+
+No new state layer was introduced.
 
 ### Step 2.4 - Message Experience
 

@@ -4,6 +4,13 @@ import { exampleWidgetConfig } from "../config/exampleWidgetConfig";
 export const foreverDemoConfig: GenericWidgetConfig = {
   ...exampleWidgetConfig,
   brandName: "FOREVER",
+  assistantName: "ASK Vera",
+  assistantSubtitle: "AI Product Assistant",
+  statusLabels: {
+    online: "Online",
+    reconnecting: "Reconnecting",
+    offline: "Offline"
+  },
   welcomeText: (
     <>
       <p>I'm here to help you find clear, useful support for your selected market and language.</p>

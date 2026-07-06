@@ -95,6 +95,14 @@ export type WidgetConsentConfig = {
 
 export type GenericWidgetConfig = {
   brandName: string;
+  assistantName?: string;
+  assistantSubtitle?: string;
+  logoUrl?: string;
+  statusLabels?: {
+    online?: string;
+    reconnecting?: string;
+    offline?: string;
+  };
   welcomeText?: ReactNode;
   loadingText: ReactNode;
   successText: ReactNode;

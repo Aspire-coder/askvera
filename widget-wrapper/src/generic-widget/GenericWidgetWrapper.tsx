@@ -14,6 +14,7 @@ import {
   selectConsentAccepted,
   selectConsentError,
   selectConsentSubmitting,
+  selectConnection,
   selectCountry,
   selectDraftMessage,
   selectIsOpen,
@@ -159,6 +160,7 @@ export function GenericWidgetWrapper({
   const consentSubmitting = selectConsentSubmitting(widgetState);
   const consentError = selectConsentError(widgetState);
   const consentAccepted = selectConsentAccepted(widgetState);
+  const connection = selectConnection(widgetState);
   const effectiveLoading = selectLoading(widgetState);
   const availableLanguages = useMemo(
     () => filterLanguagesByCountry(config.languages, selectedCountry?.code, config.countries),
@@ -386,7 +388,7 @@ export function GenericWidgetWrapper({
 
       {isOpen ? (
         <section className={`gw-panel ${showSuccess ? "gw-panel-has-success" : ""} ${consentAccepted ? "gw-panel-consented" : "gw-panel-needs-consent"}`} aria-label={config.brandName}>
-          <Header config={config} selectedCountry={selectedCountry} menuOpen={menuOpen} onToggleMenu={() => dispatch({ type: "TOGGLE_MENU" })} onClose={closeWidget} />
+          <Header config={config} selectedCountry={selectedCountry} connection={connection} menuOpen={menuOpen} onToggleMenu={() => dispatch({ type: "TOGGLE_MENU" })} onClose={closeWidget} />
           {menuOpen ? <Menu config={config} payload={localePayload} onEscalate={onEscalate} onNewChat={onNewChat} /> : null}
           {showSuccess ? (
             <div className="gw-success-banner" role="status">
