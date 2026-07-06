@@ -1,4 +1,4 @@
-import { FormEvent, type CSSProperties, useEffect, useMemo, useState } from "react";
+import { FormEvent, type CSSProperties, useEffect, useMemo, useReducer } from "react";
 import { ConsentPanel } from "./ConsentPanel";
 import { FloatingLauncher } from "./FloatingLauncher";
 import { Header } from "./Header";
@@ -7,6 +7,21 @@ import { MessageFeed } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
 import { defaultTheme } from "./config/defaultTheme";
 import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetTheme } from "./types";
+import {
+  createWidgetInitialState,
+  selectConsentAccepted,
+  selectConsentError,
+  selectConsentSubmitting,
+  selectCountry,
+  selectDraftMessage,
+  selectIsOpen,
+  selectLanguage,
+  selectLoading,
+  selectMenuOpen,
+  selectRenderState,
+  selectShowSuccess,
+  widgetReducer
+} from "../state";
 import {
   createConsentRecord,
   createLocalePayload,
@@ -73,9 +88,15 @@ export function GenericWidgetWrapper({
     () => detectInitialLocale(config.countries, config.languages, config.defaultCountryCode, config.defaultLanguageCode),
     [config.countries, config.defaultCountryCode, config.defaultLanguageCode, config.languages]
   );
-  const [storedSessionMetadata] = useState(() => readSessionMetadata(config.sessionMetadataStorageKey));
-  const [visitorId] = useState(() => providedVisitorId || readStoredId(config.visitorStorageKey) || createVisitorId());
-  const [sessionId] = useState(() => providedSessionId || readStoredId(config.sessionStorageKey) || createSessionId());
+  const storedSessionMetadata = useMemo(() => readSessionMetadata(config.sessionMetadataStorageKey), [config.sessionMetadataStorageKey]);
+  const visitorId = useMemo(
+    () => providedVisitorId || readStoredId(config.visitorStorageKey) || createVisitorId(),
+    [config.visitorStorageKey, providedVisitorId]
+  );
+  const sessionId = useMemo(
+    () => providedSessionId || readStoredId(config.sessionStorageKey) || createSessionId(),
+    [config.sessionStorageKey, providedSessionId]
+  );
   const storedLocale = useMemo(() => {
     if (!storedSessionMetadata || storedSessionMetadata.sessionId !== sessionId) return undefined;
     const country = config.countries.find((option) => option.code === storedSessionMetadata.market);
@@ -84,20 +105,56 @@ export function GenericWidgetWrapper({
     const language = languageOptions.find((option) => option.code === storedSessionMetadata.language);
     return language ? { country, language } : undefined;
   }, [config.countries, config.languages, sessionId, storedSessionMetadata]);
-  const [isOpen, setIsOpen] = useState(openByDefault);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [selectedCountry, setSelectedCountry] = useState(storedLocale?.country || initialLocale.country);
-  const [selectedLanguage, setSelectedLanguage] = useState(storedLocale?.language || initialLocale.language);
-  const [message, setMessage] = useState("");
-  const [showSuccess, setShowSuccess] = useState(initialShowSuccess);
-  const [consentSubmitting, setConsentSubmitting] = useState(false);
-  const [consentError, setConsentError] = useState<string | null>(null);
-  const [sessionCreatedAt] = useState(
-    () => storedSessionMetadata?.createdAt || new Date().toISOString()
+  const sessionCreatedAt = useMemo(
+    () => storedSessionMetadata?.createdAt || new Date().toISOString(),
+    [storedSessionMetadata?.createdAt]
   );
-  const [consentAccepted, setConsentAccepted] = useState(
-    Boolean(initialConsentAccepted || (config.persistConsent && readConsentFlag(config.consent.storageKey)))
+  const initialState = useMemo(
+    () =>
+      createWidgetInitialState({
+        openByDefault,
+        loading,
+        initialConsentAccepted: Boolean(
+          initialConsentAccepted || (config.persistConsent && readConsentFlag(config.consent.storageKey))
+        ),
+        initialShowSuccess,
+        visitorId,
+        sessionId,
+        sessionCreatedAt,
+        policyVersion: config.consent.policyVersion,
+        selectedCountry: storedLocale?.country || initialLocale.country,
+        selectedLanguage: storedLocale?.language || initialLocale.language,
+        messages
+      }),
+    [
+      config.consent.policyVersion,
+      config.consent.storageKey,
+      config.persistConsent,
+      initialConsentAccepted,
+      initialLocale.country,
+      initialLocale.language,
+      initialShowSuccess,
+      loading,
+      messages,
+      openByDefault,
+      sessionCreatedAt,
+      sessionId,
+      storedLocale?.country,
+      storedLocale?.language,
+      visitorId
+    ]
   );
+  const [widgetState, dispatch] = useReducer(widgetReducer, initialState);
+  const isOpen = selectIsOpen(widgetState);
+  const menuOpen = selectMenuOpen(widgetState);
+  const selectedCountry = selectCountry(widgetState);
+  const selectedLanguage = selectLanguage(widgetState);
+  const message = selectDraftMessage(widgetState);
+  const showSuccess = selectShowSuccess(widgetState);
+  const consentSubmitting = selectConsentSubmitting(widgetState);
+  const consentError = selectConsentError(widgetState);
+  const consentAccepted = selectConsentAccepted(widgetState);
+  const effectiveLoading = selectLoading(widgetState);
   const availableLanguages = useMemo(
     () => filterLanguagesByCountry(config.languages, selectedCountry?.code, config.countries),
     [config.countries, config.languages, selectedCountry?.code]
@@ -106,13 +163,21 @@ export function GenericWidgetWrapper({
     () => [...(config.starterTopics || []), ...(config.contextualTopics || [])],
     [config.contextualTopics, config.starterTopics]
   );
-  const state: GenericWidgetRenderState = { isOpen, selectedCountry, selectedLanguage, consentAccepted, visitorId, sessionId };
+  const state: GenericWidgetRenderState = selectRenderState(widgetState);
   const localePayload = createLocalePayload({
     visitorId,
     sessionId,
     selectedCountry: selectedCountry?.code || "",
     selectedLanguage: selectedLanguage?.code || ""
   });
+
+  useEffect(() => {
+    dispatch({ type: "SET_MESSAGES", messages });
+  }, [messages]);
+
+  useEffect(() => {
+    dispatch({ type: "SET_LOADING", loading });
+  }, [loading]);
 
   useEffect(() => {
     writeStoredId(config.visitorStorageKey, visitorId);
@@ -125,8 +190,7 @@ export function GenericWidgetWrapper({
         storedSession.legalVersion !== config.consent.policyVersion
     );
     if (legalVersionChanged) {
-      setConsentAccepted(false);
-      setShowSuccess(false);
+      dispatch({ type: "REQUIRE_CONSENT" });
       if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
     }
     writeSessionMetadata(config.sessionMetadataStorageKey, {
@@ -152,15 +216,12 @@ export function GenericWidgetWrapper({
 
   useEffect(() => {
     if (!consentRequiredSignal) return;
-    setConsentAccepted(false);
-    setShowSuccess(false);
-    setConsentError("Please review and accept the legal documents before chatting.");
+    dispatch({ type: "REQUIRE_CONSENT", error: "Please review and accept the legal documents before chatting." });
     if (config.persistConsent) writeConsentFlag(config.consent.storageKey, false);
   }, [config.consent.storageKey, config.persistConsent, consentRequiredSignal]);
 
   const closeWidget = () => {
-    setIsOpen(false);
-    setMenuOpen(false);
+    dispatch({ type: "CLOSE_WIDGET" });
     onClose?.();
   };
 
@@ -168,8 +229,7 @@ export function GenericWidgetWrapper({
     const nextCountry = config.countries.find((country) => country.code === countryCode);
     if (!nextCountry) return;
     const nextLanguage = ensureLanguageForCountry(config.languages, nextCountry.code, selectedLanguage?.code, config.countries);
-    setSelectedCountry(nextCountry);
-    setSelectedLanguage(nextLanguage);
+    dispatch({ type: "SET_COUNTRY", country: nextCountry, language: nextLanguage });
     onCountryChange?.(
       createLocalePayload({ visitorId, sessionId, selectedCountry: nextCountry.code, selectedLanguage: nextLanguage?.code || "" })
     );
@@ -178,7 +238,7 @@ export function GenericWidgetWrapper({
   const handleLanguageChange = (languageCode: string) => {
     const nextLanguage = availableLanguages.find((language) => language.code === languageCode);
     if (!nextLanguage) return;
-    setSelectedLanguage(nextLanguage);
+    dispatch({ type: "SET_LANGUAGE", language: nextLanguage });
     onLanguageChange?.(
       createLocalePayload({ visitorId, sessionId, selectedCountry: selectedCountry?.code || "", selectedLanguage: nextLanguage.code })
     );
@@ -194,7 +254,7 @@ export function GenericWidgetWrapper({
       sessionId
     });
     const accepted = actionType === "accepted";
-    setConsentError(null);
+    dispatch({ type: "SET_CONSENT_ERROR", error: null });
 
     if (!accepted) {
       onRejectConsent?.(payload);
@@ -202,17 +262,14 @@ export function GenericWidgetWrapper({
     }
 
     try {
-      setConsentSubmitting(true);
+      dispatch({ type: "START_CONSENT_SUBMIT" });
       await onAcceptConsent?.(payload);
-      setConsentAccepted(true);
-      setShowSuccess(true);
+      dispatch({ type: "ACCEPT_CONSENT" });
       if (config.persistConsent) writeConsentFlag(config.consent.storageKey, true);
     } catch {
-      setConsentAccepted(false);
-      setShowSuccess(false);
-      setConsentError("Unable to record your consent. Please try again.");
+      dispatch({ type: "REQUIRE_CONSENT", error: "Unable to record your consent. Please try again." });
     } finally {
-      setConsentSubmitting(false);
+      dispatch({ type: "STOP_CONSENT_SUBMIT" });
     }
   };
 
@@ -229,7 +286,7 @@ export function GenericWidgetWrapper({
       widgetProviderName: config.provider.name,
       widgetProviderType: config.provider.type
     };
-    setMessage("");
+    dispatch({ type: "CLEAR_DRAFT_MESSAGE" });
     onSendMessage?.(payload);
   };
 
@@ -239,7 +296,7 @@ export function GenericWidgetWrapper({
         <FloatingLauncher
           config={config}
           onClick={() => {
-            setIsOpen(true);
+            dispatch({ type: "OPEN_WIDGET" });
             onOpen?.();
           }}
         />
@@ -247,12 +304,12 @@ export function GenericWidgetWrapper({
 
       {isOpen ? (
         <section className={`gw-panel ${showSuccess ? "gw-panel-has-success" : ""} ${consentAccepted ? "gw-panel-consented" : "gw-panel-needs-consent"}`} aria-label={config.brandName}>
-          <Header config={config} selectedCountry={selectedCountry} menuOpen={menuOpen} onToggleMenu={() => setMenuOpen((value) => !value)} onClose={closeWidget} />
+          <Header config={config} selectedCountry={selectedCountry} menuOpen={menuOpen} onToggleMenu={() => dispatch({ type: "TOGGLE_MENU" })} onClose={closeWidget} />
           {menuOpen ? <Menu config={config} payload={localePayload} onEscalate={onEscalate} onNewChat={onNewChat} /> : null}
           {showSuccess ? (
             <div className="gw-success-banner" role="status">
               <span>{config.successText}</span>
-              <button type="button" onClick={() => setShowSuccess(false)} aria-label={config.labels.successDismissLabel}>{"\u00d7"}</button>
+              <button type="button" onClick={() => dispatch({ type: "SET_SUCCESS_VISIBLE", visible: false })} aria-label={config.labels.successDismissLabel}>{"\u00d7"}</button>
             </div>
           ) : null}
           <div className="gw-content">
@@ -282,14 +339,14 @@ export function GenericWidgetWrapper({
                 <div className="gw-section-title">{config.labels.suggestedTopicsLabel}</div>
                 <div className="gw-topic-list">
                   {suggestedTopics.map((topic) => (
-                    <button key={topic.id} type="button" className="gw-topic" onClick={() => setMessage(topic.prompt || topic.label)}>
+                    <button key={topic.id} type="button" className="gw-topic" onClick={() => dispatch({ type: "SET_DRAFT_MESSAGE", message: topic.prompt || topic.label })}>
                       {topic.label}
                     </button>
                   ))}
                 </div>
               </section>
             ) : null}
-            {loading ? <div className="gw-loading" role="status"><span className="gw-spinner" aria-hidden="true" /><span>{config.loadingText}</span></div> : null}
+            {effectiveLoading ? <div className="gw-loading" role="status"><span className="gw-spinner" aria-hidden="true" /><span>{config.loadingText}</span></div> : null}
             {children ? <section className="gw-child-slot" aria-label={config.labels.childrenRegionLabel}>{typeof children === "function" ? children(state) : children}</section> : null}
           </div>
           <form className="gw-composer" onSubmit={handleSubmit}>
@@ -297,11 +354,11 @@ export function GenericWidgetWrapper({
             <input
               id="gw-message-input"
               value={message}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => dispatch({ type: "SET_DRAFT_MESSAGE", message: event.target.value })}
               placeholder={config.labels.messageInputPlaceholder}
-              disabled={loading || (config.consent.requireConsentBeforeMessaging !== false && !consentAccepted)}
+              disabled={effectiveLoading || (config.consent.requireConsentBeforeMessaging !== false && !consentAccepted)}
             />
-            <button type="submit" className="gw-primary-button" disabled={!message.trim() || loading}>{config.labels.sendMessageLabel}</button>
+            <button type="submit" className="gw-primary-button" disabled={!message.trim() || effectiveLoading}>{config.labels.sendMessageLabel}</button>
           </form>
         </section>
       ) : null}

@@ -2,7 +2,7 @@
 
 ## Status
 
-Steps 1.1, 1.2, and 1.3 are complete.
+Steps 1.1, 1.2, 1.3, and 1.4 are complete.
 
 This review covers the current reusable widget package in `widget-wrapper` and defines the refactoring plan for Sprint 9.1. The main conclusion is that the widget is functional and already has a good reusable foundation, but it is still organized like a demo plus wrapper instead of a standalone widget software product.
 
@@ -683,3 +683,42 @@ GenericWidgetWrapper
 The existing backend demo now builds its current `GenericWidgetConfig` through `buildWidgetConfig()`, preserving the current visual behavior while introducing the new configuration architecture.
 
 Step 1.3 deliberately does not move API calls, state management, or SDK logic yet. Those remain in later steps so each change stays small and verifiable.
+
+## Step 1.4 Implementation Notes
+
+Step 1.4 added the centralized widget state foundation.
+
+New state modules:
+
+```text
+src/state/
+  WidgetStateProvider.tsx
+  index.ts
+  selectors.ts
+  useWidgetState.ts
+  widgetActions.ts
+  widgetReducer.ts
+  widgetState.ts
+```
+
+The widget state is now modeled by domains:
+
+- `ui`: open/closed, loading, menu, success banner, draft message, active panel.
+- `session`: visitor ID, session ID, creation time, expiration placeholder.
+- `conversation`: messages, pending message, request-in-flight flag.
+- `consent`: accepted state, legal version, pending retry, consent error.
+- `locale`: selected country and language.
+- `connection`: online, reconnecting, backend health placeholder.
+- `errors`: last error and warnings.
+- `analytics`: opened timestamp and last event timestamp.
+
+The state layer now includes:
+
+- explicit reducer actions
+- a reducer for all widget state transitions
+- selectors so components do not need to depend on raw state shape
+- a provider/hook foundation for future SDK and plugin integration
+
+`GenericWidgetWrapper` now uses the centralized reducer for the global widget state it owns, while preserving the existing public props, callbacks, local storage behavior, consent flow, locale behavior, loading behavior, and message composer behavior.
+
+This step intentionally does not extract the backend API layer yet. API communication remains in the backend demo until the event bus and API layer steps are completed.
