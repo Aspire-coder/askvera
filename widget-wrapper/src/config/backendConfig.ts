@@ -67,6 +67,8 @@ export function normalizeBackendConfig(
     ? backendConfig.legalDocuments.map((document) => ({
         id: document.id,
         label: document.title,
+        required: document.required,
+        html: document.html,
         href: options.legalLinkBuilder
           ? options.legalLinkBuilder(options.apiUrl, options.country, options.language, document.id)
           : "#",

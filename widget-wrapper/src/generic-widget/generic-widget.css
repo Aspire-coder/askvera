@@ -40,6 +40,7 @@
 }
 
 .gw-panel {
+  position: relative;
   width: var(--gw-panel-width);
   height: var(--gw-panel-height);
   max-height: calc(100vh - (var(--gw-space-5) * 2));
@@ -389,18 +390,130 @@
   font-weight: var(--gw-weight-heavy);
 }
 
-.gw-legal-item a {
+.gw-legal-item a,
+.gw-legal-link-button {
+  width: fit-content;
+  border: 0;
+  padding: 0;
+  background: transparent;
   color: var(--gw-secondary);
   text-decoration: underline;
   text-decoration-color: var(--gw-accent);
   text-decoration-thickness: 2px;
   text-underline-offset: var(--gw-space-1);
+  font-family: inherit;
   font-size: 13px;
   font-weight: var(--gw-weight-bold);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
 }
 
 .gw-legal-item a:hover,
-.gw-legal-item a:focus-visible { color: color-mix(in srgb, var(--gw-secondary), var(--gw-accent) 22%); }
+.gw-legal-item a:focus-visible,
+.gw-legal-link-button:hover,
+.gw-legal-link-button:focus-visible { color: color-mix(in srgb, var(--gw-secondary), var(--gw-accent) 22%); }
+
+.gw-legal-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: var(--gw-space-4);
+}
+
+.gw-legal-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.gw-legal-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 560px);
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--gw-panel);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius-lg);
+  box-shadow: var(--gw-elevation-modal);
+}
+
+.gw-legal-modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gw-space-4);
+  padding: var(--gw-space-4) var(--gw-space-5);
+  border-bottom: 1px solid var(--gw-border);
+}
+
+.gw-legal-modal-header h3 {
+  margin: 0;
+  color: var(--gw-text);
+  font-size: var(--gw-text-title-size);
+  line-height: var(--gw-line-heading);
+}
+
+.gw-legal-modal-header .gw-icon-button {
+  color: var(--gw-text);
+}
+
+.gw-legal-modal-header .gw-icon-button:hover,
+.gw-legal-modal-header .gw-icon-button:focus-visible {
+  background: var(--gw-surface);
+}
+
+.gw-legal-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--gw-space-5);
+  color: var(--gw-text);
+  font-size: var(--gw-text-body-size);
+  line-height: var(--gw-line-relaxed);
+}
+
+.gw-legal-modal-body h1,
+.gw-legal-modal-body h2,
+.gw-legal-modal-body h3 {
+  color: var(--gw-text);
+  line-height: var(--gw-line-heading);
+}
+
+.gw-legal-modal-body a {
+  color: var(--gw-accent);
+  overflow-wrap: anywhere;
+}
+
+.gw-legal-modal-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.gw-legal-modal-body td,
+.gw-legal-modal-body th {
+  border: 1px solid var(--gw-border);
+  padding: var(--gw-space-2);
+  vertical-align: top;
+}
+
+.gw-consent-loading {
+  margin: var(--gw-space-3) 0 0;
+  padding: 10px var(--gw-space-3);
+  color: var(--gw-text);
+  background: var(--gw-surface);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius-md);
+  font-size: 13px;
+  font-weight: var(--gw-weight-semibold);
+  line-height: 1.4;
+}
 
 .gw-consent-ack {
   display: grid;

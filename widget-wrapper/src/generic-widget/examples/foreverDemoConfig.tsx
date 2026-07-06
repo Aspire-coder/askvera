@@ -44,8 +44,14 @@ export const foreverDemoConfig: GenericWidgetConfig = {
   sessionMetadataStorageKey: "askvera_session_metadata",
   visitorStorageKey: "askvera_visitor_id",
   policyLinks: [
-    { id: "privacy", label: "Privacy Notice", href: "/api/privacy?country=US&lang=en" },
-    { id: "terms", label: "Terms of Use", href: "/terms" }
+    { id: "privacy", label: "Privacy Notice", href: "/api/privacy?country=US&lang=en", required: true },
+    { id: "privacy-addendum", label: "Privacy Addendum", href: "/api/privacy?country=US&lang=en", required: true },
+    {
+      id: "arbitration",
+      label: "FLP Individual Arbitration and Class Action Waiver Agreement",
+      href: "/api/privacy?country=US&lang=en",
+      required: true
+    }
   ],
   theme: {
     accentColor: "#ffc400",

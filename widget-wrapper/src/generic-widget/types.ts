@@ -22,6 +22,8 @@ export type WidgetPolicyLink = {
   label: string;
   href: string;
   target?: "_blank" | "_self" | "_parent" | "_top";
+  required?: boolean;
+  html?: string;
 };
 
 export type WidgetTopic = {

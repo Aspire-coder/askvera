@@ -16,24 +16,33 @@ export function ConsentPanel({
   error?: string | null;
 }) {
   const [acknowledged, setAcknowledged] = useState(false);
+  const managedLegalLinks = config.policyLinks.filter((link) => link.required !== undefined);
+  const legalDocumentsReady = managedLegalLinks.length
+    ? managedLegalLinks.every((link) => link.required === false || Boolean(link.html))
+    : config.policyLinks.length > 0;
+  const acceptDisabled = !acknowledged || accepting || !legalDocumentsReady;
 
   return (
     <section className="gw-section gw-consent">
       <h2>{config.consent.title}</h2>
       <div className="gw-consent-body">{config.consent.body}</div>
       <LegalLinks config={config} />
+      {!legalDocumentsReady ? (
+        <p className="gw-consent-loading" role="status">Loading legal documents before consent can be recorded.</p>
+      ) : null}
       <label className="gw-consent-ack">
         <input
           type="checkbox"
           checked={acknowledged}
           onChange={(event) => setAcknowledged(event.target.checked)}
+          disabled={!legalDocumentsReady || accepting}
         />
         <span>I have read and agree to all of the above documents.</span>
       </label>
       {error ? <p className="gw-consent-error" role="alert">{error}</p> : null}
       <div className="gw-consent-actions">
         <button type="button" className="gw-secondary-button" onClick={onReject} disabled={accepting}>{config.labels.rejectConsentLabel}</button>
-        <button type="button" className="gw-primary-button" onClick={onAccept} disabled={!acknowledged || accepting}>
+        <button type="button" className="gw-primary-button" onClick={onAccept} disabled={acceptDisabled}>
           {accepting ? "Saving..." : config.labels.acceptConsentLabel}
         </button>
       </div>
