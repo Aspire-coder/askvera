@@ -510,9 +510,6 @@ export function GenericWidgetWrapper({
                 disabled={composerDisabled}
                 aria-describedby={composerDisabledReason ? "gw-composer-status" : undefined}
               />
-              <button type="button" className="gw-composer-tool gw-composer-tool-voice" aria-label="Voice input" disabled>
-                <span aria-hidden="true">mic</span>
-              </button>
               <button type="submit" className="gw-primary-button" disabled={!canSendMessage}>{config.labels.sendMessageLabel}</button>
             </div>
             {composerDisabledReason ? <div id="gw-composer-status" className="gw-composer-status">{composerDisabledReason}</div> : null}

@@ -5,7 +5,7 @@ export const foreverDemoConfig: GenericWidgetConfig = {
   ...exampleWidgetConfig,
   brandName: "FOREVER",
   assistantName: "ASK Vera",
-  assistantSubtitle: "AI Product Assistant",
+  assistantSubtitle: "Enterprise Knowledge Assistant",
   statusLabels: {
     online: "Online",
     reconnecting: "Reconnecting",
@@ -13,14 +13,15 @@ export const foreverDemoConfig: GenericWidgetConfig = {
   },
   welcomeText: (
     <>
-      <p>I'm here to help you find clear, useful support for your selected market and language.</p>
-      <p>Choose a topic below or ask a question to start a conversation.</p>
+      <p><strong>Welcome to ASK Vera.</strong></p>
+      <p>Get trusted answers from approved company documentation for your selected country and language.</p>
+      <p>I can help with company policies, international directory information, country-specific documentation, corporate procedures, and compliance information.</p>
     </>
   ),
   loadingText: "Thinking...",
   loadingMessages: {
     thinking: "Thinking...",
-    searching: "Searching product documentation...",
+    searching: "Searching approved documentation...",
     generating: "Preparing your answer...",
     reconnecting: "Connection interrupted. Retrying...",
     slowResponse: "Still working..."
@@ -47,7 +48,7 @@ export const foreverDemoConfig: GenericWidgetConfig = {
     categories: ["chat-processing", "market-language-preferences"],
     storageKey: "forever-style-widget-demo-consent"
   },
-  persistConsent: true,
+  persistConsent: false,
   sessionStorageKey: "askvera_session_id",
   sessionMetadataStorageKey: "askvera_session_metadata",
   visitorStorageKey: "askvera_visitor_id",
@@ -77,10 +78,9 @@ export const foreverDemoConfig: GenericWidgetConfig = {
   },
   provider: { name: "ASK Vera API", type: "custom-react" },
   starterTopics: [
-    { id: "products", label: "What products are right for me?", prompt: "What products are right for me?" },
-    { id: "orders", label: "I need help with an order", prompt: "I need help with an order." },
-    { id: "account", label: "Help me with my account", prompt: "Help me with my account." },
-    { id: "policies", label: "Where can I find policy information?", prompt: "Where can I find policy information?" }
+    { id: "company-policies", label: "Company Policies", prompt: "What is the travel expense policy?" },
+    { id: "international-directory", label: "International Directory", prompt: "How do I contact the Germany office?" },
+    { id: "country-documentation", label: "Country Documentation", prompt: "Show me the policies for Canada." }
   ],
   contextualTopics: []
 };

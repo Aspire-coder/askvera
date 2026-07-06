@@ -1001,7 +1001,7 @@
 
 .gw-composer-shell {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
   gap: var(--gw-space-2);
   min-height: var(--gw-control-height-lg);
@@ -1168,10 +1168,6 @@
 
   .gw-composer-shell {
     grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .gw-composer-tool-voice {
-    display: none;
   }
 }
 
