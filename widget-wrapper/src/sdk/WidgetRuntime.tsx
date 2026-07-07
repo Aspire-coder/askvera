@@ -7,6 +7,8 @@ import {
   BackendUnavailableError,
   createApiClient,
   describeApiError,
+  loadConfig,
+  loadPrivacy,
   loadWidgetConfig,
   sendMessage,
   submitConsent,
@@ -103,6 +105,40 @@ const buildId = (prefix: string) => {
 
 const legalViewerHref = () => "#";
 
+function getLegalDocuments(config: ConfigResponseData | undefined) {
+  return config?.legalDocuments?.length ? config.legalDocuments : config?.legalDocs || [];
+}
+
+async function loadCompleteWidgetConfig(
+  apiClient: ReturnType<typeof createApiClient>,
+  selectedCountry: string,
+  selectedLanguage: string
+): Promise<ConfigResponseData> {
+  const widgetEnvelope = await loadWidgetConfig(apiClient);
+  const widgetConfig = widgetEnvelope.data;
+  if (!widgetConfig) {
+    throw new Error("Widget configuration response did not include data.");
+  }
+
+  const needsMarketConfig = !widgetConfig.countries?.length || widgetConfig.countries.length <= 1;
+  const currentLegalDocuments = getLegalDocuments(widgetConfig);
+  const needsLegalDocuments = !currentLegalDocuments.length;
+
+  const [marketEnvelope, privacyEnvelope] = await Promise.all([
+    needsMarketConfig ? loadConfig(apiClient) : Promise.resolve(undefined),
+    needsLegalDocuments ? loadPrivacy(apiClient, selectedCountry, selectedLanguage) : Promise.resolve(undefined)
+  ]);
+  const loadedLegalDocuments = privacyEnvelope?.data?.documents?.length ? privacyEnvelope.data.documents : currentLegalDocuments;
+
+  return {
+    ...widgetConfig,
+    countries: marketEnvelope?.data?.countries?.length ? marketEnvelope.data.countries : widgetConfig.countries,
+    privacyVersion: privacyEnvelope?.data?.version || marketEnvelope?.data?.privacyVersion || widgetConfig.privacyVersion,
+    legalDocuments: loadedLegalDocuments,
+    legalDocs: loadedLegalDocuments
+  };
+}
+
 function isConsentInstructionMessage(message: WidgetMessage): boolean {
   return message.id.includes("consent-required");
 }
@@ -191,7 +227,7 @@ export function WidgetRuntime({
           primaryColor: apiConfig.primaryColor,
           countries: apiConfig.countries,
           privacyVersion: apiConfig.privacyVersion,
-          legalDocuments: apiConfig.legalDocs,
+          legalDocuments: getLegalDocuments(apiConfig),
           starterTopics: apiConfig.starterTopics,
           contextualTopics: apiConfig.contextualTopics
         }
@@ -235,15 +271,22 @@ export function WidgetRuntime({
 
   useEffect(() => {
     let active = true;
-    loadWidgetConfig(apiClient)
-      .then((envelope) => {
-        if (!active || !envelope.data) return;
-        widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, { correlationId: envelope.correlationId });
-        setApiConfig(envelope.data);
-        const firstCountry = envelope.data.countries[0];
+    loadCompleteWidgetConfig(apiClient, selectedLocale.country, selectedLocale.language)
+      .then((loadedConfig) => {
+        if (!active) return;
+        widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, {});
+        setApiConfig(loadedConfig);
+        const firstCountry = loadedConfig.countries[0];
         const firstLanguage = firstCountry?.languages[0];
-        if (firstCountry && firstLanguage) {
+        const selectedCountryConfig = loadedConfig.countries.find((country) => country.code === selectedLocale.country);
+        const selectedLanguageConfig = selectedCountryConfig?.languages.find((language) => language.code === selectedLocale.language);
+        if (!selectedCountryConfig && firstCountry && firstLanguage) {
           setSelectedLocale({ country: firstCountry.code, language: firstLanguage.code });
+        } else if (selectedCountryConfig && !selectedLanguageConfig) {
+          const fallbackLanguage = selectedCountryConfig.languages[0];
+          if (fallbackLanguage) {
+            setSelectedLocale({ country: selectedCountryConfig.code, language: fallbackLanguage.code });
+          }
         }
       })
       .catch((error) => {
@@ -254,7 +297,7 @@ export function WidgetRuntime({
     return () => {
       active = false;
     };
-  }, [apiClient, upsertMessage]);
+  }, [apiClient, selectedLocale.country, selectedLocale.language, upsertMessage]);
 
   useEffect(() => {
     if (!clearConversationSignal) return;

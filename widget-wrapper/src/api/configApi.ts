@@ -20,6 +20,12 @@ export type ConfigResponseData = {
   sdkVersion?: string;
   countries: ApiCountry[];
   privacyVersion: string;
+  legalDocuments?: Array<{
+    id: string;
+    title: string;
+    required: boolean;
+    html?: string;
+  }>;
   legalDocs?: Array<{
     id: string;
     title: string;
