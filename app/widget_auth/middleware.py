@@ -34,6 +34,9 @@ class WidgetAuthMiddleware(BaseHTTPMiddleware):
     """Require a valid widget JWT for protected API paths when enabled."""
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         if not settings.WIDGET_AUTH_REQUIRED or request.url.path not in settings.WIDGET_AUTH_PROTECTED_PATHS:
             return await call_next(request)
 
