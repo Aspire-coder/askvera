@@ -8,6 +8,7 @@ from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
+from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
 from services.consent_service import has_valid_consent
@@ -163,10 +164,37 @@ class AIOrchestrator:
 
     def _governance_fallback(self, decision: GovernanceDecision, correlation_id: str) -> ChatResponse:
         """Return a safe fallback when governance blocks the request or response."""
-        return self.response_builder.fallback(
+        user_message = self._governance_user_message(decision)
+        LOGGER.warning(
+            "governance_fallback_response",
+            correlation_id=correlation_id,
+            provider=decision.provider,
+            risk=decision.risk_level.value,
+            risk_action=decision.risk_action.value,
+            guardrail_action=decision.guardrail_action.value,
+            internal_reason=decision.reason,
+        )
+        return self.response_builder.fallback(user_message, correlation_id)
+
+    def _governance_user_message(self, decision: GovernanceDecision) -> str:
+        """Convert internal governance reasons into user-friendly copy."""
+        risk_issues = (decision.metadata or {}).get("risk", {}).get("issues", [])
+        issue_codes = {str(issue.get("code", "")).lower() for issue in risk_issues}
+
+        if any("income" in code for code in issue_codes):
+            return FALLBACK_RESPONSES["income_claim"]
+        if any("medical" in code or "health" in code for code in issue_codes):
+            return FALLBACK_RESPONSES["medical_claim"]
+        if decision.reason == "Governance provider failed.":
+            return FALLBACK_RESPONSES["bedrock_error"]
+        if decision.reason in {
+            "Request blocked by high-risk policy.",
+            "Request blocked by risk policy.",
+        }:
+            return FALLBACK_RESPONSES["off_topic"]
+        return (
             decision.reason
-            or "I cannot help with that request. Please ask a different question or contact Forever Living support.",
-            correlation_id,
+            or "I can't help with that request, but I'm happy to help with Forever Living products, policies, ordering, or business support."
         )
 
     def _validate_response(

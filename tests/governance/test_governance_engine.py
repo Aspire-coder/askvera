@@ -92,15 +92,26 @@ def test_governance_blocks_when_guardrails_block() -> None:
     assert decision.reason == "Blocked by guardrail."
 
 
-def test_governance_blocks_high_risk_even_when_guardrails_allow() -> None:
+def test_governance_allows_warn_risk_when_guardrails_allow() -> None:
     decision = _engine(_risk_decision(RiskLevel.HIGH, PolicyAction.WARN), FakeProvider()).evaluate(
+        text="high risk", country="US", language="en", correlation_id="cid"
+    )
+
+    assert decision.allowed is True
+    assert decision.action == GovernanceAction.ALLOW
+    assert decision.risk_level == RiskLevel.HIGH
+    assert decision.risk_action == PolicyAction.WARN
+
+
+def test_governance_blocks_escalated_risk_even_when_guardrails_allow() -> None:
+    decision = _engine(_risk_decision(RiskLevel.HIGH, PolicyAction.ESCALATE), FakeProvider()).evaluate(
         text="high risk", country="US", language="en", correlation_id="cid"
     )
 
     assert decision.allowed is False
     assert decision.action == GovernanceAction.BLOCK
     assert decision.risk_level == RiskLevel.HIGH
-    assert decision.risk_action == PolicyAction.WARN
+    assert decision.risk_action == PolicyAction.ESCALATE
 
 
 def test_governance_short_circuits_critical_risk() -> None:

@@ -130,7 +130,7 @@ class GovernanceEngine:
         if guardrail_decision.action == GovernanceAction.BLOCK:
             action = GovernanceAction.BLOCK
             allowed = False
-        elif risk_decision.action in {PolicyAction.WARN, PolicyAction.ESCALATE}:
+        elif risk_decision.action == PolicyAction.ESCALATE:
             action = GovernanceAction.BLOCK
             allowed = False
             reason = "Request blocked by high-risk policy."
