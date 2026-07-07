@@ -54,11 +54,12 @@ app/*
 !app/utils/*.py
 !app/widget_auth/
 !app/widget_auth/*.py
+!app/widget_registry/
+!app/widget_registry/*.py
 .codex/
 graphify-out/
 output/
-ASK_VERA_FULL_CODE_EXPORT.md
-ASK_VERA_CODE_EXPORT_CURRENT.md
+ASK_VERA*CODE_EXPORT*.md
 *.pdf
 public/documents/*.docx
 widget-wrapper/dist/
