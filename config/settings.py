@@ -238,6 +238,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "http://127.0.0.1:5175",
     "http://localhost:5175",
+    "http://127.0.0.1:9000",
+    "http://localhost:9000",
 ]
 API_DOMAIN = "api.vera-api.xyz"
 WIDGET_DOMAIN = "chat.vera-api.xyz"
