@@ -31,7 +31,7 @@ class WidgetAuthService:
     """Validate widget initialization requests and issue short-lived JWTs."""
 
     def __init__(self, registry_service: WidgetRegistryService | None = None) -> None:
-        self._registry_service = registry_service or widget_registry_service
+        self._registry_service = registry_service or WidgetRegistryService()
 
     def reload(self) -> None:
         """Reload registry entries from settings, useful after SSM startup config."""
@@ -156,4 +156,4 @@ class WidgetAuthService:
         response = self._response_from_claims(claims)
         return WidgetRefreshResponse(**response.model_dump())
 
-widget_auth_service = WidgetAuthService()
+widget_auth_service = WidgetAuthService(widget_registry_service)
