@@ -21,6 +21,7 @@ class WidgetRegistryService:
     def __init__(self, provider: WidgetRegistryProvider | None = None) -> None:
         self._provider = provider or self._build_provider()
         self._cache: dict[str, tuple[float, WidgetRegistration | None]] = {}
+        self._origins_cache: tuple[float, set[str]] | None = None
 
     @property
     def provider_name(self) -> str:
@@ -32,6 +33,7 @@ class WidgetRegistryService:
         self._provider = self._build_provider()
         self._provider.reload()
         self._cache.clear()
+        self._origins_cache = None
         LOGGER.info("widget_registry_reloaded", provider=self.provider_name)
 
     def get_widget(self, widget_id: str) -> WidgetRegistration | None:
@@ -56,9 +58,17 @@ class WidgetRegistryService:
 
     def get_all_allowed_origins(self) -> set[str]:
         """Return allowed origins for active widgets."""
+        ttl = max(int(settings.WIDGET_REGISTRY_CACHE_SECONDS), 0)
+        now = monotonic()
+        if self._origins_cache and ttl and self._origins_cache[0] > now:
+            return set(self._origins_cache[1])
+
         origins: set[str] = set()
         for widget in self.list_active_widgets():
             origins.update(widget.allowedOrigins)
+
+        if ttl:
+            self._origins_cache = (now + ttl, set(origins))
         return origins
 
     def _build_provider(self) -> WidgetRegistryProvider:

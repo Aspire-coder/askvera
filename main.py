@@ -6,7 +6,6 @@ from collections.abc import Generator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -17,6 +16,7 @@ from app.audit.sinks.firehose import initialize_firehose_sink
 from app.middleware.audit import AuditMiddleware
 from app.middleware.correlation import CorrelationIdMiddleware
 from app.monitoring.initializer import initialize_monitoring
+from app.widget_auth.cors import DynamicWidgetCorsMiddleware
 from app.widget_auth.middleware import WidgetAuthMiddleware
 from app.widget_auth import widget_auth_service
 from config import settings
@@ -106,17 +106,11 @@ app = FastAPI(title="ASK Vera", version=settings.APP_VERSION, lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(RateLimitMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(ProtectedRequestLoggingMiddleware)
 app.add_middleware(WidgetAuthMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(DynamicWidgetCorsMiddleware)
 app.include_router(router)
 
 
