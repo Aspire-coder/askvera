@@ -11,7 +11,7 @@
     "build": "node scripts/build-widget.mjs",
     "build:widget": "node scripts/build-widget.mjs",
     "build:lib": "node scripts/build-widget.mjs",
-    "build:demo": "vite build demo",
+    "build:demo": "node -e \"console.log('Demo build skipped: production SDK no longer ships the demo app.')\"",
     "typecheck": "tsc --noEmit",
     "types": "tsc -p tsconfig.types.json"
   },
