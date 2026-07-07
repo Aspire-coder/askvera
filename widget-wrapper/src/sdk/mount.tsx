@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { BackendChatDemo } from "../generic-widget/examples/BackendChatDemo";
+import { WidgetRuntime } from "./WidgetRuntime";
 import type { AskVeraRuntimeConfig, SdkRenderState } from "./AskVera";
 
 export type MountedWidget = {
@@ -30,7 +30,7 @@ export function mountWidget(config: AskVeraRuntimeConfig, state: SdkRenderState)
   const render = (nextState: SdkRenderState) => {
     root.render(
       <React.StrictMode>
-        <BackendChatDemo
+        <WidgetRuntime
           apiBaseUrl={nextState.config.apiUrl}
           authToken={nextState.config.widgetAuthToken}
           openSignal={nextState.openSignal}
@@ -38,8 +38,6 @@ export function mountWidget(config: AskVeraRuntimeConfig, state: SdkRenderState)
           resetSignal={nextState.resetSignal}
           clearConversationSignal={nextState.clearConversationSignal}
           sdkMessage={nextState.sdkMessage}
-          country={nextState.country}
-          language={nextState.language}
         />
       </React.StrictMode>
     );
