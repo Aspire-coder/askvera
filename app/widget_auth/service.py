@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from time import time
 from uuid import uuid4
 
 from config import settings
+from app.widget_registry.service import WidgetRegistryService, widget_registry_service
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
 
@@ -27,30 +27,19 @@ class WidgetAuthError(AskVeraError):
         super().__init__(message)
 
 
-def _load_registry() -> dict[str, WidgetRegistration]:
-    """Load widget registrations from configuration."""
-    try:
-        raw_registrations = json.loads(settings.WIDGET_REGISTRY_JSON or "[]")
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("WIDGET_REGISTRY_JSON must be valid JSON.") from exc
-
-    registrations = [WidgetRegistration.model_validate(item) for item in raw_registrations]
-    return {registration.widgetId: registration for registration in registrations}
-
-
 class WidgetAuthService:
     """Validate widget initialization requests and issue short-lived JWTs."""
 
-    def __init__(self) -> None:
-        self._registry = _load_registry()
+    def __init__(self, registry_service: WidgetRegistryService | None = None) -> None:
+        self._registry_service = registry_service or widget_registry_service
 
     def reload(self) -> None:
         """Reload registry entries from settings, useful after SSM startup config."""
-        self._registry = _load_registry()
+        self._registry_service.reload()
 
     def get_registration(self, widget_id: str) -> WidgetRegistration | None:
         """Return a widget registration by ID."""
-        return self._registry.get(widget_id)
+        return self._registry_service.get_widget(widget_id)
 
     def validate_origin(self, registration: WidgetRegistration, origin: str | None) -> bool:
         """Return True if the origin is allowed for this widget."""
