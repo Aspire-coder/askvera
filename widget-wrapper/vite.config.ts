@@ -10,6 +10,8 @@ const buildCommit = process.env.GITHUB_SHA?.slice(0, 7) || process.env.ASKVERA_B
 export default defineConfig({
   plugins: [react()],
   define: {
+    process: "undefined",
+    "process.env.NODE_ENV": JSON.stringify("production"),
     __ASKVERA_SDK_NAME__: JSON.stringify(sdkName),
     __ASKVERA_SDK_VERSION__: JSON.stringify(sdkVersion),
     __ASKVERA_BUILD_DATE__: JSON.stringify(buildDate),

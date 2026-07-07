@@ -17,9 +17,10 @@ export type ConfigResponseData = {
   logo?: string;
   theme?: "light" | "dark" | "custom" | string;
   primaryColor?: string;
+  sdkVersion?: string;
   countries: ApiCountry[];
   privacyVersion: string;
-  legalDocuments?: Array<{
+  legalDocs?: Array<{
     id: string;
     title: string;
     required: boolean;

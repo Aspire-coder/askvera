@@ -76,11 +76,6 @@ class WidgetAuthService:
     def _response_from_claims(self, claims: WidgetAuthClaims) -> WidgetInitResponse:
         return WidgetInitResponse(
             token=encode_widget_token(claims.model_dump()),
-            expiresIn=settings.WIDGET_JWT_TTL_SECONDS,
-            sessionId=claims.sessionId,
-            widgetId=claims.widgetId,
-            organizationId=claims.organizationId,
-            companyName=claims.companyName,
         )
 
     def initialize(self, request: WidgetInitRequest, correlation_id: str, client_ip: str | None = None) -> WidgetInitResponse:

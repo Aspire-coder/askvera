@@ -7,11 +7,6 @@ export type WidgetInitRequest = {
 
 export type WidgetInitResponseData = {
   token: string;
-  expiresIn: number;
-  sessionId: string;
-  widgetId: string;
-  organizationId: string;
-  companyName: string;
 };
 
 export function initializeWidget(client: ApiClient, request: WidgetInitRequest) {

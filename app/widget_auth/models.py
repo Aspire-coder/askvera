@@ -70,19 +70,9 @@ class WidgetInitResponse(BaseModel):
     """Successful widget initialization payload."""
 
     token: str
-    expiresIn: int
-    sessionId: str
-    widgetId: str
-    organizationId: str
-    companyName: str
 
 
 class WidgetRefreshResponse(BaseModel):
     """Successful widget token refresh payload."""
 
     token: str
-    expiresIn: int
-    sessionId: str
-    widgetId: str
-    organizationId: str
-    companyName: str
