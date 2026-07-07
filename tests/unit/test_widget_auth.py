@@ -39,7 +39,7 @@ def test_widget_init_issues_short_lived_token(monkeypatch) -> None:
     )
 
     claims = decode_widget_token(response.token)
-    assert response.expiresIn == 900
+    assert claims["exp"] - claims["iat"] == 900
     assert claims["widgetId"] == "widget-1"
     assert claims["organizationId"] == "org-1"
     assert claims["origin"] == "https://example.com"

@@ -45,7 +45,6 @@ def test_refresh_issues_new_token_for_same_session(monkeypatch) -> None:
     refreshed = service.refresh(initial.token, "cid", "https://company.com")
 
     refreshed_claims = decode_widget_token(refreshed.token)
-    assert refreshed.sessionId == initial.sessionId
     assert refreshed_claims["sessionId"] == initial_claims["sessionId"]
     assert refreshed_claims["jti"] != initial_claims["jti"]
 

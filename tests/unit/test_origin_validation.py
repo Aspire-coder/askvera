@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from app.widget_auth.jwt import decode_widget_token
 from app.widget_auth.models import WidgetInitRequest
 from app.widget_auth.origin_validator import is_origin_allowed, normalize_origin
 from app.widget_auth.service import WidgetAuthError, WidgetAuthService
@@ -113,4 +114,6 @@ def test_service_accepts_wildcard_origin(monkeypatch) -> None:
         "203.0.113.10",
     )
 
-    assert response.widgetId == "widget-1"
+    claims = decode_widget_token(response.token)
+    assert claims["widgetId"] == "widget-1"
+    assert claims["origin"] == "https://portal.company.com"
