@@ -35,8 +35,8 @@ export function CitationRenderer({ sources }: { sources: unknown }) {
   if (!normalized.length) return null;
 
   return (
-    <section className="gw-citations" aria-label="Sources">
-      <div className="gw-citations-title">Sources</div>
+    <section className="gw-citations" aria-label="References">
+      <div className="gw-citations-title">References</div>
       <div className="gw-citation-list">
         {normalized.map((source, index) => {
           const title = sourceTitle(source);

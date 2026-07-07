@@ -225,6 +225,14 @@ export function GenericWidgetWrapper({
   }, [effectiveLoading]);
 
   useEffect(() => {
+    if (!showSuccess) return;
+    const successTimer = window.setTimeout(() => {
+      dispatch({ type: "SET_SUCCESS_VISIBLE", visible: false });
+    }, 2400);
+    return () => window.clearTimeout(successTimer);
+  }, [showSuccess]);
+
+  useEffect(() => {
     if (!isOpen) return;
     const focusTimer = window.setTimeout(() => panelRef.current?.focus(), 0);
     return () => window.clearTimeout(focusTimer);
@@ -469,6 +477,8 @@ export function GenericWidgetWrapper({
             ? config.loadingMessages?.thinking || config.loadingText
             : config.loadingText;
   const chatContentVisible = !consentRequired;
+  const introAssistantName = config.assistantName || config.brandName;
+  const introCompanyName = config.brandName && config.brandName !== introAssistantName ? config.brandName : "Forever Living";
 
   return (
     <div className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
@@ -505,7 +515,23 @@ export function GenericWidgetWrapper({
             </div>
           ) : null}
           <div className="gw-content">
-            {showLocaleSelector ? (
+            {consentRequired ? (
+              <section className="gw-onboarding-intro" aria-label="Welcome">
+                <div className="gw-onboarding-mark" aria-hidden="true">
+                  {config.logoUrl ? <img src={config.logoUrl} alt="" /> : <span>{introAssistantName.trim().slice(0, 1) || "A"}</span>}
+                </div>
+                <div>
+                  <p className="gw-onboarding-eyebrow">Welcome</p>
+                  <h2>Hi, I&apos;m {introAssistantName}.</h2>
+                  <p>
+                    Your AI assistant for {introCompanyName}. I can help you find clear answers from approved company
+                    documentation.
+                  </p>
+                  <p className="gw-onboarding-next">Please select your market and language to continue.</p>
+                </div>
+              </section>
+            ) : null}
+            {showLocaleSelector && !consentAccepted ? (
               <RegionSelector
                 config={config}
                 countries={config.countries}

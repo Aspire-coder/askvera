@@ -42,8 +42,8 @@ const baseWidgetConfig: GenericWidgetConfig = {
   assistantName: "ASK Vera",
   assistantSubtitle: "Enterprise Knowledge Assistant",
   launcherTitle: "Open ASK Vera",
-  footerText: "Powered by approved company documentation.",
-  welcomeText: "Get trusted answers from approved company documentation.",
+  footerText: "Answers are generated from approved company documentation.",
+  welcomeText: "I can help you find clear answers from approved company documentation.",
   loadingText: "Thinking...",
   loadingMessages: {
     thinking: "Thinking...",
@@ -52,7 +52,7 @@ const baseWidgetConfig: GenericWidgetConfig = {
     reconnecting: "Connection interrupted. Retrying...",
     slowResponse: "Still working..."
   },
-  successText: "Thank you. Your privacy choices have been saved and chat is ready.",
+  successText: "Privacy saved. Chat is ready.",
   labels: {
     launcherAriaLabel: "Open assistant",
     closeAriaLabel: "Close assistant",
@@ -62,7 +62,7 @@ const baseWidgetConfig: GenericWidgetConfig = {
     countryPlaceholder: "Select a market",
     languagePlaceholder: "Select a language",
     continueLabel: "Continue",
-    acceptConsentLabel: "Accept and continue",
+    acceptConsentLabel: "I agree",
     rejectConsentLabel: "Not now",
     messageInputLabel: "Message",
     messageInputPlaceholder: "Ask a question",

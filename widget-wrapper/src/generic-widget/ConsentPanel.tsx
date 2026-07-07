@@ -24,7 +24,10 @@ export function ConsentPanel({
 
   return (
     <section className="gw-section gw-consent">
-      <h2>{config.consent.title}</h2>
+      <div className="gw-consent-heading">
+        <p>One quick privacy step</p>
+        <h2>{config.consent.title}</h2>
+      </div>
       <div className="gw-consent-body">{config.consent.body}</div>
       <LegalLinks config={config} />
       {!legalDocumentsReady ? (
@@ -41,7 +44,7 @@ export function ConsentPanel({
       </label>
       {error ? <p className="gw-consent-error" role="alert">{error}</p> : null}
       <div className="gw-consent-actions">
-        <button type="button" className="gw-secondary-button" onClick={onReject} disabled={accepting}>{config.labels.rejectConsentLabel}</button>
+        <button type="button" className="gw-consent-skip" onClick={onReject} disabled={accepting}>{config.labels.rejectConsentLabel}</button>
         <button type="button" className="gw-primary-button" onClick={onAccept} disabled={acceptDisabled}>
           {accepting ? "Saving..." : config.labels.acceptConsentLabel}
         </button>

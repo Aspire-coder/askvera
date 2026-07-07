@@ -24,6 +24,14 @@ function assistantMark(config: GenericWidgetConfig): string {
   return label.trim().slice(0, 1) || "A";
 }
 
+function AssistantAvatar({ config }: { config: GenericWidgetConfig }) {
+  if (config.logoUrl) {
+    return <img src={config.logoUrl} alt="" />;
+  }
+
+  return <span>{assistantMark(config)}</span>;
+}
+
 function messageCopyText(message: WidgetMessage): string {
   if (typeof message.content === "string") return message.content;
   const copyText = message.metadata?.copyText;
@@ -127,7 +135,7 @@ function MessageCard({
   return (
     <article className={`gw-message gw-message-${message.role}`}>
       <div className="gw-message-avatar" aria-hidden="true">
-        {isAssistant ? assistantMark(config) : message.role === "user" ? "Y" : "i"}
+        {isAssistant ? <AssistantAvatar config={config} /> : message.role === "user" ? "Y" : "i"}
       </div>
       <div className="gw-message-card">
         <header className="gw-message-meta">
@@ -162,7 +170,7 @@ function LoadingMessage({
 
   return (
     <article className={`gw-message gw-message-assistant gw-message-loading gw-message-loading-${state}`}>
-      <div className="gw-message-avatar" aria-hidden="true">{assistantMark(config)}</div>
+      <div className="gw-message-avatar" aria-hidden="true"><AssistantAvatar config={config} /></div>
       <div className="gw-message-card">
         <header className="gw-message-meta">
           <span className="gw-message-author">{config.assistantName || config.brandName}</span>
@@ -211,15 +219,6 @@ export function MessageFeed({
 
   return (
     <div className="gw-message-feed" role="log" aria-live="polite" aria-busy={loadingState !== "hidden"}>
-      {config.welcomeText ? (
-        <MessageCard
-          message={{ id: "gw-welcome-message", role: "system", content: config.welcomeText }}
-          config={config}
-          state={state}
-          onCopyMessage={onCopyMessage}
-          onMessageFeedback={onMessageFeedback}
-        />
-      ) : null}
       {messages.map((message) => (
         <MessageCard
           key={message.id}

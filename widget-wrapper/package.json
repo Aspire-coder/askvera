@@ -1,6 +1,6 @@
 {
   "name": "@askvera/widget",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "type": "module",
   "private": true,
   "main": "./dist/widget.js",
@@ -15,7 +15,7 @@
     "validate-widget": "node scripts/validate-build.js",
     "upload-widget": "node scripts/upload-widget.js",
     "invalidate-widget": "node scripts/invalidate-cloudfront.js",
-    "deploy-widget": "npm run build && npm run validate-widget && npm run upload-widget && npm run invalidate-widget",
+    "deploy-widget": "node scripts/deploy-widget.js",
     "deploy-widget:ps": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-widget.ps1",
     "deploy-widget:sh": "bash ./scripts/deploy-widget.sh",
     "typecheck": "tsc --noEmit",

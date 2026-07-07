@@ -69,9 +69,10 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
   return (
     <>
       <nav className="gw-legal" aria-label={config.labels.legalLinksLabel}>
+        <div className="gw-legal-title">Review required documents</div>
         {config.policyLinks.map((link) => (
           <div key={link.id} className="gw-legal-item">
-            <span aria-hidden="true">{"\u2022"}</span>
+            <span aria-hidden="true">{"\u2713"}</span>
             {link.html ? (
               <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">
                 {link.label}
