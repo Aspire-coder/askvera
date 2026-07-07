@@ -66,11 +66,22 @@ class AIOrchestrator:
         cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
         if cached:
-            return self._validate_response(
+            chat_response = self._validate_response(
                 self.response_builder.from_cached(cached, correlation_id),
                 body,
                 correlation_id,
             )
+            governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
+            if not governance_decision.allowed:
+                LOGGER.warning(
+                    "cached_response_governance_blocked",
+                    correlation_id=correlation_id,
+                    country=body.country,
+                    language=body.language,
+                    role=body.role,
+                )
+                return self._governance_fallback(governance_decision, correlation_id)
+            return chat_response
 
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_result = self.retriever.retrieve(scrubbed_input, body.country, body.language, body.role, correlation_id)
