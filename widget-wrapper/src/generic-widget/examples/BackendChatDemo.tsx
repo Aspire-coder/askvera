@@ -222,7 +222,7 @@ export function BackendChatDemo({
             theme: apiConfig.theme,
             primaryColor: apiConfig.primaryColor,
             privacyVersion: apiConfig.privacyVersion,
-            legalDocuments: apiConfig.legalDocuments,
+            legalDocuments: apiConfig.legalDocs,
             starterTopics: apiConfig.starterTopics,
             contextualTopics: apiConfig.contextualTopics
           }

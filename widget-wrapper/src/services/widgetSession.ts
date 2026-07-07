@@ -1,6 +1,8 @@
 import type { WidgetInitResponseData } from "../api";
 
-export type WidgetAuthSession = WidgetInitResponseData & {
+export type WidgetAuthSession = {
+  token: string;
+  widgetId?: string;
   expiresAt: number;
 };
 
@@ -25,9 +27,11 @@ export class WidgetSessionStore {
   }
 
   write(response: WidgetInitResponseData): WidgetAuthSession {
+    const claims = decodeJwtPayload(response.token);
     const session = {
-      ...response,
-      expiresAt: Date.now() + response.expiresIn * 1000
+      token: response.token,
+      widgetId: typeof claims.widgetId === "string" ? claims.widgetId : undefined,
+      expiresAt: typeof claims.exp === "number" ? claims.exp * 1000 : Date.now() + 15 * 60 * 1000
     };
     window.sessionStorage.setItem(this.storageKey, JSON.stringify(session));
     return session;
@@ -40,4 +44,16 @@ export class WidgetSessionStore {
 
 export function createWidgetSessionStore(storageKey?: string) {
   return new WidgetSessionStore(storageKey);
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return {};
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, "=");
+    return JSON.parse(window.atob(padded)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
 }
