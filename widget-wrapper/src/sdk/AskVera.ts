@@ -102,14 +102,6 @@ class AskVeraSdkImpl implements AskVeraSdk {
   }
 }
 
-export const AskVera: AskVeraSdk = new AskVeraSdkImpl();
+const sdk: AskVeraSdk = new AskVeraSdkImpl();
 
-declare global {
-  interface Window {
-    AskVera?: AskVeraSdk;
-  }
-}
-
-if (typeof window !== "undefined") {
-  window.AskVera = AskVera;
-}
+export default sdk;

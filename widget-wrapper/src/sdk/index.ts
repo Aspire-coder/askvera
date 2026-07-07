@@ -1,8 +1,14 @@
-import { AskVera } from "./AskVera";
+import AskVera from "./AskVera";
 
-(window as any).AskVera = AskVera;
+declare global {
+    interface Window {
+        AskVera: typeof AskVera;
+    }
+}
 
-export { AskVera };
+window.AskVera = AskVera;
+
+export default AskVera;
 export type {
     AskVeraInitConfig,
     AskVeraSdk,
