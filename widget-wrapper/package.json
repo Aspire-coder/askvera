@@ -12,6 +12,12 @@
     "build:widget": "node scripts/build-widget.mjs",
     "build:lib": "node scripts/build-widget.mjs",
     "build:demo": "node -e \"console.log('Demo build skipped: production SDK no longer ships the demo app.')\"",
+    "validate-widget": "node scripts/validate-build.js",
+    "upload-widget": "node scripts/upload-widget.js",
+    "invalidate-widget": "node scripts/invalidate-cloudfront.js",
+    "deploy-widget": "npm run build && npm run validate-widget && npm run upload-widget && npm run invalidate-widget",
+    "deploy-widget:ps": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-widget.ps1",
+    "deploy-widget:sh": "bash ./scripts/deploy-widget.sh",
     "typecheck": "tsc --noEmit",
     "types": "tsc -p tsconfig.types.json"
   },
