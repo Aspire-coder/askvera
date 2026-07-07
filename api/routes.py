@@ -115,6 +115,34 @@ def widget_refresh(body: WidgetRefreshRequest, request: Request) -> Envelope | J
         return error_response(exc, correlation_id)
 
 
+@router.get("/api/widget/config", response_model=None)
+def widget_config(request: Request) -> Envelope | JSONResponse:
+    """Return backend-owned widget branding, market config, and legal documents."""
+    correlation_id = _correlation_id(request)
+    claims = getattr(request.state, "widget_auth", {}) or {}
+    registration = widget_auth_service.get_registration(str(claims.get("widgetId", "")))
+    if registration is None:
+        return error_response(WidgetAuthError("Widget is not active."), correlation_id)
+
+    metadata = registration.metadata or {}
+    documents = get_legal_documents()
+    return success(
+        {
+            "widgetId": registration.widgetId,
+            "companyName": registration.companyName,
+            "logo": str(metadata.get("logo") or ""),
+            "theme": str(metadata.get("theme") or "light"),
+            "primaryColor": str(metadata.get("primaryColor") or "#2D7FF9"),
+            "countries": get_countries(),
+            "privacyVersion": documents["version"],
+            "legalDocuments": documents["documents"],
+            "starterTopics": metadata.get("starterTopics"),
+            "contextualTopics": metadata.get("contextualTopics"),
+        },
+        correlation_id,
+    )
+
+
 def _valid_language_codes(country_code: str) -> set[str]:
     return get_language_codes_for_country(country_code)
 

@@ -5,7 +5,6 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = resolve(root, "dist");
-const tscBin = resolve(root, "node_modules/typescript/bin/tsc");
 const viteBin = resolve(root, "node_modules/vite/bin/vite.js");
 
 function run(command, args, options = {}) {
@@ -33,8 +32,4 @@ if (existsSync(dist)) {
   rmSync(dist, { recursive: true, force: true });
 }
 
-run("node", [tscBin, "-p", "tsconfig.types.json"], { shell: false });
-run("node", [viteBin, "build"], { shell: false, env: { WIDGET_BUILD_TARGET: "es", WIDGET_MINIFY: "false" } });
-run("node", [viteBin, "build"], { shell: false, env: { WIDGET_BUILD_TARGET: "iife", WIDGET_MINIFY: "false" } });
-run("node", [viteBin, "build"], { shell: false, env: { WIDGET_BUILD_TARGET: "iife", WIDGET_MINIFY: "true" } });
-run("node", ["scripts/generate-dist-assets.mjs"], { shell: false });
+run("node", [viteBin, "build"], { shell: false, env: { WIDGET_MINIFY: "true" } });

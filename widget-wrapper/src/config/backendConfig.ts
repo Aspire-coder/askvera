@@ -19,6 +19,11 @@ export type LegalDocumentConfig = {
 };
 
 export type BackendConfig = {
+  widgetId?: string;
+  companyName?: string;
+  logo?: string;
+  theme?: "light" | "dark" | "custom" | string;
+  primaryColor?: string;
   countries: BackendCountry[];
   privacyVersion: string;
   legalDocuments?: LegalDocumentConfig[];

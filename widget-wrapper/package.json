@@ -4,13 +4,12 @@
   "type": "module",
   "private": true,
   "main": "./dist/widget.js",
-  "module": "./dist/widget.es.js",
-  "types": "./dist/types/generic-widget/index.d.ts",
   "style": "./dist/widget.css",
   "scripts": {
     "dev": "vite demo --host 127.0.0.1 --port 5174",
     "demo": "vite demo --host 127.0.0.1 --port 5174",
     "build": "node scripts/build-widget.mjs",
+    "build:widget": "node scripts/build-widget.mjs",
     "build:lib": "node scripts/build-widget.mjs",
     "build:demo": "vite build demo",
     "typecheck": "tsc --noEmit",
@@ -18,8 +17,6 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/types/generic-widget/index.d.ts",
-      "import": "./dist/widget.es.js",
       "default": "./dist/widget.js"
     },
     "./styles.css": "./dist/widget.css"

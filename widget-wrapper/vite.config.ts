@@ -1,8 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const buildTarget = process.env.WIDGET_BUILD_TARGET || "es";
-const isIifeBuild = buildTarget === "iife";
 const isMinifiedBuild = process.env.WIDGET_MINIFY === "true";
 const sdkName = process.env.npm_package_name || "@askvera/widget";
 const sdkVersion = process.env.npm_package_version || "1.0.0";
@@ -18,18 +16,15 @@ export default defineConfig({
     __ASKVERA_BUILD_COMMIT__: JSON.stringify(buildCommit)
   },
   build: {
-    emptyOutDir: buildTarget === "es",
+    emptyOutDir: true,
     minify: isMinifiedBuild ? "oxc" : false,
-    sourcemap: true,
+    sourcemap: false,
     lib: {
-      entry: "src/generic-widget/index.ts",
-      name: "AskVeraWidget",
-      formats: [isIifeBuild ? "iife" : "es"],
-      fileName: () => {
-        if (isIifeBuild) return isMinifiedBuild ? "widget.min.js" : "widget.js";
-        return "widget.es.js";
-      },
-      cssFileName: isIifeBuild && isMinifiedBuild ? "widget.min" : "widget"
+      entry: "src/sdk/index.ts",
+      name: "AskVera",
+      formats: ["iife"],
+      fileName: () => "widget.js",
+      cssFileName: "widget"
     }
   }
 });

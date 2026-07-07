@@ -7,15 +7,13 @@ import {
   BackendUnavailableError,
   createApiClient,
   describeApiError,
-  loadConfig,
-  loadPrivacy,
+  loadWidgetConfig,
   sendMessage,
   submitFeedback,
   submitConsent,
   type ConfigResponseData,
-  type LegalDocument
 } from "../../api";
-import { buildWidgetConfig, type BackendConfig } from "../../config";
+import { buildThemeConfig, buildWidgetConfig, type BackendConfig } from "../../config";
 import { widgetEventBus, widgetEventTypes } from "../../events";
 import { createAnalyticsService } from "../../services";
 import { GenericWidgetWrapper } from "../GenericWidgetWrapper";
@@ -39,7 +37,7 @@ type ChatErrorPresentation = {
 };
 
 export type BackendChatDemoProps = {
-  apiBaseUrl?: string;
+  apiBaseUrl: string;
   authToken?: string;
   openSignal?: number;
   closeSignal?: number;
@@ -59,19 +57,11 @@ const buildId = (prefix: string) => {
 
 const joinUrl = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, "")}${path}`;
 
-const legalViewerHref = (apiBaseUrl: string, country: string, language: string, documentId: string) => {
-  const params = new URLSearchParams({
-    api: apiBaseUrl,
-    country,
-    lang: language,
-    doc: documentId
-  });
-  return `/legal?${params.toString()}`;
-};
+const legalViewerHref = () => "#";
 
 function logCorrelationId(label: string, correlationId?: string) {
-  if (!correlationId || window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") return;
-  console.info(`[ASK Vera] ${label} correlation ID: ${correlationId}`);
+  void label;
+  void correlationId;
 }
 
 function isConsentInstructionMessage(message: WidgetMessage): boolean {
@@ -204,7 +194,7 @@ function ErrorMessageContent({
 }
 
 export function BackendChatDemo({
-  apiBaseUrl = "https://api.vera-api.xyz",
+  apiBaseUrl,
   authToken,
   openSignal = 0,
   closeSignal = 0,
@@ -216,8 +206,6 @@ export function BackendChatDemo({
 }: BackendChatDemoProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState({ country: "US", language: "en" });
-  const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
-  const [legalVersion, setLegalVersion] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
   const firstMessageSentRef = useRef(false);
@@ -228,24 +216,42 @@ export function BackendChatDemo({
       const backendConfig: BackendConfig | undefined = apiConfig
         ? {
             countries: apiConfig.countries,
-            privacyVersion: legalVersion || apiConfig.privacyVersion,
-            legalDocuments
+            widgetId: apiConfig.widgetId,
+            companyName: apiConfig.companyName,
+            logo: apiConfig.logo,
+            theme: apiConfig.theme,
+            primaryColor: apiConfig.primaryColor,
+            privacyVersion: apiConfig.privacyVersion,
+            legalDocuments: apiConfig.legalDocuments,
+            starterTopics: apiConfig.starterTopics,
+            contextualTopics: apiConfig.contextualTopics
           }
         : undefined;
+      const primaryColor = apiConfig?.primaryColor || foreverDemoConfig.theme?.accentColor;
+      const theme = buildThemeConfig(
+        {
+          ...foreverDemoConfig.theme,
+          mode: apiConfig?.theme === "dark" ? "dark" : "light"
+        },
+        primaryColor
+      );
 
       return buildWidgetConfig({
         baseConfig: foreverDemoConfig,
         runtimeConfig: {
           apiUrl: apiBaseUrl,
-          providerName: foreverDemoConfig.provider.name,
-          companyName: foreverDemoConfig.brandName,
+          providerName: apiConfig?.companyName || foreverDemoConfig.provider.name,
+          companyName: apiConfig?.companyName || foreverDemoConfig.brandName,
           assistantName: foreverDemoConfig.assistantName,
           assistantSubtitle: foreverDemoConfig.assistantSubtitle,
+          logoUrl: apiConfig?.logo,
+          launcherIconUrl: apiConfig?.logo,
           launcherTitle: foreverDemoConfig.launcherTitle,
           footerText: typeof foreverDemoConfig.footerText === "string" ? foreverDemoConfig.footerText : undefined,
           defaultCountry: selectedLocale.country,
           defaultLanguage: selectedLocale.language,
-          theme: foreverDemoConfig.theme
+          accentColor: primaryColor,
+          theme
         },
         backendConfig,
         selectedCountry: selectedLocale.country,
@@ -253,7 +259,7 @@ export function BackendChatDemo({
         legalLinkBuilder: legalViewerHref
       });
     },
-    [apiBaseUrl, apiConfig, legalDocuments, legalVersion, selectedLocale.country, selectedLocale.language]
+    [apiBaseUrl, apiConfig, selectedLocale.country, selectedLocale.language]
   );
   const config = widgetConfig.genericConfig;
 
@@ -315,12 +321,20 @@ export function BackendChatDemo({
   useEffect(() => {
     let active = true;
 
-    loadConfig(apiClient)
+    loadWidgetConfig(apiClient)
       .then((envelope) => {
         if (active && envelope.data) {
           logCorrelationId("config", envelope.correlationId);
           widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, { correlationId: envelope.correlationId });
           setApiConfig(envelope.data);
+          const firstCountry = envelope.data.countries[0];
+          const firstLanguage = firstCountry?.languages[0];
+          if (firstCountry && firstLanguage) {
+            setSelectedLocale((current) => ({
+              country: country || current.country || firstCountry.code,
+              language: language || current.language || firstLanguage.code
+            }));
+          }
         }
       })
       .catch((error) => {
@@ -337,35 +351,7 @@ export function BackendChatDemo({
     return () => {
       active = false;
     };
-  }, [apiClient, upsertMessage]);
-
-  useEffect(() => {
-    let active = true;
-    loadPrivacy(apiClient, selectedLocale.country, selectedLocale.language)
-      .then((envelope) => {
-        if (active && envelope.data) {
-          logCorrelationId("privacy", envelope.correlationId);
-          widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, { correlationId: envelope.correlationId });
-          setLegalDocuments(envelope.data.documents);
-          setLegalVersion(envelope.data.version);
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          widgetEventBus.emit(widgetEventTypes.API_ERROR, { error: describeApiError(error) });
-          setLegalDocuments([]);
-          upsertMessage({
-            id: "privacy-warning",
-            role: "system",
-            content: `Legal documents could not load yet. ${describeApiError(error)}`
-          });
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [apiClient, selectedLocale.country, selectedLocale.language, upsertMessage]);
+  }, [apiClient, country, language, upsertMessage]);
 
   const handleConsent = async (payload: ConsentEventPayload) => {
     const envelope = await submitConsent(apiClient, {

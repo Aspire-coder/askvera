@@ -13,7 +13,6 @@ export type RuntimeEventCallbacks = {
 export type RuntimeConfig = {
   apiUrl: string;
   widgetId?: string;
-  publishableKey?: string;
   widgetAuthToken?: string;
   widgetAuthExpiresAt?: number;
   widgetAuthStorageKey?: string;

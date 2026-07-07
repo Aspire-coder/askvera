@@ -11,7 +11,7 @@ export type WidgetAuthResult = {
 };
 
 export async function authenticateWidget(config: AskVeraRuntimeConfig): Promise<WidgetAuthResult> {
-  if (!config.widgetId || !config.publishableKey) {
+  if (!config.widgetId) {
     return {};
   }
 
@@ -36,7 +36,6 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig): Promise<
 
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
-    publishableKey: config.publishableKey,
     origin: getCurrentOrigin()
   });
   if (!envelope.data) {

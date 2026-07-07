@@ -13,7 +13,6 @@ class WidgetRegistration(BaseModel):
     """A registered widget allowed to initialize authenticated sessions."""
 
     widgetId: str = Field(min_length=1, max_length=128)
-    publishableKey: str = Field(min_length=1, max_length=256)
     organizationId: str = Field(min_length=1, max_length=128)
     companyName: str = Field(min_length=1, max_length=256)
     allowedOrigins: list[str] = Field(default_factory=list)
@@ -33,7 +32,6 @@ class WidgetInitRequest(BaseModel):
     """Request body for POST /api/widget/init."""
 
     widgetId: str = Field(min_length=1, max_length=128)
-    publishableKey: str = Field(min_length=1, max_length=256)
     origin: str | None = Field(default=None, min_length=1, max_length=512)
 
     @field_validator("origin")

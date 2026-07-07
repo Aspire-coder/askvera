@@ -94,10 +94,6 @@ class WidgetAuthService:
             LOGGER.warning("widget_auth_disabled_widget", correlation_id=correlation_id, widget_id=request.widgetId)
             raise WidgetAuthError()
 
-        if not hmac_safe_equal(registration.publishableKey, request.publishableKey):
-            LOGGER.warning("widget_auth_key_mismatch", correlation_id=correlation_id, widget_id=request.widgetId)
-            raise WidgetAuthError()
-
         origin_validation = is_origin_allowed(request.origin, registration.allowedOrigins)
         if not origin_validation.allowed:
             LOGGER.warning(
@@ -175,13 +171,5 @@ class WidgetAuthService:
         )
         response = self._response_from_claims(claims)
         return WidgetRefreshResponse(**response.model_dump())
-
-
-def hmac_safe_equal(left: str, right: str) -> bool:
-    """Compare public keys without leaking timing information."""
-    import hmac
-
-    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
-
 
 widget_auth_service = WidgetAuthService()

@@ -2,7 +2,6 @@ import type { ApiClient } from "./client";
 
 export type WidgetInitRequest = {
   widgetId: string;
-  publishableKey: string;
   origin: string;
 };
 
