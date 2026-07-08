@@ -165,6 +165,11 @@ LEGAL_VERSION = "2026.1"
 SESSION_TIMEOUT_HOURS = 2
 MAX_SESSION_DAYS = 7
 SESSION_TTL_SECONDS = SESSION_TIMEOUT_HOURS * 60 * 60
+
+# Chat memory storage for conversation history.
+# Use "postgres" in production. Use "memory" only for local tests or demos.
+CHAT_MEMORY_BACKEND = _env_str("CHAT_MEMORY_BACKEND", "postgres").lower()
+CHAT_HISTORY_MAX_MESSAGES = _env_int("CHAT_HISTORY_MAX_MESSAGES", 10)
 # ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.
 REDIS_CACHE_NAME = "askverachat-cache"
 # ElastiCache Valkey primary endpoint hostname. Found in ElastiCache -> Valkey cache -> Connectivity.
