@@ -68,8 +68,8 @@ def test_confidence_falls_back_to_citation_quality() -> None:
     assert confidence > 0.65
 
 
-def test_retrieve_and_generate_returns_low_score_answer_with_sources() -> None:
-    """Low retrieval scores should be logged, not rejected, when citations exist."""
+def test_retrieve_and_generate_blocks_low_score_answer_with_sources() -> None:
+    """Low retrieval scores should block before model generation, even with citations."""
     runtime = MagicMock()
     runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Return policy answer"}]}}}
     clients = SimpleNamespace(bedrock_runtime=runtime)
@@ -91,11 +91,10 @@ def test_retrieve_and_generate_returns_low_score_answer_with_sources() -> None:
         confidence=0.39,
     )
     with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
-        result = retrieve_and_generate("return policy", "CA", "en", "new_prospect", "", "cid", retrieval_result=retrieval_result)
+        with pytest.raises(LowConfidenceError):
+            retrieve_and_generate("return policy", "CA", "en", "new_prospect", "", "cid", retrieval_result=retrieval_result)
 
-    assert result["response"] == "Return policy answer"
-    assert result["confidence"] < 0.5
-    assert result["sources"][0]["uri"] == "s3://kb/return-policy.pdf"
+    runtime.converse.assert_not_called()
 
 
 def test_retrieve_and_generate_raises_when_no_sources_after_fallback() -> None:

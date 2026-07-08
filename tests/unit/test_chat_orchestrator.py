@@ -62,6 +62,7 @@ def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
     monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
     monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
     monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
     monkeypatch.setattr(
         chat_orchestrator,
