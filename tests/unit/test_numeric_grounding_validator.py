@@ -80,6 +80,65 @@ def test_numeric_grounding_blocks_claim_attached_to_wrong_subject() -> None:
     assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
 
 
+def test_numeric_grounding_allows_correctly_paraphrased_claim() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "To qualify as Assistant Manager, you'll need 75 Open Group Case Credits.",
+            "Assistant Manager is achieved by generating a total of 75 Open Group Case Credits.",
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
+def test_numeric_grounding_uses_nearby_previous_sentence_subject() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "For Assistant Manager, the requirement is straightforward. You'll need 75 Open Group Case Credits.",
+            "Assistant Manager is achieved by generating a total of 75 Open Group Case Credits.",
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
+def test_numeric_grounding_blocks_percentage_attached_to_wrong_subject() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Active Assistant Manager also receives 8% Volume Bonus.",
+            (
+                "The Active Assistant Manager also receives 5% Volume Bonus. "
+                "The Active Manager also receives 8% Volume Bonus."
+            ),
+        ),
+        result,
+    )
+
+    assert result.has_critical()
+    assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
+
+
+def test_numeric_grounding_allows_percentage_attached_to_correct_subject() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Active Assistant Manager also receives 5% Volume Bonus.",
+            (
+                "The Active Assistant Manager also receives 5% Volume Bonus. "
+                "The Active Manager also receives 8% Volume Bonus."
+            ),
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_allows_answers_without_measurable_claims() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(

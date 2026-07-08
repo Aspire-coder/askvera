@@ -42,6 +42,7 @@ class MeasurableClaim:
     start: int
     end: int
     sentence: str
+    context: str
 
 
 def _normalize(text: str) -> str:
@@ -91,51 +92,24 @@ def _candidate_variants(claim: MeasurableClaim) -> set[str]:
     return variants
 
 
-STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "become",
-    "becoming",
-    "by",
-    "can",
-    "case",
-    "cases",
-    "credit",
-    "credits",
-    "consecutive",
-    "during",
-    "earned",
-    "for",
-    "from",
-    "generate",
-    "generating",
-    "group",
-    "have",
-    "in",
-    "is",
-    "it",
-    "month",
-    "months",
-    "need",
-    "of",
-    "on",
-    "open",
-    "or",
-    "requires",
-    "requirement",
-    "requirements",
-    "required",
-    "the",
-    "this",
-    "to",
-    "total",
-    "within",
-    "you",
+LEADING_CAPITALIZED_STOPWORDS = {
+    "A",
+    "An",
+    "And",
+    "As",
+    "At",
+    "For",
+    "If",
+    "In",
+    "On",
+    "Once",
+    "Per",
+    "The",
+    "Then",
+    "This",
+    "To",
+    "When",
+    "You",
 }
 
 
@@ -147,14 +121,46 @@ def _sentence_for_claim(answer: str, start: int, end: int) -> str:
     return answer[left + 1 : right].strip()
 
 
-def _subject_tokens(claim: MeasurableClaim) -> set[str]:
-    """Extract nearby subject words that connect the number to an entity."""
-    sentence = _normalize(claim.sentence)
-    claim_text = _normalize(claim.text)
-    before_claim = sentence.split(claim_text, 1)[0] if claim_text in sentence else sentence
-    tokens = re.findall(r"[a-z][a-z]+", before_claim)
-    nearby = tokens[-8:]
-    return {token for token in nearby if token not in STOPWORDS and len(token) > 2}
+def _context_for_claim(answer: str, start: int, end: int, radius: int = 220) -> str:
+    """Return a nearby answer window that can include a subject named earlier."""
+    return answer[max(0, start - radius) : min(len(answer), end + radius)].strip()
+
+
+def _capitalized_entity_phrases(text: str) -> list[str]:
+    """Extract generic entity-like phrases from original-case text."""
+    capitalized_phrases = re.findall(
+        r"\b(?:[A-Z][a-z]+|[A-Z]{2,})(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,}))*\b",
+        text,
+    )
+    entities: list[str] = []
+    for phrase in capitalized_phrases:
+        words = phrase.split()
+        while words and words[0] in LEADING_CAPITALIZED_STOPWORDS:
+            words = words[1:]
+        if words:
+            entities.append(" ".join(words))
+    return entities
+
+
+def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
+    """Extract possible entity subjects that connect the number to a thing."""
+    before_claim = claim.sentence.split(claim.text, 1)[0] if claim.text in claim.sentence else claim.sentence
+    phrases = [phrase for phrase in _capitalized_entity_phrases(before_claim) if len(phrase.split()) > 1]
+    if not phrases:
+        context_before_claim = claim.context.split(claim.text, 1)[0] if claim.text in claim.context else claim.context
+        phrases = [phrase for phrase in _capitalized_entity_phrases(context_before_claim) if len(phrase.split()) > 1]
+    if not phrases:
+        phrases = _capitalized_entity_phrases(before_claim)
+    if not phrases:
+        context_before_claim = claim.context.split(claim.text, 1)[0] if claim.text in claim.context else claim.context
+        phrases = _capitalized_entity_phrases(context_before_claim)
+
+    token_sets: list[set[str]] = []
+    for phrase in phrases:
+        tokens = set(re.findall(r"[a-z][a-z]+", _normalize(phrase)))
+        if tokens and tokens not in token_sets:
+            token_sets.append(tokens)
+    return token_sets
 
 
 def _source_windows(source_text: str, variant: str, radius: int = 180) -> list[str]:
@@ -182,12 +188,15 @@ def _source_windows(source_text: str, variant: str, radius: int = 180) -> list[s
 
 def _claim_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
     """Return true when the claim and its nearby subject appear in source context."""
-    subject_tokens = _subject_tokens(claim)
+    subject_token_sets = _subject_token_sets(claim)
     for variant in _candidate_variants(claim):
         if not variant:
             continue
         for window in _source_windows(source_text, variant):
-            if not subject_tokens or subject_tokens.issubset(set(re.findall(r"[a-z][a-z]+", window))):
+            window_tokens = set(re.findall(r"[a-z][a-z]+", window))
+            if not subject_token_sets:
+                return True
+            if any(subject_tokens.issubset(window_tokens) for subject_tokens in subject_token_sets):
                 return True
     return False
 
@@ -204,6 +213,7 @@ def _extract_claims(answer: str) -> list[MeasurableClaim]:
             start=match.start(),
             end=match.end(),
             sentence=_sentence_for_claim(answer, match.start(), match.end()),
+            context=_context_for_claim(answer, match.start(), match.end()),
         )
         key = _normalize(claim.text)
         if key in seen:
