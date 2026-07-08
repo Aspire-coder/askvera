@@ -297,7 +297,8 @@ class AIOrchestrator:
             )
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    "I could not generate a complete approved response. Please try again or contact Forever Living support.",
+                    "I found related policy information, but I'm not confident enough to give a complete approved answer. "
+                    "Please check the official policy document or contact Forever Living support.",
                     correlation_id,
                 ),
                 result,

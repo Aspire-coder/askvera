@@ -163,7 +163,7 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
     return token_sets
 
 
-def _source_windows(source_text: str, variant: str, radius: int = 180) -> list[str]:
+def _source_windows(source_text: str, variant: str, radius: int = 110) -> list[str]:
     """Return local source windows around a grounded claim candidate."""
     windows: list[str] = []
     start = 0
@@ -172,15 +172,8 @@ def _source_windows(source_text: str, variant: str, radius: int = 180) -> list[s
         if index == -1:
             break
 
-        left_candidates = [source_text.rfind(delimiter, 0, index) for delimiter in (".", ";")]
-        right_candidates = [
-            position for position in (source_text.find(".", index + len(variant)), source_text.find(";", index + len(variant))) if position != -1
-        ]
-        left = max(left_candidates)
-        right = min(right_candidates) if right_candidates else -1
-
-        window_start = left + 1 if left != -1 else max(0, index - radius)
-        window_end = right if right != -1 else min(len(source_text), index + len(variant) + radius)
+        window_start = max(0, index - radius)
+        window_end = min(len(source_text), index + len(variant) + radius)
         windows.append(source_text[window_start:window_end])
         start = index + max(len(variant), 1)
     return windows
@@ -238,14 +231,18 @@ class NumericGroundingValidator:
         if not claims:
             return
 
-        source_text = _normalize("\n".join(document.content for document in retrieval_result.documents if document.content))
-        if not source_text:
+        source_texts = [
+            _normalize(document.content)
+            for document in retrieval_result.documents
+            if document.content
+        ]
+        if not source_texts:
             return
 
         unsupported = [
             claim.text
             for claim in claims
-            if not _claim_is_supported(claim, source_text)
+            if not any(_claim_is_supported(claim, source_text) for source_text in source_texts)
         ]
         if not unsupported:
             return

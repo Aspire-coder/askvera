@@ -80,6 +80,48 @@ def test_numeric_grounding_blocks_claim_attached_to_wrong_subject() -> None:
     assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
 
 
+def test_numeric_grounding_blocks_adjacent_rank_move_up_rule_confusion() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            (
+                "To qualify as Assistant Manager, you need to meet one of these two paths: "
+                "generate 120 Open Group Case Credits in 1-2 consecutive months, or "
+                "150 Open Group Case Credits in 3-4 consecutive months."
+            ),
+            (
+                "Assistant Manager is achieved by generating a total of 75 Open Group Case Credits "
+                "within any two consecutive Months. "
+                "Unrecognized Manager can re-qualify as a Recognized Manager by generating a total "
+                "of 120 Open Group Case Credits within 1-2 consecutive Months, or 150 Open Group "
+                "Case Credits within 3-4 consecutive Months."
+            ),
+        ),
+        result,
+    )
+
+    assert result.has_critical()
+    assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
+
+
+def test_numeric_grounding_allows_correct_adjacent_rank_move_up_rule() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "To qualify as Assistant Manager, you need 75 Open Group Case Credits within any two consecutive months.",
+            (
+                "Assistant Manager is achieved by generating a total of 75 Open Group Case Credits "
+                "within any two consecutive Months. "
+                "Manager is achieved by generating a total of 120 Open Group Case Credits within "
+                "1-2 consecutive Months."
+            ),
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_allows_correctly_paraphrased_claim() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(
