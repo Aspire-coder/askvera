@@ -107,6 +107,12 @@ export type WidgetMenuLabels = {
 export type WidgetConsentConfig = {
   title: string;
   body: ReactNode;
+  eyebrow?: ReactNode;
+  acknowledgmentLabel?: ReactNode;
+  loadingText?: ReactNode;
+  declineTitle?: ReactNode;
+  declineBody?: ReactNode;
+  declineActionLabel?: ReactNode;
   policyVersion: string;
   categories: string[];
   storageKey?: string;

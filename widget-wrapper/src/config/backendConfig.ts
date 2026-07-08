@@ -29,6 +29,7 @@ export type BackendConfig = {
   legalDocuments?: LegalDocumentConfig[];
   starterTopics?: WidgetTopic[];
   contextualTopics?: WidgetTopic[];
+  copy?: Record<string, string>;
   kbMetadata?: Record<string, unknown>;
   limits?: Record<string, unknown>;
 };

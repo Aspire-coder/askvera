@@ -34,6 +34,7 @@ export type ConfigResponseData = {
   }>;
   starterTopics?: Array<{ id: string; label: string; prompt?: string; metadata?: Record<string, unknown> }>;
   contextualTopics?: Array<{ id: string; label: string; prompt?: string; metadata?: Record<string, unknown> }>;
+  copy?: Record<string, string>;
 };
 
 export function loadConfig(client: ApiClient) {
