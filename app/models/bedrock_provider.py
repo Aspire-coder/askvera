@@ -40,6 +40,19 @@ class BedrockClaudeProvider:
             )
             raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
 
+        if confidence < settings.BEDROCK_MIN_CONFIDENCE:
+            LOGGER.warning(
+                "model_low_confidence_blocked",
+                correlation_id=correlation_id,
+                country=prompt.country,
+                language=prompt.language,
+                provider=self.name,
+                confidence=confidence,
+                **summary,
+                sources=source_log_summary(sources),
+            )
+            raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
+
         params = {
             "modelId": settings.BEDROCK_MODEL_ARN,
             "system": [{"text": prompt.system_prompt}],
@@ -69,17 +82,6 @@ class BedrockClaudeProvider:
             latency_ms=latency_ms,
             metadata={"retrieval": retrieval_result.metadata, "prompt_version": prompt.prompt_version},
         )
-        if confidence < settings.BEDROCK_MIN_CONFIDENCE:
-            LOGGER.warning(
-                "model_low_confidence_with_sources",
-                correlation_id=correlation_id,
-                country=prompt.country,
-                language=prompt.language,
-                provider=self.name,
-                confidence=confidence,
-                **summary,
-                sources=source_log_summary(sources),
-            )
         LOGGER.info(
             "model_success",
             correlation_id=correlation_id,

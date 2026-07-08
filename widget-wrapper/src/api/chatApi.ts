@@ -12,6 +12,11 @@ export type ChatSource = {
   title: string;
   uri: string;
   excerpt?: string;
+  page?: string;
+  documentVersion?: string;
+  country?: string;
+  language?: string;
+  score?: number;
 };
 
 export type ChatResponseData = {

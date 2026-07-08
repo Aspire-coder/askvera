@@ -6,6 +6,7 @@ from .confidence_validator import ConfidenceValidator
 from .language_validator import LanguageValidator
 from .length_validator import LengthValidator
 from .metadata_validator import MetadataValidator
+from .numeric_grounding_validator import NumericGroundingValidator
 
 __all__ = [
     "AnswerValidator",
@@ -14,4 +15,5 @@ __all__ = [
     "LanguageValidator",
     "LengthValidator",
     "MetadataValidator",
+    "NumericGroundingValidator",
 ]
