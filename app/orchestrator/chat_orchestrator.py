@@ -165,7 +165,14 @@ class AIOrchestrator:
             },
             correlation_id,
         )
-        set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
+        if self._should_cache_response(chat_response):
+            set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
+        else:
+            LOGGER.info(
+                "cache_write_skipped",
+                correlation_id=correlation_id,
+                reason="fallback_or_critical_validation",
+            )
         return chat_response
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
@@ -319,6 +326,18 @@ class AIOrchestrator:
             },
             correlation_id=chat_response.correlation_id,
         )
+
+    def _should_cache_response(self, chat_response: ChatResponse) -> bool:
+        """Return true only for complete model answers that are safe to reuse."""
+        metadata = chat_response.metadata or {}
+        if metadata.get("fallback"):
+            return False
+
+        validation = metadata.get("validation")
+        if isinstance(validation, dict) and str(validation.get("highestSeverity", "")).upper() == "CRITICAL":
+            return False
+
+        return bool((chat_response.answer or "").strip())
 
 
 ai_orchestrator = AIOrchestrator()

@@ -6,6 +6,7 @@ from app.governance.models import GovernanceAction, GovernanceDecision
 from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
+from app.response.models import ChatResponse
 from app.retrieval.models import RetrievalResult
 from app.validation.models import ValidationResult
 from utils.validators import ChatRequest
@@ -118,3 +119,35 @@ def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -
         "how can i become a recognized manager\nFollow-up request: explain me more about my first question"
     ]
     assert governance.seen_texts[0] == retriever.seen_messages[0]
+
+
+def test_fallback_responses_are_not_cacheable() -> None:
+    """Validation and governance fallbacks should not be reused as normal answers."""
+    orchestrator = AIOrchestrator()
+    response = ChatResponse(
+        answer="I found related policy information, but I'm not confident enough to answer.",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.0,
+        metadata={"fallback": True},
+        correlation_id="cid",
+    )
+
+    assert orchestrator._should_cache_response(response) is False
+
+
+def test_critical_validation_responses_are_not_cacheable() -> None:
+    """Responses carrying critical validation metadata should not be cached."""
+    orchestrator = AIOrchestrator()
+    response = ChatResponse(
+        answer="Some answer",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={"validation": {"highestSeverity": "CRITICAL"}},
+        correlation_id="cid",
+    )
+
+    assert orchestrator._should_cache_response(response) is False
