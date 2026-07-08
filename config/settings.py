@@ -149,8 +149,9 @@ BEDROCK_GUARDRAIL_ID = "idy33rbs9v1i"
 BEDROCK_GUARDRAIL_VERSION = "DRAFT"
 # Default model provider selected by the model router.
 DEFAULT_MODEL_PROVIDER = _env_str("DEFAULT_MODEL_PROVIDER", "claude")
-# Minimum retrieval confidence required before answering. Raw HYBRID scores for relevant matches often land around 0.5-0.7.
-BEDROCK_MIN_CONFIDENCE = 0.5
+# Minimum retrieval confidence required before answering. Raw HYBRID scores for relevant policy matches
+# can land just below 0.5, so keep this configurable instead of hardcoding a brittle cutoff.
+BEDROCK_MIN_CONFIDENCE = _env_float("BEDROCK_MIN_CONFIDENCE", 0.47)
 # Retrieval configuration and fallback confidence weighting.
 BEDROCK_RETRIEVAL_RESULT_COUNT = 5
 BEDROCK_FALLBACK_SOURCE_WEIGHT = 0.12
