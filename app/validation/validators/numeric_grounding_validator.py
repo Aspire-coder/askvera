@@ -172,8 +172,20 @@ def _source_windows(source_text: str, variant: str, radius: int = 110) -> list[s
         if index == -1:
             break
 
-        window_start = max(0, index - radius)
-        window_end = min(len(source_text), index + len(variant) + radius)
+        left_boundary = max(source_text.rfind(delimiter, 0, index) for delimiter in (".", ";", "\n"))
+        right_candidates = [
+            position
+            for position in (
+                source_text.find(".", index + len(variant)),
+                source_text.find(";", index + len(variant)),
+                source_text.find("\n", index + len(variant)),
+            )
+            if position != -1
+        ]
+        right_boundary = min(right_candidates) if right_candidates else len(source_text)
+
+        window_start = max(left_boundary + 1 if left_boundary != -1 else 0, index - radius)
+        window_end = min(right_boundary, index + len(variant) + radius)
         windows.append(source_text[window_start:window_end])
         start = index + max(len(variant), 1)
     return windows
