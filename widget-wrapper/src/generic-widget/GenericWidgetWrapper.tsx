@@ -155,6 +155,8 @@ export function GenericWidgetWrapper({
     ]
   );
   const [widgetState, dispatch] = useReducer(widgetReducer, initialState);
+  const [consentDeclined, setConsentDeclined] = useState(false);
+  const [localRequestPending, setLocalRequestPending] = useState(false);
   const isOpen = selectIsOpen(widgetState);
   const menuOpen = selectMenuOpen(widgetState);
   const selectedCountry = selectCountry(widgetState);
@@ -170,10 +172,12 @@ export function GenericWidgetWrapper({
   const launcherButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const submitLockRef = useRef(false);
   const consentRequired = config.consent.requireConsentBeforeMessaging !== false && !consentAccepted;
+  const requestBusy = effectiveLoading || localRequestPending;
   const composerDisabledReason = consentRequired
     ? "Accept the privacy agreement to begin."
-    : effectiveLoading
+    : requestBusy
       ? "Waiting for the current response to finish."
       : "";
   const composerDisabled = Boolean(composerDisabledReason);
@@ -204,6 +208,12 @@ export function GenericWidgetWrapper({
 
   useEffect(() => {
     dispatch({ type: "SET_LOADING", loading });
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    submitLockRef.current = false;
+    setLocalRequestPending(false);
   }, [loading]);
 
   useEffect(() => {
@@ -275,6 +285,7 @@ export function GenericWidgetWrapper({
 
   useEffect(() => {
     if (!consentRequiredSignal) return;
+    setConsentDeclined(false);
     dispatch({ type: "REQUIRE_CONSENT", error: "Please review and accept the legal documents before chatting." });
     events.emit(widgetEventTypes.CONSENT_REQUIRED, {
       visitorId,
@@ -386,12 +397,14 @@ export function GenericWidgetWrapper({
     dispatch({ type: "SET_CONSENT_ERROR", error: null });
 
     if (!accepted) {
+      setConsentDeclined(true);
       events.emit(widgetEventTypes.CONSENT_REJECTED, { visitorId, sessionId, consent: payload });
       onRejectConsent?.(payload);
       return;
     }
 
     try {
+      setConsentDeclined(false);
       dispatch({ type: "START_CONSENT_SUBMIT" });
       await onAcceptConsent?.(payload);
       dispatch({ type: "ACCEPT_CONSENT" });
@@ -408,7 +421,9 @@ export function GenericWidgetWrapper({
     event.preventDefault();
     event.stopPropagation();
     const trimmed = message.trim();
-    if (!trimmed || composerDisabled) return;
+    if (!trimmed || composerDisabled || submitLockRef.current || !onSendMessage) return;
+    submitLockRef.current = true;
+    setLocalRequestPending(true);
     const payload: MessageEventPayload = {
       visitorId,
       sessionId,
@@ -515,7 +530,7 @@ export function GenericWidgetWrapper({
             </div>
           ) : null}
           <div className="gw-content">
-            {consentRequired ? (
+            {consentRequired && !consentDeclined ? (
               <section className="gw-onboarding-intro" aria-label="Welcome">
                 <div className="gw-onboarding-mark" aria-hidden="true">
                   {config.logoUrl ? <img src={config.logoUrl} alt="" /> : <span>{introAssistantName.trim().slice(0, 1) || "A"}</span>}
@@ -531,7 +546,7 @@ export function GenericWidgetWrapper({
                 </div>
               </section>
             ) : null}
-            {showLocaleSelector && !consentAccepted ? (
+            {showLocaleSelector && !consentAccepted && !consentDeclined ? (
               <RegionSelector
                 config={config}
                 countries={config.countries}
@@ -542,7 +557,7 @@ export function GenericWidgetWrapper({
                 onLanguageChange={handleLanguageChange}
               />
             ) : null}
-            {config.consent.requireConsentBeforeMessaging !== false && !consentAccepted ? (
+            {config.consent.requireConsentBeforeMessaging !== false && !consentAccepted && !consentDeclined ? (
               <ConsentPanel
                 config={config}
                 accepting={consentSubmitting}
@@ -550,6 +565,18 @@ export function GenericWidgetWrapper({
                 onAccept={() => handleConsent("accepted")}
                 onReject={() => handleConsent("rejected")}
               />
+            ) : null}
+            {config.consent.requireConsentBeforeMessaging !== false && !consentAccepted && consentDeclined ? (
+              <section className="gw-section gw-consent-declined" role="status" aria-live="polite">
+                <div className="gw-consent-declined-mark" aria-hidden="true">i</div>
+                <div>
+                  <h2>{config.consent.declineTitle}</h2>
+                  <p>{config.consent.declineBody}</p>
+                  <button type="button" className="gw-secondary-button" onClick={() => setConsentDeclined(false)}>
+                    {config.consent.declineActionLabel || "Review privacy terms"}
+                  </button>
+                </div>
+              </section>
             ) : null}
             {chatContentVisible ? (
               <MessageFeed

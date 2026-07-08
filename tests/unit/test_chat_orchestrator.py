@@ -3,8 +3,10 @@
 from unittest.mock import MagicMock
 
 from app.governance.models import GovernanceAction, GovernanceDecision
+from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
+from app.retrieval.models import RetrievalResult
 from app.validation.models import ValidationResult
 from utils.validators import ChatRequest
 
@@ -30,6 +32,26 @@ class _FakeValidator:
         return ValidationResult()
 
 
+class _FakeRetriever:
+    def __init__(self) -> None:
+        self.seen_messages: list[str] = []
+
+    def retrieve(self, message: str, *_: object, **__: object) -> RetrievalResult:
+        self.seen_messages.append(message)
+        return RetrievalResult(documents=[], citations=[], confidence=0.8)
+
+
+class _FakeRouter:
+    def generate(self, *_: object, **__: object) -> ModelResponse:
+        return ModelResponse(
+            text="Here is more detail about becoming a Recognized Manager.",
+            citations=[],
+            confidence=0.8,
+            provider="test",
+            model_name="test",
+        )
+
+
 def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     """Cached responses still pass through current governance before returning."""
     governance = _FakeGovernance()
@@ -53,3 +75,45 @@ def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     assert response.answer == "Blocked cached answer."
     assert response.metadata["fallback"] is True
     router.generate.assert_not_called()
+
+
+def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -> None:
+    """Vague follow-ups are expanded with the referenced prior user question."""
+    governance = _FakeGovernance()
+    retriever = _FakeRetriever()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=_FakeRouter(),
+        validator=_FakeValidator(),
+        governance=governance,
+    )
+    body = ChatRequest(message="explain me more about my first question", sessionId="session-1", country="CA", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_: text)
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "set_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_session_history",
+        lambda *_: "\n".join(
+            [
+                "user: how can i become a recognized manager",
+                "vera: Recognized Manager answer",
+                "user: how can i become a diamond manager",
+                "vera: Diamond Manager answer",
+            ]
+        ),
+    )
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.answer == "Here is more detail about becoming a Recognized Manager."
+    assert retriever.seen_messages == [
+        "how can i become a recognized manager\nFollow-up request: explain me more about my first question"
+    ]
+    assert governance.seen_texts[0] == retriever.seen_messages[0]

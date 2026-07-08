@@ -20,6 +20,21 @@ from utils.logging import get_logger
 from utils.validators import ChatRequest
 
 LOGGER = get_logger("app.orchestrator")
+FOLLOW_UP_CONTEXT_MARKERS = (
+    "that",
+    "this",
+    "it",
+    "them",
+    "those",
+    "previous",
+    "earlier",
+    "above",
+    "first question",
+    "last question",
+    "more about",
+    "explain more",
+    "tell me more",
+)
 
 
 class ConsentRequiredError(Exception):
@@ -60,11 +75,13 @@ class AIOrchestrator:
             raise ConsentRequiredError()
 
         scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
-        governance_decision = self._evaluate_governance(scrubbed_input, body, correlation_id)
+        history = get_session_history(body.sessionId, correlation_id)
+        retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
+        governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
         if not governance_decision.allowed:
             return self._governance_fallback(governance_decision, correlation_id)
 
-        cache_key = build_cache_key(scrubbed_input, body.country, body.language, body.role)
+        cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
         if cached:
             chat_response = self._validate_response(
@@ -84,8 +101,7 @@ class AIOrchestrator:
                 return self._governance_fallback(governance_decision, correlation_id)
             return chat_response
 
-        history = get_session_history(body.sessionId, correlation_id)
-        retrieval_result = self.retriever.retrieve(scrubbed_input, body.country, body.language, body.role, correlation_id)
+        retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
         prompt_package = self.prompt_builder.build(
             user_question=scrubbed_input,
             conversation=history,
@@ -151,6 +167,46 @@ class AIOrchestrator:
         )
         set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
         return chat_response
+
+    def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
+        """Expand vague follow-up questions with recent user-message context."""
+        if not self._needs_history_context(user_message, history):
+            return user_message
+
+        user_messages = self._user_messages_from_history(history)
+        if not user_messages:
+            return user_message
+
+        anchor = user_messages[0] if "first question" in user_message.lower() else user_messages[-1]
+        query = f"{anchor}\nFollow-up request: {user_message}"
+        LOGGER.info(
+            "chat_followup_context_applied",
+            correlation_id=correlation_id,
+            original_length=len(user_message),
+            contextual_length=len(query),
+        )
+        return query
+
+    def _needs_history_context(self, user_message: str, history: str) -> bool:
+        """Return true when a user message likely depends on earlier chat turns."""
+        if not history:
+            return False
+        normalized = " ".join(user_message.lower().split())
+        if not normalized:
+            return False
+        word_count = len(normalized.split())
+        return word_count <= 14 and any(marker in normalized for marker in FOLLOW_UP_CONTEXT_MARKERS)
+
+    def _user_messages_from_history(self, history: str) -> list[str]:
+        """Extract prior user messages from compact session history."""
+        messages: list[str] = []
+        for line in history.splitlines():
+            role, separator, content = line.partition(":")
+            if separator and role.strip().lower() == "user":
+                cleaned = content.strip()
+                if cleaned:
+                    messages.append(cleaned)
+        return messages
 
     def _evaluate_governance(self, text: str, body: ChatRequest, correlation_id: str) -> GovernanceDecision:
         """Run unified governance checks for input or output text."""

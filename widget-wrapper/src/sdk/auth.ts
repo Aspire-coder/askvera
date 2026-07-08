@@ -10,12 +10,19 @@ export type WidgetAuthResult = {
   session?: WidgetAuthSession;
 };
 
-export async function authenticateWidget(config: AskVeraRuntimeConfig): Promise<WidgetAuthResult> {
+export type WidgetAuthOptions = {
+  forceNew?: boolean;
+};
+
+export async function authenticateWidget(config: AskVeraRuntimeConfig, options: WidgetAuthOptions = {}): Promise<WidgetAuthResult> {
   if (!config.widgetId) {
     return {};
   }
 
   const store = createWidgetSessionStore(config.widgetAuthStorageKey);
+  if (options.forceNew) {
+    store.clear();
+  }
   const existing = store.read();
   if (existing && existing.widgetId === config.widgetId && existing.expiresAt - Date.now() > TOKEN_REFRESH_WINDOW_MS) {
     return { token: existing.token, expiresAt: existing.expiresAt, session: existing };

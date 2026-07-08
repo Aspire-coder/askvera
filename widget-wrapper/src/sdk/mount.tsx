@@ -32,6 +32,7 @@ export function mountWidget(config: AskVeraRuntimeConfig, state: SdkRenderState)
       <React.StrictMode>
         <WidgetRuntime
           apiBaseUrl={nextState.config.apiUrl}
+          widgetId={nextState.config.widgetId}
           authToken={nextState.config.widgetAuthToken}
           openSignal={nextState.openSignal}
           closeSignal={nextState.closeSignal}

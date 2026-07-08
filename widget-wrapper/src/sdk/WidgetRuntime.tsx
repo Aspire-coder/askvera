@@ -19,9 +19,11 @@ import { buildThemeConfig, buildWidgetConfig, type BackendConfig } from "../conf
 import { widgetEventBus, widgetEventTypes } from "../events";
 import { GenericWidgetWrapper } from "../generic-widget/GenericWidgetWrapper";
 import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../generic-widget/types";
+import { authenticateWidget } from "./auth";
 
 type WidgetRuntimeProps = {
   apiBaseUrl: string;
+  widgetId?: string;
   authToken?: string;
   openSignal?: number;
   closeSignal?: number;
@@ -81,6 +83,12 @@ const baseWidgetConfig: GenericWidgetConfig = {
   consent: {
     title: "Privacy and Terms",
     body: "To use ASK Vera, review and accept the legal documents below.",
+    eyebrow: "One quick privacy step",
+    acknowledgmentLabel: "I have read and agree to the required privacy and terms documents.",
+    loadingText: "Loading legal documents before consent can be recorded.",
+    declineTitle: "No problem. ASK Vera will be here when you are ready.",
+    declineBody: "Thanks for your response. To start chatting, please come back and accept the privacy and terms when you are ready.",
+    declineActionLabel: "Review privacy terms",
     policyVersion: "2026.1",
     categories: ["chat-processing", "market-language-preferences"],
     storageKey: "askvera_widget_consent",
@@ -200,6 +208,7 @@ function emitErrorEvent(error: unknown, presentation: ChatErrorPresentation, pay
 
 export function WidgetRuntime({
   apiBaseUrl,
+  widgetId,
   authToken,
   openSignal = 0,
   closeSignal = 0,
@@ -213,9 +222,10 @@ export function WidgetRuntime({
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
+  const [activeAuthToken, setActiveAuthToken] = useState(authToken);
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
-  const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken }), [apiBaseUrl, authToken]);
+  const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
 
   const widgetConfig = useMemo(() => {
     const backendConfig: BackendConfig | undefined = apiConfig
@@ -229,7 +239,8 @@ export function WidgetRuntime({
           privacyVersion: apiConfig.privacyVersion,
           legalDocuments: getLegalDocuments(apiConfig),
           starterTopics: apiConfig.starterTopics,
-          contextualTopics: apiConfig.contextualTopics
+          contextualTopics: apiConfig.contextualTopics,
+          copy: apiConfig.copy
         }
       : undefined;
     const primaryColor = apiConfig?.primaryColor || "#2D7FF9";
@@ -260,6 +271,10 @@ export function WidgetRuntime({
   const appendMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => [...current, message]);
   }, []);
+
+  useEffect(() => {
+    setActiveAuthToken(authToken);
+  }, [authToken]);
 
   const upsertMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => {
@@ -304,6 +319,26 @@ export function WidgetRuntime({
     setMessages([{ id: buildId("clear-chat"), role: "assistant", content: "Conversation cleared." }]);
   }, [clearConversationSignal]);
 
+  const refreshWidgetAuth = async () => {
+    if (!widgetId) return undefined;
+    const refreshed = await authenticateWidget({ apiUrl: apiBaseUrl, widgetId }, { forceNew: true });
+    setActiveAuthToken(refreshed.token);
+    return refreshed.token;
+  };
+
+  const submitChatRequest = async (payload: MessageEventPayload, tokenOverride?: string) => {
+    const client = tokenOverride
+      ? createApiClient({ baseUrl: apiBaseUrl, authToken: tokenOverride })
+      : apiClient;
+    return sendMessage(client, {
+      message: payload.message,
+      sessionId: payload.sessionId,
+      country: payload.selectedCountry,
+      language: payload.selectedLanguage,
+      role: "new_prospect"
+    });
+  };
+
   const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
     if (requestInFlightRef.current) return;
     requestInFlightRef.current = true;
@@ -315,13 +350,15 @@ export function WidgetRuntime({
     if (showUserMessage) appendMessage({ id: buildId("user"), role: "user", content: payload.message });
     setLoading(true);
     try {
-      const envelope = await sendMessage(apiClient, {
-        message: payload.message,
-        sessionId: payload.sessionId,
-        country: payload.selectedCountry,
-        language: payload.selectedLanguage,
-        role: "new_prospect"
-      });
+      let envelope;
+      try {
+        envelope = await submitChatRequest(payload);
+      } catch (error) {
+        if (!(error instanceof ApiUnauthorizedError)) throw error;
+        const refreshedToken = await refreshWidgetAuth();
+        if (!refreshedToken) throw error;
+        envelope = await submitChatRequest(payload, refreshedToken);
+      }
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
       const assistantMessage: WidgetMessage = {
         id: buildId("assistant"),
