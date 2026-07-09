@@ -120,3 +120,33 @@ def test_retrieval_rerank_understands_lowercase_bonus_phrase() -> None:
     reranked = _rerank_documents("what is the personal retail bonus %?", documents)
 
     assert reranked[0].id == "personal-retail-bonus"
+
+
+def test_retrieval_rerank_uses_single_word_rank_anchor() -> None:
+    """Single-word rank names such as Supervisor should still anchor retrieval."""
+    documents = [
+        RetrievedDocument(
+            id="assistant-supervisor",
+            title="CA-EN-Company-Policy.pdf",
+            content=(
+                "Assistant Supervisor is achieved by generating a total of "
+                "2 Open Group Case Credits within any 2 consecutive Months."
+            ),
+            source="s3://kb/policy.pdf",
+            score=0.91,
+        ),
+        RetrievedDocument(
+            id="supervisor",
+            title="CA-EN-Company-Policy.pdf",
+            content=(
+                "Supervisor is achieved by generating a total of "
+                "10 Open Group Case Credits within any Month."
+            ),
+            source="s3://kb/policy.pdf",
+            score=0.74,
+        ),
+    ]
+
+    reranked = _rerank_documents("What are the Case Credits requirements to become a Supervisor?", documents)
+
+    assert reranked[0].id == "supervisor"

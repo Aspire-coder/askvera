@@ -168,6 +168,11 @@ def _ordered_tokens(text: str) -> list[str]:
 def _query_phrases(text: str) -> list[str]:
     """Extract exact business phrases from the query without relying on capitalization."""
     phrases = {phrase for phrase in _capitalized_phrases(text) if len(phrase.split()) > 1}
+    phrases.update(
+        phrase
+        for phrase in _capitalized_phrases(text)
+        if len(phrase.split()) == 1 and phrase in PHRASE_ANCHOR_TERMS
+    )
     tokens = _ordered_tokens(text)
     for size in (4, 3, 2):
         for index in range(0, max(len(tokens) - size + 1, 0)):
@@ -208,6 +213,36 @@ def _policy_term_score(message: str, document_text: str) -> float:
     return best_overlap
 
 
+def _requirement_heading_score(message: str, document_text: str) -> float:
+    """Reward chunks whose requirement heading matches the exact item asked about."""
+    message_terms = _tokens(message)
+    if not ({"case", "credit", "credits"} & message_terms or {"qualify", "qualification"} & message_terms):
+        return 0.0
+
+    document_lower = document_text.lower()
+    single_anchors = [
+        phrase
+        for phrase in _query_phrases(message)
+        if len(phrase.split()) == 1 and phrase in {"manager", "supervisor"}
+    ]
+    for anchor in single_anchors:
+        qualified_heading = rf"\b[a-z]+\s+{re.escape(anchor)}\s+is\s+achieved\b"
+        if re.search(qualified_heading, document_lower):
+            return -1.0
+
+        exact_anchor = rf"(?<![a-z]\s)\b{re.escape(anchor)}"
+        exact_patterns = [
+            rf"{exact_anchor}\s+is\s+achieved\b",
+            rf"{exact_anchor}\s+is\s+earned\b",
+            rf"{exact_anchor}\s+requires\b",
+            rf"\breaches\s+the\s+level\s+of\s+{re.escape(anchor)}\b",
+            rf"\bqualif(?:y|ies|ied)\s+as\s+{re.escape(anchor)}\b",
+        ]
+        if any(re.search(pattern, document_lower) for pattern in exact_patterns):
+            return 1.0
+    return 0.0
+
+
 def _document_relevance(message: str, document: RetrievedDocument) -> float:
     """Score a retrieved document against the user question before prompting."""
     query_tokens = _tokens(message)
@@ -226,12 +261,14 @@ def _document_relevance(message: str, document: RetrievedDocument) -> float:
     source_score = float(document.score or 0.0)
     phrase_score = _phrase_score(message, document_text)
     policy_score = _policy_term_score(message, document_text)
+    requirement_score = _requirement_heading_score(message, document.content)
     return round(
-        (source_score * 0.20)
+        (source_score * 0.10)
         + (overlap * 0.25)
-        + (policy_score * 0.25)
+        + (policy_score * 0.15)
         + (phrase_score * 0.20)
-        + (number_overlap * 0.10),
+        + (number_overlap * 0.10)
+        + (requirement_score * 0.20),
         6,
     )
 
@@ -241,6 +278,7 @@ def _rerank_documents(message: str, documents: list[RetrievedDocument]) -> list[
     return sorted(
         documents,
         key=lambda document: (
+            _requirement_heading_score(message, document.content),
             _document_relevance(message, document),
             float(document.score or 0.0),
         ),

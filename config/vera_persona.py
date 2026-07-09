@@ -1,7 +1,12 @@
 """Central ASK Vera persona and fallback responses."""
 
 ROLE_CONTENT_SCOPES = {
-    "new_prospect": "Product information and public company information only.",
+    "new_prospect": (
+        "Product information, public company information, published business-plan basics, "
+        "rank qualification requirements, bonus definitions, and policy facts that are in "
+        "approved public documentation. Do not provide income projections, earnings claims, "
+        "guarantees, or personalized financial advice."
+    ),
     "active_distributor": "Product information, training, policy, and distributor support content.",
     "compliance_officer": "Full policy, IDS, audit, and compliance reference content.",
 }
