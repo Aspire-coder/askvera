@@ -95,3 +95,50 @@ def test_response_builder_prefers_answer_supporting_references() -> None:
 
     assert chat_response.citations[0]["page"] == "6"
     assert "2 Open Group Case Credits" in chat_response.citations[0]["excerpt"]
+
+
+def test_response_builder_filters_numeric_references_without_matching_values() -> None:
+    """Numeric answers should not show unrelated references with different numbers."""
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id="relevant",
+                title="CA-EN-Company-Policy.pdf",
+                content=(
+                    "An FBO reaches the level of Assistant Supervisor by generating a total of "
+                    "2 Open Group Case Credits in any single Operating Company within any "
+                    "2 consecutive Months."
+                ),
+                source="s3://kb/policy.pdf",
+                excerpt="Assistant Supervisor requirement",
+                page="6",
+                score=0.72,
+            ),
+            RetrievedDocument(
+                id="noise",
+                title="CA-EN-Company-Policy.pdf",
+                content="Chairman's Bonus Manager qualification requires 700 Open Group Case Credits.",
+                source="s3://kb/policy.pdf",
+                excerpt="Chairman's Bonus Manager qualification",
+                page="26",
+                score=0.93,
+            ),
+        ],
+        citations=[],
+        confidence=0.72,
+    )
+    model_response = ModelResponse(
+        text="To become an Assistant Supervisor, you need 2 Open Group Case Credits within any 2 consecutive months.",
+        citations=retrieval_result.sources,
+        confidence=0.72,
+        provider="claude",
+        model_name="model",
+    )
+
+    chat_response = ResponseBuilder().build(
+        model_response=model_response,
+        retrieval_result=retrieval_result,
+        correlation_id="cid",
+    )
+
+    assert [citation["page"] for citation in chat_response.citations] == ["6"]

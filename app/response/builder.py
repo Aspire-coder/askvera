@@ -145,6 +145,7 @@ class ResponseBuilder:
         if not documents:
             return []
 
+        answer_numbers = self._numbers(answer)
         ranked = sorted(
             documents,
             key=lambda document: (
@@ -156,9 +157,12 @@ class ResponseBuilder:
         supported = [
             document
             for document in ranked
-            if self._support_score(answer, document.content or document.excerpt) > 0
+            if self._support_score(answer, document.content or document.excerpt) >= self._minimum_support_score(answer)
+            and (not answer_numbers or bool(answer_numbers & self._numbers(document.content or document.excerpt)))
         ]
-        selected = supported[:3] or ranked[: min(3, len(ranked))]
+        selected = supported[: 1 if answer_numbers else 2]
+        if not selected and not answer_numbers:
+            selected = ranked[: min(2, len(ranked))]
         return [self._source_for_answer(document, answer) for document in selected]
 
     def _support_score(self, answer: str, source_text: str) -> float:
@@ -169,10 +173,15 @@ class ResponseBuilder:
             return 0.0
 
         overlap = len(answer_tokens & source_tokens) / len(answer_tokens)
-        answer_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\b", answer))
-        source_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\b", source_text))
+        answer_numbers = self._numbers(answer)
+        source_numbers = self._numbers(source_text)
         number_overlap = len(answer_numbers & source_numbers) / len(answer_numbers) if answer_numbers else 0.0
-        return round(overlap + (number_overlap * 0.5), 6)
+        phrase_overlap = self._phrase_overlap(answer, source_text)
+        return round(overlap + (number_overlap * 0.55) + (phrase_overlap * 0.25), 6)
+
+    def _minimum_support_score(self, answer: str) -> float:
+        """Require stronger source support when the answer contains measurable values."""
+        return 0.35 if self._numbers(answer) else 0.12
 
     def _tokens(self, text: str) -> set[str]:
         """Return terms useful for citation support matching."""
@@ -181,6 +190,25 @@ class ResponseBuilder:
             for token in re.findall(r"[a-z0-9]+", text.lower())
             if len(token) > 3 and token not in REFERENCE_STOPWORDS
         }
+
+    def _numbers(self, text: str) -> set[str]:
+        """Return numeric values for answer/source support matching."""
+        return set(re.findall(r"\b\d+(?:\.\d+)?\b", text.lower()))
+
+    def _phrase_overlap(self, answer: str, source_text: str) -> float:
+        """Reward sources that contain named concepts from the answer."""
+        answer_phrases = [
+            phrase.lower()
+            for phrase in re.findall(
+                r"\b(?:[A-Z][a-z]+|[A-Z]{2,})(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,}))*\b",
+                answer,
+            )
+            if len(phrase.split()) > 1
+        ]
+        if not answer_phrases:
+            return 0.0
+        source_lower = source_text.lower()
+        return min(sum(1 for phrase in answer_phrases if phrase in source_lower) / len(answer_phrases), 1.0)
 
     def _source_for_answer(self, document: RetrievedDocument, answer: str) -> dict[str, Any]:
         """Build a source dictionary with an answer-focused excerpt."""
@@ -193,20 +221,15 @@ class ResponseBuilder:
         if not source_text:
             return ""
 
-        source_lower = source_text.lower()
-        ranked_terms = sorted(self._tokens(answer), key=len, reverse=True)
-        best_index = -1
-        for term in ranked_terms:
-            best_index = source_lower.find(term)
-            if best_index != -1:
-                break
-
-        if best_index == -1:
+        windows = [
+            source_text[index : index + length]
+            for index in range(0, max(len(source_text), 1), max(length // 2, 1))
+        ] or [source_text]
+        best_window = max(windows, key=lambda window: self._support_score(answer, window))
+        if self._support_score(answer, best_window) <= 0:
             return source_text[:length].strip()
 
-        start = max(0, best_index - length // 3)
-        end = min(len(source_text), start + length)
-        return source_text[start:end].strip()
+        return best_window.strip()
 
 
 response_builder = ResponseBuilder()

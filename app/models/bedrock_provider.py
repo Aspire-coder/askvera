@@ -40,7 +40,8 @@ class BedrockClaudeProvider:
             )
             raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
 
-        if confidence < settings.BEDROCK_MIN_CONFIDENCE:
+        strong_local_match = bool(retrieval_result.metadata.get("strong_local_match"))
+        if confidence < settings.BEDROCK_MIN_CONFIDENCE and not strong_local_match:
             LOGGER.warning(
                 "model_low_confidence_blocked",
                 correlation_id=correlation_id,
@@ -52,6 +53,18 @@ class BedrockClaudeProvider:
                 sources=source_log_summary(sources),
             )
             raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
+        if confidence < settings.BEDROCK_MIN_CONFIDENCE and strong_local_match:
+            LOGGER.warning(
+                "model_low_confidence_allowed_by_local_match",
+                correlation_id=correlation_id,
+                country=prompt.country,
+                language=prompt.language,
+                provider=self.name,
+                confidence=confidence,
+                max_local_relevance=retrieval_result.metadata.get("max_local_relevance"),
+                **summary,
+                sources=source_log_summary(sources),
+            )
 
         params = {
             "modelId": settings.BEDROCK_MODEL_ARN,
