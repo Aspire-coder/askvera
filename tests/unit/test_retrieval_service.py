@@ -1,7 +1,13 @@
 """Unit tests for retrieval normalization."""
 
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument
-from app.retrieval.providers import _expanded_retrieval_query, _rerank_documents, confidence_from_sources
+from app.retrieval.providers import (
+    _expanded_retrieval_query,
+    _reference_score,
+    _retrieval_queries,
+    _rerank_documents,
+    confidence_from_sources,
+)
 
 
 def test_provider_result_extracts_api_sources() -> None:
@@ -152,16 +158,111 @@ def test_retrieval_rerank_uses_single_word_rank_anchor() -> None:
     assert reranked[0].id == "supervisor"
 
 
+def test_retrieval_rerank_prefers_multiword_rank_requirement() -> None:
+    """Multi-word ranks must not inherit neighboring Manager requirements."""
+    documents = [
+        RetrievedDocument(
+            id="manager",
+            title="CA-EN-Company-Policy.pdf",
+            content=(
+                "Manager is achieved by generating a total of "
+                "120 Open Group Case Credits within 1-2 consecutive Months, "
+                "or 150 Open Group Case Credits within 3-4 consecutive Months."
+            ),
+            source="s3://kb/policy.pdf",
+            score=0.94,
+        ),
+        RetrievedDocument(
+            id="assistant-manager",
+            title="CA-EN-Company-Policy.pdf",
+            content=(
+                "Assistant Manager is achieved by generating a total of "
+                "75 Open Group Case Credits within any Month."
+            ),
+            source="s3://kb/policy.pdf",
+            score=0.68,
+        ),
+    ]
+
+    reranked = _rerank_documents("How do I qualify as Assistant Manager?", documents)
+
+    assert reranked[0].id == "assistant-manager"
+
+
+def test_retrieval_rerank_uses_bedrock_score_as_tiebreaker() -> None:
+    """When local text is equally relevant, the provider score should still matter."""
+    documents = [
+        RetrievedDocument(
+            id="low-score",
+            title="CA-EN-Company-Policy.pdf",
+            content="Supervisor is achieved by generating 10 Open Group Case Credits within any Month.",
+            source="s3://kb/policy.pdf",
+            score=0.42,
+        ),
+        RetrievedDocument(
+            id="high-score",
+            title="CA-EN-Company-Policy.pdf",
+            content="Supervisor is achieved by generating 10 Open Group Case Credits within any Month.",
+            source="s3://kb/policy.pdf",
+            score=0.88,
+        ),
+    ]
+
+    reranked = _rerank_documents("What are the Case Credits requirements to become a Supervisor?", documents)
+
+    assert reranked[0].id == "high-score"
+
+
+def test_reference_score_reads_bedrock_retrieve_score_shapes() -> None:
+    """Bedrock Retrieve scores should survive normalization for confidence/reranking."""
+    assert _reference_score({"score": 0.74}) == 0.74
+    assert _reference_score({"retrievalScore": 74}) == 0.74
+    assert _reference_score({"metadata": {"retrieval_score": "0.63"}}) == 0.63
+
+
+def test_provider_dedupe_keeps_different_chunks_with_same_prefix() -> None:
+    """Chunk dedupe should not erase different sections that start similarly."""
+    provider = BedrockRetrievalProvider()
+    shared_prefix = "Company Policies and the Code of Professional Conduct. "
+    documents = [
+        RetrievedDocument(
+            id="page-six",
+            title="CA-EN-Company-Policy.pdf",
+            content=shared_prefix + "Supervisor is achieved by generating 10 Open Group Case Credits.",
+            source="s3://kb/policy.pdf",
+            page="6",
+            score=0.8,
+        ),
+        RetrievedDocument(
+            id="page-six-manager",
+            title="CA-EN-Company-Policy.pdf",
+            content=shared_prefix + "Manager is achieved by generating 120 Open Group Case Credits.",
+            source="s3://kb/policy.pdf",
+            page="6",
+            score=0.7,
+        ),
+    ]
+
+    deduped = provider._dedupe_documents(documents)
+
+    assert {document.id for document in deduped} == {"page-six", "page-six-manager"}
+
+
 def test_retrieval_query_expands_case_credit_rank_terms() -> None:
     """Case Credit rank questions should include policy-style retrieval wording."""
     query = _expanded_retrieval_query("What are the Case Credits requirements to become a Supervisor?")
+    queries = _retrieval_queries("What are the Case Credits requirements to become a Supervisor?")
 
     assert "Supervisor?" in query
     assert "supervisor is achieved by generating open group case credits" in query
+    assert queries[0] == "What are the Case Credits requirements to become a Supervisor?"
+    assert "supervisor is achieved by generating open group case credits" in queries
 
 
 def test_retrieval_query_expands_bonus_terms() -> None:
     """Bonus questions should include the exact business phrase for retrieval."""
     query = _expanded_retrieval_query("What is the Personal Retail Bonus %?")
+    queries = _retrieval_queries("What is the Personal Retail Bonus %?")
 
     assert "personal retail bonus" in query
+    assert "personal retail bonus" in queries

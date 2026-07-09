@@ -1,5 +1,6 @@
 """Retrieval provider implementations."""
 
+import hashlib
 import re
 from typing import Any, Protocol
 
@@ -80,6 +81,8 @@ CAPITALIZED_STOPWORDS = {
     "Where",
     "You",
 }
+
+RANK_ANCHOR_TERMS = {"manager", "supervisor"}
 
 
 class RetrievalProvider(Protocol):
@@ -185,7 +188,16 @@ def _query_phrases(text: str) -> list[str]:
 
 def _expanded_retrieval_query(message: str) -> str:
     """Add policy-style terms to improve matching without changing the user's question."""
+    queries = _retrieval_queries(message)
+    if len(queries) == 1:
+        return message
+    return message + "\n\nRelevant policy terms: " + "; ".join(queries[1:9])
+
+
+def _retrieval_queries(message: str) -> list[str]:
+    """Return focused retrieval queries for Bedrock KB search."""
     additions: list[str] = []
+    priority_additions: list[str] = []
     message_terms = _tokens(message)
     phrases = _query_phrases(message)
 
@@ -196,9 +208,9 @@ def _expanded_retrieval_query(message: str) -> str:
     if {"case", "credit", "credits"} & message_terms:
         for phrase in phrases:
             if len(phrase.split()) == 1 and phrase in {"manager", "supervisor"}:
-                additions.append(f"{phrase} is achieved by generating open group case credits")
+                priority_additions.append(f"{phrase} is achieved by generating open group case credits")
             if len(phrase.split()) > 1 and any(term in phrase.split() for term in {"manager", "supervisor"}):
-                additions.append(f"{phrase} is achieved by generating open group case credits")
+                priority_additions.append(f"{phrase} is achieved by generating open group case credits")
 
     if {"bonus", "bonuses"} & message_terms:
         additions.extend(
@@ -208,14 +220,14 @@ def _expanded_retrieval_query(message: str) -> str:
         )
 
     unique_additions = []
-    for addition in additions:
+    for addition in [*priority_additions, *additions]:
         cleaned = " ".join(addition.split())
         if cleaned and cleaned not in unique_additions:
             unique_additions.append(cleaned)
 
     if not unique_additions:
-        return message
-    return message + "\n\nRelevant policy terms: " + "; ".join(unique_additions[:8])
+        return [message]
+    return [message, *unique_additions[:4]]
 
 
 def _phrase_score(message: str, document_text: str) -> float:
@@ -255,17 +267,18 @@ def _requirement_heading_score(message: str, document_text: str) -> float:
         return 0.0
 
     document_lower = document_text.lower()
-    single_anchors = [
+    anchors = [
         phrase
         for phrase in _query_phrases(message)
-        if len(phrase.split()) == 1 and phrase in {"manager", "supervisor"}
+        if set(phrase.split()) & RANK_ANCHOR_TERMS
     ]
-    for anchor in single_anchors:
-        qualified_heading = rf"\b[a-z]+\s+{re.escape(anchor)}\s+is\s+achieved\b"
-        if re.search(qualified_heading, document_lower):
-            return -1.0
-
-        exact_anchor = rf"(?<![a-z]\s)\b{re.escape(anchor)}"
+    anchors = sorted(set(anchors), key=lambda phrase: (len(phrase.split()), len(phrase)), reverse=True)
+    for anchor in anchors:
+        if len(anchor.split()) == 1:
+            # Do not treat "Assistant Supervisor" as an exact match for "Supervisor".
+            exact_anchor = rf"(?<![a-z]\s)\b{re.escape(anchor)}\b"
+        else:
+            exact_anchor = rf"\b{re.escape(anchor)}\b"
         exact_patterns = [
             rf"{exact_anchor}\s+is\s+achieved\b",
             rf"{exact_anchor}\s+is\s+earned\b",
@@ -275,6 +288,11 @@ def _requirement_heading_score(message: str, document_text: str) -> float:
         ]
         if any(re.search(pattern, document_lower) for pattern in exact_patterns):
             return 1.0
+
+        if len(anchor.split()) == 1:
+            qualified_heading = rf"\b[a-z]+(?:\s+[a-z]+){{0,2}}\s+{re.escape(anchor)}\s+is\s+achieved\b"
+            if re.search(qualified_heading, document_lower):
+                return -1.0
     return 0.0
 
 
@@ -298,12 +316,12 @@ def _document_relevance(message: str, document: RetrievedDocument) -> float:
     policy_score = _policy_term_score(message, document_text)
     requirement_score = _requirement_heading_score(message, document.content)
     return round(
-        (source_score * 0.10)
-        + (overlap * 0.25)
+        (source_score * 0.25)
+        + (overlap * 0.15)
         + (policy_score * 0.15)
-        + (phrase_score * 0.20)
+        + (phrase_score * 0.25)
         + (number_overlap * 0.10)
-        + (requirement_score * 0.20),
+        + (requirement_score * 0.10),
         6,
     )
 
@@ -374,31 +392,35 @@ class BedrockRetrievalProvider:
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         """Call the standalone Retrieve API for reliable source scores."""
-        retrieval_query = _expanded_retrieval_query(message)
+        retrieval_queries = _retrieval_queries(message)
+        retrieval_results: list[dict[str, Any]] = []
         try:
-            response = get_aws_clients().bedrock_agent_runtime.retrieve(
-                knowledgeBaseId=settings.BEDROCK_KB_ID,
-                retrievalQuery={"text": retrieval_query},
-                retrievalConfiguration={
-                    "vectorSearchConfiguration": {
-                        "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
-                        "overrideSearchType": "HYBRID",
-                        "filter": {
-                            "andAll": [
-                                {"equals": {"key": "country_code", "value": country}},
-                                {"equals": {"key": "language", "value": language}},
-                                {"equals": {"key": "status", "value": "active"}},
-                            ]
-                        },
-                    }
-                },
-            )
+            for retrieval_query in retrieval_queries:
+                response = get_aws_clients().bedrock_agent_runtime.retrieve(
+                    knowledgeBaseId=settings.BEDROCK_KB_ID,
+                    retrievalQuery={"text": retrieval_query},
+                    retrievalConfiguration={
+                        "vectorSearchConfiguration": {
+                            "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
+                            "overrideSearchType": "HYBRID",
+                            "filter": {
+                                "andAll": [
+                                    {"equals": {"key": "country_code", "value": country}},
+                                    {"equals": {"key": "language", "value": language}},
+                                    {"equals": {"key": "status", "value": "active"}},
+                                ]
+                            },
+                        }
+                    },
+                )
+                retrieval_results.extend(response.get("retrievalResults", []))
         except (BotoCoreError, ClientError):
             LOGGER.exception("retrieval_failed", correlation_id=correlation_id, country=country, language=language, role=role)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "bedrock"})
 
-        documents = [self._document_from_retrieve_result(result) for result in response.get("retrievalResults", [])]
+        documents = [self._document_from_retrieve_result(result) for result in retrieval_results]
         documents = [document for document in documents if document.source]
+        documents = self._dedupe_documents(documents)
         documents = _rerank_documents(message, documents)
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
         selected_documents = documents[: settings.BEDROCK_RETRIEVAL_RESULT_COUNT]
@@ -406,6 +428,7 @@ class BedrockRetrievalProvider:
             selected_documents,
             provider="bedrock",
             candidate_count=len(documents),
+            query_count=len(retrieval_queries),
             max_local_relevance=max_local_relevance,
             strong_local_match=max_local_relevance >= settings.BEDROCK_STRONG_LOCAL_MATCH_THRESHOLD,
         )
@@ -421,6 +444,17 @@ class BedrockRetrievalProvider:
             sources=source_log_summary(result.sources),
         )
         return result
+
+    def _dedupe_documents(self, documents: list[RetrievedDocument]) -> list[RetrievedDocument]:
+        """Merge duplicate retrieve results while keeping the strongest score."""
+        deduped: dict[str, RetrievedDocument] = {}
+        for document in documents:
+            content_hash = hashlib.sha256(document.content.encode("utf-8")).hexdigest()
+            key = "|".join([document.source, document.page, content_hash])
+            existing = deduped.get(key)
+            if existing is None or float(document.score or 0.0) > float(existing.score or 0.0):
+                deduped[key] = document
+        return list(deduped.values())
 
     def _result(self, documents: list[RetrievedDocument], **metadata: Any) -> RetrievalResult:
         sources = [document.to_source() for document in documents]
@@ -441,6 +475,6 @@ class BedrockRetrievalProvider:
             document_version=_metadata_value(metadata, "document_version", "version", "policy_version"),
             country=_metadata_value(metadata, "country_code", "countrycode", "country"),
             language=_metadata_value(metadata, "language", "lang"),
-            score=result.get("score"),
+            score=_reference_score(result),
             metadata=metadata,
         )
