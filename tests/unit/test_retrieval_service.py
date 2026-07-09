@@ -1,7 +1,7 @@
 """Unit tests for retrieval normalization."""
 
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument
-from app.retrieval.providers import _rerank_documents, confidence_from_sources
+from app.retrieval.providers import _expanded_retrieval_query, _rerank_documents, confidence_from_sources
 
 
 def test_provider_result_extracts_api_sources() -> None:
@@ -150,3 +150,18 @@ def test_retrieval_rerank_uses_single_word_rank_anchor() -> None:
     reranked = _rerank_documents("What are the Case Credits requirements to become a Supervisor?", documents)
 
     assert reranked[0].id == "supervisor"
+
+
+def test_retrieval_query_expands_case_credit_rank_terms() -> None:
+    """Case Credit rank questions should include policy-style retrieval wording."""
+    query = _expanded_retrieval_query("What are the Case Credits requirements to become a Supervisor?")
+
+    assert "Supervisor?" in query
+    assert "supervisor is achieved by generating open group case credits" in query
+
+
+def test_retrieval_query_expands_bonus_terms() -> None:
+    """Bonus questions should include the exact business phrase for retrieval."""
+    query = _expanded_retrieval_query("What is the Personal Retail Bonus %?")
+
+    assert "personal retail bonus" in query

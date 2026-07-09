@@ -183,6 +183,41 @@ def _query_phrases(text: str) -> list[str]:
     return sorted(phrases, key=lambda phrase: (len(phrase.split()), len(phrase)), reverse=True)
 
 
+def _expanded_retrieval_query(message: str) -> str:
+    """Add policy-style terms to improve matching without changing the user's question."""
+    additions: list[str] = []
+    message_terms = _tokens(message)
+    phrases = _query_phrases(message)
+
+    for phrase in phrases:
+        if phrase not in additions:
+            additions.append(phrase)
+
+    if {"case", "credit", "credits"} & message_terms:
+        for phrase in phrases:
+            if len(phrase.split()) == 1 and phrase in {"manager", "supervisor"}:
+                additions.append(f"{phrase} is achieved by generating open group case credits")
+            if len(phrase.split()) > 1 and any(term in phrase.split() for term in {"manager", "supervisor"}):
+                additions.append(f"{phrase} is achieved by generating open group case credits")
+
+    if {"bonus", "bonuses"} & message_terms:
+        additions.extend(
+            phrase
+            for phrase in phrases
+            if any(term in phrase.split() for term in {"bonus", "retail", "personal", "wholesale", "novus", "leadership"})
+        )
+
+    unique_additions = []
+    for addition in additions:
+        cleaned = " ".join(addition.split())
+        if cleaned and cleaned not in unique_additions:
+            unique_additions.append(cleaned)
+
+    if not unique_additions:
+        return message
+    return message + "\n\nRelevant policy terms: " + "; ".join(unique_additions[:8])
+
+
 def _phrase_score(message: str, document_text: str) -> float:
     """Reward chunks that contain the exact named thing the user asked about."""
     phrases = _query_phrases(message)
@@ -339,10 +374,11 @@ class BedrockRetrievalProvider:
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         """Call the standalone Retrieve API for reliable source scores."""
+        retrieval_query = _expanded_retrieval_query(message)
         try:
             response = get_aws_clients().bedrock_agent_runtime.retrieve(
                 knowledgeBaseId=settings.BEDROCK_KB_ID,
-                retrievalQuery={"text": message},
+                retrievalQuery={"text": retrieval_query},
                 retrievalConfiguration={
                     "vectorSearchConfiguration": {
                         "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
