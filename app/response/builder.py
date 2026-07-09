@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -13,9 +14,30 @@ from .models import ChatResponse
 
 if TYPE_CHECKING:
     from app.models.responses import ModelResponse
-    from app.retrieval.models import RetrievalResult
+    from app.retrieval.models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.response")
+
+REFERENCE_STOPWORDS = {
+    "about",
+    "also",
+    "and",
+    "answer",
+    "are",
+    "can",
+    "does",
+    "for",
+    "from",
+    "have",
+    "into",
+    "need",
+    "that",
+    "the",
+    "this",
+    "with",
+    "you",
+    "your",
+}
 
 
 class ResponseBuilder:
@@ -35,7 +57,7 @@ class ResponseBuilder:
         try:
             chat_response = ChatResponse(
                 answer=model_response.text,
-                citations=model_response.citations,
+                citations=self._supporting_citations(model_response.text, retrieval_result),
                 suggestions=[],
                 cards=[],
                 confidence=model_response.confidence,
@@ -116,6 +138,75 @@ class ResponseBuilder:
             response_source="fallback",
         )
         return chat_response
+
+    def _supporting_citations(self, answer: str, retrieval_result: RetrievalResult) -> list[dict[str, Any]]:
+        """Return only the retrieved citations that best support the answer."""
+        documents = retrieval_result.documents
+        if not documents:
+            return []
+
+        ranked = sorted(
+            documents,
+            key=lambda document: (
+                self._support_score(answer, document.content or document.excerpt),
+                float(document.score or 0.0),
+            ),
+            reverse=True,
+        )
+        supported = [
+            document
+            for document in ranked
+            if self._support_score(answer, document.content or document.excerpt) > 0
+        ]
+        selected = supported[:3] or ranked[: min(3, len(ranked))]
+        return [self._source_for_answer(document, answer) for document in selected]
+
+    def _support_score(self, answer: str, source_text: str) -> float:
+        """Score how well a source text supports the final answer text."""
+        answer_tokens = self._tokens(answer)
+        source_tokens = self._tokens(source_text)
+        if not answer_tokens or not source_tokens:
+            return 0.0
+
+        overlap = len(answer_tokens & source_tokens) / len(answer_tokens)
+        answer_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\b", answer))
+        source_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\b", source_text))
+        number_overlap = len(answer_numbers & source_numbers) / len(answer_numbers) if answer_numbers else 0.0
+        return round(overlap + (number_overlap * 0.5), 6)
+
+    def _tokens(self, text: str) -> set[str]:
+        """Return terms useful for citation support matching."""
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", text.lower())
+            if len(token) > 3 and token not in REFERENCE_STOPWORDS
+        }
+
+    def _source_for_answer(self, document: RetrievedDocument, answer: str) -> dict[str, Any]:
+        """Build a source dictionary with an answer-focused excerpt."""
+        source = document.to_source()
+        source["excerpt"] = self._best_excerpt(answer, document.content or document.excerpt)
+        return source
+
+    def _best_excerpt(self, answer: str, source_text: str, length: int = 320) -> str:
+        """Choose an excerpt near the strongest answer/source overlap."""
+        if not source_text:
+            return ""
+
+        source_lower = source_text.lower()
+        ranked_terms = sorted(self._tokens(answer), key=len, reverse=True)
+        best_index = -1
+        for term in ranked_terms:
+            best_index = source_lower.find(term)
+            if best_index != -1:
+                break
+
+        if best_index == -1:
+            return source_text[:length].strip()
+
+        start = max(0, best_index - length // 3)
+        end = min(len(source_text), start + length)
+        return source_text[start:end].strip()
 
 
 response_builder = ResponseBuilder()

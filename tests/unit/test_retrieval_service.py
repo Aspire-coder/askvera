@@ -1,7 +1,7 @@
 """Unit tests for retrieval normalization."""
 
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument
-from app.retrieval.providers import confidence_from_sources
+from app.retrieval.providers import _rerank_documents, confidence_from_sources
 
 
 def test_provider_result_extracts_api_sources() -> None:
@@ -40,3 +40,27 @@ def test_confidence_falls_back_to_citation_quality() -> None:
     )
 
     assert confidence > 0.65
+
+
+def test_retrieval_rerank_prefers_exact_question_terms() -> None:
+    """Local reranking should prefer candidate chunks that match the user's item."""
+    documents = [
+        RetrievedDocument(
+            id="manager",
+            title="CA-EN-Company-Policy.pdf",
+            content="Manager is achieved by generating 120 Open Group Case Credits.",
+            source="s3://kb/policy.pdf",
+            score=0.91,
+        ),
+        RetrievedDocument(
+            id="assistant-manager",
+            title="CA-EN-Company-Policy.pdf",
+            content="Assistant Manager is achieved by generating 75 Open Group Case Credits.",
+            source="s3://kb/policy.pdf",
+            score=0.86,
+        ),
+    ]
+
+    reranked = _rerank_documents("How do I qualify as Assistant Manager?", documents)
+
+    assert reranked[0].id == "assistant-manager"

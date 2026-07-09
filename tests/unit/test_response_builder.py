@@ -47,3 +47,51 @@ def test_response_builder_preserves_existing_api_shape() -> None:
     assert chat_response.metadata["provider"] == "claude"
     assert chat_response.metadata["retrieved_document_count"] == 1
     assert chat_response.metadata["cache"] == "miss"
+
+
+def test_response_builder_prefers_answer_supporting_references() -> None:
+    """References shown to users should be supporting evidence, not raw search dumps."""
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id="relevant",
+                title="CA-EN-Company-Policy.pdf",
+                content=(
+                    "Assistant Supervisor is achieved by generating a total of "
+                    "2 Open Group Case Credits in any single Operating Company "
+                    "within any 2 consecutive Months."
+                ),
+                source="s3://kb/policy.pdf",
+                excerpt="Assistant Supervisor is achieved by generating 2 Open Group Case Credits.",
+                page="6",
+                score=0.72,
+            ),
+            RetrievedDocument(
+                id="noise",
+                title="CA-EN-Company-Policy.pdf",
+                content="Leadership Bonus requirements for unrelated incentives are listed in this section.",
+                source="s3://kb/policy.pdf",
+                excerpt="Leadership Bonus requirements for unrelated incentives.",
+                page="26",
+                score=0.9,
+            ),
+        ],
+        citations=[],
+        confidence=0.72,
+    )
+    model_response = ModelResponse(
+        text="To become an Assistant Supervisor, you need 2 Open Group Case Credits within any 2 consecutive months.",
+        citations=retrieval_result.sources,
+        confidence=0.72,
+        provider="claude",
+        model_name="model",
+    )
+
+    chat_response = ResponseBuilder().build(
+        model_response=model_response,
+        retrieval_result=retrieval_result,
+        correlation_id="cid",
+    )
+
+    assert chat_response.citations[0]["page"] == "6"
+    assert "2 Open Group Case Credits" in chat_response.citations[0]["excerpt"]

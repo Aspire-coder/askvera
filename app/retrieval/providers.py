@@ -1,5 +1,6 @@
 """Retrieval provider implementations."""
 
+import re
 from typing import Any, Protocol
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -11,6 +12,30 @@ from utils.logging import get_logger
 from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.providers")
+
+TOKEN_STOPWORDS = {
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "can",
+    "does",
+    "for",
+    "from",
+    "have",
+    "how",
+    "into",
+    "need",
+    "the",
+    "this",
+    "what",
+    "when",
+    "where",
+    "with",
+    "you",
+    "your",
+}
 
 
 class RetrievalProvider(Protocol):
@@ -55,6 +80,51 @@ def _reference_score(ref: dict[str, Any]) -> float | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _tokens(text: str) -> set[str]:
+    """Return meaningful lowercase tokens for lightweight local reranking."""
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) > 2 and token not in TOKEN_STOPWORDS
+    }
+
+
+def _numbers(text: str) -> set[str]:
+    """Return numeric values that should stay close to the user's question."""
+    return set(re.findall(r"\b\d+(?:\.\d+)?(?:\s*(?:-|to)\s*\d+(?:\.\d+)?)?\b", text.lower()))
+
+
+def _document_relevance(message: str, document: RetrievedDocument) -> float:
+    """Score a retrieved document against the user question before prompting."""
+    query_tokens = _tokens(message)
+    document_text = " ".join([document.title, document.content, document.excerpt])
+    document_tokens = _tokens(document_text)
+    if not query_tokens or not document_tokens:
+        return float(document.score or 0.0)
+
+    overlap = len(query_tokens & document_tokens) / len(query_tokens)
+    number_overlap = 0.0
+    query_numbers = _numbers(message)
+    if query_numbers:
+        document_numbers = _numbers(document_text)
+        number_overlap = len(query_numbers & document_numbers) / len(query_numbers)
+
+    source_score = float(document.score or 0.0)
+    return round((source_score * 0.55) + (overlap * 0.35) + (number_overlap * 0.10), 6)
+
+
+def _rerank_documents(message: str, documents: list[RetrievedDocument]) -> list[RetrievedDocument]:
+    """Prefer documents whose text best matches the exact user question."""
+    return sorted(
+        documents,
+        key=lambda document: (
+            _document_relevance(message, document),
+            float(document.score or 0.0),
+        ),
+        reverse=True,
+    )
 
 
 def confidence_from_sources(sources: list[dict[str, Any]]) -> float:
@@ -116,7 +186,7 @@ class BedrockRetrievalProvider:
                 retrievalQuery={"text": message},
                 retrievalConfiguration={
                     "vectorSearchConfiguration": {
-                        "numberOfResults": settings.BEDROCK_RETRIEVAL_RESULT_COUNT,
+                        "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
                         "overrideSearchType": "HYBRID",
                         "filter": {
                             "andAll": [
@@ -134,6 +204,7 @@ class BedrockRetrievalProvider:
 
         documents = [self._document_from_retrieve_result(result) for result in response.get("retrievalResults", [])]
         documents = [document for document in documents if document.source]
+        documents = _rerank_documents(message, documents)[: settings.BEDROCK_RETRIEVAL_RESULT_COUNT]
         result = self._result(documents, provider="bedrock")
         LOGGER.info(
             "retrieval_success",
