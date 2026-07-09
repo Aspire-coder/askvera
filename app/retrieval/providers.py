@@ -20,13 +20,23 @@ TOKEN_STOPWORDS = {
     "and",
     "are",
     "can",
+    "become",
+    "becomes",
     "does",
     "for",
     "from",
     "have",
     "how",
     "into",
+    "level",
+    "levels",
+    "many",
+    "much",
     "need",
+    "qualify",
+    "qualification",
+    "requirements",
+    "requirement",
     "the",
     "this",
     "what",
@@ -35,6 +45,23 @@ TOKEN_STOPWORDS = {
     "with",
     "you",
     "your",
+}
+
+PHRASE_ANCHOR_TERMS = {
+    "bonus",
+    "bonuses",
+    "case",
+    "credit",
+    "credits",
+    "discount",
+    "fbo",
+    "leadership",
+    "manager",
+    "novus",
+    "personal",
+    "retail",
+    "supervisor",
+    "wholesale",
 }
 
 CAPITALIZED_STOPWORDS = {
@@ -129,9 +156,31 @@ def _capitalized_phrases(text: str) -> list[str]:
     return cleaned
 
 
+def _ordered_tokens(text: str) -> list[str]:
+    """Return meaningful lowercase tokens in source order."""
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) > 2 and token not in TOKEN_STOPWORDS
+    ]
+
+
+def _query_phrases(text: str) -> list[str]:
+    """Extract exact business phrases from the query without relying on capitalization."""
+    phrases = {phrase for phrase in _capitalized_phrases(text) if len(phrase.split()) > 1}
+    tokens = _ordered_tokens(text)
+    for size in (4, 3, 2):
+        for index in range(0, max(len(tokens) - size + 1, 0)):
+            window = tokens[index : index + size]
+            if not any(token in PHRASE_ANCHOR_TERMS for token in window):
+                continue
+            phrases.add(" ".join(window))
+    return sorted(phrases, key=lambda phrase: (len(phrase.split()), len(phrase)), reverse=True)
+
+
 def _phrase_score(message: str, document_text: str) -> float:
     """Reward chunks that contain the exact named thing the user asked about."""
-    phrases = [phrase for phrase in _capitalized_phrases(message) if len(phrase.split()) > 1]
+    phrases = _query_phrases(message)
     if not phrases:
         return 0.0
     document_lower = document_text.lower()
@@ -178,10 +227,10 @@ def _document_relevance(message: str, document: RetrievedDocument) -> float:
     phrase_score = _phrase_score(message, document_text)
     policy_score = _policy_term_score(message, document_text)
     return round(
-        (source_score * 0.25)
+        (source_score * 0.20)
         + (overlap * 0.25)
         + (policy_score * 0.25)
-        + (phrase_score * 0.15)
+        + (phrase_score * 0.20)
         + (number_overlap * 0.10),
         6,
     )

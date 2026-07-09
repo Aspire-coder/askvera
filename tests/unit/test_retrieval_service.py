@@ -96,3 +96,27 @@ def test_retrieval_rerank_prefers_direct_requirement_over_related_opt_in_text() 
     reranked = _rerank_documents("How many Case Credits do I need to become Assistant Supervisor?", documents)
 
     assert reranked[0].id == "assistant-supervisor-requirement"
+
+
+def test_retrieval_rerank_understands_lowercase_bonus_phrase() -> None:
+    """Lowercase business phrases should still anchor retrieval to the right chunk."""
+    documents = [
+        RetrievedDocument(
+            id="leadership-bonus",
+            title="CA-EN-Company-Policy.pdf",
+            content="Leadership Bonus is paid to qualified Managers on qualifying sales.",
+            source="s3://kb/policy.pdf",
+            score=0.88,
+        ),
+        RetrievedDocument(
+            id="personal-retail-bonus",
+            title="CA-EN-Company-Policy.pdf",
+            content="Personal Retail Bonus is the difference between Suggested Retail Price and wholesale cost.",
+            source="s3://kb/policy.pdf",
+            score=0.74,
+        ),
+    ]
+
+    reranked = _rerank_documents("what is the personal retail bonus %?", documents)
+
+    assert reranked[0].id == "personal-retail-bonus"

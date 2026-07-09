@@ -122,6 +122,23 @@ def test_numeric_grounding_allows_correct_adjacent_rank_move_up_rule() -> None:
     assert not result.has_critical()
 
 
+def test_numeric_grounding_allows_hyphenated_month_format_from_source() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Assistant Supervisor requires 2 Open Group Case Credits within any 2 consecutive months.",
+            (
+                "An FBO reaches the level of Assistant Supervisor by generating a total of "
+                "2 Open Group Case Credits in any single Operating Company within any "
+                "2-consecutive-Month period."
+            ),
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_allows_correctly_paraphrased_claim() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(

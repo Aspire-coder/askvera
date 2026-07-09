@@ -291,6 +291,7 @@ class AIOrchestrator:
                         "code": issue.code,
                         "severity": issue.severity.value,
                         "field": issue.field,
+                        "message": issue.message[:500],
                     }
                     for issue in result.issues
                 ],
