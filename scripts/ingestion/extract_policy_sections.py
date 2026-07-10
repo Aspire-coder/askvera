@@ -23,6 +23,53 @@ HEADER_RE = re.compile(r"Company Policies and the Code of Professional Conduct R
 PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
 SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
+SEARCH_ALIAS_RULES = [
+    (
+        ("forever business owner", "fbo"),
+        ["Forever Business Owner", "FBO", "independent Forever Business Owner"],
+    ),
+    (
+        ("application", "contract", "agreement"),
+        ["apply", "application", "enroll", "enrollment", "register", "become", "sign up", "requirements"],
+    ),
+    (
+        ("case credit", "case credits", "open group case credits", "new case credits"),
+        [
+            "Case Credit",
+            "Case Credits",
+            "CC",
+            "Open Group Case Credits",
+            "OGCC",
+            "NEW CC",
+            "Total Case Credits",
+            "definition",
+            "defined",
+            "meaning",
+        ],
+    ),
+    (
+        ("sponsor", "sponsoring", "responsor", "responsored"),
+        ["sponsor", "sponsoring", "responsor", "responsored", "change sponsor", "new sponsor", "different sponsor"],
+    ),
+    (
+        ("arbitration", "dispute", "class action", "waiver", "controversy", "claim"),
+        ["arbitration", "dispute", "class action", "waiver", "court", "sue", "legal claim", "lawsuit"],
+    ),
+    (
+        ("bonus", "bonuses", "retail bonus", "volume bonus", "leadership bonus"),
+        [
+            "bonus",
+            "bonuses",
+            "Personal Retail Bonus",
+            "Personal Bonus",
+            "Volume Bonus",
+            "Leadership Bonus",
+            "percentage",
+            "percent",
+            "%",
+        ],
+    ),
+]
 TEXT_REPLACEMENTS = {
     "â€™": "'",
     "â€œ": '"',
@@ -51,6 +98,7 @@ class PolicySection:
             "language": self.language,
             "section_id": self.section_id,
             "section_title": self.title,
+            "search_aliases": "; ".join(_search_aliases(self)),
             "start_page": self.start_page,
             "end_page": self.end_page,
         }
@@ -283,6 +331,8 @@ def _section_text(section: PolicySection) -> str:
     page = str(section.start_page)
     if section.end_page != section.start_page:
         page = f"{section.start_page}-{section.end_page}"
+    aliases = _search_aliases(section)
+    search_alias_line = f"Search aliases: {'; '.join(aliases)}" if aliases else "Search aliases: None"
     return "\n".join(
         [
             f"Document: {section.source_file}",
@@ -290,12 +340,26 @@ def _section_text(section: PolicySection) -> str:
             f"Language: {section.language}",
             f"Section: {section.section_id}",
             f"Title: {section.title}",
+            search_alias_line,
             f"Page: {page}",
             "",
             section.content,
             "",
         ]
     )
+
+
+def _search_aliases(section: PolicySection) -> list[str]:
+    """Add natural-language search hints derived from section content."""
+
+    haystack = f"{section.section_id} {section.title} {section.content}".lower()
+    aliases: list[str] = []
+
+    for triggers, additions in SEARCH_ALIAS_RULES:
+        if any(trigger in haystack for trigger in triggers):
+            aliases.extend(additions)
+
+    return list(dict.fromkeys(aliases))
 
 
 def parse_args() -> argparse.Namespace:
