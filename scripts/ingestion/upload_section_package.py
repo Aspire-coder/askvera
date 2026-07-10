@@ -54,12 +54,27 @@ def main() -> int:
         )
 
     target = _s3_uri(args.bucket, args.prefix)
-    command = ["aws"]
+    base_command = ["aws"]
     if args.profile:
-        command.extend(["--profile", args.profile])
-    command.extend(["s3", "sync", str(package_dir), target])
+        base_command.extend(["--profile", args.profile])
+
+    clean_command = [*base_command, "s3", "rm", target, "--recursive"]
+    sync_command = [
+        *base_command,
+        "s3",
+        "sync",
+        str(package_dir),
+        target,
+        "--exclude",
+        "*",
+        "--include",
+        "*.txt",
+        "--include",
+        "*.txt.metadata.json",
+    ]
     if args.dry_run:
-        command.append("--dryrun")
+        clean_command.append("--dryrun")
+        sync_command.append("--dryrun")
 
     print("Policy section package upload")
     print("-----------------------------")
@@ -68,11 +83,15 @@ def main() -> int:
     print(f"Metadata files: {metadata_count}")
     print(f"Target: {target}")
     print("")
-    print("Running:")
-    print(" ".join(command))
+    print("Cleaning target prefix:")
+    print(" ".join(clean_command))
+    print("")
+    print("Uploading only searchable section files and metadata:")
+    print(" ".join(sync_command))
     print("")
 
-    subprocess.run(command, check=True)
+    subprocess.run(clean_command, check=True)
+    subprocess.run(sync_command, check=True)
 
     print("")
     print("Upload complete.")

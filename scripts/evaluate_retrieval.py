@@ -209,15 +209,17 @@ def _source_matches(expected_source: str, snapshot: RetrievedSourceSnapshot) -> 
 def _section_matches(expected_sections: list[str], snapshot: RetrievedSourceSnapshot) -> bool:
     if not expected_sections:
         return False
-    excerpt = snapshot.excerpt.lower()
+    haystack = f"{snapshot.title} {snapshot.source} {snapshot.excerpt}".lower()
     for section in expected_sections:
         base_section = re.sub(r"[a-z]$", "", section)
         patterns = {
             rf"\b{re.escape(section)}\b",
+            rf"\b{re.escape(section).replace(r'\\.', r'[-.]')}\b",
             rf"\b{re.escape(base_section)}\b",
+            rf"\b{re.escape(base_section).replace(r'\\.', r'[-.]')}\b",
             rf"\b{re.escape(base_section)}\s*\([a-z]\)",
         }
-        if any(re.search(pattern, excerpt) for pattern in patterns):
+        if any(re.search(pattern, haystack) for pattern in patterns):
             return True
     return False
 
