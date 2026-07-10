@@ -14,7 +14,7 @@ import json
 import re
 import sys
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -274,6 +274,13 @@ def inspect_workbook(xlsx_path: Path) -> None:
 
 def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
     from app.retrieval import retrieval_service
+    from config import settings
+
+    if args.kb_id:
+        settings.BEDROCK_KB_ID = args.kb_id
+    if args.data_source_id:
+        settings.BEDROCK_DATA_SOURCE_ID = args.data_source_id
+        settings.BEDROCK_DATASOURCE_ID = args.data_source_id
 
     frame = _load_dataframe(args.xlsx, args.sheet)
     columns = [str(column) for column in frame.columns]
@@ -371,7 +378,7 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
 
 def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     csv_path = output_dir / f"retrieval_eval_{timestamp}.csv"
     json_path = output_dir / f"retrieval_eval_{timestamp}.json"
 
@@ -390,12 +397,16 @@ def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple
 
 
 def print_summary(rows: list[RetrievalEvaluationRow]) -> None:
+    from config import settings
+
     counts: dict[str, int] = {}
     for row in rows:
         counts[row.status] = counts.get(row.status, 0) + 1
     print()
     print("Retrieval evaluation summary")
     print("----------------------------")
+    print(f"Knowledge Base ID: {settings.BEDROCK_KB_ID}")
+    print(f"Data Source ID: {settings.BEDROCK_DATA_SOURCE_ID}")
     print(f"Total cases: {len(rows)}")
     for status, count in sorted(counts.items()):
         print(f"{status}: {count}")
@@ -409,6 +420,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--language", default="en", help="Default language code when the sheet is blank.")
     parser.add_argument("--role", default="new_prospect", help="Default user role when the sheet is blank.")
     parser.add_argument("--top-k", type=int, default=5, help="Number of retrieved sources to store per test.")
+    parser.add_argument("--kb-id", default="", help="Override the Bedrock Knowledge Base ID for this test run.")
+    parser.add_argument(
+        "--data-source-id",
+        default="",
+        help="Override the Bedrock data source ID for this test run.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,

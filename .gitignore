@@ -59,6 +59,7 @@ app/*
 .codex/
 graphify-out/
 output/
+outputs/
 ASK_VERA*CODE_EXPORT*.md
 *.pdf
 public/documents/*.docx

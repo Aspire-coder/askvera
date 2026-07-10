@@ -136,9 +136,9 @@ WIDGET_REGISTRY_JSON = _env_str(
     ),
 )
 # Bedrock Knowledge Base ID. Found in Bedrock -> Knowledge Bases -> your KB -> Knowledge base ID.
-BEDROCK_KB_ID = "P482AUAHKM"
+BEDROCK_KB_ID = _env_str("BEDROCK_KB_ID", "P482AUAHKM")
 # Bedrock data source ID. Found in Bedrock -> Knowledge Bases -> Data sources.
-BEDROCK_DATA_SOURCE_ID = "JSAC3THB67"
+BEDROCK_DATA_SOURCE_ID = _env_str("BEDROCK_DATA_SOURCE_ID", "JSAC3THB67")
 # Alias matching the SSM key naming used in the AWS setup notes.
 BEDROCK_DATASOURCE_ID = BEDROCK_DATA_SOURCE_ID
 # Bedrock model ARN or inference profile ARN. Found in Bedrock -> Model access or Inference profiles.
