@@ -281,6 +281,8 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
     if args.data_source_id:
         settings.BEDROCK_DATA_SOURCE_ID = args.data_source_id
         settings.BEDROCK_DATASOURCE_ID = args.data_source_id
+    if args.retrieval_configuration:
+        settings.BEDROCK_RETRIEVAL_CONFIGURATION = args.retrieval_configuration
 
     frame = _load_dataframe(args.xlsx, args.sheet)
     columns = [str(column) for column in frame.columns]
@@ -407,6 +409,7 @@ def print_summary(rows: list[RetrievalEvaluationRow]) -> None:
     print("----------------------------")
     print(f"Knowledge Base ID: {settings.BEDROCK_KB_ID}")
     print(f"Data Source ID: {settings.BEDROCK_DATA_SOURCE_ID}")
+    print(f"Retrieval configuration: {settings.BEDROCK_RETRIEVAL_CONFIGURATION}")
     print(f"Total cases: {len(rows)}")
     for status, count in sorted(counts.items()):
         print(f"{status}: {count}")
@@ -425,6 +428,12 @@ def parse_args() -> argparse.Namespace:
         "--data-source-id",
         default="",
         help="Override the Bedrock data source ID for this test run.",
+    )
+    parser.add_argument(
+        "--retrieval-configuration",
+        choices=["vector", "managed"],
+        default="",
+        help="Use vector search for classic KBs or managed search for Managed KBs.",
     )
     parser.add_argument(
         "--output-dir",

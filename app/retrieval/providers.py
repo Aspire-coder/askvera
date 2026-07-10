@@ -387,6 +387,34 @@ def source_log_summary(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _retrieval_configuration(*, country: str, language: str, managed: bool) -> dict[str, Any]:
+    if managed:
+        return {
+            "managedSearchConfiguration": {
+                "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
+            }
+        }
+    return {
+        "vectorSearchConfiguration": {
+            "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
+            "overrideSearchType": "HYBRID",
+            "filter": {
+                "andAll": [
+                    {"equals": {"key": "country_code", "value": country}},
+                    {"equals": {"key": "language", "value": language}},
+                    {"equals": {"key": "status", "value": "active"}},
+                ]
+            },
+        }
+    }
+
+
+def _is_managed_kb_configuration_error(exc: ClientError) -> bool:
+    error = exc.response.get("Error", {})
+    message = error.get("Message", "")
+    return error.get("Code") == "ValidationException" and "managedSearchConfiguration" in message
+
+
 class BedrockRetrievalProvider:
     """Retrieve approved source documents from Bedrock Knowledge Bases."""
 
@@ -394,25 +422,38 @@ class BedrockRetrievalProvider:
         """Call the standalone Retrieve API for reliable source scores."""
         retrieval_queries = _retrieval_queries(message)
         retrieval_results: list[dict[str, Any]] = []
+        use_managed_search = settings.BEDROCK_RETRIEVAL_CONFIGURATION == "managed"
         try:
+            client = get_aws_clients().bedrock_agent_runtime
             for retrieval_query in retrieval_queries:
-                response = get_aws_clients().bedrock_agent_runtime.retrieve(
-                    knowledgeBaseId=settings.BEDROCK_KB_ID,
-                    retrievalQuery={"text": retrieval_query},
-                    retrievalConfiguration={
-                        "vectorSearchConfiguration": {
-                            "numberOfResults": settings.BEDROCK_RETRIEVAL_CANDIDATE_COUNT,
-                            "overrideSearchType": "HYBRID",
-                            "filter": {
-                                "andAll": [
-                                    {"equals": {"key": "country_code", "value": country}},
-                                    {"equals": {"key": "language", "value": language}},
-                                    {"equals": {"key": "status", "value": "active"}},
-                                ]
-                            },
-                        }
-                    },
-                )
+                try:
+                    response = client.retrieve(
+                        knowledgeBaseId=settings.BEDROCK_KB_ID,
+                        retrievalQuery={"text": retrieval_query},
+                        retrievalConfiguration=_retrieval_configuration(
+                            country=country,
+                            language=language,
+                            managed=use_managed_search,
+                        ),
+                    )
+                except ClientError as exc:
+                    if use_managed_search or not _is_managed_kb_configuration_error(exc):
+                        raise
+                    use_managed_search = True
+                    LOGGER.info(
+                        "retrieval_switching_to_managed_search",
+                        correlation_id=correlation_id,
+                        knowledge_base_id=settings.BEDROCK_KB_ID,
+                    )
+                    response = client.retrieve(
+                        knowledgeBaseId=settings.BEDROCK_KB_ID,
+                        retrievalQuery={"text": retrieval_query},
+                        retrievalConfiguration=_retrieval_configuration(
+                            country=country,
+                            language=language,
+                            managed=True,
+                        ),
+                    )
                 retrieval_results.extend(response.get("retrievalResults", []))
         except (BotoCoreError, ClientError):
             LOGGER.exception("retrieval_failed", correlation_id=correlation_id, country=country, language=language, role=role)
