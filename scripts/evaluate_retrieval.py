@@ -65,6 +65,7 @@ class RetrievalEvaluationRow:
     """One evaluated spreadsheet test row."""
 
     test_id: str
+    evaluation_type: str
     question: str
     country: str
     language: str
@@ -158,6 +159,40 @@ def _expected_sections(value: Any) -> list[str]:
 def _has_document_expectation(expected_source: str) -> bool:
     expected = expected_source.lower()
     return ".pdf" in expected or "document" in expected or "policy.pdf" in expected
+
+
+def _evaluation_type(expected_source: str) -> str:
+    """Classify whether a spreadsheet row is really testing retrieval.
+
+    The workbook includes refusal, consent, PII, prompt-injection, vague-input,
+    and off-topic cases. Those are important QA cases, but they should not count
+    against page-level retrieval accuracy because the correct product behavior is
+    to block or clarify before retrieval/generation.
+    """
+
+    expected = expected_source.lower()
+    non_retrieval_markers = [
+        "n/a",
+        "refusal",
+        "refus",
+        "out of scope",
+        "off-topic",
+        "hors sujet",
+        "pii",
+        "consent",
+        "session",
+        "clarify",
+        "input validation",
+        "input length",
+        "injection",
+        "xss",
+        "memory check",
+        "role scope",
+        "sentiment",
+        "not in kb",
+        "version scope",
+    ]
+    return "NON_RETRIEVAL" if any(marker in expected for marker in non_retrieval_markers) else "RETRIEVAL"
 
 
 def _source_matches(expected_source: str, snapshot: RetrievedSourceSnapshot) -> bool:
@@ -309,10 +344,36 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
         language = _language_code(row.get(language_col) if language_col else "", args.language)
         role = _text(row.get(role_col) if role_col else "", args.role)
         expected_source = _text(row.get(expected_source_col) if expected_source_col else "")
+        evaluation_type = _evaluation_type(expected_source)
         expected_page_text = _text(row.get(expected_page_col) if expected_page_col else "")
         expected_pages_list = _expected_pages(expected_page_text)
         expected_sections = _expected_sections(expected_source)
         correlation_id = f"retrieval-eval-{test_id}-{uuid4()}"
+
+        if evaluation_type == "NON_RETRIEVAL":
+            rows.append(
+                RetrievalEvaluationRow(
+                    test_id=test_id,
+                    evaluation_type=evaluation_type,
+                    question=question,
+                    country=country,
+                    language=language,
+                    role=role,
+                    expected_source=expected_source,
+                    expected_pages=", ".join(expected_pages_list),
+                    status="SKIP_NON_RETRIEVAL_EXPECTATION",
+                    retrieval_confidence=0.0,
+                    top_title="",
+                    top_page="",
+                    top_score=None,
+                    top_excerpt="",
+                    source_count=0,
+                    matching_source_ranks="",
+                    matching_page_ranks="",
+                    sources_json="[]",
+                )
+            )
+            continue
 
         try:
             result = retrieval_service.retrieve(
@@ -333,6 +394,7 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
             rows.append(
                 RetrievalEvaluationRow(
                     test_id=test_id,
+                    evaluation_type=evaluation_type,
                     question=question,
                     country=country,
                     language=language,
@@ -355,6 +417,7 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
             rows.append(
                 RetrievalEvaluationRow(
                     test_id=test_id,
+                    evaluation_type=evaluation_type,
                     question=question,
                     country=country,
                     language=language,
@@ -402,8 +465,12 @@ def print_summary(rows: list[RetrievalEvaluationRow]) -> None:
     from config import settings
 
     counts: dict[str, int] = {}
+    retrieval_rows = [row for row in rows if row.evaluation_type == "RETRIEVAL"]
+    retrieval_counts: dict[str, int] = {}
     for row in rows:
         counts[row.status] = counts.get(row.status, 0) + 1
+    for row in retrieval_rows:
+        retrieval_counts[row.status] = retrieval_counts.get(row.status, 0) + 1
     print()
     print("Retrieval evaluation summary")
     print("----------------------------")
@@ -412,6 +479,12 @@ def print_summary(rows: list[RetrievalEvaluationRow]) -> None:
     print(f"Retrieval configuration: {settings.BEDROCK_RETRIEVAL_CONFIGURATION}")
     print(f"Total cases: {len(rows)}")
     for status, count in sorted(counts.items()):
+        print(f"{status}: {count}")
+    print()
+    print("Retrieval-only score")
+    print("--------------------")
+    print(f"Retrieval cases: {len(retrieval_rows)}")
+    for status, count in sorted(retrieval_counts.items()):
         print(f"{status}: {count}")
 
 
