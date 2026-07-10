@@ -212,11 +212,13 @@ def _section_matches(expected_sections: list[str], snapshot: RetrievedSourceSnap
     haystack = f"{snapshot.title} {snapshot.source} {snapshot.excerpt}".lower()
     for section in expected_sections:
         base_section = re.sub(r"[a-z]$", "", section)
+        escaped_section = re.escape(section).replace(r"\.", r"[-.]")
+        escaped_base_section = re.escape(base_section).replace(r"\.", r"[-.]")
         patterns = {
             rf"\b{re.escape(section)}\b",
-            rf"\b{re.escape(section).replace(r'\\.', r'[-.]')}\b",
+            rf"\b{escaped_section}\b",
             rf"\b{re.escape(base_section)}\b",
-            rf"\b{re.escape(base_section).replace(r'\\.', r'[-.]')}\b",
+            rf"\b{escaped_base_section}\b",
             rf"\b{re.escape(base_section)}\s*\([a-z]\)",
         }
         if any(re.search(pattern, haystack) for pattern in patterns):
