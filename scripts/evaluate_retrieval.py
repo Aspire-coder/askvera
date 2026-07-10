@@ -445,11 +445,42 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
     return rows
 
 
-def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple[Path, Path]:
+REVIEW_STATUSES = {"FAIL_SECTION_NOT_FOUND", "FAIL_WRONG_SOURCE", "FAIL_NO_RESULT", "ERROR"}
+
+
+def _suggest_review_category(row: RetrievalEvaluationRow) -> str:
+    """Suggest the first human-review bucket for a failed retrieval row.
+
+    This is only a QA aid. The source of truth remains the spreadsheet review,
+    because a person still needs to decide whether the expected source, the
+    retrieval behavior, or the test type should change.
+    """
+
+    question = row.question.lower()
+    expected = row.expected_source.lower()
+    top = f"{row.top_title} {row.top_excerpt}".lower()
+
+    if row.status == "ERROR":
+        return "Harness/runtime issue"
+    if any(marker in question for marker in ["turn 1", "turn 2", "tell me more", "that"]):
+        return "Not a pure retrieval test"
+    if any(char in question for char in "àâçéèêëîïôùûü") or any(
+        word in question for word in ["comment", "quel", "numéro", "clientèle"]
+    ):
+        return "Language routing or translation needed"
+    if "customer care" in expected and "contact" in top:
+        return "Expected source needs confirmation"
+    if row.status == "FAIL_SECTION_NOT_FOUND" and row.top_score is not None and row.top_score >= 0.7:
+        return "Expected source needs confirmation"
+    return "True retrieval miss candidate"
+
+
+def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     csv_path = output_dir / f"retrieval_eval_{timestamp}.csv"
     json_path = output_dir / f"retrieval_eval_{timestamp}.json"
+    review_path = output_dir / f"retrieval_failure_review_{timestamp}.csv"
 
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(asdict(rows[0]).keys()) if rows else [])
@@ -462,7 +493,42 @@ def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple
         json.dumps([asdict(row) for row in rows], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    return csv_path, json_path
+
+    review_fields = [
+        "test_id",
+        "question",
+        "expected_source",
+        "status",
+        "top_title",
+        "top_page",
+        "top_score",
+        "top_excerpt",
+        "suggested_review_category",
+        "final_review_category",
+        "review_note",
+    ]
+    with review_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=review_fields)
+        writer.writeheader()
+        for row in rows:
+            if row.evaluation_type != "RETRIEVAL" or row.status not in REVIEW_STATUSES:
+                continue
+            writer.writerow(
+                {
+                    "test_id": row.test_id,
+                    "question": row.question,
+                    "expected_source": row.expected_source,
+                    "status": row.status,
+                    "top_title": row.top_title,
+                    "top_page": row.top_page,
+                    "top_score": row.top_score,
+                    "top_excerpt": row.top_excerpt,
+                    "suggested_review_category": _suggest_review_category(row),
+                    "final_review_category": "",
+                    "review_note": "",
+                }
+            )
+    return csv_path, json_path, review_path
 
 
 def print_summary(rows: list[RetrievalEvaluationRow]) -> None:
@@ -535,11 +601,12 @@ def main() -> int:
     if not rows:
         print("No test rows were evaluated.", file=sys.stderr)
         return 1
-    csv_path, json_path = write_outputs(rows, args.output_dir)
+    csv_path, json_path, review_path = write_outputs(rows, args.output_dir)
     print_summary(rows)
     print()
     print(f"CSV report: {csv_path}")
     print(f"JSON report: {json_path}")
+    print(f"Failure review CSV: {review_path}")
     return 0
 
 
