@@ -97,6 +97,46 @@ def test_retrieve_and_generate_blocks_low_score_answer_with_sources() -> None:
     runtime.converse.assert_not_called()
 
 
+def test_retrieve_and_generate_allows_borderline_confidence_with_enough_evidence() -> None:
+    """Several plausible sources should be allowed through the model stage."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Personal Retail Bonus answer"}]}}}
+    clients = SimpleNamespace(bedrock_runtime=runtime)
+    scores = [0.45370057, 0.40369812, 0.40310252, 0.43882382, 0.45370057]
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id=f"policy-{index}",
+                title="CA-EN-Company-Policy.pdf",
+                content="Personal Retail Bonus policy excerpt",
+                source="s3://kb/CA-EN-Company-Policy.pdf",
+                excerpt="Personal Retail Bonus policy excerpt",
+                page=str(index),
+                country="CA",
+                language="en",
+                score=score,
+            )
+            for index, score in enumerate(scores, start=1)
+        ],
+        citations=[],
+        confidence=0.447,
+    )
+
+    with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
+        result = retrieve_and_generate(
+            "What is the Personal Retail Bonus %?",
+            "CA",
+            "en",
+            "new_prospect",
+            "",
+            "cid",
+            retrieval_result=retrieval_result,
+        )
+
+    assert result["response"] == "Personal Retail Bonus answer"
+    runtime.converse.assert_called_once()
+
+
 def test_retrieve_and_generate_raises_when_no_sources_after_fallback() -> None:
     """No citations and no retrieve fallback sources should still produce the fallback."""
     retrieval_result = RetrievalResult(documents=[], citations=[], confidence=0.0)

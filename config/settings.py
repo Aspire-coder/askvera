@@ -157,6 +157,10 @@ DEFAULT_MODEL_PROVIDER = _env_str("DEFAULT_MODEL_PROVIDER", "claude")
 # Minimum retrieval confidence required before answering. Raw HYBRID scores for relevant policy matches
 # can land just below 0.5, so keep this configurable instead of hardcoding a brittle cutoff.
 BEDROCK_MIN_CONFIDENCE = _env_float("BEDROCK_MIN_CONFIDENCE", 0.47)
+# Allow model generation when the KB returns enough plausible evidence even if
+# the blended confidence is slightly below the minimum.
+BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES = _env_int("BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES", 3)
+BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE = _env_float("BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE", 0.45)
 # Retrieval configuration and fallback confidence weighting.
 BEDROCK_RETRIEVAL_RESULT_COUNT = _env_int("BEDROCK_RETRIEVAL_RESULT_COUNT", 5)
 BEDROCK_RETRIEVAL_CANDIDATE_COUNT = _env_int(

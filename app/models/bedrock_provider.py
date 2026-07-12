@@ -24,6 +24,21 @@ from .responses import ModelResponse
 LOGGER = get_logger("app.models.bedrock")
 
 
+def _has_adequate_evidence(summary: dict[str, object]) -> bool:
+    """Return true when retrieval found enough evidence to attempt generation."""
+    top_score = summary.get("top_score")
+    source_count = summary.get("source_count")
+    try:
+        normalized_top_score = float(top_score) if top_score is not None else 0.0
+        normalized_source_count = int(source_count) if source_count is not None else 0
+    except (TypeError, ValueError):
+        return False
+    return (
+        normalized_source_count >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES
+        and normalized_top_score >= settings.BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE
+    )
+
+
 class BedrockClaudeProvider:
     """Generate answers with Claude through Bedrock Runtime."""
 
@@ -48,7 +63,8 @@ class BedrockClaudeProvider:
             raise RetrievalMissError(FALLBACK_RESPONSES["low_confidence"])
 
         strong_local_match = bool(retrieval_result.metadata.get("strong_local_match"))
-        if confidence < settings.BEDROCK_MIN_CONFIDENCE and not strong_local_match:
+        adequate_evidence = _has_adequate_evidence(summary)
+        if confidence < settings.BEDROCK_MIN_CONFIDENCE and not strong_local_match and not adequate_evidence:
             LOGGER.warning(
                 "model_low_confidence_blocked",
                 correlation_id=correlation_id,
@@ -61,6 +77,17 @@ class BedrockClaudeProvider:
                 sources=source_log_summary(sources),
             )
             raise LowConfidenceThresholdError(FALLBACK_RESPONSES["low_confidence"])
+        if confidence < settings.BEDROCK_MIN_CONFIDENCE and adequate_evidence:
+            LOGGER.warning(
+                "model_low_confidence_allowed_by_evidence",
+                correlation_id=correlation_id,
+                country=prompt.country,
+                language=prompt.language,
+                provider=self.name,
+                confidence=confidence,
+                **summary,
+                sources=source_log_summary(sources),
+            )
         if confidence < settings.BEDROCK_MIN_CONFIDENCE and strong_local_match:
             LOGGER.warning(
                 "model_low_confidence_allowed_by_local_match",
