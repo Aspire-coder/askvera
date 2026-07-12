@@ -61,8 +61,11 @@ graphify-out/
 output/
 outputs/
 ASK_VERA*CODE_EXPORT*.md
+ASK_VERA_CODE_EXPORT_*.md
+aws-full-export*.json
 *.pdf
 public/documents/*.docx
+askvera-widget-sdk/
 widget-wrapper/dist/
 widget-wrapper/dist-check/
 widget-wrapper/node_modules/
