@@ -15,7 +15,7 @@ from services.consent_service import has_valid_consent
 from services.pii import scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
-from utils.exceptions import LowConfidenceError
+from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 
@@ -114,8 +114,13 @@ class AIOrchestrator:
         try:
             model_response = self.model_router.generate(prompt_package, retrieval_result, correlation_id)
         except LowConfidenceError as exc:
+            failure_layer = self._low_confidence_failure_layer(exc)
             return self._validate_response(
-                self.response_builder.fallback(exc.message, correlation_id),
+                self.response_builder.fallback(
+                    exc.message,
+                    correlation_id,
+                    metadata={"failure_layer": failure_layer},
+                ),
                 body,
                 correlation_id,
                 retrieval_result=retrieval_result,
@@ -162,6 +167,8 @@ class AIOrchestrator:
                 "language": body.language,
                 "confidence": chat_response.confidence,
                 "validation": chat_response.metadata.get("validation"),
+                "failure_layer": chat_response.metadata.get("failure_layer"),
+                "finish_reason": chat_response.metadata.get("finish_reason"),
             },
             correlation_id,
         )
@@ -228,6 +235,7 @@ class AIOrchestrator:
     def _governance_fallback(self, decision: GovernanceDecision, correlation_id: str) -> ChatResponse:
         """Return a safe fallback when governance blocks the request or response."""
         user_message = self._governance_user_message(decision)
+        failure_layer = self._governance_failure_layer(decision)
         LOGGER.warning(
             "governance_fallback_response",
             correlation_id=correlation_id,
@@ -236,8 +244,33 @@ class AIOrchestrator:
             risk_action=decision.risk_action.value,
             guardrail_action=decision.guardrail_action.value,
             internal_reason=decision.reason,
+            failure_layer=failure_layer,
         )
-        return self.response_builder.fallback(user_message, correlation_id)
+        return self.response_builder.fallback(
+            user_message,
+            correlation_id,
+            metadata={
+                "failure_layer": failure_layer,
+                "governance_provider": decision.provider,
+                "governance_reason": decision.reason,
+            },
+        )
+
+    def _governance_failure_layer(self, decision: GovernanceDecision) -> str:
+        """Classify governance failures for diagnostics."""
+        if decision.provider == "bedrock_guardrails":
+            return "local_guardrail"
+        if decision.guardrail_action.value.lower() == "block":
+            return "local_guardrail"
+        return "risk_policy"
+
+    def _low_confidence_failure_layer(self, exc: LowConfidenceError) -> str:
+        """Classify retrieval/model confidence failures for diagnostics."""
+        if isinstance(exc, RetrievalMissError):
+            return "retrieval_miss"
+        if isinstance(exc, LowConfidenceThresholdError):
+            return "low_confidence"
+        return "low_confidence"
 
     def _governance_user_message(self, decision: GovernanceDecision) -> str:
         """Convert internal governance reasons into user-friendly copy."""
@@ -297,21 +330,42 @@ class AIOrchestrator:
                 ],
             )
         if result.has_critical():
+            failure_layer = self._validation_failure_layer(result)
             LOGGER.warning(
                 "output_validator_critical_fallback",
                 correlation_id=correlation_id,
                 issue_count=len(result.issues),
                 highest_severity=result.highest_severity.value,
+                failure_layer=failure_layer,
+                critical_issue_codes=[
+                    issue.code
+                    for issue in result.issues
+                    if issue.severity.value.upper() == "CRITICAL"
+                ],
             )
             return self._with_validation_metadata(
                 self.response_builder.fallback(
                     "I found related policy information, but I'm not confident enough to give a complete approved answer. "
                     "Please check the official policy document or contact Forever Living support.",
                     correlation_id,
+                    metadata={"failure_layer": failure_layer},
                 ),
                 result,
             )
         return self._with_validation_metadata(chat_response, result)
+
+    def _validation_failure_layer(self, result: ValidationResult) -> str:
+        """Classify critical validation failures for diagnostics."""
+        critical_codes = {
+            str(issue.code).lower()
+            for issue in result.issues
+            if issue.severity.value.upper() == "CRITICAL"
+        }
+        if any("numeric" in code or "ground" in code for code in critical_codes):
+            return "numeric_validator"
+        if any("citation" in code for code in critical_codes):
+            return "citation_validator"
+        return "output_validator"
 
     def _with_validation_metadata(self, chat_response: ChatResponse, result: ValidationResult) -> ChatResponse:
         """Attach validation summary metadata without changing the public API response."""

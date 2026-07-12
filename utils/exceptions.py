@@ -55,6 +55,20 @@ class LowConfidenceError(AskVeraError):
     status_code = 200
 
 
+class RetrievalMissError(LowConfidenceError):
+    """Raised when retrieval returns no usable sources."""
+
+    error_code = "RETRIEVAL_MISS"
+    status_code = 200
+
+
+class LowConfidenceThresholdError(LowConfidenceError):
+    """Raised when retrieval returns sources below the configured threshold."""
+
+    error_code = "LOW_CONFIDENCE"
+    status_code = 200
+
+
 class AwsServiceError(AskVeraError):
     """Raised when an AWS dependency other than Bedrock fails."""
 

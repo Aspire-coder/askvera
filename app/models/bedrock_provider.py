@@ -10,7 +10,13 @@ from app.retrieval import RetrievalResult, score_summary, source_log_summary
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.aws_clients import get_aws_clients
-from utils.exceptions import BedrockServiceError, BedrockTimeoutError, ConfigurationError, LowConfidenceError
+from utils.exceptions import (
+    BedrockServiceError,
+    BedrockTimeoutError,
+    ConfigurationError,
+    LowConfidenceThresholdError,
+    RetrievalMissError,
+)
 from utils.logging import get_logger
 
 from .responses import ModelResponse
@@ -37,8 +43,9 @@ class BedrockClaudeProvider:
                 language=prompt.language,
                 provider=self.name,
                 confidence=confidence,
+                failure_layer="retrieval_miss",
             )
-            raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
+            raise RetrievalMissError(FALLBACK_RESPONSES["low_confidence"])
 
         strong_local_match = bool(retrieval_result.metadata.get("strong_local_match"))
         if confidence < settings.BEDROCK_MIN_CONFIDENCE and not strong_local_match:
@@ -49,10 +56,11 @@ class BedrockClaudeProvider:
                 language=prompt.language,
                 provider=self.name,
                 confidence=confidence,
+                failure_layer="low_confidence",
                 **summary,
                 sources=source_log_summary(sources),
             )
-            raise LowConfidenceError(FALLBACK_RESPONSES["low_confidence"])
+            raise LowConfidenceThresholdError(FALLBACK_RESPONSES["low_confidence"])
         if confidence < settings.BEDROCK_MIN_CONFIDENCE and strong_local_match:
             LOGGER.warning(
                 "model_low_confidence_allowed_by_local_match",
@@ -86,6 +94,18 @@ class BedrockClaudeProvider:
             raise BedrockServiceError(FALLBACK_RESPONSES["bedrock_error"]) from exc
 
         latency_ms = int((perf_counter() - start) * 1000)
+        finish_reason = str(response.get("stopReason", "") or "")
+        failure_layer = "aws_guardrail" if finish_reason == "guardrail_intervened" else None
+        if failure_layer:
+            LOGGER.warning(
+                "aws_guardrail_intervened",
+                correlation_id=correlation_id,
+                country=prompt.country,
+                language=prompt.language,
+                provider=self.name,
+                finish_reason=finish_reason,
+                failure_layer=failure_layer,
+            )
         model_response = response_normalizer.from_bedrock_converse(
             response,
             citations=sources,
@@ -93,7 +113,11 @@ class BedrockClaudeProvider:
             provider=self.name,
             model_name=settings.BEDROCK_MODEL_ARN,
             latency_ms=latency_ms,
-            metadata={"retrieval": retrieval_result.metadata, "prompt_version": prompt.prompt_version},
+            metadata={
+                "retrieval": retrieval_result.metadata,
+                "prompt_version": prompt.prompt_version,
+                "failure_layer": failure_layer,
+            },
         )
         LOGGER.info(
             "model_success",
@@ -104,6 +128,8 @@ class BedrockClaudeProvider:
             model=settings.BEDROCK_MODEL_ARN,
             latency_ms=latency_ms,
             confidence=confidence,
+            finish_reason=finish_reason,
+            failure_layer=failure_layer,
             **summary,
             sources=source_log_summary(sources),
         )

@@ -23,6 +23,7 @@ class ChatResponse:
             "sources": self.citations,
             "confidence": self.confidence or 0.0,
             "correlationId": self.correlation_id,
+            "metadata": self._public_metadata(),
         }
 
     def to_cache_value(self) -> dict[str, Any]:
@@ -32,3 +33,15 @@ class ChatResponse:
             "sources": self.citations,
             "confidence": self.confidence or 0.0,
         }
+
+    def _public_metadata(self) -> dict[str, Any]:
+        """Return safe diagnostic metadata for QA without exposing internals."""
+        metadata = self.metadata or {}
+        public: dict[str, Any] = {}
+        if metadata.get("failure_layer"):
+            public["failureLayer"] = metadata["failure_layer"]
+        if metadata.get("finish_reason"):
+            public["finishReason"] = metadata["finish_reason"]
+        if metadata.get("validation"):
+            public["validation"] = metadata["validation"]
+        return public

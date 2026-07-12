@@ -68,6 +68,11 @@ class ResponseBuilder:
                     "latency_ms": model_response.latency_ms,
                     "token_usage": model_response.token_usage,
                     "finish_reason": model_response.finish_reason,
+                    "failure_layer": (
+                        "aws_guardrail"
+                        if model_response.finish_reason == "guardrail_intervened"
+                        else (model_response.metadata or {}).get("failure_layer")
+                    ),
                     "retrieval_confidence": retrieval_result.confidence,
                     "retrieved_document_count": len(retrieval_result.documents),
                     "correlation_id": correlation_id,
@@ -83,6 +88,8 @@ class ResponseBuilder:
                 confidence=model_response.confidence,
                 source_count=len(model_response.citations),
                 response_source=chat_response.metadata.get("cache", "model"),
+                finish_reason=chat_response.metadata.get("finish_reason"),
+                failure_layer=chat_response.metadata.get("failure_layer"),
             )
             success = True
             return chat_response
@@ -117,7 +124,12 @@ class ResponseBuilder:
         )
         return chat_response
 
-    def fallback(self, answer: str, correlation_id: str) -> ChatResponse:
+    def fallback(
+        self,
+        answer: str,
+        correlation_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ChatResponse:
         """Build a canonical low-confidence fallback response."""
         chat_response = ChatResponse(
             answer=answer,
@@ -126,7 +138,7 @@ class ResponseBuilder:
             cards=[],
             confidence=0.0,
             correlation_id=correlation_id,
-            metadata={"fallback": True, "correlation_id": correlation_id},
+            metadata={"fallback": True, "correlation_id": correlation_id, **(metadata or {})},
         )
         LOGGER.info(
             "response_builder_chat_response_built",
@@ -136,6 +148,7 @@ class ResponseBuilder:
             confidence=chat_response.confidence,
             source_count=0,
             response_source="fallback",
+            failure_layer=chat_response.metadata.get("failure_layer"),
         )
         return chat_response
 
