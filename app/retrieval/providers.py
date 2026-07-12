@@ -231,6 +231,65 @@ def _retrieval_queries(message: str) -> list[str]:
     return [message, *unique_additions[:4]]
 
 
+def _parse_planned_queries(text: str) -> list[str]:
+    """Parse planner-generated query strings from a compact JSON model response."""
+    stripped = text.strip()
+    json_match = re.search(r"\{.*\}", stripped, flags=re.S)
+    payload = json.loads(json_match.group(0) if json_match else stripped)
+    queries = payload.get("queries", [])
+    parsed: list[str] = []
+    for query in queries:
+        cleaned = re.sub(r"\s+", " ", str(query)).strip()
+        if cleaned and cleaned not in parsed:
+            parsed.append(cleaned)
+    return parsed
+
+
+def _planned_retrieval_queries(message: str, correlation_id: str) -> list[str]:
+    """Use a focused model pass to create retrieval queries from the user question."""
+    base_queries = _retrieval_queries(message)
+    if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
+        return base_queries
+
+    system_prompt = (
+        "You create search queries for a policy knowledge base. Do not answer the user. "
+        "Rewrite the user's question into neutral search phrases that would find the exact policy section. "
+        "Preserve business terms, acronyms, rank names, bonus names, program names, legal terms, and intent. "
+        "Fix obvious typos. If the question is not in English, include English search phrases too. "
+        "Do not invent facts, numbers, percentages, section IDs, or answers. Return only JSON."
+    )
+    user_prompt = (
+        f"User question:\n{message}\n\n"
+        "Return JSON exactly like this: "
+        "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"]}. "
+        f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
+    )
+    try:
+        response = get_aws_clients().bedrock_runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        planned_queries = _parse_planned_queries(text)
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
+        return base_queries
+
+    merged: list[str] = []
+    for query in [message, *planned_queries, *base_queries[1:]]:
+        cleaned = re.sub(r"\s+", " ", query).strip()
+        if cleaned and cleaned not in merged:
+            merged.append(cleaned)
+    LOGGER.info(
+        "query_planner_success",
+        correlation_id=correlation_id,
+        planned_query_count=len(planned_queries),
+        query_count=len(merged),
+    )
+    return merged
+
+
 def _phrase_score(message: str, document_text: str) -> float:
     """Reward chunks that contain the exact named thing the user asked about."""
     phrases = _query_phrases(message)
@@ -511,7 +570,7 @@ class BedrockRetrievalProvider:
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         """Call the standalone Retrieve API for reliable source scores."""
-        retrieval_queries = _retrieval_queries(message)
+        retrieval_queries = _planned_retrieval_queries(message, correlation_id)
         retrieval_results: list[dict[str, Any]] = []
         use_managed_search = settings.BEDROCK_RETRIEVAL_CONFIGURATION == "managed"
         try:
