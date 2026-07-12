@@ -18,13 +18,16 @@ class ChatResponse:
 
     def to_api_result(self) -> dict[str, Any]:
         """Return the existing widget/API response shape."""
-        return {
+        result = {
             "response": self.answer,
             "sources": self.citations,
             "confidence": self.confidence or 0.0,
             "correlationId": self.correlation_id,
-            "metadata": self._public_metadata(),
         }
+        public_metadata = self._public_metadata()
+        if public_metadata:
+            result["metadata"] = public_metadata
+        return result
 
     def to_cache_value(self) -> dict[str, Any]:
         """Return the cache-safe response shape used by existing cache readers."""
