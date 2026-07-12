@@ -46,6 +46,36 @@ EXPECTED_PAGE_COLUMNS = [
     "source page",
     "expected source page",
 ]
+TEST_TYPE_COLUMNS = [
+    "test type",
+    "retrieval test type",
+    "evaluation type",
+    "qa type",
+]
+
+RETRIEVAL_TEST_TYPES = {
+    "retrieval",
+    "retrieval_test",
+    "retrieval test",
+    "source_retrieval",
+    "source retrieval",
+}
+
+NON_RETRIEVAL_TEST_TYPES = {
+    "not_in_document",
+    "not in document",
+    "conversation",
+    "conversation_test",
+    "conversation test",
+    "guardrail",
+    "guardrail_test",
+    "guardrail test",
+    "needs_review",
+    "needs review",
+    "unsupported",
+    "out_of_scope",
+    "out of scope",
+}
 
 
 @dataclass(frozen=True)
@@ -166,7 +196,7 @@ def _has_document_expectation(expected_source: str) -> bool:
     return ".pdf" in expected or "document" in expected or "policy.pdf" in expected
 
 
-def _evaluation_type(expected_source: str) -> str:
+def _evaluation_type(expected_source: str, explicit_test_type: str = "") -> str:
     """Classify whether a spreadsheet row is really testing retrieval.
 
     The workbook includes refusal, consent, PII, prompt-injection, vague-input,
@@ -174,6 +204,12 @@ def _evaluation_type(expected_source: str) -> str:
     against page-level retrieval accuracy because the correct product behavior is
     to block or clarify before retrieval/generation.
     """
+
+    explicit = explicit_test_type.strip().lower()
+    if explicit in RETRIEVAL_TEST_TYPES:
+        return "RETRIEVAL"
+    if explicit in NON_RETRIEVAL_TEST_TYPES:
+        return "NON_RETRIEVAL"
 
     expected = expected_source.lower()
     non_retrieval_markers = [
@@ -378,6 +414,7 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
     role_col = _find_column(columns, ROLE_COLUMNS)
     expected_source_col = _find_column(columns, EXPECTED_SOURCE_COLUMNS)
     expected_page_col = _find_column(columns, EXPECTED_PAGE_COLUMNS)
+    test_type_col = _find_column(columns, TEST_TYPE_COLUMNS)
 
     rows: list[RetrievalEvaluationRow] = []
     for row_index, row in frame.iterrows():
@@ -390,7 +427,8 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
         language = _language_code(row.get(language_col) if language_col else "", args.language)
         role = _text(row.get(role_col) if role_col else "", args.role)
         expected_source = _text(row.get(expected_source_col) if expected_source_col else "")
-        evaluation_type = _evaluation_type(expected_source)
+        explicit_test_type = _text(row.get(test_type_col) if test_type_col else "")
+        evaluation_type = _evaluation_type(expected_source, explicit_test_type)
         expected_page_text = _text(row.get(expected_page_col) if expected_page_col else "")
         expected_pages_list = _expected_pages(expected_page_text)
         expected_sections = _expected_sections(expected_source)
