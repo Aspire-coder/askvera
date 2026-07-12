@@ -79,9 +79,14 @@ class RetrievalEvaluationRow:
     top_score: float | None
     top_excerpt: str
     source_count: int
+    candidate_count: int
     matching_source_ranks: str
     matching_page_ranks: str
+    matching_candidate_source_ranks: str
+    matching_candidate_section_ranks: str
+    candidate_diagnosis: str
     sources_json: str
+    candidate_sources_json: str
     error: str = ""
 
 
@@ -248,6 +253,24 @@ def _snapshot_sources(result: Any, top_k: int) -> list[RetrievedSourceSnapshot]:
     return snapshots
 
 
+def _snapshot_candidate_sources(result: Any) -> list[RetrievedSourceSnapshot]:
+    """Return the full provider candidate pool when available."""
+    candidate_sources = result.metadata.get("candidate_sources", []) if result.metadata else []
+    snapshots: list[RetrievedSourceSnapshot] = []
+    for index, source in enumerate(candidate_sources, start=1):
+        snapshots.append(
+            RetrievedSourceSnapshot(
+                rank=index,
+                title=str(source.get("title", "")),
+                page=_normalize_page(source.get("page", "")),
+                score=_safe_float(source.get("score")),
+                source=str(source.get("uri", "")),
+                excerpt=str(source.get("excerpt", ""))[:500],
+            )
+        )
+    return snapshots
+
+
 def _status_for(
     *,
     snapshots: list[RetrievedSourceSnapshot],
@@ -286,6 +309,24 @@ def _status_for(
     if expected_pages_list or expected_source:
         return "FAIL_WRONG_SOURCE", [], []
     return "UNSCORABLE_MISSING_EXPECTED_SOURCE", [], []
+
+
+def _candidate_diagnosis(
+    *,
+    status: str,
+    expected_source: str,
+    expected_sections: list[str],
+    candidate_source_ranks: list[int],
+    candidate_section_ranks: list[int],
+) -> str:
+    """Explain whether a retrieval miss is candidate retrieval or final selection."""
+    if status.startswith("PASS"):
+        return "FINAL_SELECTION_OK"
+    if expected_sections:
+        return "EXPECTED_SECTION_IN_CANDIDATES_NOT_SELECTED" if candidate_section_ranks else "EXPECTED_SECTION_NOT_IN_CANDIDATES"
+    if _has_document_expectation(expected_source):
+        return "EXPECTED_SOURCE_IN_CANDIDATES_NOT_SELECTED" if candidate_source_ranks else "EXPECTED_SOURCE_NOT_IN_CANDIDATES"
+    return "NO_RETRIEVAL_EXPECTATION_TO_DIAGNOSE"
 
 
 def _load_dataframe(xlsx_path: Path, sheet_name: str):
@@ -372,9 +413,14 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
                     top_score=None,
                     top_excerpt="",
                     source_count=0,
+                    candidate_count=0,
                     matching_source_ranks="",
                     matching_page_ranks="",
+                    matching_candidate_source_ranks="",
+                    matching_candidate_section_ranks="",
+                    candidate_diagnosis="",
                     sources_json="[]",
+                    candidate_sources_json="[]",
                 )
             )
             continue
@@ -388,8 +434,15 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
                 correlation_id=correlation_id,
             )
             snapshots = _snapshot_sources(result, args.top_k)
+            candidate_snapshots = _snapshot_candidate_sources(result)
             status, matching_source_ranks, matching_page_ranks = _status_for(
                 snapshots=snapshots,
+                expected_source=expected_source,
+                expected_pages_list=expected_pages_list,
+                expected_sections=expected_sections,
+            )
+            _, candidate_source_ranks, candidate_section_ranks = _status_for(
+                snapshots=candidate_snapshots,
                 expected_source=expected_source,
                 expected_pages_list=expected_pages_list,
                 expected_sections=expected_sections,
@@ -412,9 +465,20 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
                     top_score=top.score,
                     top_excerpt=top.excerpt,
                     source_count=len(snapshots),
+                    candidate_count=len(candidate_snapshots),
                     matching_source_ranks=", ".join(map(str, matching_source_ranks)),
                     matching_page_ranks=", ".join(map(str, matching_page_ranks)),
+                    matching_candidate_source_ranks=", ".join(map(str, candidate_source_ranks)),
+                    matching_candidate_section_ranks=", ".join(map(str, candidate_section_ranks)),
+                    candidate_diagnosis=_candidate_diagnosis(
+                        status=status,
+                        expected_source=expected_source,
+                        expected_sections=expected_sections,
+                        candidate_source_ranks=candidate_source_ranks,
+                        candidate_section_ranks=candidate_section_ranks,
+                    ),
                     sources_json=json.dumps([asdict(snapshot) for snapshot in snapshots], ensure_ascii=False),
+                    candidate_sources_json=json.dumps([asdict(snapshot) for snapshot in candidate_snapshots], ensure_ascii=False),
                 )
             )
         except Exception as exc:  # keep going so one AWS/test failure does not hide the rest
@@ -435,9 +499,14 @@ def evaluate(args: argparse.Namespace) -> list[RetrievalEvaluationRow]:
                     top_score=None,
                     top_excerpt="",
                     source_count=0,
+                    candidate_count=0,
                     matching_source_ranks="",
                     matching_page_ranks="",
+                    matching_candidate_source_ranks="",
+                    matching_candidate_section_ranks="",
+                    candidate_diagnosis="ERROR",
                     sources_json="[]",
+                    candidate_sources_json="[]",
                     error=f"{type(exc).__name__}: {exc}",
                 )
             )
@@ -462,6 +531,16 @@ def _suggest_review_category(row: RetrievalEvaluationRow) -> str:
 
     if row.status == "ERROR":
         return "Harness/runtime issue"
+    if row.candidate_diagnosis in {
+        "EXPECTED_SECTION_IN_CANDIDATES_NOT_SELECTED",
+        "EXPECTED_SOURCE_IN_CANDIDATES_NOT_SELECTED",
+    }:
+        return "Final selector/reranker miss"
+    if row.candidate_diagnosis in {
+        "EXPECTED_SECTION_NOT_IN_CANDIDATES",
+        "EXPECTED_SOURCE_NOT_IN_CANDIDATES",
+    }:
+        return "Candidate retrieval miss"
     if any(marker in question for marker in ["turn 1", "turn 2", "tell me more", "that"]):
         return "Not a pure retrieval test"
     if any(char in question for char in "àâçéèêëîïôùûü") or any(
@@ -503,6 +582,10 @@ def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple
         "top_page",
         "top_score",
         "top_excerpt",
+        "candidate_count",
+        "matching_candidate_source_ranks",
+        "matching_candidate_section_ranks",
+        "candidate_diagnosis",
         "suggested_review_category",
         "final_review_category",
         "review_note",
@@ -523,6 +606,10 @@ def write_outputs(rows: list[RetrievalEvaluationRow], output_dir: Path) -> tuple
                     "top_page": row.top_page,
                     "top_score": row.top_score,
                     "top_excerpt": row.top_excerpt,
+                    "candidate_count": row.candidate_count,
+                    "matching_candidate_source_ranks": row.matching_candidate_source_ranks,
+                    "matching_candidate_section_ranks": row.matching_candidate_section_ranks,
+                    "candidate_diagnosis": row.candidate_diagnosis,
                     "suggested_review_category": _suggest_review_category(row),
                     "final_review_category": "",
                     "review_note": "",

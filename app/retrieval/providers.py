@@ -469,6 +469,7 @@ class BedrockRetrievalProvider:
             selected_documents,
             provider="bedrock",
             candidate_count=len(documents),
+            candidate_sources=[document.to_source() for document in documents],
             query_count=len(retrieval_queries),
             max_local_relevance=max_local_relevance,
             strong_local_match=max_local_relevance >= settings.BEDROCK_STRONG_LOCAL_MATCH_THRESHOLD,
