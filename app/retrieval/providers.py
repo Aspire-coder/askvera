@@ -1,6 +1,7 @@
 """Retrieval provider implementations."""
 
 import hashlib
+import json
 import re
 from typing import Any, Protocol
 
@@ -339,6 +340,88 @@ def _rerank_documents(message: str, documents: list[RetrievedDocument]) -> list[
     )
 
 
+def _selector_candidate_text(document: RetrievedDocument, index: int) -> str:
+    """Format one retrieval candidate for the evidence selector."""
+    content = re.sub(r"\s+", " ", document.content or document.excerpt).strip()
+    if len(content) > 900:
+        content = content[:900].rsplit(" ", 1)[0] + "..."
+    return (
+        f"[{index}] title: {document.title}\n"
+        f"score: {document.score if document.score is not None else 'unknown'}\n"
+        f"section text: {content}"
+    )
+
+
+def _parse_selector_ranks(text: str) -> list[int]:
+    """Parse selected candidate ranks from a compact JSON model response."""
+    stripped = text.strip()
+    json_match = re.search(r"\{.*\}", stripped, flags=re.S)
+    payload = json.loads(json_match.group(0) if json_match else stripped)
+    ranks = payload.get("selected_ranks", [])
+    parsed: list[int] = []
+    for rank in ranks:
+        try:
+            value = int(rank)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and value not in parsed:
+            parsed.append(value)
+    return parsed
+
+
+def _select_evidence_documents(
+    message: str,
+    documents: list[RetrievedDocument],
+    correlation_id: str,
+) -> list[RetrievedDocument]:
+    """Use a focused model pass to pick exact evidence sections from candidates."""
+    if not settings.BEDROCK_EVIDENCE_SELECTOR_ENABLED or len(documents) <= settings.BEDROCK_RETRIEVAL_RESULT_COUNT:
+        return documents
+
+    candidate_limit = max(settings.BEDROCK_RETRIEVAL_RESULT_COUNT, settings.BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
+    candidates = documents[:candidate_limit]
+    candidate_text = "\n\n".join(_selector_candidate_text(document, index) for index, document in enumerate(candidates, 1))
+    system_prompt = (
+        "You select evidence for ASK Vera. Pick only the candidate sections that directly answer "
+        "the user's exact question. Prefer the section defining or governing the exact named topic. "
+        "Do not choose a neighboring section just because it shares words. Return only JSON."
+    )
+    user_prompt = (
+        f"Question:\n{message}\n\n"
+        f"Candidate sections:\n{candidate_text}\n\n"
+        "Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}. "
+        f"Choose at most {settings.BEDROCK_RETRIEVAL_RESULT_COUNT} ranks."
+    )
+    try:
+        response = get_aws_clients().bedrock_runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        ranks = _parse_selector_ranks(text)
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("evidence_selector_failed", correlation_id=correlation_id)
+        return documents
+
+    selected: list[RetrievedDocument] = []
+    for rank in ranks[: settings.BEDROCK_RETRIEVAL_RESULT_COUNT]:
+        if 1 <= rank <= len(candidates):
+            selected.append(candidates[rank - 1])
+    if not selected:
+        return documents
+
+    selected_ids = {id(document) for document in selected}
+    reordered = [*selected, *[document for document in documents if id(document) not in selected_ids]]
+    LOGGER.info(
+        "evidence_selector_success",
+        correlation_id=correlation_id,
+        selected_ranks=ranks[: settings.BEDROCK_RETRIEVAL_RESULT_COUNT],
+        candidate_count=len(candidates),
+    )
+    return reordered
+
+
 def confidence_from_sources(sources: list[dict[str, Any]]) -> float:
     """Compute answer confidence from scores, source count, and citation quality."""
     if not sources:
@@ -463,6 +546,7 @@ class BedrockRetrievalProvider:
         documents = [document for document in documents if document.source]
         documents = self._dedupe_documents(documents)
         documents = _rerank_documents(message, documents)
+        documents = _select_evidence_documents(message, documents, correlation_id)
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
         selected_documents = documents[: settings.BEDROCK_RETRIEVAL_RESULT_COUNT]
         result = self._result(
