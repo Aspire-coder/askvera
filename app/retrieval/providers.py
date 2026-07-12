@@ -382,14 +382,22 @@ def _select_evidence_documents(
     candidates = documents[:candidate_limit]
     candidate_text = "\n\n".join(_selector_candidate_text(document, index) for index, document in enumerate(candidates, 1))
     system_prompt = (
-        "You select evidence for ASK Vera. Pick only the candidate sections that directly answer "
-        "the user's exact question. Prefer the section defining or governing the exact named topic. "
-        "Do not choose a neighboring section just because it shares words. Return only JSON."
+        "You select evidence for ASK Vera. Your job is not to answer the question; your job is to pick "
+        "the candidate sections that most directly support the answer. Prefer the section that governs, "
+        "defines, or gives the requirement for the exact topic in the user's question. A section that only "
+        "mentions the same words is weaker than a section whose title or first paragraph is about the exact "
+        "topic. Do not choose neighboring sections, glossary-only sections, inherited/related-status sections, "
+        "or later exception sections when a direct rule/definition/requirement section is available. If the "
+        "question asks how to become, qualify, earn, use, file, change, terminate, or whether something is "
+        "allowed, prefer procedural or rule sections over general background sections. If the question includes "
+        "typos or another language, infer the intended business topic and still choose the direct section. "
+        "Return only JSON."
     )
     user_prompt = (
         f"Question:\n{message}\n\n"
         f"Candidate sections:\n{candidate_text}\n\n"
-        "Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}. "
+        "Choose sections that directly answer the exact question, even if they are not the highest-scored "
+        "candidates. Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}. "
         f"Choose at most {settings.BEDROCK_RETRIEVAL_RESULT_COUNT} ranks."
     )
     try:
