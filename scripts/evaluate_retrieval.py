@@ -224,6 +224,7 @@ def _section_matches(expected_sections: list[str], snapshot: RetrievedSourceSnap
             rf"\b{escaped_section}\b",
             rf"\b{re.escape(base_section)}\b",
             rf"\b{escaped_base_section}\b",
+            rf"\b{escaped_base_section}[a-z]\b",
             rf"\b{re.escape(base_section)}\s*\([a-z]\)",
         }
         if any(re.search(pattern, haystack) for pattern in patterns):
