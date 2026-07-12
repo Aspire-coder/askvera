@@ -85,11 +85,6 @@ CAPITALIZED_STOPWORDS = {
 RANK_ANCHOR_TERMS = {"manager", "supervisor"}
 
 
-DEFINITION_QUESTION_RE = re.compile(r"\b(?:what\s+(?:is|are)|define|definition|difference\s+between)\b", re.I)
-PROCESS_QUESTION_RE = re.compile(r"\b(?:how\s+do\s+i|how\s+can\s+i|become|apply|application|enroll|enrol|register|sign\s+up)\b", re.I)
-PERCENT_QUESTION_RE = re.compile(r"%|percent|percentage", re.I)
-
-
 class RetrievalProvider(Protocol):
     """Interface boundary for retrieval implementations."""
 
@@ -189,72 +184,6 @@ def _query_phrases(text: str) -> list[str]:
                 continue
             phrases.add(" ".join(window))
     return sorted(phrases, key=lambda phrase: (len(phrase.split()), len(phrase)), reverse=True)
-
-
-def _document_identity_text(document: RetrievedDocument) -> str:
-    """Return document identity metadata that should outrank incidental body matches."""
-    metadata = document.metadata or {}
-    identity_parts = [
-        document.title,
-        _metadata_value(metadata, "section_id"),
-        _metadata_value(metadata, "section_title"),
-        _metadata_value(metadata, "source_file"),
-    ]
-    return " ".join(part for part in identity_parts if part)
-
-
-def _leading_document_text(document: RetrievedDocument, limit: int = 700) -> str:
-    """Return the front matter and opening body where section intent usually lives."""
-    return " ".join([_document_identity_text(document), document.content[:limit], document.excerpt[:limit]])
-
-
-def _section_identity_score(message: str, document: RetrievedDocument) -> float:
-    """Reward candidates whose section identity matches the user's named topic."""
-    phrases = _query_phrases(message)
-    if not phrases:
-        return 0.0
-
-    identity_text = _document_identity_text(document).lower()
-    leading_text = _leading_document_text(document).lower()
-    best = 0.0
-    for phrase in phrases:
-        if phrase in identity_text:
-            best = max(best, 1.0)
-        elif phrase in leading_text:
-            best = max(best, 0.65)
-    return best
-
-
-def _question_intent_score(message: str, document: RetrievedDocument) -> float:
-    """Reward source sections that match the user's question intent, not just words."""
-    message_lower = message.lower()
-    document_lower = _leading_document_text(document, limit=1100).lower()
-    phrases = _query_phrases(message)
-    score = 0.0
-
-    if DEFINITION_QUESTION_RE.search(message):
-        if "definition" in document_lower or "definitions" in document_lower:
-            score = max(score, 0.45)
-        for phrase in phrases:
-            phrase_pattern = re.escape(phrase)
-            if re.search(rf"\b{phrase_pattern}\b.{0,140}\b(?:means|is|are|refers\s+to|defined)\b", document_lower, re.S):
-                score = max(score, 0.75)
-
-    if PROCESS_QUESTION_RE.search(message):
-        if any(term in document_lower for term in ["application", "apply", "enroll", "enrol", "register", "sponsor", "relationship"]):
-            score = max(score, 0.35)
-        for phrase in phrases:
-            phrase_pattern = re.escape(phrase)
-            if re.search(rf"\b(?:become|apply|application|enroll|enrol|register|sign\s+up).{{0,180}}\b{phrase_pattern}\b", document_lower, re.S):
-                score = max(score, 0.75)
-            if re.search(rf"\b{phrase_pattern}\b.{{0,180}}\b(?:application|relationship|sponsor|enroll|enrol)\b", document_lower, re.S):
-                score = max(score, 0.75)
-
-    if ({"bonus", "bonuses"} & _tokens(message_lower)) and PERCENT_QUESTION_RE.search(message):
-        if "%" in document_lower and any(phrase in document_lower for phrase in phrases):
-            score = max(score, 0.75)
-
-    return score
 
 
 def _expanded_retrieval_query(message: str) -> str:
@@ -370,7 +299,7 @@ def _requirement_heading_score(message: str, document_text: str) -> float:
 def _document_relevance(message: str, document: RetrievedDocument) -> float:
     """Score a retrieved document against the user question before prompting."""
     query_tokens = _tokens(message)
-    document_text = " ".join([_document_identity_text(document), document.content, document.excerpt])
+    document_text = " ".join([document.title, document.content, document.excerpt])
     document_tokens = _tokens(document_text)
     if not query_tokens or not document_tokens:
         return float(document.score or 0.0)
@@ -386,17 +315,13 @@ def _document_relevance(message: str, document: RetrievedDocument) -> float:
     phrase_score = _phrase_score(message, document_text)
     policy_score = _policy_term_score(message, document_text)
     requirement_score = _requirement_heading_score(message, document.content)
-    section_score = _section_identity_score(message, document)
-    intent_score = _question_intent_score(message, document)
     return round(
-        (source_score * 0.18)
-        + (overlap * 0.12)
-        + (policy_score * 0.12)
-        + (phrase_score * 0.20)
+        (source_score * 0.25)
+        + (overlap * 0.15)
+        + (policy_score * 0.15)
+        + (phrase_score * 0.25)
         + (number_overlap * 0.10)
-        + (requirement_score * 0.10)
-        + (section_score * 0.10)
-        + (intent_score * 0.08),
+        + (requirement_score * 0.10),
         6,
     )
 
@@ -407,8 +332,6 @@ def _rerank_documents(message: str, documents: list[RetrievedDocument]) -> list[
         documents,
         key=lambda document: (
             _requirement_heading_score(message, document.content),
-            _section_identity_score(message, document),
-            _question_intent_score(message, document),
             _document_relevance(message, document),
             float(document.score or 0.0),
         ),
@@ -584,17 +507,9 @@ class BedrockRetrievalProvider:
         uri = location.get("s3Location", {}).get("uri", "")
         metadata = result.get("metadata", {}) or {}
         content = result.get("content", {}).get("text", "")
-        source_file = _metadata_value(metadata, "source_file") or uri.rsplit("/", 1)[-1]
-        section_id = _metadata_value(metadata, "section_id")
-        section_title = _metadata_value(metadata, "section_title")
-        title = _metadata_value(metadata, "title", "document_title")
-        if section_id and section_title:
-            title = f"{source_file} {section_id} {section_title}"
-        elif not title:
-            title = source_file
         return RetrievedDocument(
             id=_metadata_value(metadata, "id", "document_id") or uri,
-            title=title,
+            title=_metadata_value(metadata, "title", "document_title") or uri.rsplit("/", 1)[-1],
             content=content,
             source=uri,
             excerpt=content[:240],
