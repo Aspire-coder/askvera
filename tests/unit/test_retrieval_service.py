@@ -128,6 +128,78 @@ def test_retrieval_rerank_understands_lowercase_bonus_phrase() -> None:
     assert reranked[0].id == "personal-retail-bonus"
 
 
+def test_retrieval_rerank_prefers_definition_section_over_incidental_mentions() -> None:
+    """Definition questions should prefer definition sections over later incidental mentions."""
+    documents = [
+        RetrievedDocument(
+            id="incidental-fbo",
+            title="CA-EN-Company-Policy.pdf 18.02c Inheritance",
+            content="If the Forever Business Owner application of a legally married couple changes, contact the company.",
+            source="s3://kb/policy.pdf",
+            score=0.91,
+        ),
+        RetrievedDocument(
+            id="fbo-definition",
+            title="CA-EN-Company-Policy.pdf 1.02 Definitions",
+            content="Definitions. Forever Business Owner or FBO means an independent contractor who has opted in.",
+            source="s3://kb/policy.pdf",
+            score=0.70,
+        ),
+    ]
+
+    reranked = _rerank_documents("What is a Forever Business Owner?", documents)
+
+    assert reranked[0].id == "fbo-definition"
+
+
+def test_retrieval_rerank_prefers_becoming_section_over_international_sponsor_mentions() -> None:
+    """Process questions should prefer enrollment/application sections over related sponsor text."""
+    documents = [
+        RetrievedDocument(
+            id="international-sponsor",
+            title="CA-EN-Company-Policy.pdf 15.01b International sponsoring",
+            content="An FBO can be sponsored into a country outside his or her Home Operating Company.",
+            source="s3://kb/policy.pdf",
+            score=0.89,
+        ),
+        RetrievedDocument(
+            id="becoming-fbo",
+            title="CA-EN-Company-Policy.pdf 17.01 Becoming a Forever Business Owner",
+            content="The FBO relationship with FLP is contractual. A person may apply to become an FBO by submitting an application.",
+            source="s3://kb/policy.pdf",
+            score=0.66,
+        ),
+    ]
+
+    reranked = _rerank_documents("How do I become an FBO in Canada?", documents)
+
+    assert reranked[0].id == "becoming-fbo"
+
+
+def test_retrieval_rerank_prefers_exact_bonus_percentage_section() -> None:
+    """Bonus percentage questions should prefer sections with the named bonus and percentage."""
+    documents = [
+        RetrievedDocument(
+            id="pricing",
+            title="CA-EN-Company-Policy.pdf 4.07 Pricing",
+            content="Product pricing may vary by Operating Company and order type.",
+            source="s3://kb/policy.pdf",
+            score=0.89,
+        ),
+        RetrievedDocument(
+            id="personal-bonus",
+            title="CA-EN-Company-Policy.pdf 4.02c Personal Bonus",
+            content="Personal Bonus is a 5% bonus on qualifying personal and downline purchases.",
+            source="s3://kb/policy.pdf",
+            score=0.62,
+        ),
+    ]
+
+    reranked = _rerank_documents("What is the Personal Bonus %?", documents)
+
+    assert reranked[0].id == "personal-bonus"
+
+
 def test_retrieval_rerank_uses_single_word_rank_anchor() -> None:
     """Single-word rank names such as Supervisor should still anchor retrieval."""
     documents = [
