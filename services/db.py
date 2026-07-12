@@ -32,9 +32,9 @@ def _build_database_url(secret: dict[str, Any]) -> str:
     """Build a SQLAlchemy PostgreSQL URL from an AWS RDS secret payload."""
     username = quote_plus(str(secret["username"]))
     password = quote_plus(str(secret["password"]))
-    host = secret["host"]
-    port = secret.get("port", 5432)
-    database = secret.get("dbname") or secret.get("database") or "postgres"
+    host = secret.get("host") or settings.RDS_HOST
+    port = secret.get("port") or settings.RDS_PORT
+    database = secret.get("dbname") or secret.get("database") or settings.RDS_DB_NAME
     return f"postgresql+psycopg://{username}:{password}@{host}:{port}/{database}"
 
 

@@ -64,6 +64,11 @@ PROMPT_VERSION = "2026-07-09"
 KB_VERSION = "2026-06-29"
 # RDS PostgreSQL database identifier. Found in RDS -> Databases -> database-1.
 RDS_DB_IDENTIFIER = "database-1"
+# RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
+# only contain username/password, so keep the endpoint in deploy-time config.
+RDS_HOST = _env_str("RDS_HOST", "database-1.cebeiie8qr4i.us-east-1.rds.amazonaws.com")
+RDS_PORT = _env_int("RDS_PORT", 5432)
+RDS_DB_NAME = _env_str("RDS_DB_NAME", "postgres")
 # Secrets Manager ARN for the RDS PostgreSQL master credentials. Found in RDS -> database-1 -> Configuration -> Master credentials ARN.
 RDS_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:615592621509:secret:rds!db-617fcf32-1ae3-4f45-b803-4378b966fcf6-0xz7wN"
 # PostgreSQL connection pool size for the FastAPI process. Tune in production after load testing.
