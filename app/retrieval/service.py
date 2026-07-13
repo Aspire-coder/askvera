@@ -21,6 +21,10 @@ class RetrievalService:
         """Select the configured retrieval backend."""
         if settings.RETRIEVAL_PROVIDER == "section":
             return SectionSearchProvider()
+        if settings.RETRIEVAL_PROVIDER == "opensearch_section":
+            from .opensearch_sections import OpenSearchSectionProvider
+
+            return OpenSearchSectionProvider()
         return BedrockRetrievalProvider()
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
