@@ -1,0 +1,59 @@
+{
+  "version": "2026-07-13",
+  "description": "Approved search glossary for converting user wording into policy-document wording. This file is data, not code; expand it as new reviewed wording gaps are found.",
+  "entries": [
+    {
+      "id": "case-credit-ogcc-new-cc",
+      "country": ["*"],
+      "language": ["en"],
+      "triggers": [
+        "ogcc",
+        "open group case credit",
+        "open group case credits",
+        "new cc",
+        "new case credit",
+        "new case credits"
+      ],
+      "queries": [
+        "Open Group Case Credits NEW Case Credits definitions",
+        "Open Group Case Credits",
+        "NEW Case Credits",
+        "Case Credit definitions"
+      ]
+    },
+    {
+      "id": "earned-incentive-forever2drive",
+      "country": ["*"],
+      "language": ["en"],
+      "triggers": [
+        "forever2drive",
+        "forever 2 drive",
+        "forever to drive",
+        "drive incentive"
+      ],
+      "queries": [
+        "Earned Incentive Program",
+        "Earned Incentive qualification requirements",
+        "Earned Incentive levels"
+      ]
+    },
+    {
+      "id": "legal-dispute-court-arbitration",
+      "country": ["*"],
+      "language": ["en"],
+      "triggers": [
+        "sue",
+        "court",
+        "lawsuit",
+        "legal claim",
+        "class action",
+        "dispute"
+      ],
+      "queries": [
+        "Individual Arbitration Agreement Class Action Waiver",
+        "controversy claim dispute arbitration",
+        "court class action waiver"
+      ]
+    }
+  ]
+}

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import boto3
@@ -21,6 +23,30 @@ from .models import RetrievedDocument, RetrievalResult
 from .section_index import _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
+
+
+def _normalize_text(value: str) -> str:
+    """Normalize text for glossary trigger checks."""
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+@lru_cache(maxsize=1)
+def _load_search_glossary() -> list[dict[str, Any]]:
+    """Load content-managed search glossary entries."""
+    path = Path(settings.OPENSEARCH_GLOSSARY_PATH)
+    if not path.exists():
+        LOGGER.warning("opensearch_glossary_missing", path=str(path))
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        LOGGER.exception("opensearch_glossary_load_failed", path=str(path))
+        return []
+    entries = payload.get("entries", [])
+    if not isinstance(entries, list):
+        LOGGER.warning("opensearch_glossary_invalid_entries", path=str(path))
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
 
 
 @lru_cache(maxsize=1)
@@ -171,29 +197,6 @@ def _parse_selector_ranks(text: str) -> list[int]:
     return parsed
 
 
-def _parse_search_queries(text: str) -> list[str]:
-    """Parse search queries from a compact JSON model response."""
-    stripped = text.strip()
-    try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return []
-        try:
-            payload = json.loads(stripped[start : end + 1])
-        except json.JSONDecodeError:
-            return []
-
-    parsed: list[str] = []
-    for query in payload.get("search_queries", []):
-        normalized = str(query or "").strip()
-        if normalized and normalized not in parsed:
-            parsed.append(normalized)
-    return parsed
-
-
 class OpenSearchSectionProvider:
     """Retrieve approved policy sections from an OpenSearch section index."""
 
@@ -201,7 +204,7 @@ class OpenSearchSectionProvider:
         del role
         try:
             client = _client()
-            search_messages = self._rewrite_search_queries(message, correlation_id)
+            search_messages = self._build_search_queries(message, country, language)
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
             for index, search_message in enumerate(search_messages):
@@ -263,48 +266,49 @@ class OpenSearchSectionProvider:
         )
         return result
 
-    def _rewrite_search_queries(self, message: str, correlation_id: str) -> list[str]:
-        """Optionally generate document-friendly search phrases for retrieval."""
+    def _build_search_queries(self, message: str, country: str, language: str) -> list[str]:
+        """Build original, glossary, and optional model-rewritten search queries."""
         original = message.strip()
-        if not settings.OPENSEARCH_QUERY_REWRITE_ENABLED or not original:
-            return [original]
-
-        system_prompt = (
-            "You rewrite user questions into search queries for approved company policy documents. "
-            "Do not answer the question. Keep queries short. Preserve the user's intent. "
-            "Expand acronyms, informal names, legal/business wording, and translated wording into likely official policy terms. "
-            "Do not invent specific section numbers or facts."
-        )
-        user_prompt = (
-            f"User question:\n{original}\n\n"
-            f"Return up to {settings.OPENSEARCH_QUERY_REWRITE_COUNT} search queries as JSON exactly like this: "
-            "{\"search_queries\":[\"original or rewritten phrase\",\"another phrase\"]}."
-        )
-        try:
-            response = get_aws_clients().bedrock_runtime.converse(
-                modelId=settings.BEDROCK_MODEL_ARN,
-                system=[{"text": system_prompt}],
-                messages=[{"role": "user", "content": [{"text": user_prompt}]}],
-            )
-            text = response["output"]["message"]["content"][0].get("text", "")
-            rewritten = _parse_search_queries(text)
-        except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
-            LOGGER.exception("opensearch_query_rewrite_failed", correlation_id=correlation_id)
+        if not original:
             return [original]
 
         search_queries = [original]
-        for query in rewritten:
+        for query in self._glossary_search_queries(original, country, language):
             if query not in search_queries:
                 search_queries.append(query)
-            if len(search_queries) >= settings.OPENSEARCH_QUERY_REWRITE_COUNT:
-                break
 
-        LOGGER.info(
-            "opensearch_query_rewrite_success",
-            correlation_id=correlation_id,
-            query_count=len(search_queries),
-        )
         return search_queries
+
+    def _glossary_search_queries(self, message: str, country: str, language: str) -> list[str]:
+        """Return approved glossary queries that match the user's wording."""
+        if not settings.OPENSEARCH_GLOSSARY_ENABLED:
+            return []
+
+        normalized_message = f" {_normalize_text(message)} "
+        normalized_country = (country or "").upper()
+        normalized_language = (language or "").lower()
+        queries: list[str] = []
+
+        for entry in _load_search_glossary():
+            countries = [str(value).upper() for value in entry.get("country", ["*"])]
+            languages = [str(value).lower() for value in entry.get("language", ["*"])]
+            if "*" not in countries and normalized_country not in countries:
+                continue
+            if "*" not in languages and normalized_language not in languages:
+                continue
+
+            triggers = [_normalize_text(str(trigger)) for trigger in entry.get("triggers", [])]
+            if not any(f" {trigger} " in normalized_message for trigger in triggers if trigger):
+                continue
+
+            for query in entry.get("queries", []):
+                normalized_query = str(query or "").strip()
+                if normalized_query and normalized_query not in queries:
+                    queries.append(normalized_query)
+                if len(queries) >= settings.OPENSEARCH_GLOSSARY_QUERY_LIMIT:
+                    return queries
+
+        return queries
 
     def _merge_hits(
         self,
