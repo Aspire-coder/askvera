@@ -19,11 +19,23 @@ MEASURABLE_CLAIM_PATTERN = re.compile(
         ccs?|
         consecutive\s+months?|
         months?|
+        mois|
+        meses?|
+        meses|
+        monat(?:e|en)?|
         days?|
+        jours?|
+        dias?|
         years?|
+        ans?|
+        années?|
+        años?|
+        anos?|
         weeks?|
         percent|
         percentage|
+        pour\s+cent|
+        porcento|
         %
     )
     (?=\W|$)
@@ -64,6 +76,11 @@ def _number_variants(number: str) -> set[str]:
     return variants
 
 
+def _word_tokens(text: str) -> set[str]:
+    """Return normalized word tokens, including accented Latin characters."""
+    return set(re.findall(r"[^\W\d_]{2,}", _normalize(text), flags=re.UNICODE))
+
+
 def _candidate_variants(claim: MeasurableClaim) -> set[str]:
     """Return normalized variants for the same measurable claim."""
     text = _normalize(claim.text)
@@ -90,12 +107,8 @@ def _candidate_variants(claim: MeasurableClaim) -> set[str]:
             variants.add(f"{number} open group case credit")
         if unit == "month":
             variants.add(f"{number} months")
-            variants.add(f"{number} processing month")
-            variants.add(f"{number} processing months")
         if unit == "months":
             variants.add(f"{number} month")
-            variants.add(f"{number} processing month")
-            variants.add(f"{number} processing months")
         if unit in {"consecutive month", "consecutive months"}:
             variants.add(f"{number} consecutive month")
             variants.add(f"{number} consecutive months")
@@ -142,7 +155,7 @@ def _context_for_claim(answer: str, start: int, end: int, radius: int = 220) -> 
 def _capitalized_entity_phrases(text: str) -> list[str]:
     """Extract generic entity-like phrases from original-case text."""
     capitalized_phrases = re.findall(
-        r"\b(?:[A-Z][a-z]+|[A-Z]{2,})(?:\s+(?:[A-Z][a-z]+|[A-Z]{2,}))*\b",
+        r"\b(?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+|[A-ZÀ-ÖØ-Þ]{2,})(?:\s+(?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]+|[A-ZÀ-ÖØ-Þ]{2,}))*\b",
         text,
     )
     entities: list[str] = []
@@ -170,7 +183,7 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
 
     token_sets: list[set[str]] = []
     for phrase in phrases:
-        tokens = set(re.findall(r"[a-z][a-z]+", _normalize(phrase)))
+        tokens = _word_tokens(phrase)
         if tokens and tokens not in token_sets:
             token_sets.append(tokens)
     return token_sets
@@ -179,42 +192,40 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
 def _source_windows(source_text: str, variant: str, radius: int = 110) -> list[str]:
     """Return local source windows around a grounded claim candidate."""
     windows: list[str] = []
-    start = 0
-    while True:
-        index = source_text.find(variant, start)
-        if index == -1:
-            break
+    pattern = re.compile(rf"(?<![\d.]){re.escape(variant)}(?![\d.])")
+    for match in pattern.finditer(source_text):
+        index = match.start()
 
         left_boundary = max(source_text.rfind(delimiter, 0, index) for delimiter in (".", ";", "\n"))
         right_candidates = [
             position
             for position in (
-                source_text.find(".", index + len(variant)),
-                source_text.find(";", index + len(variant)),
-                source_text.find("\n", index + len(variant)),
+                source_text.find(".", match.end()),
+                source_text.find(";", match.end()),
+                source_text.find("\n", match.end()),
             )
             if position != -1
         ]
         right_boundary = min(right_candidates) if right_candidates else len(source_text)
 
         window_start = max(left_boundary + 1 if left_boundary != -1 else 0, index - radius)
-        window_end = min(right_boundary, index + len(variant) + radius)
+        window_end = min(right_boundary, match.end() + radius)
         windows.append(source_text[window_start:window_end])
-        start = index + max(len(variant), 1)
     return windows
 
 
 def _claim_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
     """Return true when the claim and its nearby subject appear in source context."""
     subject_token_sets = _subject_token_sets(claim)
-    for variant in _candidate_variants(claim):
-        if not variant:
-            continue
-        for window in _source_windows(source_text, variant):
-            window_tokens = set(re.findall(r"[a-z][a-z]+", window))
-            if not subject_token_sets:
+    for number in _number_variants(claim.number):
+        for window in _source_windows(source_text, number):
+            window_tokens = _word_tokens(window)
+            if subject_token_sets and any(subject_tokens.issubset(window_tokens) for subject_tokens in subject_token_sets):
                 return True
-            if any(subject_tokens.issubset(window_tokens) for subject_tokens in subject_token_sets):
+
+    if not subject_token_sets:
+        for variant in _candidate_variants(claim):
+            if variant and _source_windows(source_text, variant):
                 return True
     return False
 

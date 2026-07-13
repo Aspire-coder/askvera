@@ -155,6 +155,33 @@ def test_numeric_grounding_allows_processing_month_source_phrase() -> None:
     assert not result.has_critical()
 
 
+def test_numeric_grounding_allows_same_subject_number_with_different_language_unit_wording() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "NEW Case Credits are accumulated for 12 mois after qualification.",
+            "NEW Case Credits will be accumulated for 12 mois de traitement after qualification.",
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
+def test_numeric_grounding_does_not_match_number_inside_larger_number() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Assistant Supervisor requires 2 Open Group Case Credits.",
+            "Assistant Supervisor is achieved by generating 12 Open Group Case Credits.",
+        ),
+        result,
+    )
+
+    assert result.has_critical()
+    assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
+
+
 def test_numeric_grounding_allows_correctly_paraphrased_claim() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(
