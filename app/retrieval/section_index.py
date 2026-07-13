@@ -231,7 +231,7 @@ def _intent_score(message: str, row: dict[str, Any]) -> float:
         if "case credit" in content[:2200] and ("achieved" in content[:2200] or "reaches the level" in content[:2200]):
             score += 0.8
         if re.fullmatch(r"\d+\.\d+", section_id) and len(re.findall(r"\bis\s+achieved\b", content[:2500])) > 1:
-            score -= 4.0
+            score -= 7.0
         if section_id.startswith(("11.", "12.")) and "chairman" in content[:1200]:
             score -= 2.2
 
