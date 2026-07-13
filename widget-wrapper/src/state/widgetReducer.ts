@@ -94,6 +94,16 @@ export function widgetReducer(state: WidgetState, action: WidgetAction): WidgetS
         conversation: { ...state.conversation, requestInFlight: action.requestInFlight },
         analytics: { ...state.analytics, lastEventAt }
       };
+    case "SET_CONNECTION":
+      return {
+        ...state,
+        connection: {
+          online: action.online,
+          reconnecting: Boolean(action.reconnecting),
+          backendHealthy: action.backendHealthy ?? action.online
+        },
+        analytics: { ...state.analytics, lastEventAt }
+      };
     case "RESET_SESSION":
       return {
         ...state,

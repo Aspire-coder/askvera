@@ -35,6 +35,8 @@ import {
 } from "./utils";
 import "./generic-widget.css";
 
+const HealthCheckIntervalMs = 30000;
+
 export function GenericWidgetWrapper({
   config,
   children,
@@ -56,6 +58,7 @@ export function GenericWidgetWrapper({
   eventBus,
   debugEvents = false,
   renderMessages,
+  onHealthCheck,
   onOpen,
   onClose,
   onAcceptConsent,
@@ -177,6 +180,8 @@ export function GenericWidgetWrapper({
   const requestBusy = effectiveLoading || localRequestPending;
   const composerDisabledReason = consentRequired
     ? "Accept the privacy agreement to begin."
+    : !connection.online
+      ? "ASK Vera is temporarily unavailable. Please try again in a moment."
     : requestBusy
       ? "Waiting for the current response to finish."
       : "";
@@ -201,6 +206,32 @@ export function GenericWidgetWrapper({
   useEffect(() => {
     events.emit(widgetEventTypes.WIDGET_INITIALIZED, { visitorId, sessionId });
   }, [events, sessionId, visitorId]);
+
+  useEffect(() => {
+    if (!isOpen || !onHealthCheck) return;
+
+    let cancelled = false;
+    let intervalId: number | undefined;
+
+    const checkHealth = async () => {
+      try {
+        const healthy = await onHealthCheck();
+        if (cancelled) return;
+        dispatch({ type: "SET_CONNECTION", online: healthy, reconnecting: false, backendHealthy: healthy });
+      } catch {
+        if (cancelled) return;
+        dispatch({ type: "SET_CONNECTION", online: false, reconnecting: false, backendHealthy: false });
+      }
+    };
+
+    void checkHealth();
+    intervalId = window.setInterval(() => void checkHealth(), HealthCheckIntervalMs);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [isOpen, onHealthCheck]);
 
   useEffect(() => {
     dispatch({ type: "SET_MESSAGES", messages });

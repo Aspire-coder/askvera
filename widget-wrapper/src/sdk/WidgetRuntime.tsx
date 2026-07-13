@@ -7,6 +7,7 @@ import {
   BackendUnavailableError,
   createApiClient,
   describeApiError,
+  healthCheck,
   loadConfig,
   loadPrivacy,
   loadWidgetConfig,
@@ -227,6 +228,11 @@ export function WidgetRuntime({
   const requestInFlightRef = useRef(false);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
 
+  const checkBackendHealth = useCallback(async () => {
+    const envelope = await healthCheck(apiClient);
+    return envelope.success !== false && envelope.data?.status !== "unhealthy";
+  }, [apiClient]);
+
   const widgetConfig = useMemo(() => {
     const backendConfig: BackendConfig | undefined = apiConfig
       ? {
@@ -434,6 +440,7 @@ export function WidgetRuntime({
       resetSignal={resetSignal}
       outboundMessage={sdkMessage}
       consentRequiredSignal={consentRequiredSignal}
+      onHealthCheck={checkBackendHealth}
       onAcceptConsent={handleConsent}
       onCountryChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}

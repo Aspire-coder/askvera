@@ -228,6 +228,7 @@ export type GenericWidgetWrapperProps = {
   eventBus?: WidgetEventBus;
   debugEvents?: boolean;
   renderMessages?: (messages: WidgetMessage[], state: GenericWidgetRenderState) => ReactNode;
+  onHealthCheck?: () => Promise<boolean>;
   onOpen?: () => void;
   onClose?: () => void;
   onAcceptConsent?: (payload: ConsentEventPayload) => void | Promise<void>;
