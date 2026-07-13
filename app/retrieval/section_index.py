@@ -49,6 +49,21 @@ TOKEN_STOPWORDS = {
 
 RANK_TERMS = {"supervisor", "manager"}
 ONBOARDING_TERMS = {"become", "enroll", "enrollment", "register", "registration", "sign", "devenir"}
+FBO_TERMS = {"fbo", "forever", "business", "owner", "owners"}
+NOISY_FBO_CONTEXTS = {
+    "testamentary",
+    "transfer",
+    "transfers",
+    "inherit",
+    "inheritable",
+    "spouse",
+    "divorce",
+    "legal separation",
+    "approved fbo website",
+    "advertisement",
+    "internet policies",
+    "sponsored into a country outside",
+}
 
 
 def _tokens(text_value: str) -> list[str]:
@@ -97,6 +112,44 @@ def _onboarding_intent(message: str) -> bool:
     return bool(message_tokens & ONBOARDING_TERMS or re.search(r"\bsign\s+up\b", message.lower()))
 
 
+def _fbo_definition_intent(message: str) -> bool:
+    message_tokens = set(_tokens(message))
+    return _definition_intent(message) and bool({"fbo", "owner"} & message_tokens) and bool(message_tokens & FBO_TERMS)
+
+
+def _rank_phrase_from_message(message: str) -> str | None:
+    """Find the most specific rank phrase in the user question."""
+    message_lower = message.lower()
+    rank_matches = re.findall(
+        r"\b(?:assistant\s+supervisor|assistant\s+manager|recognized\s+manager|eagle\s+manager|"
+        r"senior\s+manager|soaring\s+manager|sapphire\s+manager|diamond\s+manager|gem\s+manager|"
+        r"supervisor|manager)\b",
+        message_lower,
+    )
+    if not rank_matches:
+        return None
+    return max(rank_matches, key=lambda value: (len(value.split()), len(value)))
+
+
+def _bonus_phrase_from_message(message: str) -> str | None:
+    """Find a concrete bonus phrase instead of treating all bonus questions alike."""
+    message_lower = message.lower()
+    bonus_phrases = [
+        "personal retail bonus",
+        "preferred customer bonus",
+        "wholesale novus customer bonus",
+        "wholesale customer bonus",
+        "novus customer bonus",
+        "personal bonus",
+        "leadership bonus",
+        "volume bonus",
+    ]
+    for phrase in bonus_phrases:
+        if phrase in message_lower:
+            return phrase
+    return None
+
+
 def _rank_requirement_score(message: str, content: str) -> float:
     """Prefer the exact rank requirement over neighboring rank sections."""
     message_tokens = set(_tokens(message))
@@ -104,10 +157,10 @@ def _rank_requirement_score(message: str, content: str) -> float:
         return 0.0
 
     content_lower = content.lower()
-    phrases = _key_phrases(message)
-    rank_phrases = [
+    rank_phrase = _rank_phrase_from_message(message)
+    rank_phrases = [rank_phrase] if rank_phrase else [
         phrase
-        for phrase in phrases
+        for phrase in _key_phrases(message)
         if set(phrase.split()) & RANK_TERMS
     ]
     for phrase in sorted(rank_phrases, key=lambda value: (len(value.split()), len(value)), reverse=True):
@@ -121,11 +174,66 @@ def _rank_requirement_score(message: str, content: str) -> float:
             rf"\breaches\s+the\s+level\s+of\s+{re.escape(phrase)}\b",
             rf"\bqualif(?:y|ies|ied)\s+as\s+{re.escape(phrase)}\b",
         ]
-        if any(re.search(pattern, content_lower[:1200]) for pattern in direct_patterns):
-            return 1.0
+        if any(re.search(pattern, content_lower[:1800]) for pattern in direct_patterns):
+            return 3.0
         if len(phrase.split()) == 1 and re.search(rf"\b[a-z]+\s+{re.escape(phrase)}\s+is\s+achieved\b", content_lower[:600]):
-            return -0.6
+            return -1.25
     return 0.0
+
+
+def _intent_score(message: str, row: dict[str, Any]) -> float:
+    """Score whether a section answers the user's question type, not just its words."""
+    section_id = str(row.get("section_id") or "").lower()
+    title = str(row.get("section_title") or "").lower()
+    content = str(row.get("content") or "").lower()
+    search_text = str(row.get("search_text") or "").lower()
+    message_tokens = set(_tokens(message))
+    score = 0.0
+
+    if _fbo_definition_intent(message):
+        if section_id == "1.01" or content.startswith("1.01 "):
+            score += 3.5
+        if "independent forever business owner" in content or "independent forever business owners" in content:
+            score += 1.4
+        if any(noisy in search_text[:1600] for noisy in NOISY_FBO_CONTEXTS):
+            score -= 2.6
+        if re.search(r"\b18\.\d+", section_id) or re.search(r"\b22\.\d+", section_id):
+            score -= 1.8
+
+    if _onboarding_intent(message) and ({"fbo", "owner"} & message_tokens):
+        if section_id.startswith("17.01"):
+            score += 4.0
+        if "fbo relationship" in content[:500] or "only adult individuals" in content[:700]:
+            score += 1.8
+        if {"application", "agreement", "contractual", "register", "purchase"} & set(_tokens(content[:1200])):
+            score += 0.9
+        if any(noisy in search_text[:1800] for noisy in NOISY_FBO_CONTEXTS):
+            score -= 2.0
+        if section_id.startswith(("15.", "16.", "18.", "22.")):
+            score -= 1.0
+
+    bonus_phrase = _bonus_phrase_from_message(message)
+    if bonus_phrase:
+        if bonus_phrase in title or bonus_phrase in content[:1800]:
+            score += 3.0
+        if section_id.startswith("4.01") or section_id.startswith("4.07"):
+            score += 1.0
+        if "bonus" not in content[:1800]:
+            score -= 1.0
+        if section_id.startswith(("1.02", "11.", "12.", "22.")):
+            score -= 1.4
+
+    rank_phrase = _rank_phrase_from_message(message)
+    if rank_phrase:
+        exact_rank = rf"\b{re.escape(rank_phrase)}\b"
+        if re.search(rf"{exact_rank}\s+is\s+achieved\b", content[:2000]):
+            score += 2.5
+        if "case credit" in content[:2200] and ("achieved" in content[:2200] or "reaches the level" in content[:2200]):
+            score += 0.8
+        if section_id.startswith(("11.", "12.")) and "chairman" in content[:1200]:
+            score -= 2.2
+
+    return score
 
 
 def _source_score(row: dict[str, Any], message: str) -> float:
@@ -151,7 +259,7 @@ def _source_score(row: dict[str, Any], message: str) -> float:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
     for phrase in phrases:
         if phrase in title:
-            score += 0.2
+            score += 0.35
         elif phrase in content[:800]:
             score += 0.12
     if _definition_intent(message):
@@ -167,6 +275,7 @@ def _source_score(row: dict[str, Any], message: str) -> float:
         if "sponsored into a country outside" in content:
             score -= 0.25
     score += _rank_requirement_score(message, content)
+    score += _intent_score(message, row)
     return round(score, 6)
 
 
@@ -175,9 +284,11 @@ def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
     if not documents:
         return 0.0
     scores = [float(document.score or 0.0) for document in documents]
-    top_score = max(scores)
+    top_score = scores[0]
+    runner_up = scores[1] if len(scores) > 1 else 0.0
     avg_score = sum(scores) / len(scores)
-    normalized = min((top_score * 0.75) + (avg_score * 0.25), 0.99)
+    margin = max(top_score - runner_up, 0.0)
+    normalized = min((top_score / 10.0) + (margin / 10.0) + (avg_score / 30.0), 0.95)
     return round(normalized, 3)
 
 
