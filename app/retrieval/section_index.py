@@ -47,6 +47,9 @@ TOKEN_STOPWORDS = {
     "your",
 }
 
+RANK_TERMS = {"supervisor", "manager"}
+ONBOARDING_TERMS = {"become", "enroll", "enrollment", "register", "registration", "sign", "devenir"}
+
 
 def _tokens(text_value: str) -> list[str]:
     """Return search-worthy lowercase tokens in source order."""
@@ -57,6 +60,20 @@ def _tokens(text_value: str) -> list[str]:
         if token not in tokens:
             tokens.append(token)
     return tokens
+
+
+def _ts_query(tokens: list[str]) -> str:
+    """Build a safe broad Postgres tsquery from normalized tokens."""
+    cleaned = [token for token in tokens if re.fullmatch(r"[a-z0-9]+", token)]
+    return " | ".join(f"{token}:*" for token in cleaned) or "policy"
+
+
+def _token_regex(tokens: list[str]) -> str:
+    """Build a broad regex fallback for candidate collection."""
+    cleaned = [re.escape(token) for token in tokens if re.fullmatch(r"[a-z0-9]+", token)]
+    if not cleaned:
+        return r"policy"
+    return r"\m(?:" + "|".join(cleaned) + r")\M"
 
 
 def _key_phrases(message: str) -> list[str]:
@@ -71,6 +88,46 @@ def _key_phrases(message: str) -> list[str]:
     return phrases[:12]
 
 
+def _definition_intent(message: str) -> bool:
+    return bool(re.search(r"\b(?:what|who)\s+(?:is|are)\b|\bdefine\b|\bmeaning\b", message.lower()))
+
+
+def _onboarding_intent(message: str) -> bool:
+    message_tokens = set(_tokens(message))
+    return bool(message_tokens & ONBOARDING_TERMS or re.search(r"\bsign\s+up\b", message.lower()))
+
+
+def _rank_requirement_score(message: str, content: str) -> float:
+    """Prefer the exact rank requirement over neighboring rank sections."""
+    message_tokens = set(_tokens(message))
+    if not ({"case", "credit", "credits"} & message_tokens or {"qualify", "qualification"} & message_tokens):
+        return 0.0
+
+    content_lower = content.lower()
+    phrases = _key_phrases(message)
+    rank_phrases = [
+        phrase
+        for phrase in phrases
+        if set(phrase.split()) & RANK_TERMS
+    ]
+    for phrase in sorted(rank_phrases, key=lambda value: (len(value.split()), len(value)), reverse=True):
+        exact_phrase = rf"\b{re.escape(phrase)}\b"
+        if len(phrase.split()) == 1:
+            exact_phrase = rf"(?<!assistant\s)\b{re.escape(phrase)}\b"
+        direct_patterns = [
+            rf"{exact_phrase}\s+is\s+achieved\b",
+            rf"{exact_phrase}\s+is\s+earned\b",
+            rf"{exact_phrase}\s+requires\b",
+            rf"\breaches\s+the\s+level\s+of\s+{re.escape(phrase)}\b",
+            rf"\bqualif(?:y|ies|ied)\s+as\s+{re.escape(phrase)}\b",
+        ]
+        if any(re.search(pattern, content_lower[:1200]) for pattern in direct_patterns):
+            return 1.0
+        if len(phrase.split()) == 1 and re.search(rf"\b[a-z]+\s+{re.escape(phrase)}\s+is\s+achieved\b", content_lower[:600]):
+            return -0.6
+    return 0.0
+
+
 def _source_score(row: dict[str, Any], message: str) -> float:
     """Blend database rank with exact title/section/text matches."""
     base_score = float(row.get("rank") or 0.0)
@@ -81,6 +138,7 @@ def _source_score(row: dict[str, Any], message: str) -> float:
     message_lower = message.lower()
     message_tokens = set(_tokens(message))
     content_tokens = set(_tokens(search_text[:2000]))
+    phrases = _key_phrases(message)
 
     score = base_score
     if section_id and re.search(rf"\b{re.escape(section_id)}\b", message_lower):
@@ -91,11 +149,24 @@ def _source_score(row: dict[str, Any], message: str) -> float:
         score += 0.4
     if message_tokens:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
-    for phrase in _key_phrases(message):
+    for phrase in phrases:
         if phrase in title:
             score += 0.2
         elif phrase in content[:800]:
             score += 0.12
+    if _definition_intent(message):
+        for phrase in phrases:
+            if re.search(rf"\b{re.escape(phrase)}\b(?:\s*\([^)]+\))?\s*[:\-]", content[:900]):
+                score += 0.85
+            elif re.search(rf"\b{re.escape(phrase)}\b\s+(?:is|are)\b", content[:600]):
+                score += 0.45
+    if _onboarding_intent(message):
+        onboarding_words = {"applicant", "application", "contractual", "relationship", "purchase", "submit"}
+        if onboarding_words & content_tokens:
+            score += 0.55
+        if "sponsored into a country outside" in content:
+            score -= 0.25
+    score += _rank_requirement_score(message, content)
     return round(score, 6)
 
 
@@ -115,8 +186,10 @@ class SectionSearchProvider:
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
-        query = " ".join(_tokens(message)) or message
-        like_query = f"%{query}%"
+        tokens = _tokens(message)
+        query = " ".join(tokens) or message
+        ts_query = _ts_query(tokens)
+        token_regex = _token_regex(tokens)
         try:
             with get_engine().connect() as connection:
                 rows = connection.execute(
@@ -139,14 +212,14 @@ class SectionSearchProvider:
                                 metadata,
                                 ts_rank_cd(
                                     to_tsvector('english', search_text),
-                                    plainto_tsquery('english', :query)
+                                    to_tsquery('english', :ts_query)
                                 ) AS rank
                             FROM policy_sections
                             WHERE country = :country
                               AND language = :language
                               AND (
-                                to_tsvector('english', search_text) @@ plainto_tsquery('english', :query)
-                                OR lower(search_text) LIKE lower(:like_query)
+                                to_tsvector('english', search_text) @@ to_tsquery('english', :ts_query)
+                                OR lower(search_text) ~ :token_regex
                               )
                         )
                         SELECT *
@@ -157,7 +230,8 @@ class SectionSearchProvider:
                     ),
                     {
                         "query": query,
-                        "like_query": like_query,
+                        "ts_query": ts_query,
+                        "token_regex": token_regex,
                         "country": country,
                         "language": language,
                         "candidate_count": settings.SECTION_RETRIEVAL_CANDIDATE_COUNT,
