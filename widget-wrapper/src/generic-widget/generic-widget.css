@@ -2983,3 +2983,98 @@
     height: auto;
   }
 }
+
+/* Keep legal documents inside the widget instead of floating over the host page. */
+.gw-legal-modal {
+  position: absolute;
+  inset: 88px 0 86px;
+  width: auto;
+  height: auto;
+  z-index: 24;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  pointer-events: none;
+}
+
+.gw-legal-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(255, 207, 38, 0.2), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.44), rgba(255, 246, 205, 0.3));
+  -webkit-backdrop-filter: blur(15px) saturate(1.18);
+  backdrop-filter: blur(15px) saturate(1.18);
+  pointer-events: auto;
+}
+
+.gw-legal-modal-panel {
+  position: relative;
+  width: min(390px, calc(100% - 16px));
+  height: min(100%, 540px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 24px;
+  border-color: rgba(255, 255, 255, 0.64);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 248, 218, 0.52)),
+    rgba(255, 255, 255, 0.46);
+  box-shadow:
+    0 24px 72px rgba(29, 29, 31, 0.18),
+    0 8px 24px rgba(150, 112, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.26);
+  backdrop-filter: blur(30px) saturate(1.26);
+  pointer-events: auto;
+}
+
+.gw-legal-modal-header {
+  flex: 0 0 auto;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.gw-legal-modal-header h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.22;
+}
+
+.gw-legal-modal-header .gw-icon-button {
+  flex: 0 0 auto;
+}
+
+.gw-legal-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+  overscroll-behavior: contain;
+}
+
+.gw-legal-modal-body * {
+  max-width: 100%;
+}
+
+.gw-legal-modal-body table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+@media (max-width: 520px) {
+  .gw-legal-modal {
+    inset: 74px 0 78px;
+    padding: 10px;
+  }
+
+  .gw-legal-modal-panel {
+    width: min(100%, calc(100vw - 28px));
+    height: 100%;
+  }
+}
