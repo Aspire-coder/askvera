@@ -139,6 +139,22 @@ def test_numeric_grounding_allows_hyphenated_month_format_from_source() -> None:
     assert not result.has_critical()
 
 
+def test_numeric_grounding_allows_processing_month_source_phrase() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "NEW Case Credits are accumulated for 12 months after someone qualifies as Recognized Manager.",
+            (
+                "NEW Case Credits will be accumulated for 12 processing months "
+                "including the month in which he/she qualified as Recognized Manager."
+            ),
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_allows_correctly_paraphrased_claim() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(

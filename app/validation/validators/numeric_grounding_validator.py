@@ -90,8 +90,12 @@ def _candidate_variants(claim: MeasurableClaim) -> set[str]:
             variants.add(f"{number} open group case credit")
         if unit == "month":
             variants.add(f"{number} months")
+            variants.add(f"{number} processing month")
+            variants.add(f"{number} processing months")
         if unit == "months":
             variants.add(f"{number} month")
+            variants.add(f"{number} processing month")
+            variants.add(f"{number} processing months")
         if unit in {"consecutive month", "consecutive months"}:
             variants.add(f"{number} consecutive month")
             variants.add(f"{number} consecutive months")
