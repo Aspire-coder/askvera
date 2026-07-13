@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from typing import Any
 
@@ -193,8 +194,27 @@ class OpenSearchSectionProvider:
             else:
                 existing["rank"] = float(existing.get("rank") or 0.0) + float(row.get("rank") or 0.0)
 
+        self._normalize_opensearch_ranks(list(merged.values()))
         scored = [(row, _source_score(row, message)) for row in merged.values()]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
+
+    def _normalize_opensearch_ranks(self, rows: list[dict[str, Any]]) -> None:
+        """Turn raw OpenSearch scores into a small ranking hint.
+
+        OpenSearch BM25 scores can be 50-80+ for common policy words. The
+        section scorer was designed around much smaller Postgres ranks, so raw
+        OpenSearch scores can overwhelm intent signals like exact section title,
+        rank requirement wording, and definition/onboarding intent.
+        """
+        if not rows:
+            return
+        raw_scores = [max(float(row.get("rank") or 0.0), 0.0) for row in rows]
+        max_score = max(raw_scores)
+        if max_score <= 0:
+            return
+        max_log = math.log1p(max_score)
+        for row, raw_score in zip(rows, raw_scores, strict=False):
+            row["rank"] = (math.log1p(raw_score) / max_log) * 1.25
 
     def _document_from_row(self, row: dict[str, Any], score: float) -> RetrievedDocument:
         page = str(row.get("start_page") or "")
