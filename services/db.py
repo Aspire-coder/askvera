@@ -125,6 +125,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                         end_page INTEGER,
                         content TEXT NOT NULL,
                         search_text TEXT NOT NULL,
+                        embedding JSONB,
                         metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                         content_hash TEXT NOT NULL,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -136,6 +137,7 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS source_uri TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS document_type TEXT NOT NULL DEFAULT 'policy'"))
             connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS embedding JSONB"))
             connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb"))
             connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()"))

@@ -55,6 +55,8 @@ REQUIRED_VALUES = [
 AWS_REGION = "us-east-1"
 AWS_ACCOUNT_ID = "615592621509"
 BEDROCK_REGION = AWS_REGION
+# Bedrock embedding model used for app-owned section semantic retrieval.
+BEDROCK_EMBED_MODEL_ID = _env_str("BEDROCK_EMBED_MODEL_ID", "amazon.titan-embed-text-v2:0")
 # Public API version returned by /health. Found in release notes or deployment tag.
 APP_VERSION = "1.0.0"
 # Runtime environment. Production disables development-only auth conveniences.
@@ -182,6 +184,9 @@ RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "bedrock").lower()
 SECTION_RETRIEVAL_RESULT_COUNT = _env_int("SECTION_RETRIEVAL_RESULT_COUNT", 5)
 SECTION_RETRIEVAL_CANDIDATE_COUNT = _env_int("SECTION_RETRIEVAL_CANDIDATE_COUNT", 30)
 SECTION_RETRIEVAL_MIN_SCORE = _env_float("SECTION_RETRIEVAL_MIN_SCORE", 0.05)
+SECTION_RETRIEVAL_MODE = _env_str("SECTION_RETRIEVAL_MODE", "keyword").lower()
+SECTION_RETRIEVAL_VECTOR_CANDIDATE_COUNT = _env_int("SECTION_RETRIEVAL_VECTOR_CANDIDATE_COUNT", 30)
+SECTION_RETRIEVAL_VECTOR_WEIGHT = _env_float("SECTION_RETRIEVAL_VECTOR_WEIGHT", 8.0)
 # S3 bucket backing the Bedrock Knowledge Base approved documents.
 S3_BUCKET = "askverachat-prod-kb"
 # S3 location for legal HTML documents returned by /api/privacy.

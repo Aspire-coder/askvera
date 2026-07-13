@@ -7,6 +7,8 @@ without changing the production Bedrock retrieval path.
 
 from __future__ import annotations
 
+import json
+import math
 import re
 from typing import Any
 
@@ -15,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings
 from services.db import get_engine
+from services.embeddings import embed_text
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
@@ -294,6 +297,33 @@ def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
     return round(normalized, 3)
 
 
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    """Return cosine similarity for two embedding vectors."""
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(a * a for a in left))
+    right_norm = math.sqrt(sum(b * b for b in right))
+    if left_norm == 0.0 or right_norm == 0.0:
+        return 0.0
+    return dot / (left_norm * right_norm)
+
+
+def _embedding_from_row(row: dict[str, Any]) -> list[float]:
+    """Read an embedding stored as JSONB/list."""
+    raw_embedding = row.get("embedding")
+    if raw_embedding is None:
+        return []
+    if isinstance(raw_embedding, str):
+        try:
+            raw_embedding = json.loads(raw_embedding)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw_embedding, list):
+        return []
+    return [float(value) for value in raw_embedding]
+
+
 class SectionSearchProvider:
     """Retrieve approved policy sections from PostgreSQL."""
 
@@ -305,52 +335,9 @@ class SectionSearchProvider:
         token_regex = _token_regex(tokens)
         try:
             with get_engine().connect() as connection:
-                rows = connection.execute(
-                    text(
-                        """
-                        WITH ranked AS (
-                            SELECT
-                                id,
-                                source_file,
-                                source_uri,
-                                country,
-                                language,
-                                document_type,
-                                section_id,
-                                section_title,
-                                start_page,
-                                end_page,
-                                content,
-                                search_text,
-                                metadata,
-                                ts_rank_cd(
-                                    to_tsvector('english', search_text),
-                                    to_tsquery('english', :ts_query)
-                                ) AS rank
-                            FROM policy_sections
-                            WHERE country = :country
-                              AND language = :language
-                              AND (
-                                to_tsvector('english', search_text) @@ to_tsquery('english', :ts_query)
-                                OR lower(search_text) ~ :token_regex
-                              )
-                        )
-                        SELECT *
-                        FROM ranked
-                        ORDER BY rank DESC, section_id ASC
-                        LIMIT :candidate_count
-                        """
-                    ),
-                    {
-                        "query": query,
-                        "ts_query": ts_query,
-                        "token_regex": token_regex,
-                        "country": country,
-                        "language": language,
-                        "candidate_count": settings.SECTION_RETRIEVAL_CANDIDATE_COUNT,
-                    },
-                ).mappings()
-                candidates = [dict(row) for row in rows]
+                keyword_candidates = self._keyword_candidates(connection, ts_query, token_regex, country, language)
+                semantic_candidates = self._semantic_candidates(connection, message, country, language, correlation_id)
+                candidates = self._merge_candidates(keyword_candidates, semantic_candidates)
         except SQLAlchemyError:
             LOGGER.exception("section_retrieval_failed", correlation_id=correlation_id, country=country, language=language)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "section"})
@@ -372,8 +359,13 @@ class SectionSearchProvider:
             confidence=_confidence_from_documents(documents),
             metadata={
                 "provider": "section",
+                "mode": settings.SECTION_RETRIEVAL_MODE,
                 "candidate_count": len(candidates),
                 "query": query,
+                "candidate_sources": [
+                    self._document_from_row(row, score).to_source()
+                    for row, score in scored[: settings.SECTION_RETRIEVAL_CANDIDATE_COUNT]
+                ],
             },
         )
         LOGGER.info(
@@ -386,6 +378,125 @@ class SectionSearchProvider:
             confidence=result.confidence,
         )
         return result
+
+    def _keyword_candidates(self, connection: Any, ts_query: str, token_regex: str, country: str, language: str) -> list[dict[str, Any]]:
+        rows = connection.execute(
+            text(
+                """
+                WITH ranked AS (
+                    SELECT
+                        id,
+                        source_file,
+                        source_uri,
+                        country,
+                        language,
+                        document_type,
+                        section_id,
+                        section_title,
+                        start_page,
+                        end_page,
+                        content,
+                        search_text,
+                        embedding,
+                        metadata,
+                        ts_rank_cd(
+                            to_tsvector('english', search_text),
+                            to_tsquery('english', :ts_query)
+                        ) AS rank
+                    FROM policy_sections
+                    WHERE country = :country
+                      AND language = :language
+                      AND (
+                        to_tsvector('english', search_text) @@ to_tsquery('english', :ts_query)
+                        OR lower(search_text) ~ :token_regex
+                      )
+                )
+                SELECT *
+                FROM ranked
+                ORDER BY rank DESC, section_id ASC
+                LIMIT :candidate_count
+                """
+            ),
+            {
+                "ts_query": ts_query,
+                "token_regex": token_regex,
+                "country": country,
+                "language": language,
+                "candidate_count": settings.SECTION_RETRIEVAL_CANDIDATE_COUNT,
+            },
+        ).mappings()
+        return [dict(row) for row in rows]
+
+    def _semantic_candidates(
+        self,
+        connection: Any,
+        message: str,
+        country: str,
+        language: str,
+        correlation_id: str,
+    ) -> list[dict[str, Any]]:
+        if settings.SECTION_RETRIEVAL_MODE != "hybrid":
+            return []
+        try:
+            query_embedding = embed_text(message)
+        except Exception:
+            LOGGER.exception("section_embedding_query_failed", correlation_id=correlation_id)
+            return []
+        if not query_embedding:
+            return []
+
+        rows = connection.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    source_file,
+                    source_uri,
+                    country,
+                    language,
+                    document_type,
+                    section_id,
+                    section_title,
+                    start_page,
+                    end_page,
+                    content,
+                    search_text,
+                    embedding,
+                    metadata,
+                    0.0 AS rank
+                FROM policy_sections
+                WHERE country = :country
+                  AND language = :language
+                  AND embedding IS NOT NULL
+                """
+            ),
+            {"country": country, "language": language},
+        ).mappings()
+        scored_rows: list[dict[str, Any]] = []
+        for row in rows:
+            row_dict = dict(row)
+            similarity = _cosine_similarity(query_embedding, _embedding_from_row(row_dict))
+            if similarity <= 0:
+                continue
+            row_dict["rank"] = similarity * settings.SECTION_RETRIEVAL_VECTOR_WEIGHT
+            row_dict["semantic_score"] = similarity
+            scored_rows.append(row_dict)
+        return sorted(scored_rows, key=lambda item: float(item.get("rank") or 0.0), reverse=True)[
+            : settings.SECTION_RETRIEVAL_VECTOR_CANDIDATE_COUNT
+        ]
+
+    def _merge_candidates(self, keyword_candidates: list[dict[str, Any]], semantic_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: dict[str, dict[str, Any]] = {}
+        for row in keyword_candidates + semantic_candidates:
+            row_id = str(row.get("id") or "")
+            if not row_id:
+                continue
+            existing = merged.get(row_id)
+            if existing is None or float(row.get("rank") or 0.0) > float(existing.get("rank") or 0.0):
+                merged[row_id] = row
+        return sorted(merged.values(), key=lambda item: float(item.get("rank") or 0.0), reverse=True)[
+            : max(settings.SECTION_RETRIEVAL_CANDIDATE_COUNT, settings.SECTION_RETRIEVAL_VECTOR_CANDIDATE_COUNT)
+        ]
 
     def _document_from_row(self, row: dict[str, Any], score: float) -> RetrievedDocument:
         page = str(row.get("start_page") or "")

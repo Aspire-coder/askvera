@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from services.db import get_engine  # noqa: E402
+from services.embeddings import embed_text  # noqa: E402
 
 
 def _section_id(section: dict[str, Any]) -> str:
@@ -64,6 +65,7 @@ def load_sections(
     source_uri_prefix: str,
     document_type: str,
     replace_source: bool,
+    embed: bool,
 ) -> int:
     """Upsert policy sections into the database."""
     if not sections:
@@ -97,6 +99,7 @@ def load_sections(
         for section in sections:
             content = str(section["content"])
             search_text = _search_text(section)
+            embedding = embed_text(search_text) if embed else None
             source_file = str(section["source_file"])
             source_uri = source_uri_prefix.rstrip("/") + "/" + source_file if source_uri_prefix else ""
             metadata = {
@@ -124,6 +127,7 @@ def load_sections(
                         end_page,
                         content,
                         search_text,
+                        embedding,
                         metadata,
                         content_hash,
                         updated_at
@@ -141,6 +145,7 @@ def load_sections(
                         :end_page,
                         :content,
                         :search_text,
+                        CAST(:embedding AS jsonb),
                         CAST(:metadata AS jsonb),
                         :content_hash,
                         now()
@@ -157,6 +162,7 @@ def load_sections(
                         end_page = EXCLUDED.end_page,
                         content = EXCLUDED.content,
                         search_text = EXCLUDED.search_text,
+                        embedding = EXCLUDED.embedding,
                         metadata = EXCLUDED.metadata,
                         content_hash = EXCLUDED.content_hash,
                         updated_at = now()
@@ -175,6 +181,7 @@ def load_sections(
                     "end_page": section["end_page"],
                     "content": content,
                     "search_text": search_text,
+                    "embedding": json.dumps(embedding) if embedding is not None else None,
                     "metadata": json.dumps(metadata, ensure_ascii=False),
                     "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                 },
@@ -188,6 +195,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-uri-prefix", default="", help="Original approved document S3 prefix, used in citations")
     parser.add_argument("--document-type", default="policy")
     parser.add_argument("--replace-source", action="store_true", help="Delete existing rows for this source/country/language first")
+    parser.add_argument("--embed", action="store_true", help="Generate and store Bedrock embeddings for semantic retrieval")
     return parser.parse_args()
 
 
@@ -199,6 +207,7 @@ def main() -> int:
         source_uri_prefix=args.source_uri_prefix,
         document_type=args.document_type,
         replace_source=args.replace_source,
+        embed=args.embed,
     )
     print("Policy section database load complete")
     print("-------------------------------------")

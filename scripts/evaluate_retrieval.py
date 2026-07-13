@@ -670,9 +670,13 @@ def print_summary(rows: list[RetrievalEvaluationRow]) -> None:
     print()
     print("Retrieval evaluation summary")
     print("----------------------------")
-    print(f"Knowledge Base ID: {settings.BEDROCK_KB_ID}")
-    print(f"Data Source ID: {settings.BEDROCK_DATA_SOURCE_ID}")
-    print(f"Retrieval configuration: {settings.BEDROCK_RETRIEVAL_CONFIGURATION}")
+    print(f"Retrieval provider: {settings.RETRIEVAL_PROVIDER}")
+    if settings.RETRIEVAL_PROVIDER == "section":
+        print(f"Section retrieval mode: {settings.SECTION_RETRIEVAL_MODE}")
+    else:
+        print(f"Knowledge Base ID: {settings.BEDROCK_KB_ID}")
+        print(f"Data Source ID: {settings.BEDROCK_DATA_SOURCE_ID}")
+        print(f"Retrieval configuration: {settings.BEDROCK_RETRIEVAL_CONFIGURATION}")
     print(f"Total cases: {len(rows)}")
     for status, count in sorted(counts.items()):
         print(f"{status}: {count}")
