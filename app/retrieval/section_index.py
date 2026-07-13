@@ -336,7 +336,15 @@ class SectionSearchProvider:
         try:
             with get_engine().connect() as connection:
                 keyword_candidates = self._keyword_candidates(connection, ts_query, token_regex, country, language)
-                semantic_candidates = self._semantic_candidates(connection, message, country, language, correlation_id)
+                keyword_best_score = self._best_candidate_score(keyword_candidates, message)
+                semantic_candidates: list[dict[str, Any]] = []
+                if settings.SECTION_RETRIEVAL_MODE == "hybrid":
+                    semantic_candidates = self._semantic_candidates(connection, message, country, language, correlation_id)
+                elif settings.SECTION_RETRIEVAL_MODE == "fallback" and self._should_use_semantic_fallback(
+                    keyword_candidates,
+                    keyword_best_score,
+                ):
+                    semantic_candidates = self._semantic_candidates(connection, message, country, language, correlation_id)
                 candidates = self._merge_candidates(keyword_candidates, semantic_candidates)
         except SQLAlchemyError:
             LOGGER.exception("section_retrieval_failed", correlation_id=correlation_id, country=country, language=language)
@@ -361,6 +369,8 @@ class SectionSearchProvider:
                 "provider": "section",
                 "mode": settings.SECTION_RETRIEVAL_MODE,
                 "candidate_count": len(candidates),
+                "semantic_fallback_used": bool(semantic_candidates),
+                "keyword_best_score": keyword_best_score,
                 "query": query,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
@@ -376,8 +386,21 @@ class SectionSearchProvider:
             source_count=len(sources),
             candidate_count=len(candidates),
             confidence=result.confidence,
+            semantic_fallback_used=bool(semantic_candidates),
         )
         return result
+
+    def _best_candidate_score(self, candidates: list[dict[str, Any]], message: str) -> float:
+        """Return the best final score keyword retrieval can produce."""
+        if not candidates:
+            return 0.0
+        return max(_source_score(row, message) for row in candidates)
+
+    def _should_use_semantic_fallback(self, keyword_candidates: list[dict[str, Any]], keyword_best_score: float) -> bool:
+        """Use semantic search only when keyword retrieval is clearly struggling."""
+        if not keyword_candidates:
+            return True
+        return keyword_best_score < settings.SECTION_RETRIEVAL_FALLBACK_MIN_SCORE
 
     def _keyword_candidates(self, connection: Any, ts_query: str, token_regex: str, country: str, language: str) -> list[dict[str, Any]]:
         rows = connection.execute(
@@ -435,8 +458,6 @@ class SectionSearchProvider:
         language: str,
         correlation_id: str,
     ) -> list[dict[str, Any]]:
-        if settings.SECTION_RETRIEVAL_MODE != "hybrid":
-            return []
         try:
             query_embedding = embed_text(message)
         except Exception:
