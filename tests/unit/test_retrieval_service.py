@@ -1,6 +1,6 @@
 """Unit tests for retrieval normalization."""
 
-from app.retrieval import BedrockRetrievalProvider, RetrievedDocument
+from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
     _expanded_retrieval_query,
     _reference_score,
@@ -8,6 +8,33 @@ from app.retrieval.providers import (
     _rerank_documents,
     confidence_from_sources,
 )
+from config import settings
+
+
+class _StaticProvider:
+    def __init__(self, provider_name: str) -> None:
+        self.provider_name = provider_name
+
+    def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
+        return RetrievalResult(
+            documents=[],
+            confidence=1.0,
+            sources=[],
+            metadata={"provider": self.provider_name},
+        )
+
+
+def test_retrieval_service_refreshes_provider_after_config_load(monkeypatch) -> None:
+    """The singleton must pick up SSM-loaded retrieval config after import time."""
+    monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "bedrock")
+    service = RetrievalService()
+    monkeypatch.setattr(service, "_default_provider", lambda: _StaticProvider(settings.RETRIEVAL_PROVIDER))
+
+    monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "opensearch_section")
+
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert result.metadata["provider"] == "opensearch_section"
 
 
 def test_provider_result_extracts_api_sources() -> None:
