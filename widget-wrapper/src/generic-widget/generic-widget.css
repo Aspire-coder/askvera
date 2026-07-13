@@ -1914,3 +1914,432 @@
   outline: 3px solid rgb(45 127 249 / 28%);
   outline-offset: 3px;
 }
+
+/* Refined ASK Vera product skin */
+.gw-root {
+  --gw-text-title-size: 17px;
+  --gw-text-heading-size: 15px;
+  --gw-text-body-size: 14px;
+  --gw-text-chat-size: 16px;
+  --gw-line-body: 1.5;
+  --gw-line-relaxed: 1.62;
+  --gw-weight-bold: 640;
+  --gw-weight-heavy: 680;
+  --gw-radius-md: 12px;
+  --gw-radius-lg: 18px;
+  --gw-radius-xl: 22px;
+  --gw-elevation-1: 0 2px 10px rgba(29, 29, 31, 0.06);
+  --gw-elevation-2: 0 14px 34px rgba(29, 29, 31, 0.08);
+  --gw-elevation-3: 0 22px 58px rgba(29, 29, 31, 0.12);
+}
+
+.gw-panel {
+  border-color: rgba(229, 231, 235, 0.9);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 248, 246, 0.98)),
+    var(--gw-background);
+  box-shadow: 0 28px 90px rgba(29, 29, 31, 0.16);
+}
+
+.gw-header {
+  min-height: 76px;
+  padding: 16px 20px;
+  background: var(--gw-header-bg);
+  border-bottom: 1px solid rgba(229, 231, 235, 0.78);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.gw-header-mark,
+.gw-onboarding-mark,
+.gw-message-avatar {
+  border-radius: 14px;
+}
+
+.gw-header-mark {
+  width: 40px;
+  height: 40px;
+  border-color: rgba(36, 107, 69, 0.16);
+  background: #eef7f1;
+  color: #246b45;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.66);
+}
+
+.gw-title {
+  color: #1d1d1f;
+  font-weight: 680;
+}
+
+.gw-subtitle {
+  color: #6e7380;
+  font-weight: 500;
+}
+
+.gw-status {
+  color: #6e7380;
+  font-weight: 560;
+}
+
+.gw-status-region::before {
+  color: #b3b7bd;
+}
+
+.gw-icon-button {
+  color: #6e7380;
+  border-radius: 999px;
+}
+
+.gw-icon-button:hover,
+.gw-icon-button:focus-visible {
+  color: #1d1d1f;
+  background: rgba(29, 29, 31, 0.06);
+}
+
+.gw-content {
+  padding: 24px 28px;
+  gap: 20px;
+  background:
+    linear-gradient(180deg, rgba(238, 247, 241, 0.55), rgba(247, 248, 246, 0) 170px),
+    #f7f8f6;
+}
+
+.gw-onboarding-intro,
+.gw-region-selector,
+.gw-consent,
+.gw-consent-declined {
+  border: 1px solid rgba(229, 231, 235, 0.9);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 30px rgba(29, 29, 31, 0.07);
+}
+
+.gw-onboarding-intro {
+  grid-template-columns: 44px minmax(0, 1fr);
+  padding: 22px;
+  background:
+    linear-gradient(135deg, rgba(238, 247, 241, 0.92), rgba(255, 255, 255, 0.95) 64%),
+    #ffffff;
+}
+
+.gw-onboarding-mark {
+  width: 44px;
+  height: 44px;
+  background: #1d1d1f;
+  color: #ffffff;
+  font-weight: 650;
+}
+
+.gw-onboarding-eyebrow,
+.gw-consent-heading p,
+.gw-citations-title,
+.gw-section-title {
+  letter-spacing: 0.04em;
+  color: #2f7d4e;
+}
+
+.gw-onboarding-intro h2,
+.gw-consent h2,
+.gw-consent-declined h2 {
+  color: #1d1d1f;
+  font-weight: 680;
+}
+
+.gw-onboarding-intro p,
+.gw-consent-body,
+.gw-widget-footer {
+  color: #6e7380;
+}
+
+.gw-region-selector {
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.gw-field {
+  color: #6e7380;
+  font-weight: 680;
+}
+
+.gw-field select,
+.gw-composer textarea {
+  border-color: rgba(229, 231, 235, 0.95);
+  border-radius: 14px;
+  background-color: #ffffff;
+  font-weight: 520;
+}
+
+.gw-consent {
+  border-left: 0;
+  padding: 20px;
+}
+
+.gw-legal {
+  border-color: rgba(229, 231, 235, 0.92);
+  border-radius: 16px;
+  background: #f9faf8;
+}
+
+.gw-legal-item a,
+.gw-legal-link-button {
+  min-height: 38px;
+  border-color: rgba(229, 231, 235, 0.95);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1d1d1f;
+  font-weight: 580;
+}
+
+.gw-consent-ack {
+  border-color: rgba(47, 125, 78, 0.24);
+  border-radius: 16px;
+  background: #eef7f1;
+  color: #1d1d1f;
+}
+
+.gw-consent .gw-primary-button,
+.gw-primary-button {
+  border-color: #246b45;
+  background: #246b45;
+  color: #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(36, 107, 69, 0.16);
+}
+
+.gw-primary-button:not(:disabled):hover,
+.gw-primary-button:not(:disabled):focus-visible {
+  background: #2f7d4e;
+  border-color: #2f7d4e;
+}
+
+.gw-primary-button:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.gw-secondary-button,
+.gw-topic {
+  border-color: rgba(229, 231, 235, 0.95);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1d1d1f;
+  font-weight: 560;
+}
+
+.gw-message-feed {
+  gap: 18px;
+}
+
+.gw-message {
+  gap: 10px;
+}
+
+.gw-message-avatar {
+  width: 34px;
+  height: 34px;
+  border-color: rgba(47, 125, 78, 0.18);
+  background: #eef7f1;
+  color: #246b45;
+  box-shadow: 0 4px 12px rgba(29, 29, 31, 0.08);
+}
+
+.gw-message-card {
+  border-color: rgba(229, 231, 235, 0.86);
+  border-radius: 18px;
+  padding: 14px 16px;
+  color: #1d1d1f;
+  line-height: 1.58;
+  box-shadow: 0 6px 22px rgba(29, 29, 31, 0.06);
+}
+
+.gw-message-assistant .gw-message-card,
+.gw-message-system .gw-message-card,
+.gw-message-loading .gw-message-card {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.gw-message-user .gw-message-card {
+  border: 0;
+  border-radius: 20px 20px 8px 20px;
+  background: #1d1d1f;
+  color: #ffffff;
+  box-shadow: 0 10px 28px rgba(29, 29, 31, 0.16);
+}
+
+.gw-message-meta {
+  margin-bottom: 10px;
+  color: #8b9098;
+}
+
+.gw-message-author {
+  color: #1d1d1f;
+  font-weight: 650;
+}
+
+.gw-message h3,
+.gw-message h4,
+.gw-message h5,
+.gw-message strong {
+  color: #1d1d1f;
+  font-weight: 650;
+}
+
+.gw-message-user strong {
+  color: inherit;
+}
+
+.gw-citations {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(229, 231, 235, 0.78);
+}
+
+.gw-citations-title {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #f7f8f6;
+  color: #6e7380;
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: none;
+}
+
+.gw-citations-title::-webkit-details-marker {
+  display: none;
+}
+
+.gw-citations-title::after {
+  content: "+";
+  color: #8b9098;
+  font-weight: 650;
+}
+
+.gw-citations[open] .gw-citations-title::after {
+  content: "-";
+}
+
+.gw-citation-list {
+  margin-top: 10px;
+}
+
+.gw-citation-card {
+  border-color: rgba(229, 231, 235, 0.88);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.gw-citation-card a,
+.gw-citation-card span {
+  color: #1d1d1f;
+  font-weight: 620;
+}
+
+.gw-message-actions {
+  border-top-color: rgba(229, 231, 235, 0.76);
+}
+
+.gw-message-action {
+  min-height: 30px;
+  background: #f7f8f6;
+  color: #6e7380;
+  font-weight: 620;
+}
+
+.gw-message-action:hover,
+.gw-message-action:focus-visible,
+.gw-message-action-active {
+  border-color: rgba(47, 125, 78, 0.24);
+  background: #eef7f1;
+  color: #246b45;
+}
+
+.gw-composer {
+  padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.92);
+  border-top-color: rgba(229, 231, 235, 0.8);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 -14px 30px rgba(29, 29, 31, 0.05);
+}
+
+.gw-composer-shell {
+  min-height: 58px;
+  padding: 7px;
+  border-color: rgba(229, 231, 235, 0.96);
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.gw-composer:focus-within .gw-composer-shell {
+  border-color: rgba(47, 125, 78, 0.54);
+  box-shadow: 0 0 0 4px rgba(47, 125, 78, 0.12);
+}
+
+.gw-composer textarea {
+  min-height: 40px;
+  padding: 9px 8px;
+  font-size: 15px;
+}
+
+.gw-composer .gw-primary-button {
+  width: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  background: #246b45;
+  border-color: #246b45;
+  box-shadow: none;
+}
+
+.gw-composer-tool {
+  background: #f7f8f6;
+  color: #8b9098;
+}
+
+.gw-composer-status,
+.gw-composer-hint {
+  color: #6e7380;
+}
+
+.gw-loading-label {
+  color: #1d1d1f;
+  font-weight: 560;
+}
+
+.gw-typing-dots span {
+  background: #2f7d4e;
+}
+
+@media (max-width: 520px) {
+  .gw-panel {
+    border-radius: 20px;
+  }
+
+  .gw-content {
+    padding: 18px;
+  }
+
+  .gw-onboarding-intro {
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding: 18px;
+  }
+
+  .gw-message-card {
+    padding: 13px 14px;
+  }
+
+  .gw-composer {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .gw-composer-shell {
+    border-radius: 22px;
+  }
+}

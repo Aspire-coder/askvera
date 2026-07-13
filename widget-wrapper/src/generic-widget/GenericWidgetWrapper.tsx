@@ -539,10 +539,10 @@ export function GenericWidgetWrapper({
                   <p className="gw-onboarding-eyebrow">Welcome</p>
                   <h2>Hi, I&apos;m {introAssistantName}.</h2>
                   <p>
-                    Your AI assistant for {introCompanyName}. I can help you find clear answers from approved company
-                    documentation.
+                    I can help you find approved answers about {introCompanyName} products, policies, and business
+                    support.
                   </p>
-                  <p className="gw-onboarding-next">Please select your market and language to continue.</p>
+                  <p className="gw-onboarding-next">Choose your market and language to begin.</p>
                 </div>
               </section>
             ) : null}

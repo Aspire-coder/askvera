@@ -43,8 +43,8 @@ export function CitationRenderer({ sources }: { sources: unknown }) {
   if (!normalized.length) return null;
 
   return (
-    <section className="gw-citations" aria-label="References">
-      <div className="gw-citations-title">References</div>
+    <details className="gw-citations" aria-label="References">
+      <summary className="gw-citations-title">References</summary>
       <div className="gw-citation-list">
         {normalized.map((source, index) => {
           const title = sourceTitle(source);
@@ -64,6 +64,6 @@ export function CitationRenderer({ sources }: { sources: unknown }) {
           );
         })}
       </div>
-    </section>
+    </details>
   );
 }
