@@ -18,8 +18,8 @@ class _StaticProvider:
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         return RetrievalResult(
             documents=[],
+            citations=[],
             confidence=1.0,
-            sources=[],
             metadata={"provider": self.provider_name},
         )
 
