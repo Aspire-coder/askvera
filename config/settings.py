@@ -175,6 +175,13 @@ BEDROCK_EVIDENCE_SELECTOR_ENABLED = _env_bool("BEDROCK_EVIDENCE_SELECTOR_ENABLED
 BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 BEDROCK_FALLBACK_SOURCE_WEIGHT = 0.12
 BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
+# Retrieval backend. Keep "bedrock" as the default production path. Use
+# "section" only after loading reviewed policy sections into PostgreSQL and
+# validating retrieval quality with the test harness.
+RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "bedrock").lower()
+SECTION_RETRIEVAL_RESULT_COUNT = _env_int("SECTION_RETRIEVAL_RESULT_COUNT", 5)
+SECTION_RETRIEVAL_CANDIDATE_COUNT = _env_int("SECTION_RETRIEVAL_CANDIDATE_COUNT", 30)
+SECTION_RETRIEVAL_MIN_SCORE = _env_float("SECTION_RETRIEVAL_MIN_SCORE", 0.05)
 # S3 bucket backing the Bedrock Knowledge Base approved documents.
 S3_BUCKET = "askverachat-prod-kb"
 # S3 location for legal HTML documents returned by /api/privacy.

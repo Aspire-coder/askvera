@@ -109,6 +109,61 @@ def create_schema(correlation_id: str = "startup") -> None:
             )
             connection.execute(text("ALTER TABLE consent_log ADD COLUMN IF NOT EXISTS accepted BOOLEAN NOT NULL DEFAULT true"))
             connection.execute(text("ALTER TABLE consent_log ADD COLUMN IF NOT EXISTS correlation_id TEXT"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS policy_sections (
+                        id TEXT PRIMARY KEY,
+                        source_file TEXT NOT NULL,
+                        source_uri TEXT NOT NULL DEFAULT '',
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        document_type TEXT NOT NULL DEFAULT 'policy',
+                        section_id TEXT NOT NULL,
+                        section_title TEXT NOT NULL,
+                        start_page INTEGER,
+                        end_page INTEGER,
+                        content TEXT NOT NULL,
+                        search_text TEXT NOT NULL,
+                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        content_hash TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS source_uri TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS document_type TEXT NOT NULL DEFAULT 'policy'"))
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb"))
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE policy_sections ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_policy_sections_market
+                    ON policy_sections (country, language, document_type)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_policy_sections_section
+                    ON policy_sections (country, language, section_id)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_policy_sections_search
+                    ON policy_sections
+                    USING GIN (to_tsvector('english', search_text))
+                    """
+                )
+            )
     except SQLAlchemyError as exc:
         LOGGER.exception("postgres_schema_failed", correlation_id=correlation_id)
         raise AwsServiceError("PostgreSQL schema setup failed.") from exc
