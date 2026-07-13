@@ -160,7 +160,6 @@ def _actions(sections: list[dict[str, Any]], *, index: str, source_uri_prefix: s
         {
             "_op_type": "index",
             "_index": index,
-            "_id": _section_id(section),
             "_source": _document(section, source_uri_prefix=source_uri_prefix, status=status),
         }
         for section in sections
