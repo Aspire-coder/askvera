@@ -2850,3 +2850,136 @@
   outline: 3px solid rgba(248, 196, 0, 0.34);
   outline-offset: 3px;
 }
+
+/* Consent layout correction: clearer document rows and cleaner legal overlay */
+.gw-panel {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(248, 196, 0, 0.3), transparent 38%),
+    radial-gradient(circle at 96% 12%, rgba(248, 196, 0, 0.22), transparent 30%),
+    radial-gradient(circle at 100% 40%, rgba(47, 125, 78, 0.08), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.58), rgba(255, 248, 220, 0.42) 54%, rgba(255, 255, 255, 0.54));
+}
+
+.gw-header {
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.68), rgba(255, 244, 194, 0.7) 52%, rgba(255, 255, 255, 0.48));
+}
+
+.gw-consent,
+.gw-region-selector,
+.gw-onboarding-intro {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.66), rgba(255, 247, 214, 0.38)),
+    rgba(255, 255, 255, 0.38);
+}
+
+.gw-legal {
+  background:
+    linear-gradient(145deg, rgba(255, 248, 220, 0.66), rgba(255, 255, 255, 0.28));
+}
+
+.gw-legal-item a,
+.gw-legal-link-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 44px;
+  padding: 10px 12px 10px 14px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.62), rgba(255, 249, 224, 0.4));
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.gw-legal-item a::before,
+.gw-legal-link-button::before {
+  content: none;
+}
+
+.gw-legal-item a::after,
+.gw-legal-link-button::after {
+  content: "Open";
+  width: 54px;
+  min-width: 54px;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(255, 242, 188, 0.78);
+  color: #765500;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(248, 196, 0, 0.22);
+}
+
+.gw-legal-item a:hover::after,
+.gw-legal-item a:focus-visible::after,
+.gw-legal-link-button:hover::after,
+.gw-legal-link-button:focus-visible::after {
+  background: rgba(248, 196, 0, 0.84);
+  color: #1d1d1f;
+}
+
+.gw-legal-modal {
+  position: fixed;
+  inset: auto 18px 18px auto;
+  width: min(430px, calc(100vw - 36px));
+  height: min(620px, calc(100dvh - 36px));
+  z-index: 2147483002;
+  display: block;
+  padding: 0;
+}
+
+.gw-legal-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(29, 29, 31, 0.18);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.gw-legal-modal-panel {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-color: rgba(255, 255, 255, 0.58);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(255, 247, 214, 0.54)),
+    rgba(255, 255, 255, 0.58);
+  box-shadow:
+    0 26px 72px rgba(29, 29, 31, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(28px) saturate(1.24);
+  backdrop-filter: blur(28px) saturate(1.24);
+}
+
+.gw-legal-modal-header {
+  min-height: 66px;
+  padding: 18px 20px;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.7), rgba(255, 244, 194, 0.54));
+  border-bottom-color: rgba(248, 196, 0, 0.22);
+}
+
+.gw-legal-modal-body {
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.gw-legal-modal-body > * {
+  max-width: none;
+}
+
+@media (max-width: 520px) {
+  .gw-legal-modal {
+    inset: 10px;
+    width: auto;
+    height: auto;
+  }
+}
