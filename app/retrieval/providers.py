@@ -356,47 +356,6 @@ def _requirement_heading_score(message: str, document_text: str) -> float:
     return 0.0
 
 
-def _direct_topic_score(message: str, document: RetrievedDocument) -> float:
-    """Reward chunks whose title or opening text is about the user's exact topic."""
-    phrases = _query_phrases(message)
-    if not phrases:
-        return 0.0
-
-    title = re.sub(r"[^a-z0-9]+", " ", document.title.lower())
-    opening = re.sub(r"\s+", " ", (document.content or document.excerpt).lower()).strip()[:700]
-    opening_terms = _tokens(opening[:360])
-    title_terms = _tokens(title)
-    message_lower = message.lower()
-    definition_intent = bool(re.search(r"\b(?:what|who)\s+(?:is|are)\b|\bdefine\b|\bmeaning\b", message_lower))
-    onboarding_intent = bool(re.search(r"\b(?:become|enroll|register|sign\s+up|devenir)\b", message_lower))
-    score = 0.0
-
-    for phrase in phrases:
-        phrase_terms = _tokens(phrase)
-        if not phrase_terms:
-            continue
-        phrase_text = " ".join(phrase.split())
-        if phrase_text in title:
-            score = max(score, 1.0)
-        elif phrase_text in opening[:360]:
-            score = max(score, 0.9)
-        elif phrase_terms <= title_terms:
-            score = max(score, 0.85)
-        elif phrase_terms <= opening_terms:
-            score = max(score, 0.75)
-        if definition_intent and re.search(rf"\b{re.escape(phrase_text)}\b\s*(?:[:\-]|\bis\b|\bare\b)", opening[:260]):
-            score = max(score, 1.15)
-
-    if score and definition_intent:
-        score += 0.1
-    if score and onboarding_intent:
-        onboarding_terms = {"application", "applicant", "contractual", "relationship", "opt", "marketing", "plan"}
-        if opening_terms & onboarding_terms:
-            score += 0.2
-
-    return score
-
-
 def _document_relevance(message: str, document: RetrievedDocument) -> float:
     """Score a retrieved document against the user question before prompting."""
     query_tokens = _tokens(message)
@@ -416,15 +375,13 @@ def _document_relevance(message: str, document: RetrievedDocument) -> float:
     phrase_score = _phrase_score(message, document_text)
     policy_score = _policy_term_score(message, document_text)
     requirement_score = _requirement_heading_score(message, document.content)
-    direct_topic_score = _direct_topic_score(message, document)
     return round(
-        (source_score * 0.20)
-        + (overlap * 0.12)
-        + (policy_score * 0.13)
-        + (phrase_score * 0.20)
+        (source_score * 0.25)
+        + (overlap * 0.15)
+        + (policy_score * 0.15)
+        + (phrase_score * 0.25)
         + (number_overlap * 0.10)
-        + (requirement_score * 0.10)
-        + (direct_topic_score * 0.15),
+        + (requirement_score * 0.10),
         6,
     )
 
@@ -435,7 +392,6 @@ def _rerank_documents(message: str, documents: list[RetrievedDocument]) -> list[
         documents,
         key=lambda document: (
             _requirement_heading_score(message, document.content),
-            _direct_topic_score(message, document),
             _document_relevance(message, document),
             float(document.score or 0.0),
         ),

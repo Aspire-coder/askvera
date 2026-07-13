@@ -128,57 +128,6 @@ def test_retrieval_rerank_understands_lowercase_bonus_phrase() -> None:
     assert reranked[0].id == "personal-retail-bonus"
 
 
-def test_retrieval_rerank_prefers_definition_section_over_related_mentions() -> None:
-    """Definition questions should prefer the section defining the topic."""
-    documents = [
-        RetrievedDocument(
-            id="related-application",
-            title="CA-EN-Company-Policy.18.02c.if-the-forever-business-owner-application.txt",
-            content="If the Forever Business Owner application of a legally married person is accepted...",
-            source="s3://kb/policy.pdf",
-            score=0.92,
-        ),
-        RetrievedDocument(
-            id="fbo-definition",
-            title="CA-EN-Company-Policy.1.01.definitions-forever-business-owner.txt",
-            content="Forever Business Owner: an independent contractor who has completed an application with FLP.",
-            source="s3://kb/policy.pdf",
-            score=0.68,
-        ),
-    ]
-
-    reranked = _rerank_documents("What is a Forever Business Owner?", documents)
-
-    assert reranked[0].id == "fbo-definition"
-
-
-def test_retrieval_rerank_prefers_onboarding_section_over_related_sponsoring() -> None:
-    """Become/enroll questions should prefer the onboarding section when present."""
-    documents = [
-        RetrievedDocument(
-            id="international-sponsoring",
-            title="CA-EN-Company-Policy.15.01b.an-fbo-can-be-sponsored-into-a-country.txt",
-            content="An FBO can be sponsored into a country outside his or her home Operating Company.",
-            source="s3://kb/policy.pdf",
-            score=0.91,
-        ),
-        RetrievedDocument(
-            id="fbo-application",
-            title="CA-EN-Company-Policy.17.01.the-fbo-relationship-with-flp.txt",
-            content=(
-                "The FBO relationship with FLP is one of a contractual nature. The applicant "
-                "must submit an application and no purchase is required to become an FBO."
-            ),
-            source="s3://kb/policy.pdf",
-            score=0.62,
-        ),
-    ]
-
-    reranked = _rerank_documents("How do I become an FBO in Canada?", documents)
-
-    assert reranked[0].id == "fbo-application"
-
-
 def test_retrieval_rerank_uses_single_word_rank_anchor() -> None:
     """Single-word rank names such as Supervisor should still anchor retrieval."""
     documents = [
