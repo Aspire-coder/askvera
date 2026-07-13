@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import math
-import re
 from functools import lru_cache
 from typing import Any
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
 from opensearchpy.exceptions import OpenSearchException
 
 from config import settings
+from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from utils.logging import get_logger
 
@@ -19,26 +21,6 @@ from .models import RetrievedDocument, RetrievalResult
 from .section_index import _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
-
-
-QUERY_EXPANSIONS: tuple[tuple[str, str], ...] = (
-    (r"\bfbo\b", "Forever Business Owner FBO"),
-    (r"\bogcc\b", "Open Group Case Credits"),
-    (r"\bnew\s*cc\b", "NEW Case Credits"),
-    (r"\bcase\s+credits?\b", "Case Credit Open Group Case Credits Active Case Credits"),
-    (r"\bbecom\b", "become"),
-    (r"\bdevenir\b", "become enroll register"),
-    (r"\brabais\b", "discount"),
-    (r"\bclient(?:e)?\s+pr[ée]f[ée]r[ée]\b", "Preferred Customer"),
-    (r"\bforever\s*2\s*drive\b|\bforever2drive\b", "Forever2Drive Earned Incentive Program"),
-    (r"\bgem\s+manager\b", "Gem Manager Sapphire Manager Diamond Manager Eagle Manager Lines"),
-    (r"\b(?:do\s+not|don't|dont)\s+order\b|\b7\s+years?\b|\bseven\s+years?\b", "record retention no account activity consecutive seven year inactive"),
-    (r"\bmaximum\b.*\bcase\s+credits?\b|\bwithout\s+approval\b", "maximum case credit order written approval"),
-    (r"\bchange\b.*\bsponsor\b|\bnew\s+sponsor\b|\bdifferent\s+sponsor\b", "responsor choose new Sponsor Preferred Customer eligible"),
-    (r"\bsponsor\b.*\bmexico\b|\binternational\s+sponsor", "International Sponsoring Home Country Operating Company"),
-    (r"\bsue\b|\bcourt\b|\blawsuit\b|\barbitration\b", "dispute arbitration court class action waiver"),
-    (r"\bdivorc", "divorce legal separation transfer Forever Business"),
-)
 
 
 @lru_cache(maxsize=1)
@@ -63,18 +45,6 @@ def _client() -> OpenSearch:
     )
 
 
-def _expanded_query(message: str) -> str:
-    """Append policy vocabulary that maps user wording to document wording."""
-    additions: list[str] = []
-    message_lower = message.lower()
-    for pattern, expansion in QUERY_EXPANSIONS:
-        if re.search(pattern, message_lower, flags=re.I) and expansion not in additions:
-            additions.append(expansion)
-    if not additions:
-        return message
-    return message + "\n\nPolicy search terms: " + "; ".join(additions)
-
-
 def _language_filter(language: str) -> dict[str, Any]:
     """Use English policy sections as fallback until translated sections exist."""
     normalized = (language or "en").lower()
@@ -85,7 +55,6 @@ def _language_filter(language: str) -> dict[str, Any]:
 
 def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
     """Build a metadata-filtered BM25 query."""
-    query = _expanded_query(message)
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
@@ -98,7 +67,7 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
                 "should": [
                     {
                         "multi_match": {
-                            "query": query,
+                            "query": message,
                             "fields": [
                                 "section_id^8",
                                 "section_title^6",
@@ -112,7 +81,6 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
                     },
                     {"match_phrase": {"section_title": {"query": message, "boost": 5}}},
                     {"match_phrase": {"content": {"query": message, "boost": 2}}},
-                    {"match": {"search_text": {"query": query, "boost": 1.5}}},
                 ],
                 "minimum_should_match": 1,
             }
@@ -122,13 +90,12 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
 
 def _vector_query(message: str, country: str, language: str) -> dict[str, Any]:
     """Build a vector query with metadata filters."""
-    query = _expanded_query(message)
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "knn": {
                 "embedding": {
-                    "vector": embed_text(query),
+                    "vector": embed_text(message),
                     "k": settings.OPENSEARCH_CANDIDATE_COUNT,
                     "filter": {
                         "bool": {
@@ -148,7 +115,7 @@ def _vector_query(message: str, country: str, language: str) -> dict[str, Any]:
 def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, Any]:
     """Convert an OpenSearch hit to the row shape used by section scoring."""
     source = hit.get("_source", {}) or {}
-    row = {
+    return {
         "id": source.get("id") or hit.get("_id", ""),
         "source_file": source.get("source_file", ""),
         "source_uri": source.get("source_uri", ""),
@@ -164,7 +131,44 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
         "metadata": source.get("metadata", {}),
         "rank": float(hit.get("_score") or 0.0) * score_weight,
     }
-    return row
+
+
+def _selector_candidate_text(row: dict[str, Any], score: float, index: int) -> str:
+    """Format one candidate for the evidence selector."""
+    content = str(row.get("content") or "")
+    return (
+        f"Candidate {index}\n"
+        f"Section: {row.get('section_id', '')}\n"
+        f"Title: {row.get('section_title', '')}\n"
+        f"Current score: {score}\n"
+        f"Text:\n{content[:1200]}"
+    )
+
+
+def _parse_selector_ranks(text: str) -> list[int]:
+    """Parse selected candidate ranks from a compact JSON model response."""
+    stripped = text.strip()
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return []
+        try:
+            payload = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return []
+
+    parsed: list[int] = []
+    for rank in payload.get("selected_ranks", []):
+        try:
+            parsed_rank = int(rank)
+        except (TypeError, ValueError):
+            continue
+        if parsed_rank not in parsed:
+            parsed.append(parsed_rank)
+    return parsed
 
 
 class OpenSearchSectionProvider:
@@ -188,6 +192,8 @@ class OpenSearchSectionProvider:
             vector_response.get("hits", {}).get("hits", []),
             message,
         )
+        rows = self._select_evidence_rows(message, rows, correlation_id)
+
         documents = [
             self._document_from_row(row, score)
             for row, score in rows
@@ -241,6 +247,72 @@ class OpenSearchSectionProvider:
         self._normalize_opensearch_ranks(list(merged.values()))
         scored = [(row, _source_score(row, message)) for row in merged.values()]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
+
+    def _select_evidence_rows(
+        self,
+        message: str,
+        rows: list[tuple[dict[str, Any], float]],
+        correlation_id: str,
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Optionally let a small model choose the best evidence from candidates."""
+        if not settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED or not rows:
+            return rows
+
+        candidate_limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
+        candidates = rows[:candidate_limit]
+        candidate_text = "\n\n".join(
+            _selector_candidate_text(row, score, index)
+            for index, (row, score) in enumerate(candidates, start=1)
+        )
+        system_prompt = (
+            "You select evidence for ASK Vera. Do not answer the user's question. "
+            "Choose the candidate policy sections that most directly support an answer. "
+            "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
+            "Return only JSON."
+        )
+        user_prompt = (
+            f"User question:\n{message}\n\n"
+            f"Candidate sections:\n{candidate_text}\n\n"
+            f"Select up to {settings.OPENSEARCH_RESULT_COUNT} candidate ranks. "
+            "Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}."
+        )
+        try:
+            response = get_aws_clients().bedrock_runtime.converse(
+                modelId=settings.BEDROCK_MODEL_ARN,
+                system=[{"text": system_prompt}],
+                messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            )
+            text = response["output"]["message"]["content"][0].get("text", "")
+            ranks = _parse_selector_ranks(text)
+        except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
+            LOGGER.exception("opensearch_evidence_selector_failed", correlation_id=correlation_id)
+            return rows
+
+        selected: list[tuple[dict[str, Any], float]] = []
+        selected_ids: set[str] = set()
+        for rank in ranks:
+            if 1 <= rank <= len(candidates):
+                candidate = candidates[rank - 1]
+                row_id = str(candidate[0].get("id") or "")
+                if row_id not in selected_ids:
+                    selected.append(candidate)
+                    selected_ids.add(row_id)
+
+        if not selected:
+            return rows
+
+        remaining = [
+            candidate
+            for candidate in rows
+            if str(candidate[0].get("id") or "") not in selected_ids
+        ]
+        LOGGER.info(
+            "opensearch_evidence_selector_success",
+            correlation_id=correlation_id,
+            selected_count=len(selected),
+            candidate_count=len(candidates),
+        )
+        return [*selected, *remaining]
 
     def _normalize_opensearch_ranks(self, rows: list[dict[str, Any]]) -> None:
         """Turn raw OpenSearch scores into a small ranking hint.
