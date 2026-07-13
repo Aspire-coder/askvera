@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -18,6 +19,26 @@ from .models import RetrievedDocument, RetrievalResult
 from .section_index import _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
+
+
+QUERY_EXPANSIONS: tuple[tuple[str, str], ...] = (
+    (r"\bfbo\b", "Forever Business Owner FBO"),
+    (r"\bogcc\b", "Open Group Case Credits"),
+    (r"\bnew\s*cc\b", "NEW Case Credits"),
+    (r"\bcase\s+credits?\b", "Case Credit Open Group Case Credits Active Case Credits"),
+    (r"\bbecom\b", "become"),
+    (r"\bdevenir\b", "become enroll register"),
+    (r"\brabais\b", "discount"),
+    (r"\bclient(?:e)?\s+pr[ée]f[ée]r[ée]\b", "Preferred Customer"),
+    (r"\bforever\s*2\s*drive\b|\bforever2drive\b", "Forever2Drive Earned Incentive Program"),
+    (r"\bgem\s+manager\b", "Gem Manager Sapphire Manager Diamond Manager Eagle Manager Lines"),
+    (r"\b(?:do\s+not|don't|dont)\s+order\b|\b7\s+years?\b|\bseven\s+years?\b", "record retention no account activity consecutive seven year inactive"),
+    (r"\bmaximum\b.*\bcase\s+credits?\b|\bwithout\s+approval\b", "maximum case credit order written approval"),
+    (r"\bchange\b.*\bsponsor\b|\bnew\s+sponsor\b|\bdifferent\s+sponsor\b", "responsor choose new Sponsor Preferred Customer eligible"),
+    (r"\bsponsor\b.*\bmexico\b|\binternational\s+sponsor", "International Sponsoring Home Country Operating Company"),
+    (r"\bsue\b|\bcourt\b|\blawsuit\b|\barbitration\b", "dispute arbitration court class action waiver"),
+    (r"\bdivorc", "divorce legal separation transfer Forever Business"),
+)
 
 
 @lru_cache(maxsize=1)
@@ -42,21 +63,42 @@ def _client() -> OpenSearch:
     )
 
 
+def _expanded_query(message: str) -> str:
+    """Append policy vocabulary that maps user wording to document wording."""
+    additions: list[str] = []
+    message_lower = message.lower()
+    for pattern, expansion in QUERY_EXPANSIONS:
+        if re.search(pattern, message_lower, flags=re.I) and expansion not in additions:
+            additions.append(expansion)
+    if not additions:
+        return message
+    return message + "\n\nPolicy search terms: " + "; ".join(additions)
+
+
+def _language_filter(language: str) -> dict[str, Any]:
+    """Use English policy sections as fallback until translated sections exist."""
+    normalized = (language or "en").lower()
+    if normalized == "en":
+        return {"term": {"language": "en"}}
+    return {"terms": {"language": [normalized, "en"]}}
+
+
 def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
     """Build a metadata-filtered BM25 query."""
+    query = _expanded_query(message)
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "bool": {
                 "filter": [
                     {"term": {"country": country}},
-                    {"term": {"language": language}},
+                    _language_filter(language),
                     {"term": {"status": "active"}},
                 ],
                 "should": [
                     {
                         "multi_match": {
-                            "query": message,
+                            "query": query,
                             "fields": [
                                 "section_id^8",
                                 "section_title^6",
@@ -70,6 +112,7 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
                     },
                     {"match_phrase": {"section_title": {"query": message, "boost": 5}}},
                     {"match_phrase": {"content": {"query": message, "boost": 2}}},
+                    {"match": {"search_text": {"query": query, "boost": 1.5}}},
                 ],
                 "minimum_should_match": 1,
             }
@@ -79,18 +122,19 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
 
 def _vector_query(message: str, country: str, language: str) -> dict[str, Any]:
     """Build a vector query with metadata filters."""
+    query = _expanded_query(message)
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "knn": {
                 "embedding": {
-                    "vector": embed_text(message),
+                    "vector": embed_text(query),
                     "k": settings.OPENSEARCH_CANDIDATE_COUNT,
                     "filter": {
                         "bool": {
                             "filter": [
                                 {"term": {"country": country}},
-                                {"term": {"language": language}},
+                                _language_filter(language),
                                 {"term": {"status": "active"}},
                             ]
                         }
