@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from typing import Any
 
 from sqlalchemy import text
@@ -24,56 +25,12 @@ from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.section_index")
 
-TOKEN_STOPWORDS = {
-    "about",
-    "after",
-    "also",
-    "and",
-    "are",
-    "can",
-    "does",
-    "for",
-    "from",
-    "have",
-    "how",
-    "into",
-    "many",
-    "much",
-    "need",
-    "the",
-    "this",
-    "what",
-    "when",
-    "where",
-    "with",
-    "you",
-    "your",
-}
-
-RANK_TERMS = {"supervisor", "manager"}
-ONBOARDING_TERMS = {"become", "enroll", "enrollment", "register", "registration", "sign", "devenir"}
-FBO_TERMS = {"fbo", "forever", "business", "owner", "owners"}
-NOISY_FBO_CONTEXTS = {
-    "testamentary",
-    "transfer",
-    "transfers",
-    "inherit",
-    "inheritable",
-    "spouse",
-    "divorce",
-    "legal separation",
-    "approved fbo website",
-    "advertisement",
-    "internet policies",
-    "sponsored into a country outside",
-}
-
-
 def _tokens(text_value: str) -> list[str]:
-    """Return search-worthy lowercase tokens in source order."""
+    """Return Unicode word tokens in source order without language-specific rules."""
     tokens: list[str] = []
-    for token in re.findall(r"[a-z0-9]+", text_value.lower()):
-        if len(token) <= 2 or token in TOKEN_STOPWORDS:
+    normalized = unicodedata.normalize("NFKC", text_value or "").casefold()
+    for token in re.findall(r"[^\W_]+", normalized, flags=re.UNICODE):
+        if len(token) <= 1:
             continue
         if token not in tokens:
             tokens.append(token)
@@ -81,14 +38,14 @@ def _tokens(text_value: str) -> list[str]:
 
 
 def _ts_query(tokens: list[str]) -> str:
-    """Build a safe broad Postgres tsquery from normalized tokens."""
-    cleaned = [token for token in tokens if re.fullmatch(r"[a-z0-9]+", token)]
+    """Build a safe broad Postgres tsquery from Unicode-normalized tokens."""
+    cleaned = [token.replace("'", "") for token in tokens if token and "'" not in token]
     return " | ".join(f"{token}:*" for token in cleaned) or "policy"
 
 
 def _token_regex(tokens: list[str]) -> str:
     """Build a broad regex fallback for candidate collection."""
-    cleaned = [re.escape(token) for token in tokens if re.fullmatch(r"[a-z0-9]+", token)]
+    cleaned = [re.escape(token) for token in tokens if token]
     if not cleaned:
         return r"policy"
     return r"\m(?:" + "|".join(cleaned) + r")\M"
@@ -106,216 +63,86 @@ def _key_phrases(message: str) -> list[str]:
     return phrases[:12]
 
 
-def _exact_topic_score(message: str, title: str, content: str) -> float:
-    """Reward literal policy-topic matches without encoding document-specific rules.
+def _normalize_text(value: str) -> str:
+    """Normalize whitespace and case while retaining every language's letters."""
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    return " ".join(normalized.split())
 
-    Formal program names and rank names are normally preserved in a policy heading or
-    its opening paragraph. Giving those literal matches a clear ranking preference is
-    language-agnostic and lets each document supply its own vocabulary.
-    """
-    normalized_message = " ".join(message.casefold().split())
-    normalized_title = " ".join(title.casefold().split())
-    normalized_content = " ".join(content.casefold().split())
+
+def _character_ngrams(value: str, size: int = 3) -> set[str]:
+    """Provide language-neutral lexical matching when word boundaries vary."""
+    compact = "".join(character for character in _normalize_text(value) if character.isalnum())
+    if len(compact) < size:
+        return {compact} if compact else set()
+    return {compact[index : index + size] for index in range(len(compact) - size + 1)}
+
+
+def _character_overlap(left: str, right: str) -> float:
+    """Measure how much of a shorter named phrase appears in the other text."""
+    left_ngrams = _character_ngrams(left)
+    right_ngrams = _character_ngrams(right)
+    if not left_ngrams or not right_ngrams:
+        return 0.0
+    return len(left_ngrams & right_ngrams) / min(len(left_ngrams), len(right_ngrams))
+
+
+def _exact_topic_score(message: str, title: str, content: str) -> float:
+    """Reward a document's own named topic without policy-specific heuristics."""
+    normalized_message = _normalize_text(message)
+    normalized_title = _normalize_text(title)
+    normalized_content = _normalize_text(content[:1800])
     score = 0.0
 
+    # A section title is content-managed data. If it appears in the question, it is
+    # the strongest generic evidence that this section is about the asked topic.
+    if normalized_title and len(normalized_title) >= 3 and normalized_title in normalized_message:
+        score += 1.6
+
     for phrase in _key_phrases(message):
-        if len(phrase.split()) < 2:
-            continue
         if phrase in normalized_title:
             score = max(score, 1.5)
-        elif phrase in normalized_content[:1800]:
+        elif phrase in normalized_content:
             score = max(score, 0.65)
 
-    # Program names often consist of a single distinctive token, such as a branded
-    # initiative containing a number. This is intentionally generic rather than a
-    # curated list of program names.
     for token in _tokens(message):
-        if len(token) < 6 or not any(character.isdigit() for character in token):
+        if len(token) < 4 or not any(character.isdigit() for character in token):
             continue
         if token in normalized_title:
             score = max(score, 1.8)
-        elif token in normalized_content[:1800]:
+        elif token in normalized_content:
             score = max(score, 0.9)
 
     return score
 
 
-def _definition_intent(message: str) -> bool:
-    return bool(re.search(r"\b(?:what|who)\s+(?:is|are)\b|\bdefine\b|\bmeaning\b", message.lower()))
-
-
-def _onboarding_intent(message: str) -> bool:
-    message_tokens = set(_tokens(message))
-    return bool(message_tokens & ONBOARDING_TERMS or re.search(r"\bsign\s+up\b", message.lower()))
-
-
-def _fbo_definition_intent(message: str) -> bool:
-    message_tokens = set(_tokens(message))
-    return _definition_intent(message) and bool({"fbo", "owner"} & message_tokens) and bool(message_tokens & FBO_TERMS)
-
-
-def _rank_phrase_from_message(message: str) -> str | None:
-    """Find the most specific rank phrase in the user question."""
-    message_lower = message.lower()
-    rank_matches = re.findall(
-        r"\b(?:assistant\s+supervisor|assistant\s+manager|recognized\s+manager|eagle\s+manager|"
-        r"senior\s+manager|soaring\s+manager|sapphire\s+manager|diamond\s+manager|gem\s+manager|"
-        r"supervisor|manager)\b",
-        message_lower,
-    )
-    if not rank_matches:
-        return None
-    return max(rank_matches, key=lambda value: (len(value.split()), len(value)))
-
-
-def _bonus_phrase_from_message(message: str) -> str | None:
-    """Find a concrete bonus phrase instead of treating all bonus questions alike."""
-    message_lower = message.lower()
-    bonus_phrases = [
-        "personal retail bonus",
-        "preferred customer bonus",
-        "wholesale novus customer bonus",
-        "wholesale customer bonus",
-        "novus customer bonus",
-        "personal bonus",
-        "leadership bonus",
-        "volume bonus",
-    ]
-    for phrase in bonus_phrases:
-        if phrase in message_lower:
-            return phrase
-    return None
-
-
-def _rank_requirement_score(message: str, content: str) -> float:
-    """Prefer the exact rank requirement over neighboring rank sections."""
-    message_tokens = set(_tokens(message))
-    if not ({"case", "credit", "credits"} & message_tokens or {"qualify", "qualification"} & message_tokens):
-        return 0.0
-
-    content_lower = content.lower()
-    rank_phrase = _rank_phrase_from_message(message)
-    rank_phrases = [rank_phrase] if rank_phrase else [
-        phrase
-        for phrase in _key_phrases(message)
-        if set(phrase.split()) & RANK_TERMS
-    ]
-    for phrase in sorted(rank_phrases, key=lambda value: (len(value.split()), len(value)), reverse=True):
-        exact_phrase = rf"\b{re.escape(phrase)}\b"
-        if len(phrase.split()) == 1:
-            exact_phrase = rf"(?<!assistant\s)\b{re.escape(phrase)}\b"
-        direct_patterns = [
-            rf"{exact_phrase}\s+is\s+achieved\b",
-            rf"{exact_phrase}\s+is\s+earned\b",
-            rf"{exact_phrase}\s+requires\b",
-            rf"\breaches\s+the\s+level\s+of\s+{re.escape(phrase)}\b",
-            rf"\bqualif(?:y|ies|ied)\s+as\s+{re.escape(phrase)}\b",
-        ]
-        if any(re.search(pattern, content_lower[:1800]) for pattern in direct_patterns):
-            return 3.0
-        if len(phrase.split()) == 1 and re.search(rf"\b[a-z]+\s+{re.escape(phrase)}\s+is\s+achieved\b", content_lower[:600]):
-            return -1.25
-    return 0.0
-
-
-def _intent_score(message: str, row: dict[str, Any]) -> float:
-    """Score whether a section answers the user's question type, not just its words."""
-    section_id = str(row.get("section_id") or "").lower()
-    title = str(row.get("section_title") or "").lower()
-    content = str(row.get("content") or "").lower()
-    search_text = str(row.get("search_text") or "").lower()
-    message_tokens = set(_tokens(message))
-    score = 0.0
-
-    if _fbo_definition_intent(message):
-        if section_id == "1.01" or content.startswith("1.01 "):
-            score += 3.5
-        if "independent forever business owner" in content or "independent forever business owners" in content:
-            score += 1.4
-        if any(noisy in search_text[:1600] for noisy in NOISY_FBO_CONTEXTS):
-            score -= 2.6
-        if re.search(r"\b18\.\d+", section_id) or re.search(r"\b22\.\d+", section_id):
-            score -= 1.8
-
-    if _onboarding_intent(message) and ({"fbo", "owner"} & message_tokens):
-        if section_id.startswith("17.01"):
-            score += 4.0
-        if "fbo relationship" in content[:500] or "only adult individuals" in content[:700]:
-            score += 1.8
-        if {"application", "agreement", "contractual", "register", "purchase"} & set(_tokens(content[:1200])):
-            score += 0.9
-        if any(noisy in search_text[:1800] for noisy in NOISY_FBO_CONTEXTS):
-            score -= 2.0
-        if section_id.startswith(("15.", "16.", "18.", "22.")):
-            score -= 1.0
-
-    bonus_phrase = _bonus_phrase_from_message(message)
-    if bonus_phrase:
-        if bonus_phrase in title or bonus_phrase in content[:1800]:
-            score += 3.0
-        if section_id.startswith("4.01") or section_id.startswith("4.07"):
-            score += 1.0
-        if "bonus" not in content[:1800]:
-            score -= 1.0
-        if section_id.startswith(("1.02", "11.", "12.", "22.")):
-            score -= 1.4
-
-    rank_phrase = _rank_phrase_from_message(message)
-    if rank_phrase:
-        exact_rank = rf"\b{re.escape(rank_phrase)}\b"
-        if re.search(rf"{exact_rank}\s+is\s+achieved\b", content[:2000]):
-            score += 2.5
-        if "case credit" in content[:2200] and ("achieved" in content[:2200] or "reaches the level" in content[:2200]):
-            score += 0.8
-        if re.fullmatch(r"\d+\.\d+", section_id) and len(re.findall(r"\bis\s+achieved\b", content[:2500])) > 1:
-            score -= 7.0
-        if section_id.startswith(("11.", "12.")) and "chairman" in content[:1200]:
-            score -= 2.2
-
-    return score
-
-
 def _source_score(row: dict[str, Any], message: str) -> float:
-    """Blend database rank with exact title/section/text matches."""
+    """Blend search rank with generic, document-derived lexical alignment."""
     base_score = float(row.get("rank") or 0.0)
     section_id = str(row.get("section_id") or "").lower()
     title = str(row.get("section_title") or "").lower()
     content = str(row.get("content") or "").lower()
     search_text = str(row.get("search_text") or "").lower()
-    message_lower = message.lower()
+    message_lower = _normalize_text(message)
     message_tokens = set(_tokens(message))
     content_tokens = set(_tokens(search_text[:2000]))
     phrases = _key_phrases(message)
 
     score = base_score
-    if section_id and re.search(rf"\b{re.escape(section_id)}\b", message_lower):
+    if section_id and section_id in message_lower:
         score += 0.75
-    if title and title in message_lower:
-        score += 0.65
-    if title and all(token in message_tokens for token in _tokens(title)):
-        score += 0.4
+    if title and _normalize_text(title) in message_lower:
+        score += 0.8
+    title_overlap = _character_overlap(message, title)
+    if title_overlap >= 0.68:
+        score += title_overlap * 1.1
     if message_tokens:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
     score += _exact_topic_score(message, title, content)
     for phrase in phrases:
-        if phrase in title:
+        if phrase in _normalize_text(title):
             score += 0.35
-        elif phrase in content[:800]:
+        elif phrase in _normalize_text(content[:800]):
             score += 0.12
-    if _definition_intent(message):
-        for phrase in phrases:
-            if re.search(rf"\b{re.escape(phrase)}\b(?:\s*\([^)]+\))?\s*[:\-]", content[:900]):
-                score += 0.85
-            elif re.search(rf"\b{re.escape(phrase)}\b\s+(?:is|are)\b", content[:600]):
-                score += 0.45
-    if _onboarding_intent(message):
-        onboarding_words = {"applicant", "application", "contractual", "relationship", "purchase", "submit"}
-        if onboarding_words & content_tokens:
-            score += 0.55
-        if "sponsored into a country outside" in content:
-            score -= 0.25
-    score += _rank_requirement_score(message, content)
-    score += _intent_score(message, row)
     return round(score, 6)
 
 
@@ -458,14 +285,14 @@ class SectionSearchProvider:
                         embedding,
                         metadata,
                         ts_rank_cd(
-                            to_tsvector('english', search_text),
-                            to_tsquery('english', :ts_query)
+                            to_tsvector('simple', search_text),
+                            to_tsquery('simple', :ts_query)
                         ) AS rank
                     FROM policy_sections
                     WHERE country = :country
                       AND language = :language
                       AND (
-                        to_tsvector('english', search_text) @@ to_tsquery('english', :ts_query)
+                        to_tsvector('simple', search_text) @@ to_tsquery('simple', :ts_query)
                         OR lower(search_text) ~ :token_regex
                       )
                 )

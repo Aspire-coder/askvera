@@ -45,3 +45,20 @@ def test_distinctive_program_name_beats_generic_policy_text() -> None:
 
     question = "What is Forever2Drive?"
     assert _source_score(program, question) > _source_score(generic, question)
+
+
+def test_document_title_match_is_unicode_safe() -> None:
+    """Scoring must use the document language rather than an English term list."""
+    governing = _row(
+        "7.03",
+        "Conditions pour devenir Manager",
+        "Les conditions pour devenir Manager sont decrites dans cette section.",
+    )
+    nearby = _row(
+        "7.04",
+        "Programme de reconnaissance",
+        "Un Manager peut recevoir une reconnaissance ulterieure.",
+    )
+
+    question = "Quelles sont les conditions pour devenir Manager?"
+    assert _source_score(governing, question) > _source_score(nearby, question)

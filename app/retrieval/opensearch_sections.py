@@ -84,6 +84,11 @@ def _language_filter(language: str) -> dict[str, Any]:
     return {"terms": {"language": languages}}
 
 
+def _language_key(language: str) -> str:
+    """Use one locale convention for documents and content-managed glossary entries."""
+    return (language or "en").split("-", 1)[0].lower()
+
+
 def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
     """Build a metadata-filtered BM25 query."""
     return {
@@ -291,12 +296,12 @@ class OpenSearchSectionProvider:
 
         normalized_message = f" {_normalize_text(message)} "
         normalized_country = (country or "").upper()
-        normalized_language = (language or "").lower()
+        normalized_language = _language_key(language)
         queries: list[str] = []
 
         for entry in _load_search_glossary():
             countries = [str(value).upper() for value in entry.get("country", ["*"])]
-            languages = [str(value).lower() for value in entry.get("language", ["*"])]
+            languages = [_language_key(str(value)) if value != "*" else "*" for value in entry.get("language", ["*"])]
             if "*" not in countries and normalized_country not in countries:
                 continue
             if "*" not in languages and normalized_language not in languages:
@@ -324,8 +329,14 @@ class OpenSearchSectionProvider:
         merged: dict[str, dict[str, Any]] = {}
         for hit in text_hits:
             row = _hit_to_row(hit)
-            if row["id"]:
-                merged[row["id"]] = row
+            row_id = str(row["id"] or "")
+            if not row_id:
+                continue
+            existing = merged.get(row_id)
+            if existing is None or float(row.get("rank") or 0.0) > float(existing.get("rank") or 0.0):
+                # Original and glossary searches may return the same section. Keep
+                # the strongest text result instead of letting a later query erase it.
+                merged[row_id] = row
         for hit in vector_hits:
             row = _hit_to_row(hit, score_weight=settings.OPENSEARCH_VECTOR_WEIGHT)
             if not row["id"]:

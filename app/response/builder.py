@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -179,8 +180,6 @@ class ResponseBuilder:
             and (not answer_numbers or bool(answer_numbers & self._numbers(document.content or document.excerpt)))
         ]
         selected = supported[: 1 if answer_numbers else 2]
-        if not selected and not answer_numbers:
-            selected = ranked[: min(2, len(ranked))]
         return [self._source_for_answer(document, answer) for document in selected]
 
     def _support_score(self, answer: str, source_text: str) -> float:
@@ -202,10 +201,11 @@ class ResponseBuilder:
         return 0.35 if self._numbers(answer) else 0.12
 
     def _tokens(self, text: str) -> set[str]:
-        """Return terms useful for citation support matching."""
+        """Return Unicode terms useful for citation support matching."""
+        normalized = unicodedata.normalize("NFKC", text or "").casefold()
         return {
             token
-            for token in re.findall(r"[a-z0-9]+", text.lower())
+            for token in re.findall(r"[^\W_]+", normalized, flags=re.UNICODE)
             if len(token) > 3 and token not in REFERENCE_STOPWORDS
         }
 

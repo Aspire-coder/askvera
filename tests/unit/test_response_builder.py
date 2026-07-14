@@ -169,3 +169,27 @@ def test_response_builder_does_not_attach_policy_sources_to_guardrail_copy() -> 
     assert response.citations == []
     assert response.metadata["failure_layer"] == "aws_guardrail"
     assert response.metadata["response_source"] == "guardrail"
+
+
+def test_response_builder_does_not_attach_an_unrelated_source() -> None:
+    """No reference is safer than displaying a policy section that does not support the reply."""
+    document = RetrievedDocument(
+        id="unrelated",
+        title="Policy - Sec 8.08: Sapphire Manager",
+        content="Sapphire Manager recognition requirements.",
+        source="s3://kb/policy.pdf",
+        score=0.9,
+    )
+    response = ResponseBuilder().build(
+        model_response=ModelResponse(
+            text="Please contact support for help with your account.",
+            citations=[document.to_source()],
+            confidence=0.9,
+            provider="claude",
+            model_name="model",
+        ),
+        retrieval_result=RetrievalResult(documents=[document], citations=[], confidence=0.9),
+        correlation_id="cid",
+    )
+
+    assert response.citations == []

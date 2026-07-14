@@ -77,16 +77,18 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     second_score = float(documents[1].score or 0.0) if len(documents) > 1 else 0.0
     score_margin = top_score - second_score
     current_document = _has_current_locale_document(documents, country, language)
-    exact_topic_match = any(_has_topic_match(query, document) for document in documents[:3])
-    no_serious_conflict = score_margin >= -0.15
+    exact_topic_match = any(_has_topic_match(query, document) for document in documents)
     enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
 
     # Safety is based on approved document metadata and retrieval confidence,
     # not an English list of business or rule words. Topic overlap is retained
     # only for diagnostics and retrieval-quality monitoring.
-    approved = bool(current_document and enough_score and no_serious_conflict)
+    approved = bool(current_document and enough_score)
     reason = "approved" if approved else "insufficient_approved_evidence"
-    evidence = documents[:3] if approved else []
+    # The retrieval provider has already bounded this reviewed evidence set. Keeping
+    # it intact avoids dropping the governing section merely because it ranked fourth
+    # before the optional evidence selector is applied.
+    evidence = documents if approved else []
     return EvidenceDecision(
         approved=approved,
         reason=reason,
@@ -118,7 +120,7 @@ def _has_current_locale_document(documents: list[RetrievedDocument], country: st
     allowed_languages = {normalized_language}
     if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
         allowed_languages.add("en")
-    for document in documents[:3]:
+    for document in documents:
         document_country = (document.country or "").upper()
         document_language = _locale_key(document.language)
         if document_country == normalized_country and document_language in allowed_languages:
