@@ -553,7 +553,20 @@ export function GenericWidgetWrapper({
           }}
         >
           <Header config={config} selectedCountry={selectedCountry} connection={connection} menuOpen={menuOpen} onToggleMenu={() => dispatch({ type: "TOGGLE_MENU" })} onClose={closeWidget} />
-          {menuOpen ? <Menu config={config} payload={localePayload} onEscalate={onEscalate} onNewChat={onNewChat} /> : null}
+          {menuOpen ? (
+            <Menu
+              config={config}
+              payload={localePayload}
+              onDismiss={() => dispatch({ type: "SET_MENU_OPEN", open: false })}
+              onEscalate={onEscalate}
+              onNewChat={(payload) => {
+                dispatch({ type: "SET_MENU_OPEN", open: false });
+                dispatch({ type: "SET_MESSAGES", messages: [] });
+                dispatch({ type: "CLEAR_DRAFT_MESSAGE" });
+                onNewChat?.(payload);
+              }}
+            />
+          ) : null}
           {showSuccess ? (
             <div className="gw-success-banner" role="status">
               <span>{config.successText}</span>

@@ -460,7 +460,7 @@ export function WidgetRuntime({
       onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={(payload) => void sendChat(payload)}
       onMessageFeedback={handleMessageFeedback}
-      onNewChat={() => setMessages([{ id: buildId("new-chat"), role: "assistant", content: "New chat started." }])}
+      onNewChat={() => setMessages([])}
     />
   );
 }

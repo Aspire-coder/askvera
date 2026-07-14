@@ -10,6 +10,16 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
 
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+
 export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -34,12 +44,13 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
     const documentToPrint = config.policyLinks.find((link) => link.id === documentId);
     if (!documentToPrint?.html) return;
 
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    const printWindow = window.open("", "_blank");
     if (!printWindow) {
       openDocument(documentId);
       return;
     }
 
+    printWindow.opener = null;
     printWindow.document.write(`<!doctype html><html><head><title>${documentToPrint.label}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 28px;color:#1d1d1f;line-height:1.55}h1,h2,h3{line-height:1.25}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d9ddd9;padding:8px;text-align:left}@media print{body{margin:0;max-width:none}}</style></head><body>${documentToPrint.html}</body></html>`);
     printWindow.document.close();
     printWindow.focus();
@@ -91,11 +102,10 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
             <span aria-hidden="true">{"\u2713"}</span>
             {link.html ? (
               <div className="gw-legal-document-actions">
-                <span className="gw-legal-document-name">{link.label}</span>
-                <div>
-                  <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">Read</button>
-                  <button type="button" className="gw-legal-print-button" onClick={() => printDocument(link.id)}>Save as PDF</button>
-                </div>
+                <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">{link.label}</button>
+                <button type="button" className="gw-legal-print-button" onClick={() => printDocument(link.id)} aria-label={`Save ${link.label} as PDF`} title="Save as PDF">
+                  <DownloadIcon />
+                </button>
               </div>
             ) : (
               <a href={link.href} target={link.target || "_blank"} rel="noreferrer">

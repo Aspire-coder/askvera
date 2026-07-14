@@ -1982,25 +1982,21 @@
   gap: 10px;
 }
 
-.gw-legal-document-name {
+.gw-legal-document-actions .gw-legal-link-button {
   min-width: 0;
-  color: #1d1d1f;
-  font-size: 13px;
-  font-weight: 620;
-  line-height: 1.35;
-}
-
-.gw-legal-document-actions > div {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 6px;
+  flex: 1 1 auto;
+  text-align: left;
 }
 
 .gw-legal-print-button {
-  min-height: 28px;
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-grid;
+  place-items: center;
   border: 1px solid rgba(36, 107, 69, 0.18);
   border-radius: 999px;
-  padding: 0 9px;
+  padding: 0;
   background: rgba(238, 247, 241, 0.9);
   color: #246b45;
   font: inherit;
@@ -2009,12 +2005,22 @@
   cursor: pointer;
 }
 
+.gw-legal-print-button svg {
+  width: 15px;
+  height: 15px;
+}
+
 .gw-legal-print-button:hover,
 .gw-legal-print-button:focus-visible {
   border-color: #246b45;
   background: #246b45;
   color: #fff;
   outline: none;
+}
+
+.gw-legal-document-actions .gw-legal-link-button::before,
+.gw-legal-document-actions .gw-legal-link-button::after {
+  content: none;
 }
 
 /* Refined ASK Vera product skin */
