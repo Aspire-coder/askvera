@@ -51,3 +51,39 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig, options: 
   const session = store.write(envelope.data);
   return { token: session.token, expiresAt: session.expiresAt, session };
 }
+
+/**
+ * Renews the in-memory widget token after a protected API request receives a
+ * 401. If the old token cannot be renewed, initialization is used as the
+ * normal, origin-validated fallback.
+ */
+export async function renewWidgetAuth(config: AskVeraRuntimeConfig, currentToken?: string): Promise<WidgetAuthResult> {
+  if (!config.widgetId) {
+    return {};
+  }
+
+  const store = createWidgetSessionStore(config.widgetAuthStorageKey);
+  const client = createApiClient({ baseUrl: config.apiUrl });
+
+  if (currentToken) {
+    try {
+      const refreshEnvelope = await refreshWidget(client, currentToken);
+      if (refreshEnvelope.data) {
+        const session = store.write(refreshEnvelope.data);
+        return { token: session.token, expiresAt: session.expiresAt, session };
+      }
+    } catch {
+      // A fully expired token cannot be refreshed. Initialize a new session below.
+    }
+  }
+
+  const envelope = await initializeWidget(client, {
+    widgetId: config.widgetId,
+    origin: getCurrentOrigin()
+  });
+  if (!envelope.data) {
+    throw new Error("Widget initialization did not return a session token.");
+  }
+  const session = store.write(envelope.data);
+  return { token: session.token, expiresAt: session.expiresAt, session };
+}

@@ -7,6 +7,7 @@ import {
   BackendUnavailableError,
   createApiClient,
   describeApiError,
+  healthCheck,
   loadConfig,
   loadPrivacy,
   loadWidgetConfig,
@@ -19,7 +20,7 @@ import { buildThemeConfig, buildWidgetConfig, type BackendConfig } from "../conf
 import { widgetEventBus, widgetEventTypes } from "../events";
 import { GenericWidgetWrapper } from "../generic-widget/GenericWidgetWrapper";
 import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../generic-widget/types";
-import { authenticateWidget } from "./auth";
+import { renewWidgetAuth } from "./auth";
 
 type WidgetRuntimeProps = {
   apiBaseUrl: string;
@@ -225,12 +226,15 @@ export function WidgetRuntime({
   const [activeAuthToken, setActiveAuthToken] = useState(authToken);
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
+  const activeAuthTokenRef = useRef(authToken);
+  const authRefreshPromiseRef = useRef<Promise<string | undefined> | null>(null);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
+  const healthClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
 
   const checkBackendHealth = useCallback(async () => {
-    const envelope = await loadWidgetConfig(apiClient);
+    const envelope = await healthCheck(healthClient);
     return envelope.success !== false && Boolean(envelope.data);
-  }, [apiClient]);
+  }, [healthClient]);
 
   const widgetConfig = useMemo(() => {
     const backendConfig: BackendConfig | undefined = apiConfig
@@ -279,7 +283,36 @@ export function WidgetRuntime({
 
   useEffect(() => {
     setActiveAuthToken(authToken);
+    activeAuthTokenRef.current = authToken;
   }, [authToken]);
+
+  const refreshWidgetAuth = useCallback(async () => {
+    if (!widgetId) return undefined;
+    if (authRefreshPromiseRef.current) return authRefreshPromiseRef.current;
+
+    const refreshPromise = renewWidgetAuth({ apiUrl: apiBaseUrl, widgetId }, activeAuthTokenRef.current)
+      .then((refreshed) => {
+        setActiveAuthToken(refreshed.token);
+        activeAuthTokenRef.current = refreshed.token;
+        return refreshed.token;
+      })
+      .finally(() => {
+        authRefreshPromiseRef.current = null;
+      });
+    authRefreshPromiseRef.current = refreshPromise;
+    return refreshPromise;
+  }, [apiBaseUrl, widgetId]);
+
+  const withWidgetAuthRetry = useCallback(async <T,>(request: (client: ReturnType<typeof createApiClient>) => Promise<T>) => {
+    try {
+      return await request(apiClient);
+    } catch (error) {
+      if (!(error instanceof ApiUnauthorizedError)) throw error;
+      const refreshedToken = await refreshWidgetAuth();
+      if (!refreshedToken) throw error;
+      return request(createApiClient({ baseUrl: apiBaseUrl, authToken: refreshedToken }));
+    }
+  }, [apiBaseUrl, apiClient, refreshWidgetAuth]);
 
   const upsertMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => {
@@ -291,7 +324,7 @@ export function WidgetRuntime({
 
   useEffect(() => {
     let active = true;
-    loadCompleteWidgetConfig(apiClient, selectedLocale.country, selectedLocale.language)
+    withWidgetAuthRetry((client) => loadCompleteWidgetConfig(client, selectedLocale.country, selectedLocale.language))
       .then((loadedConfig) => {
         if (!active) return;
         widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, {});
@@ -317,31 +350,21 @@ export function WidgetRuntime({
     return () => {
       active = false;
     };
-  }, [apiClient, selectedLocale.country, selectedLocale.language, upsertMessage]);
+  }, [selectedLocale.country, selectedLocale.language, upsertMessage, withWidgetAuthRetry]);
 
   useEffect(() => {
     if (!clearConversationSignal) return;
     setMessages([{ id: buildId("clear-chat"), role: "assistant", content: "Conversation cleared." }]);
   }, [clearConversationSignal]);
 
-  const refreshWidgetAuth = async () => {
-    if (!widgetId) return undefined;
-    const refreshed = await authenticateWidget({ apiUrl: apiBaseUrl, widgetId }, { forceNew: true });
-    setActiveAuthToken(refreshed.token);
-    return refreshed.token;
-  };
-
-  const submitChatRequest = async (payload: MessageEventPayload, tokenOverride?: string) => {
-    const client = tokenOverride
-      ? createApiClient({ baseUrl: apiBaseUrl, authToken: tokenOverride })
-      : apiClient;
-    return sendMessage(client, {
+  const submitChatRequest = async (payload: MessageEventPayload) => {
+    return withWidgetAuthRetry((client) => sendMessage(client, {
       message: payload.message,
       sessionId: payload.sessionId,
       country: payload.selectedCountry,
       language: payload.selectedLanguage,
       role: "new_prospect"
-    });
+    }));
   };
 
   const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
@@ -355,15 +378,7 @@ export function WidgetRuntime({
     if (showUserMessage) appendMessage({ id: buildId("user"), role: "user", content: payload.message });
     setLoading(true);
     try {
-      let envelope;
-      try {
-        envelope = await submitChatRequest(payload);
-      } catch (error) {
-        if (!(error instanceof ApiUnauthorizedError)) throw error;
-        const refreshedToken = await refreshWidgetAuth();
-        if (!refreshedToken) throw error;
-        envelope = await submitChatRequest(payload, refreshedToken);
-      }
+      const envelope = await submitChatRequest(payload);
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
       const assistantMessage: WidgetMessage = {
         id: buildId("assistant"),
@@ -395,13 +410,13 @@ export function WidgetRuntime({
   };
 
   const handleConsent = async (payload: ConsentEventPayload) => {
-    await submitConsent(apiClient, {
+    await withWidgetAuthRetry((client) => submitConsent(client, {
       sessionId: payload.sessionId,
       country: payload.selectedCountry,
       lang: payload.selectedLanguage,
       timestamp: payload.timestamp,
       version: payload.policyVersion
-    });
+    }));
     setMessages((current) => current.filter((message) => !isConsentInstructionMessage(message)));
     if (pendingMessage) {
       const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
@@ -412,7 +427,7 @@ export function WidgetRuntime({
 
   const handleMessageFeedback = async (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => {
     try {
-      await submitFeedback(apiClient, {
+      await withWidgetAuthRetry((client) => submitFeedback(client, {
         sessionId: state.sessionId,
         messageId: message.id,
         rating,
@@ -422,7 +437,7 @@ export function WidgetRuntime({
           correlationId: message.metadata?.correlationId,
           confidence: message.metadata?.confidence
         }
-      });
+      }));
     } catch (error) {
       widgetEventBus.emit(widgetEventTypes.API_ERROR, { visitorId: state.visitorId, sessionId: state.sessionId, error: describeApiError(error) });
     }
