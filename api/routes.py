@@ -259,14 +259,17 @@ def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse
 
 @router.get("/health")
 def health() -> JSONResponse:
-    """Return fast ALB health status without AWS calls."""
+    """Return fast ALB health status in the same envelope used by the widget."""
     import main
 
     status = "draining" if main.shutdown_requested else "healthy"
-    return JSONResponse(
-        status_code=503 if main.shutdown_requested else 200,
-        content={"status": status, "version": settings.APP_VERSION, "timestamp": datetime.now(UTC).isoformat()},
+    correlation_id = "health"
+    envelope = Envelope(
+        success=not main.shutdown_requested,
+        data={"status": status, "version": settings.APP_VERSION},
+        correlationId=correlation_id,
     )
+    return JSONResponse(status_code=503 if main.shutdown_requested else 200, content=envelope.model_dump())
 
 
 @router.get("/health/deep")
