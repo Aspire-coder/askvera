@@ -2,6 +2,7 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useReducer, useRef, useSt
 import { ConsentPanel } from "./ConsentPanel";
 import { FloatingLauncher } from "./FloatingLauncher";
 import { Header } from "./Header";
+import { Menu } from "./Menu";
 import { MessageFeed, type LoadingDisplayState } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
 import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetMessage, WidgetTheme } from "./types";
@@ -20,6 +21,7 @@ import {
   selectIsOpen,
   selectLanguage,
   selectLoading,
+  selectMenuOpen,
   selectRenderState,
   selectShowSuccess,
   widgetReducer
@@ -66,7 +68,6 @@ export function GenericWidgetWrapper({
   onSendMessage,
   onMessageCopied,
   onMessageFeedback,
-  onDownloadSource,
   onEscalate,
   onNewChat
 }: GenericWidgetWrapperProps) {
@@ -160,6 +161,7 @@ export function GenericWidgetWrapper({
   const [consentDeclined, setConsentDeclined] = useState(false);
   const [localRequestPending, setLocalRequestPending] = useState(false);
   const isOpen = selectIsOpen(widgetState);
+  const menuOpen = selectMenuOpen(widgetState);
   const selectedCountry = selectCountry(widgetState);
   const selectedLanguage = selectLanguage(widgetState);
   const message = selectDraftMessage(widgetState);
@@ -550,7 +552,8 @@ export function GenericWidgetWrapper({
             if (event.key === "Escape") closeWidget();
           }}
         >
-          <Header config={config} selectedCountry={selectedCountry} connection={connection} onClose={closeWidget} />
+          <Header config={config} selectedCountry={selectedCountry} connection={connection} menuOpen={menuOpen} onToggleMenu={() => dispatch({ type: "TOGGLE_MENU" })} onClose={closeWidget} />
+          {menuOpen ? <Menu config={config} payload={localePayload} onEscalate={onEscalate} onNewChat={onNewChat} /> : null}
           {showSuccess ? (
             <div className="gw-success-banner" role="status">
               <span>{config.successText}</span>
@@ -616,7 +619,6 @@ export function GenericWidgetWrapper({
                 loadingLabel={loadingLabel}
                 onCopyMessage={handleMessageCopied}
                 onMessageFeedback={handleMessageFeedback}
-                onDownloadSource={onDownloadSource}
               />
             ) : null}
             {chatContentVisible && suggestedTopics.length ? (

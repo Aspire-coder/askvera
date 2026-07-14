@@ -13,10 +13,8 @@ export function Menu({
 }) {
   return (
     <div className="gw-menu" role="menu">
-      <button type="button" className="gw-menu-item" role="menuitem">{config.menu.settings}</button>
-      <button type="button" className="gw-menu-item" role="menuitem">{config.menu.history}</button>
       <button type="button" className="gw-menu-item" role="menuitem" onClick={() => onNewChat?.(payload)}>{config.menu.newChat}</button>
-      <button type="button" className="gw-menu-item" role="menuitem" onClick={() => onEscalate?.(payload)}>{config.menu.escalate}</button>
+      {onEscalate ? <button type="button" className="gw-menu-item" role="menuitem" onClick={() => onEscalate(payload)}>{config.menu.escalate}</button> : null}
     </div>
   );
 }

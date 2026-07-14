@@ -30,6 +30,22 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   };
 
+  const printDocument = (documentId: string) => {
+    const documentToPrint = config.policyLinks.find((link) => link.id === documentId);
+    if (!documentToPrint?.html) return;
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) {
+      openDocument(documentId);
+      return;
+    }
+
+    printWindow.document.write(`<!doctype html><html><head><title>${documentToPrint.label}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 28px;color:#1d1d1f;line-height:1.55}h1,h2,h3{line-height:1.25}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d9ddd9;padding:8px;text-align:left}@media print{body{margin:0;max-width:none}}</style></head><body>${documentToPrint.html}</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+  };
+
   useEffect(() => {
     if (!activeDocument?.html) return;
     closeButtonRef.current?.focus();
@@ -74,9 +90,13 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
           <div key={link.id} className="gw-legal-item">
             <span aria-hidden="true">{"\u2713"}</span>
             {link.html ? (
-              <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">
-                {link.label}
-              </button>
+              <div className="gw-legal-document-actions">
+                <span className="gw-legal-document-name">{link.label}</span>
+                <div>
+                  <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">Read</button>
+                  <button type="button" className="gw-legal-print-button" onClick={() => printDocument(link.id)}>Save as PDF</button>
+                </div>
+              </div>
             ) : (
               <a href={link.href} target={link.target || "_blank"} rel="noreferrer">
                 {link.label}

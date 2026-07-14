@@ -52,14 +52,12 @@ function MessageActions({
   message,
   state,
   onCopyMessage,
-  onMessageFeedback,
-  onDownloadSource
+  onMessageFeedback
 }: {
   message: WidgetMessage;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
-  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
 }) {
   const [copied, setCopied] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
@@ -111,15 +109,13 @@ function MessageCard({
   config,
   state,
   onCopyMessage,
-  onMessageFeedback,
-  onDownloadSource
+  onMessageFeedback
 }: {
   message: WidgetMessage;
   config: GenericWidgetConfig;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
-  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
 }) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -139,7 +135,7 @@ function MessageCard({
           <span className="gw-message-author">{label}</span>
         </header>
         <div className="gw-message-body">{content}</div>
-        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} onDownloadSource={onDownloadSource} /> : null}
+        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} /> : null}
         {isAssistant ? (
           <MessageActions
             message={message}
@@ -197,8 +193,7 @@ export function MessageFeed({
   loadingState = "hidden",
   loadingLabel,
   onCopyMessage,
-  onMessageFeedback,
-  onDownloadSource
+  onMessageFeedback
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
@@ -208,7 +203,6 @@ export function MessageFeed({
   loadingLabel?: ReactNode;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
-  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const previousLoadingState = useRef(loadingState);
@@ -234,7 +228,6 @@ export function MessageFeed({
           state={state}
           onCopyMessage={onCopyMessage}
           onMessageFeedback={onMessageFeedback}
-          onDownloadSource={onDownloadSource}
         />
       ))}
       {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}

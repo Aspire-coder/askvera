@@ -39,11 +39,9 @@ function formatPage(page?: string): string | null {
 }
 
 export function CitationRenderer({
-  sources,
-  onDownloadSource
+  sources
 }: {
   sources: unknown;
-  onDownloadSource?: (source: RenderedSource) => void | Promise<void>;
 }) {
   const normalized = normalizeSources(sources);
   if (!normalized.length) return null;
@@ -55,7 +53,6 @@ export function CitationRenderer({
         {normalized.map((source, index) => {
           const title = sourceTitle(source);
           const pageLabel = formatPage(source.page);
-          const canDownload = Boolean(source.uri?.startsWith("s3://"));
           return (
             <article key={`${title}-${index}`} className="gw-citation-card">
               <div className="gw-citation-heading">
@@ -64,11 +61,6 @@ export function CitationRenderer({
               </div>
               <div className="gw-citation-meta">
                 {pageLabel ? <span className="gw-citation-page">{pageLabel}</span> : null}
-                {canDownload && onDownloadSource ? (
-                  <button type="button" className="gw-citation-download" onClick={() => void onDownloadSource(source)}>
-                    Download PDF
-                  </button>
-                ) : null}
               </div>
               {source.excerpt ? <p>{source.excerpt}</p> : null}
             </article>

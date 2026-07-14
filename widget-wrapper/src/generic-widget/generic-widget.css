@@ -1974,12 +1974,34 @@
   gap: 10px;
 }
 
-.gw-citation-download {
-  min-height: 30px;
-  border: 0;
+.gw-legal-document-actions {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gw-legal-document-name {
+  min-width: 0;
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.gw-legal-document-actions > div {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.gw-legal-print-button {
+  min-height: 28px;
+  border: 1px solid rgba(36, 107, 69, 0.18);
   border-radius: 999px;
-  padding: 0 10px;
-  background: rgba(238, 247, 241, 0.94);
+  padding: 0 9px;
+  background: rgba(238, 247, 241, 0.9);
   color: #246b45;
   font: inherit;
   font-size: 11px;
@@ -1987,10 +2009,11 @@
   cursor: pointer;
 }
 
-.gw-citation-download:hover,
-.gw-citation-download:focus-visible {
+.gw-legal-print-button:hover,
+.gw-legal-print-button:focus-visible {
+  border-color: #246b45;
   background: #246b45;
-  color: #ffffff;
+  color: #fff;
   outline: none;
 }
 

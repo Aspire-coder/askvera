@@ -1,7 +1,7 @@
 import type { WidgetState } from "../state";
 import type { GenericWidgetConfig, WidgetCountryOption } from "./types";
 
-type HeaderIconName = "close";
+type HeaderIconName = "menu" | "close";
 
 function HeaderIcon({ name }: { name: HeaderIconName }) {
   const commonProps = {
@@ -16,6 +16,16 @@ function HeaderIcon({ name }: { name: HeaderIconName }) {
     "aria-hidden": true
   };
 
+  if (name === "menu") {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="1" />
+        <circle cx="12" cy="5" r="1" />
+        <circle cx="12" cy="19" r="1" />
+      </svg>
+    );
+  }
+
   return (
     <svg {...commonProps}>
       <path d="M18 6 6 18" />
@@ -28,11 +38,15 @@ export function Header({
   config,
   selectedCountry,
   connection,
+  menuOpen,
+  onToggleMenu,
   onClose
 }: {
   config: GenericWidgetConfig;
   selectedCountry?: WidgetCountryOption;
   connection: WidgetState["connection"];
+  menuOpen: boolean;
+  onToggleMenu: () => void;
   onClose: () => void;
 }) {
   const assistantName = config.assistantName || config.brandName;
@@ -63,6 +77,9 @@ export function Header({
         </div>
       </div>
       <div className="gw-header-actions">
+        <button type="button" className="gw-icon-button" onClick={onToggleMenu} aria-label={config.labels.menuAriaLabel} aria-expanded={menuOpen}>
+          <HeaderIcon name="menu" />
+        </button>
         <button type="button" className="gw-icon-button" onClick={onClose} aria-label={config.labels.closeAriaLabel}>
           <HeaderIcon name="close" />
         </button>

@@ -10,5 +10,4 @@ export * from "./errors";
 export * from "./feedbackApi";
 export * from "./healthApi";
 export * from "./privacyApi";
-export * from "./sourceDownloadApi";
 export * from "./widgetInitApi";
