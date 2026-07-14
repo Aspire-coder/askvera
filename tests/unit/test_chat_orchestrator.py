@@ -67,7 +67,7 @@ def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     governance = _FakeGovernance()
     router = MagicMock()
     orchestrator = AIOrchestrator(router=router, validator=_FakeValidator(), governance=governance)
-    body = ChatRequest(message="hello", sessionId="session-1", country="US", language="en")
+    body = ChatRequest(message="What is the FBO Support Fee?", sessionId="session-1", country="US", language="en")
 
     monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
     monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
@@ -82,7 +82,7 @@ def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
 
     response = orchestrator.handle_chat(body, "cid")
 
-    assert governance.seen_texts == ["hello", "cached unsafe answer"]
+    assert governance.seen_texts == ["What is the FBO Support Fee?", "cached unsafe answer"]
     assert response.answer == "Blocked cached answer."
     assert response.metadata["fallback"] is True
     router.generate.assert_not_called()
