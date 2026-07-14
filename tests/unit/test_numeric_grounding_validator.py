@@ -195,6 +195,25 @@ def test_numeric_grounding_allows_correctly_paraphrased_claim() -> None:
     assert not result.has_critical()
 
 
+def test_numeric_grounding_allows_long_wrapped_policy_clause() -> None:
+    """A PDF-wrapped clause may place the subject well before its numeric rule."""
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "A Recognized Manager needs 120 Open Group Case Credits.",
+            (
+                "A Recognized Manager qualifies after meeting the policy requirements and "
+                "maintaining the required activity in the applicable Operating Company, with "
+                "the relevant qualification period determined under the marketing plan, by "
+                "generating a total of 120 Open Group Case Credits."
+            ),
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_uses_nearby_previous_sentence_subject() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(

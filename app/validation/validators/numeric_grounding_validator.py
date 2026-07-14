@@ -189,8 +189,13 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
     return token_sets
 
 
-def _source_windows(source_text: str, variant: str, radius: int = 110) -> list[str]:
-    """Return local source windows around a grounded claim candidate."""
+def _source_windows(source_text: str, variant: str, radius: int = 260) -> list[str]:
+    """Return clause-bounded source windows around a grounded claim candidate.
+
+    Extracted PDFs commonly wrap a single policy clause across several lines. The
+    larger radius keeps its named subject and numeric requirement together while
+    the sentence/newline boundaries still prevent borrowing a nearby rank's rule.
+    """
     windows: list[str] = []
     pattern = re.compile(rf"(?<![\d.]){re.escape(variant)}(?![\d.])")
     for match in pattern.finditer(source_text):
