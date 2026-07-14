@@ -1,0 +1,30 @@
+{
+  "version": "2026-07-14",
+  "description": "Controlled non-document messages. Add a locale only when that market is launched or evaluated.",
+  "locales": {
+    "en": {
+      "patterns": {
+        "greeting": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"],
+        "thanks": ["thanks", "thank you"],
+        "capability": ["who are you", "what can you help with", "help"]
+      },
+      "responses": {
+        "greeting": "Hi, I'm ASK Vera. What Forever Living product, policy, or business-support question can I help with?",
+        "thanks": "You're welcome. I'm here whenever you want help finding an approved Forever Living answer.",
+        "capability": "I can help find approved answers about Forever Living products, company policies, business-plan basics, discounts, bonuses, rank qualifications, ordering, and support topics."
+      }
+    },
+    "fr": {
+      "patterns": {
+        "greeting": ["bonjour", "salut", "bonsoir"],
+        "thanks": ["merci", "merci beaucoup"],
+        "capability": ["qui es tu", "que peux tu faire", "aide"]
+      },
+      "responses": {
+        "greeting": "Bonjour, je suis ASK Vera. Comment puis-je vous aider avec une question sur les produits, les politiques ou le soutien aux entrepreneurs Forever Living?",
+        "thanks": "Je vous en prie. Je suis la lorsque vous avez besoin d'une reponse approuvee de Forever Living.",
+        "capability": "Je peux vous aider a trouver des reponses approuvees sur les produits Forever Living, les politiques, les bases du plan de vente, les rabais, les bonus, les qualifications de niveau, les commandes et le soutien."
+      }
+    }
+  }
+}

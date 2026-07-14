@@ -1,88 +1,17 @@
-"""Evidence approval helpers for policy-grounded answers."""
+"""Evidence approval and controlled non-document routing helpers."""
 
 from __future__ import annotations
 
+import json
 import re
+import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
-
-
-SMALL_TALK_PATTERNS = (
-    r"^\s*(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you)\s*[!.]?\s*$",
-    r"^\s*(who are you|what can you help with|help|start|restart)\s*[?!.]?\s*$",
-)
-
-POLICY_SENSITIVE_TERMS = {
-    "active",
-    "bonus",
-    "case",
-    "cc",
-    "credit",
-    "discount",
-    "earn",
-    "fee",
-    "fbo",
-    "manager",
-    "novus",
-    "percentage",
-    "policy",
-    "qualify",
-    "requirement",
-    "requirements",
-    "retail",
-    "sponsor",
-    "supervisor",
-    "wholesale",
-}
-
-RULE_TERMS = {
-    "achieved",
-    "allowed",
-    "cannot",
-    "eligible",
-    "generating",
-    "must",
-    "need",
-    "prohibited",
-    "qualifies",
-    "qualify",
-    "required",
-    "requires",
-    "shall",
-}
-
-STOPWORDS = {
-    "about",
-    "after",
-    "also",
-    "and",
-    "anything",
-    "are",
-    "can",
-    "does",
-    "for",
-    "from",
-    "have",
-    "how",
-    "into",
-    "is",
-    "me",
-    "my",
-    "of",
-    "the",
-    "this",
-    "to",
-    "what",
-    "when",
-    "where",
-    "who",
-    "why",
-    "with",
-    "you",
-    "your",
-}
 
 
 @dataclass(frozen=True)
@@ -94,7 +23,6 @@ class EvidenceDecision:
     evidence: list[RetrievedDocument]
     query_intent: str
     exact_topic_match: bool
-    direct_rule_match: bool
     top_score: float
     score_margin: float
 
@@ -105,7 +33,6 @@ class EvidenceDecision:
             "reason": self.reason,
             "query_intent": self.query_intent,
             "exact_topic_match": self.exact_topic_match,
-            "direct_rule_match": self.direct_rule_match,
             "top_score": round(self.top_score, 6),
             "score_margin": round(self.score_margin, 6),
             "evidence_count": len(self.evidence),
@@ -113,40 +40,52 @@ class EvidenceDecision:
         }
 
 
-def classify_intent(message: str) -> str:
-    """Classify whether a message needs policy evidence."""
-    normalized = " ".join((message or "").lower().split())
+def classify_intent(message: str, language: str = "") -> str:
+    """Route only narrowly-controlled assistant messages around document retrieval.
+
+    Every substantive message, including unknown wording or an unsupported
+    request, follows the document-grounded path and fails closed if evidence is
+    insufficient. Business vocabulary does not belong in this router.
+    """
+    normalized = _normalize_text(message)
     if not normalized:
         return "empty"
-    if any(re.match(pattern, normalized, flags=re.IGNORECASE) for pattern in SMALL_TALK_PATTERNS):
-        return "assistant_meta"
-    if any(term in _tokens(normalized) for term in POLICY_SENSITIVE_TERMS):
-        return "policy_fact"
-    if re.search(r"\d|%|\b(require|qualif|eligible|policy|bonus|discount|fee|sponsor|manager|supervisor)\w*", normalized):
-        return "policy_fact"
-    return "policy_fact"
+    return "assistant_meta" if _assistant_meta_category(normalized, language) else "policy_fact"
+
+
+def assistant_meta_response(message: str, language: str = "") -> str | None:
+    """Return a configured response for a controlled greeting/capability message."""
+    category = _assistant_meta_category(_normalize_text(message), language)
+    if not category:
+        return None
+    locale = _locale_key(language)
+    routes = _conversation_routes().get(locale, {})
+    response = (routes.get("responses", {}) or {}).get(category)
+    return str(response).strip() if response else None
 
 
 def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str, language: str) -> EvidenceDecision:
-    """Approve or reject retrieved evidence before generation."""
-    intent = classify_intent(query)
+    """Approve approved, current-locale evidence before model generation."""
+    intent = classify_intent(query, language)
     documents = retrieval_result.documents
     if intent != "policy_fact":
-        return EvidenceDecision(True, "non_policy_intent", documents[:1], intent, True, True, 0.0, 0.0)
+        return EvidenceDecision(True, "non_document_intent", documents[:1], intent, True, 0.0, 0.0)
     if not documents:
-        return EvidenceDecision(False, "no_evidence", [], intent, False, False, 0.0, 0.0)
+        return EvidenceDecision(False, "no_evidence", [], intent, False, 0.0, 0.0)
 
     top_score = float(documents[0].score or 0.0)
     second_score = float(documents[1].score or 0.0) if len(documents) > 1 else 0.0
     score_margin = top_score - second_score
     current_document = _has_current_locale_document(documents, country, language)
-    exact_topic_match = _has_topic_match(query, documents[0])
-    direct_rule_match = _has_direct_rule_match(query, documents[0])
+    exact_topic_match = any(_has_topic_match(query, document) for document in documents[:3])
     no_serious_conflict = score_margin >= -0.15
     enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
 
-    approved = bool(current_document and enough_score and no_serious_conflict and (exact_topic_match or direct_rule_match))
-    reason = "approved" if approved else "insufficient_direct_evidence"
+    # Safety is based on approved document metadata and retrieval confidence,
+    # not an English list of business or rule words. Topic overlap is retained
+    # only for diagnostics and retrieval-quality monitoring.
+    approved = bool(current_document and enough_score and no_serious_conflict)
+    reason = "approved" if approved else "insufficient_approved_evidence"
     evidence = documents[:3] if approved else []
     return EvidenceDecision(
         approved=approved,
@@ -154,14 +93,13 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
         evidence=evidence,
         query_intent=intent,
         exact_topic_match=exact_topic_match,
-        direct_rule_match=direct_rule_match,
         top_score=top_score,
         score_margin=score_margin,
     )
 
 
 def with_approved_evidence(retrieval_result: RetrievalResult, decision: EvidenceDecision) -> RetrievalResult:
-    """Attach evidence decision metadata and narrow documents sent to the model."""
+    """Attach decision metadata and narrow the model context to approved sections."""
     documents = decision.evidence if decision.approved else []
     return RetrievalResult(
         documents=documents,
@@ -176,40 +114,67 @@ def with_approved_evidence(retrieval_result: RetrievalResult, decision: Evidence
 
 def _has_current_locale_document(documents: list[RetrievedDocument], country: str, language: str) -> bool:
     normalized_country = (country or "").upper()
-    normalized_language = (language or "").lower()
+    normalized_language = _locale_key(language)
+    allowed_languages = {normalized_language}
+    if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
+        allowed_languages.add("en")
     for document in documents[:3]:
         document_country = (document.country or "").upper()
-        document_language = (document.language or "").lower()
-        if document_country == normalized_country and document_language in {normalized_language, "en"}:
+        document_language = _locale_key(document.language)
+        if document_country == normalized_country and document_language in allowed_languages:
             return True
     return False
 
 
 def _has_topic_match(query: str, document: RetrievedDocument) -> bool:
-    query_tokens = _meaningful_tokens(query)
-    if not query_tokens:
-        return True
-    source_tokens = _tokens(" ".join([document.title, document.content, document.excerpt]))
-    distinctive_tokens = {token for token in query_tokens if token not in STOPWORDS and len(token) >= 4}
-    if not distinctive_tokens:
-        return True
-    overlap = distinctive_tokens & source_tokens
-    return bool(overlap) and len(overlap) / len(distinctive_tokens) >= 0.2
-
-
-def _has_direct_rule_match(query: str, document: RetrievedDocument) -> bool:
+    """Provide a Unicode-safe lexical diagnostic without deciding answer safety."""
     query_tokens = _tokens(query)
     source_tokens = _tokens(" ".join([document.title, document.content, document.excerpt]))
-    if query_tokens & {"what", "define", "definition"}:
-        return bool(query_tokens & source_tokens)
-    if query_tokens & {"how", "qualify", "requirement", "requirements", "eligible", "earn", "become"}:
-        return bool(source_tokens & RULE_TERMS)
-    return bool(query_tokens & source_tokens)
+    if not query_tokens or not source_tokens:
+        return False
+    overlap = query_tokens & source_tokens
+    return bool(overlap) and len(overlap) / len(query_tokens) >= 0.2
 
 
-def _meaningful_tokens(text: str) -> set[str]:
-    return {token for token in _tokens(text) if token not in STOPWORDS}
+@lru_cache(maxsize=1)
+def _conversation_routes() -> dict[str, dict[str, Any]]:
+    """Load small-talk routing from reviewed locale configuration."""
+    path = Path(settings.CONVERSATION_ROUTES_PATH)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    locales = payload.get("locales", {})
+    return locales if isinstance(locales, dict) else {}
+
+
+def _assistant_meta_category(normalized_message: str, language: str) -> str | None:
+    if not normalized_message:
+        return None
+    routes = _conversation_routes().get(_locale_key(language), {})
+    patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
+    for category, phrases in patterns.items():
+        normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
+        if normalized_message in normalized_phrases:
+            return str(category)
+    return None
+
+
+def _locale_key(language: str) -> str:
+    """Use the primary language tag for locale configuration and metadata checks."""
+    return (language or "en").split("-", 1)[0].lower()
+
+
+def _normalize_text(value: str) -> str:
+    """Case-fold text while preserving accented and non-Latin letters."""
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    return " ".join("".join(character if character.isalnum() else " " for character in normalized).split())
 
 
 def _tokens(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+    """Return Unicode word tokens suitable for non-authoritative diagnostics."""
+    return {
+        token
+        for token in re.findall(r"[^\W_]+", _normalize_text(text), flags=re.UNICODE)
+        if len(token) >= 3 and not token.isdigit()
+    }

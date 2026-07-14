@@ -2,7 +2,7 @@
 
 from app.models.responses import ModelResponse
 from app.models.router import ModelRouter, model_router
-from app.evidence import approve_evidence, classify_intent, with_approved_evidence
+from app.evidence import assistant_meta_response, approve_evidence, classify_intent, with_approved_evidence
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
@@ -83,7 +83,7 @@ class AIOrchestrator:
         if not governance_decision.allowed:
             return self._governance_fallback(governance_decision, correlation_id)
 
-        intent = classify_intent(scrubbed_input)
+        intent = classify_intent(scrubbed_input, body.language)
         if intent == "assistant_meta":
             chat_response = self._static_assistant_response(body, correlation_id)
             append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
@@ -395,20 +395,8 @@ class AIOrchestrator:
 
     def _static_assistant_response(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Return controlled non-policy responses without retrieval."""
-        message = (body.message or "").strip().lower()
-        if "who are you" in message:
-            answer = (
-                "I'm ASK Vera, Forever Living's approved-document assistant. I can help with product, policy, "
-                "ordering, and business-support questions using the approved information available to me."
-            )
-        elif "what can you help" in message or message == "help":
-            answer = (
-                "I can help find approved answers about Forever Living products, company policies, business-plan "
-                "basics, discounts, bonuses, rank qualifications, ordering, and support topics."
-            )
-        elif "thank" in message:
-            answer = "You're welcome. I'm here whenever you want help finding an approved Forever Living answer."
-        else:
+        answer = assistant_meta_response(body.message, body.language)
+        if not answer:
             answer = "Hi, I'm ASK Vera. What Forever Living product, policy, or business-support question can I help with?"
         return self.response_builder.fallback(
             answer,

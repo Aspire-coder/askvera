@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,8 @@ LOGGER = get_logger("app.retrieval.opensearch_sections")
 
 def _normalize_text(value: str) -> str:
     """Normalize text for glossary trigger checks."""
-    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    return " ".join("".join(character if character.isalnum() else " " for character in normalized).split())
 
 
 @lru_cache(maxsize=1)
@@ -72,11 +74,14 @@ def _client() -> OpenSearch:
 
 
 def _language_filter(language: str) -> dict[str, Any]:
-    """Use English policy sections as fallback until translated sections exist."""
-    normalized = (language or "en").lower()
+    """Filter to the requested language, with an explicit optional English fallback."""
+    normalized = (language or "en").split("-", 1)[0].lower()
     if normalized == "en":
         return {"term": {"language": "en"}}
-    return {"terms": {"language": [normalized, "en"]}}
+    languages = [normalized]
+    if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
+        languages.append("en")
+    return {"terms": {"language": languages}}
 
 
 def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
