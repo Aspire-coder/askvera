@@ -112,15 +112,3 @@ class PromptBuilder:
                 )
             )
         return "\n\n".join(chunks)
-
-
-def build_prompt(language: str, country: str, role: str, chunks: str, history: str) -> str:
-    """Compatibility helper for tests and transitional callers."""
-    return PromptBuilder().build(
-        user_question="$query$",
-        conversation=history,
-        country=country,
-        language=language,
-        role=role,
-        retrieved_documents=chunks,
-    ).system_prompt

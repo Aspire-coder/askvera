@@ -1,6 +1,6 @@
 """Prompt construction package."""
 
-from .builder import PromptBuilder, build_prompt
+from .builder import PromptBuilder
 from .models import PromptPackage
 
-__all__ = ["PromptBuilder", "PromptPackage", "build_prompt"]
+__all__ = ["PromptBuilder", "PromptPackage"]

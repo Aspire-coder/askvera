@@ -5,21 +5,28 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.prompts import build_prompt
+from app.models.bedrock_provider import BedrockClaudeProvider
+from app.prompts import PromptBuilder
 from app.retrieval import RetrievedDocument, RetrievalResult, confidence_from_sources
-from services.bedrock import generate, retrieve_and_generate
 from utils.exceptions import LowConfidenceError
 
 
 def test_build_prompt_replaces_all_variables() -> None:
     """The ASK Vera prompt contains concrete user context."""
-    prompt = build_prompt("en", "US", "new_prospect", "chunk", "history")
-    assert "{{" not in prompt
-    assert "US" in prompt
-    assert "chunk" in prompt
+    prompt = PromptBuilder().build(
+        user_question="question",
+        conversation="history",
+        country="US",
+        language="en",
+        role="new_prospect",
+        retrieved_documents="chunk",
+    )
+    assert "{{" not in prompt.system_prompt
+    assert "US" in prompt.system_prompt
+    assert "chunk" in prompt.system_prompt
 
 
-def test_retrieve_and_generate_returns_sources() -> None:
+def test_bedrock_provider_returns_sources() -> None:
     """Bedrock response is transformed into API data."""
     runtime = MagicMock()
     runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Answer"}]}}}
@@ -43,7 +50,11 @@ def test_retrieve_and_generate_returns_sources() -> None:
         confidence=0.91,
     )
     with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
-        result = retrieve_and_generate("q", "US", "en", "new_prospect", "", "cid", retrieval_result=retrieval_result)
+        result = BedrockClaudeProvider().generate(
+            build_prompt_package("q", "US", "en", "new_prospect", retrieval_result),
+            retrieval_result,
+            "cid",
+        ).to_chat_result()
     assert result["response"] == "Answer"
     assert result["confidence"] >= 0.65
     assert result["sources"][0]["uri"] == "s3://kb/doc.pdf"
@@ -68,7 +79,7 @@ def test_confidence_falls_back_to_citation_quality() -> None:
     assert confidence > 0.65
 
 
-def test_retrieve_and_generate_blocks_low_score_answer_with_sources() -> None:
+def test_bedrock_provider_blocks_low_score_answer_with_sources() -> None:
     """Low retrieval scores should block before model generation, even with citations."""
     runtime = MagicMock()
     runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Return policy answer"}]}}}
@@ -92,12 +103,16 @@ def test_retrieve_and_generate_blocks_low_score_answer_with_sources() -> None:
     )
     with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
         with pytest.raises(LowConfidenceError):
-            retrieve_and_generate("return policy", "CA", "en", "new_prospect", "", "cid", retrieval_result=retrieval_result)
+            BedrockClaudeProvider().generate(
+                build_prompt_package("return policy", "CA", "en", "new_prospect", retrieval_result),
+                retrieval_result,
+                "cid",
+            )
 
     runtime.converse.assert_not_called()
 
 
-def test_retrieve_and_generate_allows_borderline_confidence_with_enough_evidence() -> None:
+def test_bedrock_provider_allows_borderline_confidence_with_enough_evidence() -> None:
     """Several plausible sources should be allowed through the model stage."""
     runtime = MagicMock()
     runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Personal Retail Bonus answer"}]}}}
@@ -123,26 +138,32 @@ def test_retrieve_and_generate_allows_borderline_confidence_with_enough_evidence
     )
 
     with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
-        result = retrieve_and_generate(
-            "What is the Personal Retail Bonus %?",
-            "CA",
-            "en",
-            "new_prospect",
-            "",
+        result = BedrockClaudeProvider().generate(
+            build_prompt_package(
+                "What is the Personal Retail Bonus %?",
+                "CA",
+                "en",
+                "new_prospect",
+                retrieval_result,
+            ),
+            retrieval_result,
             "cid",
-            retrieval_result=retrieval_result,
-        )
+        ).to_chat_result()
 
     assert result["response"] == "Personal Retail Bonus answer"
     runtime.converse.assert_called_once()
 
 
-def test_retrieve_and_generate_raises_when_no_sources_after_fallback() -> None:
+def test_bedrock_provider_raises_when_no_sources_are_available() -> None:
     """No citations and no retrieve fallback sources should still produce the fallback."""
     retrieval_result = RetrievalResult(documents=[], citations=[], confidence=0.0)
 
     with pytest.raises(LowConfidenceError):
-        generate(build_prompt_package("unrelated", "CA", "en", "new_prospect", retrieval_result), retrieval_result, "cid")
+        BedrockClaudeProvider().generate(
+            build_prompt_package("unrelated", "CA", "en", "new_prospect", retrieval_result),
+            retrieval_result,
+            "cid",
+        )
 
 
 def build_prompt_package(message: str, country: str, language: str, role: str, retrieval_result: RetrievalResult):
