@@ -168,6 +168,20 @@ def test_numeric_grounding_allows_same_subject_number_with_different_language_un
     assert not result.has_critical()
 
 
+def test_numeric_grounding_allows_french_numeric_rule_without_english_unit_terms() -> None:
+    """Numeric grounding must rely on source evidence, not an English unit list."""
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Le Directeur regional exige 75 credits en 2 mois.",
+            "Le Directeur regional est atteint avec 75 credits en 2 mois.",
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_does_not_match_number_inside_larger_number() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(
