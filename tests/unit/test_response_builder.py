@@ -22,7 +22,7 @@ def test_response_builder_preserves_existing_api_shape() -> None:
         confidence=0.91,
     )
     model_response = ModelResponse(
-        text="Answer",
+        text="Policy content",
         citations=retrieval_result.sources,
         confidence=0.91,
         provider="claude",
@@ -39,7 +39,7 @@ def test_response_builder_preserves_existing_api_shape() -> None:
     )
 
     assert chat_response.to_api_result() == {
-        "response": "Answer",
+        "response": "Policy content",
         "sources": retrieval_result.sources,
         "confidence": 0.91,
         "correlationId": "cid",
