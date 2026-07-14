@@ -20,6 +20,11 @@ FALLBACK_RESPONSES = {
         "want to guess. Your upline or Forever Living support can give you an official "
         "answer - want me to point you to how to reach them?"
     ),
+    "insufficient_evidence": (
+        "I couldn't find a clear answer in the approved policy information currently "
+        "available to me. Please check the official policy document or contact Forever "
+        "Living support for clarification."
+    ),
     "income_claim": (
         "I can't share income projections or guarantees - that's not something I'm "
         "able to speak to. The official Income Disclosure Statement is the right place "

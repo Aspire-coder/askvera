@@ -7,7 +7,7 @@ from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
 from app.response.models import ChatResponse
-from app.retrieval.models import RetrievalResult
+from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationResult
 from utils.validators import ChatRequest
 
@@ -39,7 +39,16 @@ class _FakeRetriever:
 
     def retrieve(self, message: str, *_: object, **__: object) -> RetrievalResult:
         self.seen_messages.append(message)
-        return RetrievalResult(documents=[], citations=[], confidence=0.8)
+        document = RetrievedDocument(
+            id="recognized-manager",
+            title="Policy - Sec 5.01: Recognized Manager",
+            content="A Forever Business Owner can become a Recognized Manager by meeting the policy requirements.",
+            source="s3://approved/policy.pdf",
+            country="CA",
+            language="en",
+            score=0.8,
+        )
+        return RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.8)
 
 
 class _FakeRouter:
