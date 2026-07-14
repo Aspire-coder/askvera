@@ -173,6 +173,7 @@ export function GenericWidgetWrapper({
   const effectiveLoading = selectLoading(widgetState);
   const [loadingDisplayState, setLoadingDisplayState] = useState<LoadingDisplayState>("hidden");
   const launcherButtonRef = useRef<HTMLButtonElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const submitLockRef = useRef(false);
@@ -277,6 +278,39 @@ export function GenericWidgetWrapper({
     if (!isOpen) return;
     const focusTimer = window.setTimeout(() => panelRef.current?.focus(), 0);
     return () => window.clearTimeout(focusTimer);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !rootRef.current) return;
+
+    const root = rootRef.current;
+    const viewport = window.visualViewport;
+    let frameId = 0;
+
+    const updateViewport = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        const visibleHeight = viewport?.height ?? window.innerHeight;
+        const viewportTop = viewport?.offsetTop ?? 0;
+        const keyboardOffset = Math.max(0, window.innerHeight - visibleHeight - viewportTop);
+        root.style.setProperty("--gw-mobile-viewport-height", `${Math.round(visibleHeight)}px`);
+        root.style.setProperty("--gw-keyboard-offset", `${Math.round(keyboardOffset)}px`);
+      });
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    viewport?.addEventListener("resize", updateViewport);
+    viewport?.addEventListener("scroll", updateViewport);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updateViewport);
+      viewport?.removeEventListener("resize", updateViewport);
+      viewport?.removeEventListener("scroll", updateViewport);
+      root.style.removeProperty("--gw-mobile-viewport-height");
+      root.style.removeProperty("--gw-keyboard-offset");
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -527,7 +561,7 @@ export function GenericWidgetWrapper({
   const introCompanyName = config.brandName && config.brandName !== introAssistantName ? config.brandName : "Forever Living";
 
   return (
-    <div className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
+    <div ref={rootRef} className={`gw-root ${className}`} style={{ ...buildThemeVars(config.theme), ...style }}>
       {!isOpen ? (
         <FloatingLauncher
           ref={launcherButtonRef}
