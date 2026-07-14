@@ -11,7 +11,7 @@ from config.vera_persona import role_scope_for
 from utils.logging import get_logger
 
 from .models import PromptPackage
-from .templates import COMPLIANCE_PROMPT, FOLLOWUP_PROMPT, RAG_PROMPT, SYSTEM_PROMPT
+from .templates import COMPLIANCE_PROMPT, EVIDENCE_CONTRACT_PROMPT, FOLLOWUP_PROMPT, RAG_PROMPT, SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from app.retrieval.models import RetrievalResult
@@ -51,7 +51,10 @@ class PromptBuilder:
                 .replace("{{retrieved_chunks}}", retrieved_context)
                 .replace("{{session_history}}", conversation)
             ).strip()
-            system_prompt = "\n\n".join([rendered_system, compliance_rules.strip(), FOLLOWUP_PROMPT.strip()])
+            prompt_parts = [rendered_system, compliance_rules.strip(), FOLLOWUP_PROMPT.strip()]
+            if settings.EVIDENCE_GATED_OUTPUT_ENABLED:
+                prompt_parts.append(EVIDENCE_CONTRACT_PROMPT.strip())
+            system_prompt = "\n\n".join(prompt_parts)
             package = PromptPackage(
                 system_prompt=system_prompt,
                 user_prompt=RAG_PROMPT.replace("$query$", user_question),
@@ -65,6 +68,7 @@ class PromptBuilder:
                     "has_conversation": bool(conversation.strip()),
                     "retrieval_confidence": retrieval_result.confidence if retrieval_result else None,
                     "retrieval_source_count": len(retrieval_result.documents) if retrieval_result else 0,
+                    "evidence_contract": settings.EVIDENCE_GATED_OUTPUT_ENABLED,
                     **(metadata or {}),
                 },
             )

@@ -92,3 +92,22 @@ Use conversation history only for continuity and to avoid repeating
 yourself. Do not infer facts that are not present in the retrieved
 authorised context, even if they seem implied by earlier turns.
 """
+
+EVIDENCE_CONTRACT_PROMPT = """
+Return only a JSON object. Do not use markdown or prose outside the JSON.
+Use this exact shape:
+{
+  "status": "approved",
+  "answer": "the user-facing answer in the requested language",
+  "evidence_ids": ["exact Source IDs used"],
+  "claims": [
+    {"text": "one factual claim stated in the answer", "evidence_ids": ["supporting Source ID"]}
+  ]
+}
+
+Only use Source IDs that appear in the retrieved authorised chunks. Every
+factual claim, including a definition, number, percentage, rank, eligibility
+rule, date, prohibition, or timeframe, must name at least one supporting
+Source ID. If the chunks do not directly support a complete answer, return
+{"status":"insufficient_evidence","answer":"","evidence_ids":[],"claims":[]}.
+"""

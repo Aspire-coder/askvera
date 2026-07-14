@@ -16,6 +16,8 @@ dist/
 htmlcov/
 tmp/
 app/*
+!app/evidence.py
+!app/evidence_contract.py
 !app/audit/
 !app/audit/*.py
 !app/audit/sinks/

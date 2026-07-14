@@ -199,6 +199,9 @@ OPENSEARCH_GLOSSARY_QUERY_LIMIT = _env_int("OPENSEARCH_GLOSSARY_QUERY_LIMIT", 4)
 OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file__).with_name("search_glossary.json")))
 OPENSEARCH_EVIDENCE_SELECTOR_ENABLED = _env_bool("OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
 OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
+# Optional staged rollout: require the model to declare the retrieved section IDs
+# that support every factual claim before an answer is released.
+EVIDENCE_GATED_OUTPUT_ENABLED = _env_bool("EVIDENCE_GATED_OUTPUT_ENABLED", False)
 # S3 bucket backing the Bedrock Knowledge Base approved documents.
 S3_BUCKET = "askverachat-prod-kb"
 # S3 location for legal HTML documents returned by /api/privacy.

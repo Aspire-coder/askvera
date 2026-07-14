@@ -2,6 +2,8 @@
 
 from app.models.responses import ModelResponse
 from app.models.router import ModelRouter, model_router
+from app.evidence import approve_evidence, classify_intent, with_approved_evidence
+from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.retrieval import RetrievalService, retrieval_service
@@ -81,6 +83,12 @@ class AIOrchestrator:
         if not governance_decision.allowed:
             return self._governance_fallback(governance_decision, correlation_id)
 
+        intent = classify_intent(scrubbed_input)
+        if intent == "assistant_meta":
+            chat_response = self._static_assistant_response(body, correlation_id)
+            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
+            return chat_response
+
         cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
         cached = get_cache_value(cache_key, correlation_id)
         if cached:
@@ -102,6 +110,30 @@ class AIOrchestrator:
             return chat_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
+        retrieval_result = with_approved_evidence(retrieval_result, evidence_decision)
+        if not evidence_decision.approved:
+            LOGGER.warning(
+                "evidence_decision_rejected",
+                correlation_id=correlation_id,
+                country=body.country,
+                language=body.language,
+                role=body.role,
+                **evidence_decision.to_metadata(),
+            )
+            return self._validate_response(
+                self.response_builder.fallback(
+                    FALLBACK_RESPONSES["insufficient_evidence"],
+                    correlation_id,
+                    metadata={
+                        "failure_layer": "evidence_gate",
+                        "evidence_decision": evidence_decision.to_metadata(),
+                    },
+                ),
+                body,
+                correlation_id,
+                retrieval_result=retrieval_result,
+            )
         prompt_package = self.prompt_builder.build(
             user_question=scrubbed_input,
             conversation=history,
@@ -126,6 +158,20 @@ class AIOrchestrator:
                 retrieval_result=retrieval_result,
             )
 
+        contracted_response = self._apply_evidence_contract(model_response, retrieval_result, correlation_id)
+        if contracted_response is None:
+            return self._validate_response(
+                self.response_builder.fallback(
+                    FALLBACK_RESPONSES["insufficient_evidence"],
+                    correlation_id,
+                    metadata={"failure_layer": "evidence_contract"},
+                ),
+                body,
+                correlation_id,
+                retrieval_result=retrieval_result,
+            )
+        model_response, retrieval_result = contracted_response
+
         chat_response = self.response_builder.build(
             model_response=model_response,
             retrieval_result=retrieval_result,
@@ -136,6 +182,7 @@ class AIOrchestrator:
                 "language": body.language,
                 "role": body.role,
                 "cache": "miss",
+                "evidence_decision": evidence_decision.to_metadata(),
             },
         )
         safe_answer = scrub_pii(chat_response.answer, correlation_id, body.language)
@@ -181,6 +228,59 @@ class AIOrchestrator:
                 reason="fallback_or_critical_validation",
             )
         return chat_response
+
+    def _apply_evidence_contract(
+        self,
+        model_response: ModelResponse,
+        retrieval_result: RetrievalResult,
+        correlation_id: str,
+    ) -> tuple[ModelResponse, RetrievalResult] | None:
+        """Release only structured answers whose claims cite approved section IDs."""
+        from config import settings
+
+        if not settings.EVIDENCE_GATED_OUTPUT_ENABLED:
+            return model_response, retrieval_result
+
+        contract = parse_evidence_contract(model_response.text, retrieval_result.documents)
+        if not contract.valid:
+            LOGGER.warning(
+                "evidence_contract_rejected",
+                correlation_id=correlation_id,
+                reason=contract.reason,
+            )
+            return None
+
+        supported_documents = [
+            document for document in retrieval_result.documents if document.id in set(contract.evidence_ids)
+        ]
+        contracted_retrieval_result = RetrievalResult(
+            documents=supported_documents,
+            citations=[document.to_source() for document in supported_documents],
+            confidence=retrieval_result.confidence,
+            metadata={
+                **(retrieval_result.metadata or {}),
+                "evidence_contract": {"status": "accepted", "evidence_ids": list(contract.evidence_ids)},
+            },
+        )
+        LOGGER.info(
+            "evidence_contract_accepted",
+            correlation_id=correlation_id,
+            evidence_count=len(supported_documents),
+        )
+        return (
+            ModelResponse(
+                text=contract.answer,
+                citations=[document.to_source() for document in supported_documents],
+                confidence=model_response.confidence,
+                provider=model_response.provider,
+                model_name=model_response.model_name,
+                latency_ms=model_response.latency_ms,
+                token_usage=model_response.token_usage,
+                finish_reason=model_response.finish_reason,
+                metadata={**(model_response.metadata or {}), "evidence_contract": "accepted"},
+            ),
+            contracted_retrieval_result,
+        )
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
         """Expand vague follow-up questions with recent user-message context."""
@@ -293,6 +393,29 @@ class AIOrchestrator:
             or "I can't help with that request, but I'm happy to help with Forever Living products, policies, ordering, or business support."
         )
 
+    def _static_assistant_response(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
+        """Return controlled non-policy responses without retrieval."""
+        message = (body.message or "").strip().lower()
+        if "who are you" in message:
+            answer = (
+                "I'm ASK Vera, Forever Living's approved-document assistant. I can help with product, policy, "
+                "ordering, and business-support questions using the approved information available to me."
+            )
+        elif "what can you help" in message or message == "help":
+            answer = (
+                "I can help find approved answers about Forever Living products, company policies, business-plan "
+                "basics, discounts, bonuses, rank qualifications, ordering, and support topics."
+            )
+        elif "thank" in message:
+            answer = "You're welcome. I'm here whenever you want help finding an approved Forever Living answer."
+        else:
+            answer = "Hi, I'm ASK Vera. What Forever Living product, policy, or business-support question can I help with?"
+        return self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={"intent": "assistant_meta", "fallback": False, "response_source": "template"},
+        )
+
     def _validate_response(
         self,
         chat_response: ChatResponse,
@@ -345,8 +468,7 @@ class AIOrchestrator:
             )
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    "I found related policy information, but I'm not confident enough to give a complete approved answer. "
-                    "Please check the official policy document or contact Forever Living support.",
+                    FALLBACK_RESPONSES["insufficient_evidence"],
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
