@@ -7,7 +7,6 @@ import {
   BackendUnavailableError,
   createApiClient,
   describeApiError,
-  healthCheck,
   loadConfig,
   loadPrivacy,
   loadWidgetConfig,
@@ -229,8 +228,8 @@ export function WidgetRuntime({
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
 
   const checkBackendHealth = useCallback(async () => {
-    const envelope = await healthCheck(apiClient);
-    return envelope.success !== false && envelope.data?.status !== "unhealthy";
+    const envelope = await loadWidgetConfig(apiClient);
+    return envelope.success !== false && Boolean(envelope.data);
   }, [apiClient]);
 
   const widgetConfig = useMemo(() => {
