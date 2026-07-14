@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.metrics import STAGE_PROMPT_BUILD
 from app.metrics.pipeline import record_pipeline_metric
+from config import settings
 from config.vera_persona import role_scope_for
 from utils.logging import get_logger
 

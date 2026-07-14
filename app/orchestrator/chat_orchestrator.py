@@ -123,7 +123,7 @@ class AIOrchestrator:
             )
             return self._validate_response(
                 self.response_builder.fallback(
-                    FALLBACK_RESPONSES["insufficient_evidence"],
+                    self._insufficient_evidence_message(),
                     correlation_id,
                     metadata={
                         "failure_layer": "evidence_gate",
@@ -162,7 +162,7 @@ class AIOrchestrator:
         if contracted_response is None:
             return self._validate_response(
                 self.response_builder.fallback(
-                    FALLBACK_RESPONSES["insufficient_evidence"],
+                    self._insufficient_evidence_message(),
                     correlation_id,
                     metadata={"failure_layer": "evidence_contract"},
                 ),
@@ -393,6 +393,16 @@ class AIOrchestrator:
             or "I can't help with that request, but I'm happy to help with Forever Living products, policies, ordering, or business support."
         )
 
+    def _insufficient_evidence_message(self) -> str:
+        """Use the approved fallback while remaining compatible with older config."""
+        return FALLBACK_RESPONSES.get(
+            "insufficient_evidence",
+            FALLBACK_RESPONSES.get(
+                "low_confidence",
+                "I couldn't find a clear answer in the approved information available to me.",
+            ),
+        )
+
     def _static_assistant_response(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Return controlled non-policy responses without retrieval."""
         answer = assistant_meta_response(body.message, body.language)
@@ -456,7 +466,7 @@ class AIOrchestrator:
             )
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    FALLBACK_RESPONSES["insufficient_evidence"],
+                    self._insufficient_evidence_message(),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
