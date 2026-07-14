@@ -1,17 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingTimingMs } from "../constants";
 import { CitationRenderer, MarkdownRenderer } from "../renderers";
 import type { GenericWidgetConfig, GenericWidgetRenderState, WidgetMessage } from "./types";
 
 type MessageRole = WidgetMessage["role"];
 export type LoadingDisplayState = "hidden" | "typing" | "skeleton" | "slow" | "reconnecting";
-
-function formatMessageTimestamp(timestamp?: string): string {
-  if (!timestamp) return "Now";
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return timestamp;
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
 
 function roleLabel(role: MessageRole, config: GenericWidgetConfig): string {
   if (role === "assistant") return config.assistantName || config.brandName;
@@ -59,12 +52,14 @@ function MessageActions({
   message,
   state,
   onCopyMessage,
-  onMessageFeedback
+  onMessageFeedback,
+  onDownloadSource
 }: {
   message: WidgetMessage;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
 }) {
   const [copied, setCopied] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
@@ -116,13 +111,15 @@ function MessageCard({
   config,
   state,
   onCopyMessage,
-  onMessageFeedback
+  onMessageFeedback,
+  onDownloadSource
 }: {
   message: WidgetMessage;
   config: GenericWidgetConfig;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
 }) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -140,10 +137,9 @@ function MessageCard({
       <div className="gw-message-card">
         <header className="gw-message-meta">
           <span className="gw-message-author">{label}</span>
-          <time>{formatMessageTimestamp(message.timestamp)}</time>
         </header>
         <div className="gw-message-body">{content}</div>
-        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} /> : null}
+        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} onDownloadSource={onDownloadSource} /> : null}
         {isAssistant ? (
           <MessageActions
             message={message}
@@ -172,10 +168,7 @@ function LoadingMessage({
     <article className={`gw-message gw-message-assistant gw-message-loading gw-message-loading-${state}`}>
       <div className="gw-message-avatar" aria-hidden="true"><AssistantAvatar config={config} /></div>
       <div className="gw-message-card">
-        <header className="gw-message-meta">
-          <span className="gw-message-author">{config.assistantName || config.brandName}</span>
-          <time>{formatMessageTimestamp()}</time>
-        </header>
+        <header className="gw-message-meta"><span className="gw-message-author">{config.assistantName || config.brandName}</span></header>
         <div className="gw-loading-body" role="status" aria-live="polite">
           <div className="gw-typing-dots" aria-hidden="true">
             <span />
@@ -204,7 +197,8 @@ export function MessageFeed({
   loadingState = "hidden",
   loadingLabel,
   onCopyMessage,
-  onMessageFeedback
+  onMessageFeedback,
+  onDownloadSource
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
@@ -214,7 +208,20 @@ export function MessageFeed({
   loadingLabel?: ReactNode;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
 }) {
+  const endRef = useRef<HTMLDivElement>(null);
+  const previousLoadingState = useRef(loadingState);
+
+  useEffect(() => {
+    const answerCompleted = previousLoadingState.current !== "hidden" && loadingState === "hidden";
+    const messageAdded = messages.length > 0;
+    if (answerCompleted || messageAdded) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    previousLoadingState.current = loadingState;
+  }, [loadingState, messages.length]);
+
   if (renderMessages) return <div className="gw-message-feed">{renderMessages(messages, state)}</div>;
 
   return (
@@ -227,9 +234,11 @@ export function MessageFeed({
           state={state}
           onCopyMessage={onCopyMessage}
           onMessageFeedback={onMessageFeedback}
+          onDownloadSource={onDownloadSource}
         />
       ))}
       {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}
+      <div ref={endRef} aria-hidden="true" />
     </div>
   );
 }

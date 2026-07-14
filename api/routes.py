@@ -2,8 +2,9 @@
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -148,6 +149,17 @@ def _valid_language_codes(country_code: str) -> set[str]:
     return get_language_codes_for_country(country_code)
 
 
+def _approved_pdf_location(source_uri: str) -> tuple[str, str] | None:
+    """Accept only approved policy PDFs, never arbitrary S3 locations."""
+    parsed = urlparse(source_uri)
+    key = parsed.path.lstrip("/")
+    if parsed.scheme != "s3" or parsed.netloc != settings.S3_BUCKET:
+        return None
+    if not key.startswith("approved/") or not key.lower().endswith(".pdf"):
+        return None
+    return parsed.netloc, key
+
+
 @router.post("/api/chat", response_model=None)
 def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
@@ -185,6 +197,42 @@ def privacy(request: Request, country: str | None = None, lang: str | None = Non
     documents = get_legal_documents()
     LOGGER.info("privacy_returned", correlation_id=correlation_id, country=normalized_country, lang=normalized_lang)
     return success(documents, correlation_id)
+
+
+@router.get("/api/source-download", response_model=None)
+def source_download(request: Request, uri: str = Query(min_length=1, max_length=2048)) -> Envelope | JSONResponse:
+    """Create a short-lived download URL for an approved cited policy PDF."""
+    correlation_id = _correlation_id(request)
+    location = _approved_pdf_location(uri)
+    if location is None:
+        envelope = Envelope(
+            success=False,
+            error={"code": "INVALID_SOURCE", "message": "That document is not available for download."},
+            correlationId=correlation_id,
+        )
+        return JSONResponse(status_code=400, content=envelope.model_dump())
+
+    bucket, key = location
+    try:
+        download_url = get_aws_clients().s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket,
+                "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{key.rsplit("/", 1)[-1]}"',
+            },
+            ExpiresIn=settings.SOURCE_DOWNLOAD_URL_TTL_SECONDS,
+        )
+    except Exception:
+        LOGGER.exception("source_download_url_failed", correlation_id=correlation_id, source_key=key)
+        envelope = Envelope(
+            success=False,
+            error={"code": "SOURCE_DOWNLOAD_UNAVAILABLE", "message": "The document is temporarily unavailable."},
+            correlationId=correlation_id,
+        )
+        return JSONResponse(status_code=503, content=envelope.model_dump())
+
+    return success({"url": download_url, "filename": key.rsplit("/", 1)[-1]}, correlation_id)
 
 
 @router.post("/api/consent", response_model=None)

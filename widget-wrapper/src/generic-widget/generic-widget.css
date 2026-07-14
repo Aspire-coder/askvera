@@ -1915,6 +1915,85 @@
   outline-offset: 3px;
 }
 
+/* Keep answer cards calm: citations and feedback are related content, not sections. */
+.gw-message-meta {
+  margin-bottom: 7px;
+}
+
+.gw-citations,
+.gw-message-actions {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.gw-citations {
+  margin-top: 16px;
+}
+
+.gw-message-actions {
+  margin-top: 12px;
+}
+
+.gw-citations-title {
+  background: rgba(255, 247, 214, 0.72);
+  color: #5c634f;
+}
+
+.gw-citation-card {
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(229, 231, 235, 0.72);
+}
+
+.gw-citation-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.gw-citation-kind {
+  color: #6e7380;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.gw-citation-document {
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.gw-citation-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gw-citation-download {
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(238, 247, 241, 0.94);
+  color: #246b45;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.gw-citation-download:hover,
+.gw-citation-download:focus-visible {
+  background: #246b45;
+  color: #ffffff;
+  outline: none;
+}
+
 /* Refined ASK Vera product skin */
 .gw-root {
   --gw-text-title-size: 17px;

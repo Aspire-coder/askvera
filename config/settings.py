@@ -105,7 +105,7 @@ WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
 WIDGET_JWT_ISSUER = _env_str("WIDGET_JWT_ISSUER", "ask-vera")
 WIDGET_JWT_AUDIENCE = _env_str("WIDGET_JWT_AUDIENCE", "widget-api")
 WIDGET_JWT_CLOCK_SKEW_SECONDS = _env_int("WIDGET_JWT_CLOCK_SKEW_SECONDS", 60)
-WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/privacy", "/api/config", "/api/widget/config"]
+WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/privacy", "/api/config", "/api/widget/config", "/api/source-download"]
 WIDGET_ALLOW_LOCALHOST_ORIGINS = _env_bool("WIDGET_ALLOW_LOCALHOST_ORIGINS", APP_ENV != "production")
 WIDGET_REGISTRY_PROVIDER = _env_str("WIDGET_REGISTRY_PROVIDER", "json")
 WIDGET_REGISTRY_TABLE = _env_str("WIDGET_REGISTRY_TABLE", "AskVeraWidgets")
@@ -206,6 +206,8 @@ CONVERSATION_ROUTES_PATH = _env_str("CONVERSATION_ROUTES_PATH", str(Path(__file_
 EVIDENCE_GATED_OUTPUT_ENABLED = _env_bool("EVIDENCE_GATED_OUTPUT_ENABLED", False)
 # S3 bucket backing the Bedrock Knowledge Base approved documents.
 S3_BUCKET = "askverachat-prod-kb"
+# Short-lived browser download URLs are issued only for approved PDFs in S3_BUCKET.
+SOURCE_DOWNLOAD_URL_TTL_SECONDS = _env_int("SOURCE_DOWNLOAD_URL_TTL_SECONDS", 300)
 # S3 location for legal HTML documents returned by /api/privacy.
 LEGAL_BUCKET = "askverachat-prod-content"
 LEGAL_PREFIX = "legal"

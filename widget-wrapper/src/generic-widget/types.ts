@@ -238,6 +238,7 @@ export type GenericWidgetWrapperProps = {
   onSendMessage?: (payload: MessageEventPayload) => void;
   onMessageCopied?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onDownloadSource?: (source: { uri?: string; title?: string; page?: string }) => void | Promise<void>;
   onEscalate?: (payload: LocaleChangePayload) => void;
   onNewChat?: (payload: LocaleChangePayload) => void;
 };

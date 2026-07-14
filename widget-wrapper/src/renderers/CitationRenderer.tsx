@@ -38,27 +38,38 @@ function formatPage(page?: string): string | null {
   return `p. ${trimmed}`;
 }
 
-export function CitationRenderer({ sources }: { sources: unknown }) {
+export function CitationRenderer({
+  sources,
+  onDownloadSource
+}: {
+  sources: unknown;
+  onDownloadSource?: (source: RenderedSource) => void | Promise<void>;
+}) {
   const normalized = normalizeSources(sources);
   if (!normalized.length) return null;
 
   return (
     <details className="gw-citations" aria-label="References">
-      <summary className="gw-citations-title">References</summary>
+      <summary className="gw-citations-title">Sources used for this answer ({normalized.length})</summary>
       <div className="gw-citation-list">
         {normalized.map((source, index) => {
           const title = sourceTitle(source);
           const pageLabel = formatPage(source.page);
+          const canDownload = Boolean(source.uri?.startsWith("s3://"));
           return (
             <article key={`${title}-${index}`} className="gw-citation-card">
-              {source.uri ? (
-                <a href={source.uri} target="_blank" rel="noreferrer">
-                  {title}
-                </a>
-              ) : (
-                <span>{title}</span>
-              )}
-              {pageLabel ? <span className="gw-citation-page">{pageLabel}</span> : null}
+              <div className="gw-citation-heading">
+                <span className="gw-citation-kind">{index === 0 ? "Primary source" : "Supporting source"}</span>
+                <span className="gw-citation-document">{title}</span>
+              </div>
+              <div className="gw-citation-meta">
+                {pageLabel ? <span className="gw-citation-page">{pageLabel}</span> : null}
+                {canDownload && onDownloadSource ? (
+                  <button type="button" className="gw-citation-download" onClick={() => void onDownloadSource(source)}>
+                    Download PDF
+                  </button>
+                ) : null}
+              </div>
               {source.excerpt ? <p>{source.excerpt}</p> : null}
             </article>
           );

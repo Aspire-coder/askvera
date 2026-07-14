@@ -8,6 +8,7 @@ import {
   createApiClient,
   describeApiError,
   healthCheck,
+  getSourceDownload,
   loadConfig,
   loadPrivacy,
   loadWidgetConfig,
@@ -443,6 +444,20 @@ export function WidgetRuntime({
     }
   };
 
+  const handleSourceDownload = async (source: { uri?: string }) => {
+    if (!source.uri) return;
+    const envelope = await withWidgetAuthRetry((client) => getSourceDownload(client, source.uri!));
+    const url = envelope.data?.url;
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = envelope.data?.filename || "policy-document.pdf";
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <GenericWidgetWrapper
       config={config}
@@ -460,6 +475,7 @@ export function WidgetRuntime({
       onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={(payload) => void sendChat(payload)}
       onMessageFeedback={handleMessageFeedback}
+      onDownloadSource={handleSourceDownload}
       onNewChat={() => setMessages([{ id: buildId("new-chat"), role: "assistant", content: "New chat started." }])}
     />
   );
