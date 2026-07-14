@@ -142,3 +142,30 @@ def test_response_builder_filters_numeric_references_without_matching_values() -
     )
 
     assert [citation["page"] for citation in chat_response.citations] == ["6"]
+
+
+def test_response_builder_does_not_attach_policy_sources_to_guardrail_copy() -> None:
+    """Safety interventions must not make unrelated retrieval look like evidence."""
+    document = RetrievedDocument(
+        id="unrelated-policy",
+        title="Policy - Sec 8.08: Sapphire Manager",
+        content="Sapphire Manager qualification requirements.",
+        source="s3://kb/policy.pdf",
+        score=0.9,
+    )
+    response = ResponseBuilder().build(
+        model_response=ModelResponse(
+            text="I cannot provide medical advice.",
+            citations=[document.to_source()],
+            confidence=0.9,
+            provider="claude",
+            model_name="model",
+            finish_reason="guardrail_intervened",
+        ),
+        retrieval_result=RetrievalResult(documents=[document], citations=[], confidence=0.9),
+        correlation_id="cid",
+    )
+
+    assert response.citations == []
+    assert response.metadata["failure_layer"] == "aws_guardrail"
+    assert response.metadata["response_source"] == "guardrail"

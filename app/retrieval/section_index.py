@@ -106,6 +106,40 @@ def _key_phrases(message: str) -> list[str]:
     return phrases[:12]
 
 
+def _exact_topic_score(message: str, title: str, content: str) -> float:
+    """Reward literal policy-topic matches without encoding document-specific rules.
+
+    Formal program names and rank names are normally preserved in a policy heading or
+    its opening paragraph. Giving those literal matches a clear ranking preference is
+    language-agnostic and lets each document supply its own vocabulary.
+    """
+    normalized_message = " ".join(message.casefold().split())
+    normalized_title = " ".join(title.casefold().split())
+    normalized_content = " ".join(content.casefold().split())
+    score = 0.0
+
+    for phrase in _key_phrases(message):
+        if len(phrase.split()) < 2:
+            continue
+        if phrase in normalized_title:
+            score = max(score, 1.5)
+        elif phrase in normalized_content[:1800]:
+            score = max(score, 0.65)
+
+    # Program names often consist of a single distinctive token, such as a branded
+    # initiative containing a number. This is intentionally generic rather than a
+    # curated list of program names.
+    for token in _tokens(message):
+        if len(token) < 6 or not any(character.isdigit() for character in token):
+            continue
+        if token in normalized_title:
+            score = max(score, 1.8)
+        elif token in normalized_content[:1800]:
+            score = max(score, 0.9)
+
+    return score
+
+
 def _definition_intent(message: str) -> bool:
     return bool(re.search(r"\b(?:what|who)\s+(?:is|are)\b|\bdefine\b|\bmeaning\b", message.lower()))
 
@@ -262,6 +296,7 @@ def _source_score(row: dict[str, Any], message: str) -> float:
         score += 0.4
     if message_tokens:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
+    score += _exact_topic_score(message, title, content)
     for phrase in phrases:
         if phrase in title:
             score += 0.35

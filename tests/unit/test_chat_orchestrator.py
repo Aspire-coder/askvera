@@ -160,3 +160,19 @@ def test_critical_validation_responses_are_not_cacheable() -> None:
     )
 
     assert orchestrator._should_cache_response(response) is False
+
+
+def test_guardrail_response_is_not_cacheable() -> None:
+    """Safety copy must not be replayed as a normal answer from cache."""
+    orchestrator = AIOrchestrator()
+    response = ChatResponse(
+        answer="I cannot provide medical advice.",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.0,
+        metadata={"failure_layer": "aws_guardrail", "response_source": "guardrail"},
+        correlation_id="cid",
+    )
+
+    assert orchestrator._should_cache_response(response) is False

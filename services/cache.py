@@ -107,6 +107,7 @@ def build_cache_key(message: str, country: str, language: str, role: str) -> str
     """Build a versioned locale-aware SHA256 cache key."""
     versions = "|".join(
         [
+            settings.CACHE_SCHEMA_VERSION,
             settings.KB_VERSION,
             settings.PROMPT_VERSION,
             settings.BEDROCK_GUARDRAIL_VERSION,

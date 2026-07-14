@@ -55,9 +55,17 @@ class ResponseBuilder:
         started = perf_counter()
         success = False
         try:
+            guardrail_intervened = model_response.finish_reason == "guardrail_intervened"
+            failure_layer = (
+                "aws_guardrail"
+                if guardrail_intervened
+                else (model_response.metadata or {}).get("failure_layer")
+            )
             chat_response = ChatResponse(
                 answer=model_response.text,
-                citations=self._supporting_citations(model_response.text, retrieval_result),
+                # A guardrail response is safety copy, not an answer grounded in the
+                # retrieved policy sections. Never present unrelated retrieval as its source.
+                citations=[] if guardrail_intervened else self._supporting_citations(model_response.text, retrieval_result),
                 suggestions=[],
                 cards=[],
                 confidence=model_response.confidence,
@@ -68,11 +76,8 @@ class ResponseBuilder:
                     "latency_ms": model_response.latency_ms,
                     "token_usage": model_response.token_usage,
                     "finish_reason": model_response.finish_reason,
-                    "failure_layer": (
-                        "aws_guardrail"
-                        if model_response.finish_reason == "guardrail_intervened"
-                        else (model_response.metadata or {}).get("failure_layer")
-                    ),
+                    "failure_layer": failure_layer,
+                    "response_source": "guardrail" if guardrail_intervened else "model",
                     "retrieval_confidence": retrieval_result.confidence,
                     "retrieved_document_count": len(retrieval_result.documents),
                     "correlation_id": correlation_id,

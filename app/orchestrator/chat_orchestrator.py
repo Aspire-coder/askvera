@@ -508,6 +508,11 @@ class AIOrchestrator:
         if metadata.get("fallback"):
             return False
 
+        # Guardrail safety copy should be generated fresh and must never be
+        # replayed as though it were a document-grounded policy response.
+        if metadata.get("failure_layer") or metadata.get("response_source") == "guardrail":
+            return False
+
         validation = metadata.get("validation")
         if isinstance(validation, dict) and str(validation.get("highestSeverity", "")).upper() == "CRITICAL":
             return False
