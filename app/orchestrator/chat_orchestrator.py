@@ -10,6 +10,7 @@ from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
+from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
