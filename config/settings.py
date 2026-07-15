@@ -62,7 +62,7 @@ APP_VERSION = "1.0.0"
 # Runtime environment. Production disables development-only auth conveniences.
 APP_ENV = _env_str("APP_ENV", "development").lower()
 # Prompt/cache version values used to invalidate stale AI responses after content or policy changes.
-PROMPT_VERSION = "2026-07-09"
+PROMPT_VERSION = "2026-07-15"
 KB_VERSION = "2026-06-29"
 # RDS PostgreSQL database identifier. Found in RDS -> Databases -> database-1.
 RDS_DB_IDENTIFIER = "database-1"
@@ -235,7 +235,7 @@ ELASTICACHE_REDIS_HOST = REDIS_HOST
 ELASTICACHE_REDIS_PORT = REDIS_PORT
 # Redis TTL for answer cache in seconds. Found in architecture plan for cache layer.
 CACHE_TTL_SECONDS = 7200
-CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "2")
+CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "3")
 # Audit Firehose sink configuration. Defaults are overridden by production.env, then by SSM.
 AUDIT_FIREHOSE_ENABLED = _env_bool("AUDIT_FIREHOSE_ENABLED", False)
 AUDIT_FIREHOSE_STREAM = _env_str("AUDIT_FIREHOSE_STREAM", "askvera-audit")
@@ -289,6 +289,8 @@ SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askve
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.
 COMPREHEND_PII_LANGUAGE_CODES = ["en", "es"]
+# Public organization and assistant names that must not be anonymized in approved answers.
+PII_APPROVED_PUBLIC_TERMS = ["ASK Vera", "Forever Living"]
 # Privacy notice version displayed by /api/config and stored in consent_log.
 PRIVACY_VERSION = "2026-05-01"
 # Allowed CORS origins for the widget host domains. Found in CloudFront or website deployment settings.

@@ -189,7 +189,10 @@ class AIOrchestrator:
             chat_response.answer,
             correlation_id,
             body.language,
-            allowed_texts=(document.content for document in retrieval_result.documents),
+            allowed_texts=[
+                *settings.PII_APPROVED_PUBLIC_TERMS,
+                *(document.content for document in retrieval_result.documents),
+            ],
         )
         if safe_answer != chat_response.answer:
             chat_response = ChatResponse(

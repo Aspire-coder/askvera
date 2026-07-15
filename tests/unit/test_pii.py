@@ -31,3 +31,21 @@ def test_approved_directory_contact_is_preserved() -> None:
     evidence = "Main Admin. Email gvilla@foreverliving.com.mx"
 
     assert scrub_pii(answer, "cid", "fr", allowed_texts=[evidence]) == answer
+
+
+def test_approved_public_assistant_name_is_not_anonymized() -> None:
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [{"BeginOffset": 8, "EndOffset": 12, "Type": "NAME"}]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(
+            "I'm ASK Vera.",
+            "cid",
+            "en",
+            allowed_texts=["ASK Vera"],
+        )
+
+    assert answer == "I'm ASK Vera."
