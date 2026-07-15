@@ -89,34 +89,28 @@ def _language_key(language: str) -> str:
     return (language or "en").split("-", 1)[0].lower()
 
 
-def _retrieval_scope_filter(country: str, language: str) -> dict[str, Any]:
-    """Allow the requested locale plus explicitly global documents."""
+def _scope_filter(country: str, language: str, scope: str) -> dict[str, Any]:
+    """Build an isolated locale or global-document filter."""
+    if scope == "global":
+        return {"term": {"access_scope": "global"}}
     return {
         "bool": {
-            "should": [
-                {
-                    "bool": {
-                        "filter": [
-                            {"term": {"country": country}},
-                            _language_filter(language),
-                        ]
-                    }
-                },
-                {"term": {"access_scope": "global"}},
-            ],
-            "minimum_should_match": 1,
+            "filter": [
+                {"term": {"country": country}},
+                _language_filter(language),
+            ]
         }
     }
 
 
-def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
+def _text_query(message: str, country: str, language: str, *, scope: str = "locale") -> dict[str, Any]:
     """Build a metadata-filtered BM25 query."""
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "bool": {
                 "filter": [
-                    _retrieval_scope_filter(country, language),
+                    _scope_filter(country, language, scope),
                     {"term": {"status": "active"}},
                 ],
                 "should": [
@@ -143,7 +137,7 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
     }
 
 
-def _vector_query(message: str, country: str, language: str) -> dict[str, Any]:
+def _vector_query(message: str, country: str, language: str, *, scope: str = "locale") -> dict[str, Any]:
     """Build a vector query with metadata filters."""
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
@@ -155,7 +149,7 @@ def _vector_query(message: str, country: str, language: str) -> dict[str, Any]:
                     "filter": {
                         "bool": {
                             "filter": [
-                                _retrieval_scope_filter(country, language),
+                                _scope_filter(country, language, scope),
                                 {"term": {"status": "active"}},
                             ]
                         }
@@ -238,22 +232,23 @@ class OpenSearchSectionProvider:
             vector_hits: list[dict[str, Any]] = []
             for index, search_message in enumerate(search_messages):
                 weight = 1.0 if index == 0 else 0.88
-                text_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
-                    body=_text_query(search_message, country, language),
-                )
-                vector_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
-                    body=_vector_query(search_message, country, language),
-                )
-                text_hits.extend(
-                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                    for hit in text_response.get("hits", {}).get("hits", [])
-                )
-                vector_hits.extend(
-                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                    for hit in vector_response.get("hits", {}).get("hits", [])
-                )
+                for scope in ("locale", "global"):
+                    text_response = client.search(
+                        index=settings.OPENSEARCH_INDEX,
+                        body=_text_query(search_message, country, language, scope=scope),
+                    )
+                    vector_response = client.search(
+                        index=settings.OPENSEARCH_INDEX,
+                        body=_vector_query(search_message, country, language, scope=scope),
+                    )
+                    text_hits.extend(
+                        {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+                        for hit in text_response.get("hits", {}).get("hits", [])
+                    )
+                    vector_hits.extend(
+                        {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+                        for hit in vector_response.get("hits", {}).get("hits", [])
+                    )
         except OpenSearchException:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
