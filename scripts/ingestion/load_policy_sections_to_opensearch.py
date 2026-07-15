@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,7 @@ def _index_body() -> dict[str, Any]:
                 "content": {"type": "text"},
                 "search_text": {"type": "text"},
                 "content_hash": {"type": "keyword"},
+                "ingestion_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": True},
                 "embedding": {
                     "type": "knn_vector",
@@ -121,7 +123,13 @@ def _load_sections(path: Path) -> list[dict[str, Any]]:
     return sections
 
 
-def _document(section: dict[str, Any], *, source_uri_prefix: str, status: str) -> dict[str, Any]:
+def _document(
+    section: dict[str, Any],
+    *,
+    source_uri_prefix: str,
+    status: str,
+    ingestion_id: str,
+) -> dict[str, Any]:
     content = str(section["content"])
     search_text = _search_text(section)
     source_file = str(section["source_file"])
@@ -150,17 +158,30 @@ def _document(section: dict[str, Any], *, source_uri_prefix: str, status: str) -
         "content": content,
         "search_text": search_text,
         "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "ingestion_id": ingestion_id,
         "metadata": metadata,
         "embedding": embed_text(search_text),
     }
 
 
-def _actions(sections: list[dict[str, Any]], *, index: str, source_uri_prefix: str, status: str) -> list[dict[str, Any]]:
+def _actions(
+    sections: list[dict[str, Any]],
+    *,
+    index: str,
+    source_uri_prefix: str,
+    status: str,
+    ingestion_id: str,
+) -> list[dict[str, Any]]:
     return [
         {
             "_op_type": "index",
             "_index": index,
-            "_source": _document(section, source_uri_prefix=source_uri_prefix, status=status),
+            "_source": _document(
+                section,
+                source_uri_prefix=source_uri_prefix,
+                status=status,
+                ingestion_id=ingestion_id,
+            ),
         }
         for section in sections
     ]
@@ -172,8 +193,73 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--index", default="", help="OpenSearch index name. Defaults to OPENSEARCH_INDEX.")
     parser.add_argument("--source-uri-prefix", default="", help="Original approved document S3 prefix, used in citations")
     parser.add_argument("--status", default="active")
+    parser.add_argument(
+        "--replace-source",
+        action="store_true",
+        help=(
+            "After a successful active load, remove older active or staging copies of "
+            "the same country, language, and source file."
+        ),
+    )
     parser.add_argument("--recreate-index", action="store_true", help="Delete and recreate the index before loading")
     return parser.parse_args()
+
+
+def _source_identity(sections: list[dict[str, Any]]) -> tuple[str, str, str]:
+    identities = {
+        (
+            str(section.get("country", "")),
+            str(section.get("language", "")),
+            str(section.get("source_file", "")),
+        )
+        for section in sections
+    }
+    if len(identities) != 1 or not all(identities.pop()):
+        raise ValueError(
+            "--replace-source requires one non-empty country, language, and source_file "
+            "in the JSONL input."
+        )
+    return next(iter({
+        (
+            str(section["country"]),
+            str(section["language"]),
+            str(section["source_file"]),
+        )
+        for section in sections
+    }))
+
+
+def _older_source_actions(
+    client: OpenSearch,
+    *,
+    index: str,
+    country: str,
+    language: str,
+    source_file: str,
+    ingestion_id: str,
+) -> list[dict[str, str]]:
+    result = client.search(
+        index=index,
+        body={
+            "size": 10_000,
+            "_source": ["ingestion_id"],
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"country": country}},
+                        {"term": {"language": language}},
+                        {"term": {"source_file": source_file}},
+                        {"terms": {"status": ["active", "staging"]}},
+                    ]
+                }
+            },
+        },
+    )
+    return [
+        {"_op_type": "delete", "_index": index, "_id": hit["_id"]}
+        for hit in result["hits"]["hits"]
+        if hit.get("_source", {}).get("ingestion_id") != ingestion_id
+    ]
 
 
 def main() -> int:
@@ -186,9 +272,22 @@ def main() -> int:
         client.indices.create(index=index, body=_index_body())
 
     sections = _load_sections(args.jsonl)
+    if not sections:
+        raise ValueError(f"No sections found in {args.jsonl}")
+    if args.replace_source and args.status != "active":
+        raise ValueError("--replace-source is only valid with --status active.")
+    source_identity = _source_identity(sections) if args.replace_source else None
+
+    ingestion_id = uuid.uuid4().hex
     success, errors = helpers.bulk(
         client,
-        _actions(sections, index=index, source_uri_prefix=args.source_uri_prefix, status=args.status),
+        _actions(
+            sections,
+            index=index,
+            source_uri_prefix=args.source_uri_prefix,
+            status=args.status,
+            ingestion_id=ingestion_id,
+        ),
         raise_on_error=False,
     )
     print("OpenSearch policy section load complete")
@@ -200,6 +299,29 @@ def main() -> int:
     if errors:
         print(json.dumps(errors[:3], indent=2))
         return 1
+
+    if args.replace_source:
+        assert source_identity is not None
+        country, language, source_file = source_identity
+        delete_actions = _older_source_actions(
+            client,
+            index=index,
+            country=country,
+            language=language,
+            source_file=source_file,
+            ingestion_id=ingestion_id,
+        )
+        deleted, delete_errors = helpers.bulk(
+            client,
+            delete_actions,
+            raise_on_error=False,
+            raise_on_exception=False,
+        )
+        print(f"Replaced older source records: {deleted}")
+        print(f"Replacement errors: {len(delete_errors)}")
+        if delete_errors:
+            print(json.dumps(delete_errors[:3], indent=2))
+            return 1
     return 0
 
 
