@@ -89,6 +89,26 @@ def _language_key(language: str) -> str:
     return (language or "en").split("-", 1)[0].lower()
 
 
+def _retrieval_scope_filter(country: str, language: str) -> dict[str, Any]:
+    """Allow the requested locale plus explicitly global documents."""
+    return {
+        "bool": {
+            "should": [
+                {
+                    "bool": {
+                        "filter": [
+                            {"term": {"country": country}},
+                            _language_filter(language),
+                        ]
+                    }
+                },
+                {"term": {"access_scope": "global"}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
 def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
     """Build a metadata-filtered BM25 query."""
     return {
@@ -96,8 +116,7 @@ def _text_query(message: str, country: str, language: str) -> dict[str, Any]:
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {"country": country}},
-                    _language_filter(language),
+                    _retrieval_scope_filter(country, language),
                     {"term": {"status": "active"}},
                 ],
                 "should": [
@@ -136,8 +155,7 @@ def _vector_query(message: str, country: str, language: str) -> dict[str, Any]:
                     "filter": {
                         "bool": {
                             "filter": [
-                                {"term": {"country": country}},
-                                _language_filter(language),
+                                _retrieval_scope_filter(country, language),
                                 {"term": {"status": "active"}},
                             ]
                         }
@@ -158,6 +176,7 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
         "country": source.get("country", ""),
         "language": source.get("language", ""),
         "document_type": source.get("document_type", ""),
+        "access_scope": source.get("access_scope", "country"),
         "section_id": source.get("section_id", ""),
         "section_title": source.get("section_title", ""),
         "start_page": source.get("start_page", ""),
@@ -208,7 +227,7 @@ def _parse_selector_ranks(text: str) -> list[int]:
 
 
 class OpenSearchSectionProvider:
-    """Retrieve approved policy sections from an OpenSearch section index."""
+    """Retrieve approved document sections from an OpenSearch section index."""
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
@@ -369,7 +388,7 @@ class OpenSearchSectionProvider:
         )
         system_prompt = (
             "You select evidence for ASK Vera. Do not answer the user's question. "
-            "Choose the candidate policy sections that most directly support an answer. "
+            "Choose the candidate approved-document sections that most directly support an answer. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
             "Return only JSON."
         )
@@ -441,9 +460,12 @@ class OpenSearchSectionProvider:
         if page and end_page and str(end_page) != page:
             page = f"{page}-{end_page}"
         source_uri = row.get("source_uri") or f"opensearch-section://{row.get('source_file', '')}/{row.get('section_id', '')}"
-        title = f"{row.get('source_file', 'Policy')} - Sec {row.get('section_id', '')}"
-        if row.get("section_title"):
-            title = f"{title}: {row['section_title']}"
+        if row.get("document_type") == "office_directory":
+            title = f"{row.get('source_file', 'Directory')} - {row.get('section_title', 'Directory record')}"
+        else:
+            title = f"{row.get('source_file', 'Policy')} - Sec {row.get('section_id', '')}"
+            if row.get("section_title"):
+                title = f"{title}: {row['section_title']}"
         content = str(row.get("content") or "")
         return RetrievedDocument(
             id=str(row.get("id") or ""),

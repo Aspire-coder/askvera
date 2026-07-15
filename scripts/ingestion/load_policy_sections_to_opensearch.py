@@ -62,6 +62,7 @@ def _index_body() -> dict[str, Any]:
                 "country": {"type": "keyword"},
                 "language": {"type": "keyword"},
                 "document_type": {"type": "keyword"},
+                "access_scope": {"type": "keyword"},
                 "section_id": {"type": "keyword"},
                 "section_title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
                 "start_page": {"type": "integer"},
@@ -129,12 +130,15 @@ def _document(
     source_uri_prefix: str,
     status: str,
     ingestion_id: str,
+    document_type: str,
+    access_scope: str,
 ) -> dict[str, Any]:
     content = str(section["content"])
     search_text = _search_text(section)
     source_file = str(section["source_file"])
     source_uri = source_uri_prefix.rstrip("/") + "/" + source_file if source_uri_prefix else ""
     metadata = {
+        **dict(section.get("metadata") or {}),
         "source_file": source_file,
         "country": section["country"],
         "language": section["language"],
@@ -142,6 +146,8 @@ def _document(
         "section_title": section["title"],
         "start_page": section["start_page"],
         "end_page": section["end_page"],
+        "document_type": document_type,
+        "access_scope": access_scope,
     }
     return {
         "id": _section_id(section),
@@ -150,7 +156,8 @@ def _document(
         "source_uri": source_uri,
         "country": section["country"],
         "language": section["language"],
-        "document_type": "policy",
+        "document_type": document_type,
+        "access_scope": access_scope,
         "section_id": section["section_id"],
         "section_title": section["title"],
         "start_page": section["start_page"],
@@ -171,6 +178,8 @@ def _actions(
     source_uri_prefix: str,
     status: str,
     ingestion_id: str,
+    document_type: str,
+    access_scope: str,
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -181,6 +190,8 @@ def _actions(
                 source_uri_prefix=source_uri_prefix,
                 status=status,
                 ingestion_id=ingestion_id,
+                document_type=document_type,
+                access_scope=access_scope,
             ),
         }
         for section in sections
@@ -193,6 +204,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--index", default="", help="OpenSearch index name. Defaults to OPENSEARCH_INDEX.")
     parser.add_argument("--source-uri-prefix", default="", help="Original approved document S3 prefix, used in citations")
     parser.add_argument("--status", default="active")
+    parser.add_argument("--document-type", default="policy")
+    parser.add_argument(
+        "--access-scope",
+        choices=("country", "global"),
+        default="country",
+        help="Country records obey locale filters; global records are available in every market.",
+    )
     parser.add_argument(
         "--replace-source",
         action="store_true",
@@ -214,19 +232,18 @@ def _source_identity(sections: list[dict[str, Any]]) -> tuple[str, str, str]:
         )
         for section in sections
     }
-    if len(identities) != 1 or not all(identities.pop()):
+    if len(identities) != 1:
         raise ValueError(
             "--replace-source requires one non-empty country, language, and source_file "
             "in the JSONL input."
         )
-    return next(iter({
-        (
-            str(section["country"]),
-            str(section["language"]),
-            str(section["source_file"]),
+    identity = next(iter(identities))
+    if not all(identity):
+        raise ValueError(
+            "--replace-source requires one non-empty country, language, and source_file "
+            "in the JSONL input."
         )
-        for section in sections
-    }))
+    return identity
 
 
 def _older_source_actions(
@@ -287,6 +304,8 @@ def main() -> int:
             source_uri_prefix=args.source_uri_prefix,
             status=args.status,
             ingestion_id=ingestion_id,
+            document_type=args.document_type,
+            access_scope=args.access_scope,
         ),
         raise_on_error=False,
     )
