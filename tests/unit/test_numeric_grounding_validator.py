@@ -4,7 +4,7 @@ from app.validation.models import ValidationContext, ValidationResult
 from app.validation.validators.numeric_grounding_validator import NumericGroundingValidator
 
 
-def _context(answer: str, source_text: str) -> ValidationContext:
+def _context(answer: str, source_text: str, metadata: dict | None = None) -> ValidationContext:
     return ValidationContext(
         chat_response=ChatResponse(
             answer=answer,
@@ -27,6 +27,7 @@ def _context(answer: str, source_text: str) -> ValidationContext:
                     content=source_text,
                     source="s3://example/CA-EN-Company-Policy.pdf",
                     page="6.0",
+                    metadata=metadata or {},
                 )
             ],
             citations=[],
@@ -286,3 +287,17 @@ def test_numeric_grounding_allows_answers_without_measurable_claims() -> None:
 
     assert result.valid
     assert result.issues == []
+
+
+def test_numeric_grounding_allows_exact_directory_phone_across_languages() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Le numéro du bureau est le 52 55 3300 9400.",
+            "Office Phone 1 52 55 3300 9400",
+            metadata={"directory_section": "office", "access_scope": "global"},
+        ),
+        result,
+    )
+
+    assert not result.has_critical()

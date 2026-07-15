@@ -134,6 +134,11 @@ def _claim_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
     return False
 
 
+def _structured_record_number_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
+    """Allow an exact number from a structured record across answer languages."""
+    return any(_source_windows(source_text, number) for number in _number_variants(claim.number))
+
+
 def _extract_claims(answer: str) -> list[MeasurableClaim]:
     """Extract numeric claims from an answer without assuming unit vocabulary."""
     claims: list[MeasurableClaim] = []
@@ -168,14 +173,25 @@ class NumericGroundingValidator:
         if not claims:
             return
 
-        source_texts = [_normalize(document.content) for document in retrieval_result.documents if document.content]
-        if not source_texts:
+        source_documents = [
+            (document, _normalize(document.content))
+            for document in retrieval_result.documents
+            if document.content
+        ]
+        if not source_documents:
             return
 
         unsupported = [
             claim.text
             for claim in claims
-            if not any(_claim_is_supported(claim, source_text) for source_text in source_texts)
+            if not any(
+                _claim_is_supported(claim, source_text)
+                or (
+                    document.metadata.get("directory_section") in {"office", "staff"}
+                    and _structured_record_number_is_supported(claim, source_text)
+                )
+                for document, source_text in source_documents
+            )
         ]
         if not unsupported:
             return

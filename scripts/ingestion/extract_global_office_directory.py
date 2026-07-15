@@ -21,6 +21,14 @@ STAFF_RECORD_RE = re.compile(
     r"(?m)^(?P<title>[^\n]+)\nOperating Country\n(?P<record_country>[^\n]+)$"
 )
 SAFE_ID_RE = re.compile(r"[^a-z0-9]+")
+WRAPPED_EMAIL_RE = re.compile(
+    r"([\w.+-]+@[\w.-]+)\n([A-Za-z0-9-]{1,20}\.[A-Za-z]{2,})",
+    re.UNICODE,
+)
+WRAPPED_EMAIL_AT_RE = re.compile(
+    r"([\w.+-]+)\n(@[\w.-]+\.[A-Za-z]{2,})",
+    re.UNICODE,
+)
 
 
 @dataclass(frozen=True)
@@ -55,7 +63,9 @@ def _clean_page(text: str) -> str:
     text = HEADER_RE.sub("", text)
     text = PAGE_RE.sub("", text)
     lines = [" ".join(line.split()) for line in text.splitlines()]
-    return "\n".join(line for line in lines if line).strip()
+    cleaned = "\n".join(line for line in lines if line).strip()
+    cleaned = WRAPPED_EMAIL_RE.sub(r"\1\2", cleaned)
+    return WRAPPED_EMAIL_AT_RE.sub(r"\1\2", cleaned)
 
 
 def _page_for_offset(page_offsets: list[tuple[int, int, int]], offset: int) -> int:

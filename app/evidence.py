@@ -121,6 +121,8 @@ def _has_current_locale_document(documents: list[RetrievedDocument], country: st
     if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
         allowed_languages.add("en")
     for document in documents:
+        if str(document.metadata.get("access_scope") or "").lower() == "global":
+            return True
         document_country = (document.country or "").upper()
         document_language = _locale_key(document.language)
         if document_country == normalized_country and document_language in allowed_languages:

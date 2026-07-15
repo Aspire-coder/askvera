@@ -68,3 +68,13 @@ def test_staff_cards_preserve_embedded_contact_details() -> None:
     assert len(records) == 1
     assert "Technical Person" in records[0].content
     assert records[0].end_page == 24
+
+
+def test_clean_page_repairs_pdf_wrapped_email_addresses() -> None:
+    cleaned = extractor._clean_page(
+        "General Mailbox\ncentrodeatencion@foreverliving.co\nm.mx\n"
+        "Admin Email\nregional.manager\n@example.com"
+    )
+
+    assert "centrodeatencion@foreverliving.com.mx" in cleaned
+    assert "regional.manager@example.com" in cleaned
