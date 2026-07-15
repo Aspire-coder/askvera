@@ -17,7 +17,12 @@ from typing import Iterable
 from pypdf import PdfReader
 
 
-SECTION_RE = re.compile(r"(?m)^(?P<section>\d{1,2}\.\d{2})\s+(?P<title>.+)$")
+# Policies commonly use a mix of top-level headings ("1 Introduction"),
+# one-digit subsections ("1.3."), and two-digit subsections ("11.01").
+# Require a letter in the title so PDF page-number pairs are not headings.
+SECTION_RE = re.compile(
+    r"(?m)^(?P<section>\d{1,2}(?:\.\d{1,2})?)\.?\s+(?P<title>[^\W\d_].+)$"
+)
 LETTERED_RE = re.compile(r"(?m)^\((?P<section>[a-z])\)\s+(?P<title>.+)$")
 HEADER_RE = re.compile(r"Company Policies and the Code of Professional Conduct Revised \d+")
 PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
@@ -74,9 +79,18 @@ def _read_pages(pdf_path: Path) -> list[tuple[int, str]]:
     pages: list[tuple[int, str]] = []
     for index, page in enumerate(reader.pages, start=1):
         text = _clean_page_text(page.extract_text() or "")
-        if text:
+        if text and not _looks_like_contents_page(text):
             pages.append((index, text))
     return pages
+
+
+def _looks_like_contents_page(text: str) -> bool:
+    """Detect a dense numbered list without depending on its language."""
+    heading_lines = sum(
+        bool(SECTION_RE.match(line))
+        for line in text.splitlines()
+    )
+    return heading_lines >= 6
 
 
 def _iter_section_matches(page_text: str) -> Iterable[re.Match[str]]:
