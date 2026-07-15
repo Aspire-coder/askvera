@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from services.pii import scrub_pii
+from services.pii import _pii_language_code, scrub_pii
 
 
 def test_scrub_pii_replaces_detected_entities() -> None:
@@ -15,3 +15,19 @@ def test_scrub_pii_replaces_detected_entities() -> None:
     clients = SimpleNamespace(comprehend=comprehend)
     with patch("services.pii.get_aws_clients", return_value=clients):
         assert scrub_pii("Contact me a@example.com", "cid") == "Contact me [EMAIL]"
+
+
+def test_french_uses_pattern_scrubbing_without_calling_comprehend() -> None:
+    with patch("services.pii.get_aws_clients") as get_clients:
+        result = scrub_pii("Écrivez-moi à private@example.com", "cid", "fr")
+
+    assert result == "Écrivez-moi à [EMAIL]"
+    get_clients.assert_not_called()
+    assert _pii_language_code("fr") is None
+
+
+def test_approved_directory_contact_is_preserved() -> None:
+    answer = "Le contact est gvilla@foreverliving.com.mx."
+    evidence = "Main Admin. Email gvilla@foreverliving.com.mx"
+
+    assert scrub_pii(answer, "cid", "fr", allowed_texts=[evidence]) == answer

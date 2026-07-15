@@ -185,7 +185,12 @@ class AIOrchestrator:
                 "evidence_decision": evidence_decision.to_metadata(),
             },
         )
-        safe_answer = scrub_pii(chat_response.answer, correlation_id, body.language)
+        safe_answer = scrub_pii(
+            chat_response.answer,
+            correlation_id,
+            body.language,
+            allowed_texts=(document.content for document in retrieval_result.documents),
+        )
         if safe_answer != chat_response.answer:
             chat_response = ChatResponse(
                 answer=safe_answer,

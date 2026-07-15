@@ -287,8 +287,8 @@ ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS = _env_bool("ENABLE_INSUFFICIENT_DATA_NOT
 SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askverachat-feedback"
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
-# Languages supported for Comprehend PII detection by this app.
-COMPREHEND_PII_LANGUAGE_CODES = ["en", "es", "fr"]
+# Languages supported by Amazon Comprehend DetectPiiEntities.
+COMPREHEND_PII_LANGUAGE_CODES = ["en", "es"]
 # Privacy notice version displayed by /api/config and stored in consent_log.
 PRIVACY_VERSION = "2026-05-01"
 # Allowed CORS origins for the widget host domains. Found in CloudFront or website deployment settings.
