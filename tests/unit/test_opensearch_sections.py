@@ -38,7 +38,7 @@ def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch)
         {"terms": {"language": ["fr"]}},
     ]
     assert _scope_filter("GB", "en", "locale")["bool"]["filter"][0] == {
-        "terms": {"country": ["UK"]}
+        "terms": {"country": ["GB", "UK"]}
     }
     assert _scope_filter("CA", "fr", "global") == {
         "term": {"access_scope": "global"}
