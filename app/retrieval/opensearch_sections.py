@@ -472,6 +472,11 @@ class OpenSearchSectionProvider:
             "Choose the candidate approved-document sections that most directly support an answer. "
             "The user question and a candidate document may use different languages; compare their meaning across languages. "
             "Use document type, record type, and record country metadata to distinguish office, staff, and policy evidence. "
+            "When the user asks for an office, address, phone number, email address, website, or staff contact in a named place, "
+            "prefer an office_directory candidate whose Record country matches that named place. "
+            "The user's selected market is not necessarily the place they are asking about. "
+            "Do not substitute a selected-market policy section that merely mentions generic customer care when a matching "
+            "global office or staff record directly contains the requested contact information. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
             "Return only JSON."
         )

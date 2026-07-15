@@ -62,7 +62,7 @@ APP_VERSION = "1.0.0"
 # Runtime environment. Production disables development-only auth conveniences.
 APP_ENV = _env_str("APP_ENV", "development").lower()
 # Prompt/cache version values used to invalidate stale AI responses after content or policy changes.
-PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-15")
+PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-15.2")
 # Rotate this value whenever approved indexed content is published. Keeping it
 # configurable lets the ingestion workflow invalidate stale answers without a
 # code change.

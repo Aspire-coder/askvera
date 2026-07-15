@@ -33,6 +33,13 @@ def test_approved_directory_contact_is_preserved() -> None:
     assert scrub_pii(answer, "cid", "fr", allowed_texts=[evidence]) == answer
 
 
+def test_approved_wrapped_office_number_is_preserved() -> None:
+    answer = "Adresse : Londres No. 61, Torre A, oficina 706-709"
+    evidence = "Londres No.61 Torre A oficina 706 -\n709 Colonia Juarez"
+
+    assert scrub_pii(answer, "cid", "fr", allowed_texts=[evidence]) == answer
+
+
 def test_approved_public_assistant_name_is_not_anonymized() -> None:
     comprehend = MagicMock()
     comprehend.detect_pii_entities.return_value = {

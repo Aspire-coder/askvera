@@ -29,9 +29,24 @@ def _approved_entity(entity_text: str, allowed_texts: Iterable[str]) -> bool:
     normalized_entity = entity_text.casefold().strip()
     if not normalized_entity:
         return False
+    punctuation_insensitive_entity = re.sub(r"[^\w]+", " ", normalized_entity, flags=re.UNICODE).strip()
     for allowed_text in allowed_texts:
         normalized_allowed = str(allowed_text or "").casefold()
         if normalized_entity in normalized_allowed:
+            return True
+        # PDF extraction can wrap punctuation-separated public values across
+        # lines, for example office 706 -\n709. Treat separators consistently
+        # while still requiring the complete entity to occur in approved text.
+        punctuation_insensitive_allowed = re.sub(
+            r"[^\w]+",
+            " ",
+            normalized_allowed,
+            flags=re.UNICODE,
+        ).strip()
+        if (
+            punctuation_insensitive_entity
+            and punctuation_insensitive_entity in punctuation_insensitive_allowed
+        ):
             return True
         entity_digits = re.sub(r"\D", "", normalized_entity)
         if len(entity_digits) >= 7 and entity_digits in re.sub(r"\D", "", normalized_allowed):
