@@ -72,3 +72,15 @@ def test_selector_candidates_reserve_space_for_global_documents() -> None:
 
     assert len(candidates) == 9
     assert sum(row["access_scope"] == "global" for row, _score in candidates) == 3
+
+
+def test_global_search_query_skips_translation_for_matching_language(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE", "en")
+
+    query = OpenSearchSectionProvider()._global_search_query(
+        "Where is the Mexico office?",
+        "en-US",
+        "test-correlation",
+    )
+
+    assert query == "Where is the Mexico office?"

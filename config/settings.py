@@ -200,6 +200,7 @@ OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file_
 OPENSEARCH_EVIDENCE_SELECTOR_ENABLED = _env_bool("OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
 OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 OPENSEARCH_ALLOW_ENGLISH_FALLBACK = _env_bool("OPENSEARCH_ALLOW_ENGLISH_FALLBACK", False)
+OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE = _env_str("OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE", "en")
 CONVERSATION_ROUTES_PATH = _env_str("CONVERSATION_ROUTES_PATH", str(Path(__file__).with_name("conversation_routes.json")))
 # Optional staged rollout: require the model to declare the retrieved section IDs
 # that support every factual claim before an answer is released.

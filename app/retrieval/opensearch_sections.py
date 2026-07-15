@@ -269,27 +269,38 @@ class OpenSearchSectionProvider:
         try:
             client = _client()
             search_messages = self._build_search_queries(message, country, language)
+            global_search_message = self._global_search_query(message, language, correlation_id)
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
             for index, search_message in enumerate(search_messages):
                 weight = 1.0 if index == 0 else 0.88
-                for scope in ("locale", "global"):
-                    text_response = client.search(
-                        index=settings.OPENSEARCH_INDEX,
-                        body=_text_query(search_message, country, language, scope=scope),
-                    )
-                    vector_response = client.search(
-                        index=settings.OPENSEARCH_INDEX,
-                        body=_vector_query(search_message, country, language, scope=scope),
-                    )
-                    text_hits.extend(
-                        {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                        for hit in text_response.get("hits", {}).get("hits", [])
-                    )
-                    vector_hits.extend(
-                        {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                        for hit in vector_response.get("hits", {}).get("hits", [])
-                    )
+                text_response = client.search(
+                    index=settings.OPENSEARCH_INDEX,
+                    body=_text_query(search_message, country, language, scope="locale"),
+                )
+                vector_response = client.search(
+                    index=settings.OPENSEARCH_INDEX,
+                    body=_vector_query(search_message, country, language, scope="locale"),
+                )
+                text_hits.extend(
+                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+                    for hit in text_response.get("hits", {}).get("hits", [])
+                )
+                vector_hits.extend(
+                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+                    for hit in vector_response.get("hits", {}).get("hits", [])
+                )
+
+            global_text_response = client.search(
+                index=settings.OPENSEARCH_INDEX,
+                body=_text_query(global_search_message, country, language, scope="global"),
+            )
+            global_vector_response = client.search(
+                index=settings.OPENSEARCH_INDEX,
+                body=_vector_query(global_search_message, country, language, scope="global"),
+            )
+            text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
+            vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
         except OpenSearchException:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
@@ -313,7 +324,8 @@ class OpenSearchSectionProvider:
             metadata={
                 "provider": "opensearch_section",
                 "candidate_count": len(rows),
-                "search_query_count": len(search_messages),
+                "search_query_count": len(search_messages) + 1,
+                "global_query_translated": global_search_message != message,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
                     for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
@@ -330,6 +342,39 @@ class OpenSearchSectionProvider:
             confidence=result.confidence,
         )
         return result
+
+    def _global_search_query(self, message: str, language: str, correlation_id: str) -> str:
+        """Translate a query into the configured language of global documents."""
+        target_language = _language_key(settings.OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE)
+        if _language_key(language) == target_language:
+            return message
+
+        system_prompt = (
+            "Translate document-search queries into the requested target language. "
+            "Preserve proper names, country names, organization names, acronyms, numbers, email addresses, and phone numbers. "
+            "Return only the translated query without commentary or quotation marks."
+        )
+        user_prompt = f"Target language code: {target_language}\nQuery:\n{message}"
+        try:
+            response = get_aws_clients().bedrock_runtime.converse(
+                modelId=settings.BEDROCK_MODEL_ARN,
+                system=[{"text": system_prompt}],
+                messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            )
+            translated = response["output"]["message"]["content"][0].get("text", "").strip()
+        except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
+            LOGGER.exception("opensearch_global_query_translation_failed", correlation_id=correlation_id)
+            return message
+
+        if not translated:
+            return message
+        LOGGER.info(
+            "opensearch_global_query_translation_success",
+            correlation_id=correlation_id,
+            source_language=_language_key(language),
+            target_language=target_language,
+        )
+        return translated.strip('"')
 
     def _build_search_queries(self, message: str, country: str, language: str) -> list[str]:
         """Build original, glossary, and optional model-rewritten search queries."""
