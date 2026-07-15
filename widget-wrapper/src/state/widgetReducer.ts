@@ -110,7 +110,8 @@ export function widgetReducer(state: WidgetState, action: WidgetAction): WidgetS
         session: { visitorId: action.visitorId, sessionId: action.sessionId, createdAt: action.createdAt },
         consent: { ...state.consent, accepted: false, pendingRetry: false },
         conversation: { messages: [], requestInFlight: false },
-        ui: { ...state.ui, showSuccess: false, draftMessage: "", activePanel: "consent" },
+        locale: action.clearLocale ? { country: undefined, language: undefined } : state.locale,
+        ui: { ...state.ui, menuOpen: false, showSuccess: false, draftMessage: "", activePanel: "consent" },
         analytics: { ...state.analytics, lastEventAt }
       };
     case "SET_ERROR":

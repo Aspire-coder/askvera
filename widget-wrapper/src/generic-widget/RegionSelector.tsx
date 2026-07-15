@@ -28,7 +28,11 @@ export function RegionSelector({
       </label>
       <label className="gw-field">
         <span>{config.labels.languageLabel}</span>
-        <select value={selectedLanguageCode || ""} onChange={(event) => onLanguageChange(event.target.value)}>
+        <select
+          value={selectedLanguageCode || ""}
+          onChange={(event) => onLanguageChange(event.target.value)}
+          disabled={!selectedCountryCode}
+        >
           {config.labels.languagePlaceholder ? <option value="">{config.labels.languagePlaceholder}</option> : null}
           {languages.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
         </select>

@@ -252,6 +252,7 @@ export function WidgetRuntime({
   const [activeAuthToken, setActiveAuthToken] = useState(authToken);
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
+  const conversationGenerationRef = useRef(0);
   const activeAuthTokenRef = useRef(authToken);
   const authRefreshPromiseRef = useRef<Promise<string | undefined> | null>(null);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
@@ -446,6 +447,7 @@ export function WidgetRuntime({
 
   const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
     if (requestInFlightRef.current) return;
+    const conversationGeneration = conversationGenerationRef.current;
     requestInFlightRef.current = true;
     widgetEventBus.emit(widgetEventTypes.CHAT_STARTED, { visitorId: payload.visitorId, sessionId: payload.sessionId });
     if (!firstMessageSentRef.current) {
@@ -456,6 +458,7 @@ export function WidgetRuntime({
     setLoading(true);
     try {
       const envelope = await submitChatRequest(payload);
+      if (conversationGeneration !== conversationGenerationRef.current) return;
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
       const localized = getWidgetCopy(payload.selectedLanguage);
       const assistantMessage: WidgetMessage = {
@@ -480,6 +483,7 @@ export function WidgetRuntime({
       appendMessage(assistantMessage);
       widgetEventBus.emit(widgetEventTypes.MESSAGE_RECEIVED, { visitorId: payload.visitorId, sessionId: payload.sessionId, correlationId, message: assistantMessage });
     } catch (error) {
+      if (conversationGeneration !== conversationGenerationRef.current) return;
       if (error instanceof ApiRequestError && error.code === "CONSENT_REQUIRED") {
         setPendingMessage(payload);
         setConsentRequiredSignal((value) => value + 1);
@@ -495,8 +499,10 @@ export function WidgetRuntime({
         metadata: { errorCategory: presentation.category }
       });
     } finally {
-      requestInFlightRef.current = false;
-      setLoading(false);
+      if (conversationGeneration === conversationGenerationRef.current) {
+        requestInFlightRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -590,6 +596,10 @@ export function WidgetRuntime({
       })}
       onRequestSupport={(message, state) => handleSupportRequest(state, message)}
       onNewChat={(payload) => {
+        conversationGenerationRef.current += 1;
+        requestInFlightRef.current = false;
+        setLoading(false);
+        setPendingMessage(null);
         setMessages([]);
         window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: payload.sessionId, messages: [] }));
         firstMessageSentRef.current = false;

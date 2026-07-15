@@ -23,6 +23,6 @@ export type WidgetAction =
   | { type: "UPDATE_MESSAGE"; message: WidgetMessage }
   | { type: "SET_REQUEST_IN_FLIGHT"; requestInFlight: boolean }
   | { type: "SET_CONNECTION"; online: boolean; reconnecting?: boolean; backendHealthy?: boolean }
-  | { type: "RESET_SESSION"; visitorId: string; sessionId: string; createdAt: string }
+  | { type: "RESET_SESSION"; visitorId: string; sessionId: string; createdAt: string; clearLocale?: boolean }
   | { type: "SET_ERROR"; error: string | null }
   | { type: "ADD_WARNING"; warning: string };

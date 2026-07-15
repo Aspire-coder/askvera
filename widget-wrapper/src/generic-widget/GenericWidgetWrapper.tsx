@@ -192,7 +192,9 @@ export function GenericWidgetWrapper({
   const composerDisabled = Boolean(composerDisabledReason);
   const canSendMessage = Boolean(message.trim()) && !composerDisabled;
   const availableLanguages = useMemo(
-    () => filterLanguagesByCountry(config.languages, selectedCountry?.code, config.countries),
+    () => selectedCountry
+      ? filterLanguagesByCountry(config.languages, selectedCountry.code, config.countries)
+      : [],
     [config.countries, config.languages, selectedCountry?.code]
   );
   const suggestedTopics = useMemo(
@@ -384,12 +386,13 @@ export function GenericWidgetWrapper({
     if (!resetSignal) return;
     const nextSession = sessionManager.reset({
       legalVersion: config.consent.policyVersion,
-      country: selectedCountry?.code,
-      language: selectedLanguage?.code
+      country: undefined,
+      language: undefined
     });
-    dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt });
+    setConsentDeclined(false);
+    dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt, clearLocale: true });
     events.emit(widgetEventTypes.SESSION_RESET, { visitorId: nextSession.visitorId, sessionId: nextSession.sessionId });
-  }, [config.consent.policyVersion, events, resetSignal, selectedCountry?.code, selectedLanguage?.code, sessionManager]);
+  }, [config.consent.policyVersion, events, resetSignal, sessionManager]);
 
   useEffect(() => {
     if (!outboundMessage?.id || !outboundMessage.text.trim()) return;
@@ -606,12 +609,19 @@ export function GenericWidgetWrapper({
                 const nextSession = sessionManager.reset({
                   providedVisitorId: visitorId,
                   legalVersion: config.consent.policyVersion,
-                  country: selectedCountry?.code,
-                  language: selectedLanguage?.code,
-                  consentAccepted
+                  country: undefined,
+                  language: undefined,
+                  consentAccepted: false
                 });
-                dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt });
-                const nextPayload = { ...payload, visitorId: nextSession.visitorId, sessionId: nextSession.sessionId };
+                setConsentDeclined(false);
+                dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt, clearLocale: true });
+                const nextPayload = {
+                  ...payload,
+                  visitorId: nextSession.visitorId,
+                  sessionId: nextSession.sessionId,
+                  selectedCountry: "",
+                  selectedLanguage: ""
+                };
                 events.emit(widgetEventTypes.SESSION_RESET, nextPayload);
                 onNewChat?.(nextPayload);
               }}
@@ -648,7 +658,7 @@ export function GenericWidgetWrapper({
                 onLanguageChange={handleLanguageChange}
               />
             ) : null}
-            {config.consent.requireConsentBeforeMessaging !== false && !consentAccepted && !consentDeclined ? (
+            {config.consent.requireConsentBeforeMessaging !== false && !consentAccepted && !consentDeclined && selectedCountry && selectedLanguage ? (
               <ConsentPanel
                 config={config}
                 accepting={consentSubmitting}
