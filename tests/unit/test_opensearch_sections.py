@@ -34,9 +34,12 @@ def test_language_key_normalizes_regional_language_tags() -> None:
 def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_ALLOW_ENGLISH_FALLBACK", False)
     assert _scope_filter("CA", "fr", "locale")["bool"]["filter"] == [
-        {"term": {"country": "CA"}},
+        {"terms": {"country": ["CA"]}},
         {"terms": {"language": ["fr"]}},
     ]
+    assert _scope_filter("GB", "en", "locale")["bool"]["filter"][0] == {
+        "terms": {"country": ["UK"]}
+    }
     assert _scope_filter("CA", "fr", "global") == {
         "term": {"access_scope": "global"}
     }
