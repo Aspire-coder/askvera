@@ -51,7 +51,21 @@ def _approved_entity(entity_text: str, allowed_texts: Iterable[str]) -> bool:
         entity_digits = re.sub(r"\D", "", normalized_entity)
         if len(entity_digits) >= 7 and entity_digits in re.sub(r"\D", "", normalized_allowed):
             return True
+        entity_tokens = set(re.findall(r"[^\W_]+", punctuation_insensitive_entity, flags=re.UNICODE))
+        allowed_tokens = set(re.findall(r"[^\W_]+", punctuation_insensitive_allowed, flags=re.UNICODE))
+        if len(entity_tokens) >= 2:
+            overlap = len(entity_tokens & allowed_tokens)
+            if overlap >= 2 and overlap / len(entity_tokens) >= 0.8:
+                return True
     return False
+
+
+def _looks_like_location_name(entity_text: str) -> bool:
+    """Distinguish a short place name from a private street address."""
+    if any(character.isdigit() for character in entity_text):
+        return False
+    tokens = re.findall(r"[^\W_]+", entity_text, flags=re.UNICODE)
+    return 1 <= len(tokens) <= 4
 
 
 def _scrub_pattern_pii(text: str, allowed_texts: Iterable[str]) -> str:
@@ -73,6 +87,7 @@ def scrub_pii(
     language: str | None = None,
     *,
     allowed_texts: Iterable[str] = (),
+    preserve_location_names: bool = False,
 ) -> str:
     """Mask PII entities using Amazon Comprehend."""
     if not text:
@@ -100,8 +115,12 @@ def scrub_pii(
     for entity in sorted(response.get("Entities", []), key=lambda item: item["BeginOffset"], reverse=True):
         start = int(entity["BeginOffset"])
         end = int(entity["EndOffset"])
-        if _approved_entity(text[start:end], approved):
+        entity_text = text[start:end]
+        entity_type = str(entity.get("Type") or "PII").upper()
+        if _approved_entity(entity_text, approved):
             continue
-        scrubbed = f"{scrubbed[:start]}[{entity['Type']}]{scrubbed[end:]}"
+        if preserve_location_names and entity_type in {"ADDRESS", "LOCATION"} and _looks_like_location_name(entity_text):
+            continue
+        scrubbed = f"{scrubbed[:start]}[{entity_type}]{scrubbed[end:]}"
     LOGGER.info("pii_scrubbed", correlation_id=correlation_id, entity_count=len(response.get("Entities", [])), language=language_code)
     return scrubbed

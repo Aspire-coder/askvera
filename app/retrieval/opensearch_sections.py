@@ -22,7 +22,7 @@ from services.market_config import get_document_country_codes
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
-from .section_index import _confidence_from_documents, _source_score
+from .section_index import _character_overlap, _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
 
@@ -136,6 +136,66 @@ def _text_query(message: str, country: str, language: str, *, scope: str = "loca
             }
         },
     }
+
+
+def _directory_text_query(message: str) -> dict[str, Any]:
+    """Build a metadata-aware query for globally available directory records."""
+    return {
+        "size": settings.OPENSEARCH_CANDIDATE_COUNT,
+        "query": {
+            "bool": {
+                "filter": [
+                    _scope_filter("", "", "global"),
+                    {"term": {"status": "active"}},
+                    {"term": {"document_type": "office_directory"}},
+                ],
+                "should": [
+                    {
+                        "multi_match": {
+                            "query": message,
+                            "fields": [
+                                "metadata.record_country^12",
+                                "section_title^10",
+                                "content^4",
+                                "search_text^2",
+                            ],
+                            "type": "best_fields",
+                            "operator": "or",
+                            "fuzziness": "AUTO",
+                        }
+                    },
+                    {"match_phrase": {"metadata.record_country": {"query": message, "boost": 18}}},
+                    {"match_phrase": {"section_title": {"query": message, "boost": 8}}},
+                ],
+                "minimum_should_match": 1,
+            }
+        },
+    }
+
+
+def _directory_record_country_score(message: str, row: dict[str, Any]) -> float:
+    """Reward directory records whose own country metadata matches the query."""
+    if row.get("document_type") != "office_directory":
+        return 0.0
+    metadata = dict(row.get("metadata") or {})
+    record_country = _normalize_text(str(metadata.get("record_country") or ""))
+    normalized_message = _normalize_text(message)
+    if not record_country or not normalized_message:
+        return 0.0
+    if record_country in normalized_message:
+        return 2.4
+
+    message_tokens = set(normalized_message.split())
+    country_tokens = record_country.split()
+    acronym = "".join(token[0] for token in country_tokens if token)
+    if len(acronym) >= 2 and acronym in message_tokens:
+        return 2.2
+
+    compact_country = "".join(country_tokens)
+    compact_message_tokens = [token for token in message_tokens if len(token) >= 4]
+    if any(_character_overlap(token, compact_country) >= 0.72 for token in compact_message_tokens):
+        return 1.6
+    return 0.0
 
 
 def _vector_query(message: str, country: str, language: str, *, scope: str = "locale") -> dict[str, Any]:
@@ -294,7 +354,7 @@ class OpenSearchSectionProvider:
 
             global_text_response = client.search(
                 index=settings.OPENSEARCH_INDEX,
-                body=_text_query(global_search_message, country, language, scope="global"),
+                body=_directory_text_query(global_search_message),
             )
             global_vector_response = client.search(
                 index=settings.OPENSEARCH_INDEX,
@@ -449,7 +509,10 @@ class OpenSearchSectionProvider:
                 existing["rank"] = float(existing.get("rank") or 0.0) + float(row.get("rank") or 0.0)
 
         self._normalize_opensearch_ranks(list(merged.values()))
-        scored = [(row, _source_score(row, message)) for row in merged.values()]
+        scored = [
+            (row, _source_score(row, message) + _directory_record_country_score(message, row))
+            for row in merged.values()
+        ]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
 
     def _select_evidence_rows(

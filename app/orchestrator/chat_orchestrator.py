@@ -85,7 +85,12 @@ class AIOrchestrator:
         if not has_valid_consent(body.sessionId, correlation_id):
             raise ConsentRequiredError()
 
-        scrubbed_input = scrub_pii(body.message, correlation_id, body.language)
+        scrubbed_input = scrub_pii(
+            body.message,
+            correlation_id,
+            body.language,
+            preserve_location_names=True,
+        )
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)

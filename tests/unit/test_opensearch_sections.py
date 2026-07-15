@@ -2,6 +2,8 @@
 
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
+    _directory_record_country_score,
+    _directory_text_query,
     _language_key,
     _selector_candidates,
     _scope_filter,
@@ -87,3 +89,21 @@ def test_global_search_query_skips_translation_for_matching_language(monkeypatch
     )
 
     assert query == "Where is the Mexico office?"
+
+
+def test_directory_query_filters_to_active_global_directory_records() -> None:
+    filters = _directory_text_query("Where is the India office?")["query"]["bool"]["filter"]
+
+    assert {"term": {"access_scope": "global"}} in filters
+    assert {"term": {"status": "active"}} in filters
+    assert {"term": {"document_type": "office_directory"}} in filters
+
+
+def test_directory_country_score_derives_acronyms_from_record_metadata() -> None:
+    row = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "United Kingdom"},
+    }
+
+    assert _directory_record_country_score("Give me the UK office address", row) == 2.2
+    assert _directory_record_country_score("Give me the United Kingdom office address", row) == 2.4

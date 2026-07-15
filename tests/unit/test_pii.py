@@ -40,6 +40,52 @@ def test_approved_wrapped_office_number_is_preserved() -> None:
     assert scrub_pii(answer, "cid", "fr", allowed_texts=[evidence]) == answer
 
 
+def test_short_location_name_is_preserved_for_retrieval_input() -> None:
+    text = "Give me the address of the United Kingdom office"
+    start = text.index("United Kingdom")
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [{"BeginOffset": start, "EndOffset": start + len("United Kingdom"), "Type": "ADDRESS"}]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(text, "cid", "en", preserve_location_names=True)
+
+    assert answer == text
+
+
+def test_private_street_address_is_still_scrubbed() -> None:
+    text = "Send it to 123 Main Street, Toronto"
+    start = text.index("123 Main Street, Toronto")
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [{"BeginOffset": start, "EndOffset": len(text), "Type": "ADDRESS"}]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(text, "cid", "en", preserve_location_names=True)
+
+    assert answer == "Send it to [ADDRESS]"
+
+
+def test_grounded_address_with_formatting_variation_is_preserved() -> None:
+    text = "Office: 35 Homer Road, Solihull, West Midlands, UK"
+    evidence = "Physical Address 35 Homer Road Solihull West Midlands B91 3QJ United Kingdom"
+    start = text.index("35 Homer Road")
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [{"BeginOffset": start, "EndOffset": len(text), "Type": "ADDRESS"}]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(text, "cid", "en", allowed_texts=[evidence])
+
+    assert answer == text
+
+
 def test_approved_public_assistant_name_is_not_anonymized() -> None:
     comprehend = MagicMock()
     comprehend.detect_pii_entities.return_value = {

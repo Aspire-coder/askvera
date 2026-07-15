@@ -67,6 +67,9 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-15.2")
 # configurable lets the ingestion workflow invalidate stale answers without a
 # code change.
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
+# Code-owned retrieval behavior version. Bump when query normalization or
+# ranking changes so previously cached failures cannot mask a deployed fix.
+RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-15-directory-v3")
 # RDS PostgreSQL database identifier. Found in RDS -> Databases -> database-1.
 RDS_DB_IDENTIFIER = "database-1"
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
