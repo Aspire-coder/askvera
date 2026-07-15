@@ -135,8 +135,20 @@ def _claim_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
 
 
 def _structured_record_number_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
-    """Allow an exact number from a structured record across answer languages."""
-    return any(_source_windows(source_text, number) for number in _number_variants(claim.number))
+    """Allow structured-record numbers despite harmless display formatting changes."""
+    for number in _number_variants(claim.number):
+        if _source_windows(source_text, number):
+            return True
+
+        # Office directories often store a phone number as one digit string while
+        # an answer formats it with spaces, parentheses, or a country-code prefix.
+        # Compare digits only in this structured-record path; policy rules retain
+        # the stricter subject-aware matching above.
+        claim_digits = "".join(character for character in number if character.isdigit())
+        source_digits = "".join(character for character in source_text if character.isdigit())
+        if claim_digits and claim_digits in source_digits:
+            return True
+    return False
 
 
 def _extract_claims(answer: str) -> list[MeasurableClaim]:

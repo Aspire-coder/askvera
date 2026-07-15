@@ -301,3 +301,17 @@ def test_numeric_grounding_allows_exact_directory_phone_across_languages() -> No
     )
 
     assert not result.has_critical()
+
+
+def test_numeric_grounding_allows_reformatted_directory_phone_across_languages() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Le numero du bureau est le +52 (55) 3383-6196.",
+            "Admin. 2 Cell# 525533836196",
+            metadata={"directory_section": "staff", "access_scope": "global"},
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
