@@ -18,6 +18,7 @@ from opensearchpy.exceptions import OpenSearchException
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
+from services.market_config import get_document_country_codes
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
@@ -96,7 +97,7 @@ def _scope_filter(country: str, language: str, scope: str) -> dict[str, Any]:
     return {
         "bool": {
             "filter": [
-                {"term": {"country": country}},
+                {"terms": {"country": sorted(get_document_country_codes(country))}},
                 _language_filter(language),
             ]
         }
@@ -470,6 +471,8 @@ class OpenSearchSectionProvider:
         system_prompt = (
             "You select evidence for ASK Vera. Do not answer the user's question. "
             "Choose the candidate approved-document sections that most directly support an answer. "
+            "Treat harmless misspellings, omitted accents, and accidental character spacing as noisy user input; "
+            "match the intended term when the candidate text makes that intent clear. "
             "The user question and a candidate document may use different languages; compare their meaning across languages. "
             "Use document type, record type, and record country metadata to distinguish office, staff, and policy evidence. "
             "When the user asks for an office, address, phone number, email address, website, or staff contact in a named place, "

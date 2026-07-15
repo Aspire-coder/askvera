@@ -52,15 +52,19 @@ function MessageActions({
   message,
   state,
   onCopyMessage,
-  onMessageFeedback
+  onMessageFeedback,
+  onRequestSupport
 }: {
   message: WidgetMessage;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const [copied, setCopied] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
+  const [supportRequested, setSupportRequested] = useState(false);
+  const [supportPending, setSupportPending] = useState(false);
   const copyText = messageCopyText(message);
 
   const handleCopy = async () => {
@@ -76,10 +80,21 @@ function MessageActions({
     await onMessageFeedback?.(message, nextRating, state);
   };
 
+  const handleSupport = async () => {
+    if (supportPending || supportRequested || !onRequestSupport) return;
+    setSupportPending(true);
+    try {
+      await onRequestSupport(message, state);
+      setSupportRequested(true);
+    } finally {
+      setSupportPending(false);
+    }
+  };
+
   return (
     <div className="gw-message-actions" aria-label="Message actions">
       <button type="button" className="gw-message-action" onClick={handleCopy} disabled={!copyText} aria-label="Copy assistant response">
-        {copied ? "Copied" : "Copy"}
+        {copied ? ((message.metadata?.actionCopiedLabel as string) || "Copied") : ((message.metadata?.actionCopyLabel as string) || "Copy")}
       </button>
       <button
         type="button"
@@ -88,7 +103,7 @@ function MessageActions({
         aria-label="Mark response as helpful"
         aria-pressed={rating === 1}
       >
-        Helpful
+        {(message.metadata?.actionHelpfulLabel as string) || "Helpful"}
       </button>
       <button
         type="button"
@@ -97,8 +112,17 @@ function MessageActions({
         aria-label="Mark response as not helpful"
         aria-pressed={rating === -1}
       >
-        Not helpful
+        {(message.metadata?.actionNotHelpfulLabel as string) || "Not helpful"}
       </button>
+      {message.metadata?.supportRecommended || rating === -1 ? (
+        <button type="button" className="gw-message-action gw-message-support-action" onClick={() => void handleSupport()} disabled={supportPending || supportRequested}>
+          {supportRequested
+            ? ((message.metadata?.supportRequestedLabel as string) || "Requested")
+            : supportPending
+              ? ((message.metadata?.supportCreatingLabel as string) || "Creating...")
+              : ((message.metadata?.supportLabel as string) || "Request support")}
+        </button>
+      ) : null}
       {copied ? <span className="gw-sr-only" role="status">Response copied.</span> : null}
     </div>
   );
@@ -109,13 +133,15 @@ function MessageCard({
   config,
   state,
   onCopyMessage,
-  onMessageFeedback
+  onMessageFeedback,
+  onRequestSupport
 }: {
   message: WidgetMessage;
   config: GenericWidgetConfig;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -142,6 +168,7 @@ function MessageCard({
             state={state}
             onCopyMessage={onCopyMessage}
             onMessageFeedback={onMessageFeedback}
+            onRequestSupport={onRequestSupport}
           />
         ) : null}
       </div>
@@ -193,7 +220,8 @@ export function MessageFeed({
   loadingState = "hidden",
   loadingLabel,
   onCopyMessage,
-  onMessageFeedback
+  onMessageFeedback,
+  onRequestSupport
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
@@ -203,6 +231,7 @@ export function MessageFeed({
   loadingLabel?: ReactNode;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const previousLoadingState = useRef(loadingState);
@@ -228,6 +257,7 @@ export function MessageFeed({
           state={state}
           onCopyMessage={onCopyMessage}
           onMessageFeedback={onMessageFeedback}
+          onRequestSupport={onRequestSupport}
         />
       ))}
       {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}

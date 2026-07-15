@@ -1,8 +1,16 @@
-"""AI chat orchestration for ASK Vera."""
+"""AI chat orchestration for AskVera."""
+
+import re
 
 from app.models.responses import ModelResponse
 from app.models.router import ModelRouter, model_router
-from app.evidence import assistant_meta_response, approve_evidence, classify_intent, with_approved_evidence
+from app.evidence import (
+    assistant_meta_response,
+    approve_evidence,
+    classify_intent,
+    localized_conversation_response,
+    with_approved_evidence,
+)
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
@@ -82,7 +90,7 @@ class AIOrchestrator:
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
         if not governance_decision.allowed:
-            return self._governance_fallback(governance_decision, correlation_id)
+            return self._governance_fallback(governance_decision, correlation_id, body.language)
 
         intent = classify_intent(scrubbed_input, body.language)
         if intent == "assistant_meta":
@@ -107,7 +115,7 @@ class AIOrchestrator:
                     language=body.language,
                     role=body.role,
                 )
-                return self._governance_fallback(governance_decision, correlation_id)
+                return self._governance_fallback(governance_decision, correlation_id, body.language)
             return chat_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
@@ -124,7 +132,7 @@ class AIOrchestrator:
             )
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(),
+                    self._insufficient_evidence_message(body.language),
                     correlation_id,
                     metadata={
                         "failure_layer": "evidence_gate",
@@ -150,7 +158,7 @@ class AIOrchestrator:
             failure_layer = self._low_confidence_failure_layer(exc)
             return self._validate_response(
                 self.response_builder.fallback(
-                    exc.message,
+                    self._insufficient_evidence_message(body.language),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -163,7 +171,7 @@ class AIOrchestrator:
         if contracted_response is None:
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(),
+                    self._insufficient_evidence_message(body.language),
                     correlation_id,
                     metadata={"failure_layer": "evidence_contract"},
                 ),
@@ -214,7 +222,7 @@ class AIOrchestrator:
         )
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
         if not governance_decision.allowed:
-            return self._governance_fallback(governance_decision, correlation_id)
+            return self._governance_fallback(governance_decision, correlation_id, body.language)
         append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
@@ -293,6 +301,7 @@ class AIOrchestrator:
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
         """Expand vague follow-up questions with recent user-message context."""
+        user_message = self._normalize_malformed_spacing(user_message, correlation_id)
         if not self._needs_history_context(user_message, history):
             return user_message
 
@@ -309,6 +318,35 @@ class AIOrchestrator:
             contextual_length=len(query),
         )
         return query
+
+    def _normalize_malformed_spacing(self, message: str, correlation_id: str) -> str:
+        """Repair character-spaced input without using a language vocabulary."""
+        tokens = re.findall(r"[^\W_]", message, flags=re.UNICODE)
+        word_tokens = re.findall(r"[^\W_]+", message, flags=re.UNICODE)
+        if len(tokens) < 8 or not word_tokens:
+            return message
+        single_ratio = sum(len(token) == 1 for token in word_tokens) / len(word_tokens)
+        if single_ratio < 0.65:
+            return message
+
+        groups = re.split(r"\s{2,}", message.strip())
+        repaired: list[str] = []
+        for group in groups:
+            group_tokens = group.split()
+            if len(group_tokens) >= 2 and all(len(token) == 1 for token in group_tokens):
+                repaired.append("".join(group_tokens))
+            else:
+                repaired.append(group)
+        normalized = " ".join(part for part in repaired if part).strip()
+        if normalized and normalized != message.strip():
+            LOGGER.info(
+                "chat_character_spacing_repaired",
+                correlation_id=correlation_id,
+                original_length=len(message),
+                normalized_length=len(normalized),
+            )
+            return normalized
+        return message
 
     def _needs_history_context(self, user_message: str, history: str) -> bool:
         """Return true when a user message likely depends on earlier chat turns."""
@@ -341,9 +379,9 @@ class AIOrchestrator:
             correlation_id=correlation_id,
         )
 
-    def _governance_fallback(self, decision: GovernanceDecision, correlation_id: str) -> ChatResponse:
+    def _governance_fallback(self, decision: GovernanceDecision, correlation_id: str, language: str = "en") -> ChatResponse:
         """Return a safe fallback when governance blocks the request or response."""
-        user_message = self._governance_user_message(decision)
+        user_message = self._governance_user_message(decision, language)
         failure_layer = self._governance_failure_layer(decision)
         LOGGER.warning(
             "governance_fallback_response",
@@ -381,30 +419,30 @@ class AIOrchestrator:
             return "low_confidence"
         return "low_confidence"
 
-    def _governance_user_message(self, decision: GovernanceDecision) -> str:
+    def _governance_user_message(self, decision: GovernanceDecision, language: str = "en") -> str:
         """Convert internal governance reasons into user-friendly copy."""
         risk_issues = (decision.metadata or {}).get("risk", {}).get("issues", [])
         issue_codes = {str(issue.get("code", "")).lower() for issue in risk_issues}
 
         if any("income" in code for code in issue_codes):
-            return FALLBACK_RESPONSES["income_claim"]
+            return localized_conversation_response("income_claim", language) or FALLBACK_RESPONSES["income_claim"]
         if any("medical" in code or "health" in code for code in issue_codes):
-            return FALLBACK_RESPONSES["medical_claim"]
+            return localized_conversation_response("medical_claim", language) or FALLBACK_RESPONSES["medical_claim"]
         if decision.reason == "Governance provider failed.":
-            return FALLBACK_RESPONSES["bedrock_error"]
+            return localized_conversation_response("bedrock_error", language) or FALLBACK_RESPONSES["bedrock_error"]
         if decision.reason in {
             "Request blocked by high-risk policy.",
             "Request blocked by risk policy.",
         }:
-            return FALLBACK_RESPONSES["off_topic"]
+            return localized_conversation_response("off_topic", language) or FALLBACK_RESPONSES["off_topic"]
         return (
             decision.reason
             or "I can't help with that request, but I'm happy to help with Forever Living products, policies, ordering, or business support."
         )
 
-    def _insufficient_evidence_message(self) -> str:
+    def _insufficient_evidence_message(self, language: str = "en") -> str:
         """Use the approved fallback while remaining compatible with older config."""
-        return FALLBACK_RESPONSES.get(
+        return localized_conversation_response("insufficient_evidence", language) or FALLBACK_RESPONSES.get(
             "insufficient_evidence",
             FALLBACK_RESPONSES.get(
                 "low_confidence",
@@ -416,7 +454,7 @@ class AIOrchestrator:
         """Return controlled non-policy responses without retrieval."""
         answer = assistant_meta_response(body.message, body.language)
         if not answer:
-            answer = "Hi, I'm ASK Vera. What Forever Living product, policy, or business-support question can I help with?"
+            answer = localized_conversation_response("greeting", body.language) or "Hello, I'm AskVera. How can I help?"
         return self.response_builder.fallback(
             answer,
             correlation_id,
@@ -475,7 +513,7 @@ class AIOrchestrator:
             )
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(),
+                    self._insufficient_evidence_message(body.language),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),

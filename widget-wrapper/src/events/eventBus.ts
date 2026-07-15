@@ -28,7 +28,7 @@ export class WidgetEventBus {
     };
 
     if (this.debug) {
-      this.logger.info("[ASK Vera Event]", event.type, event);
+      this.logger.info("[AskVera Event]", event.type, event);
     }
 
     const listeners = this.listeners[type] as Set<WidgetEventListener<TType>> | undefined;
@@ -36,7 +36,7 @@ export class WidgetEventBus {
       try {
         listener(event);
       } catch (error) {
-        this.logger.warn("[ASK Vera Event] listener failed", error);
+        this.logger.warn("[AskVera Event] listener failed", error);
       }
     });
 

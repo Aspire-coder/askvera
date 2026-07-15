@@ -204,7 +204,14 @@ def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse
     correlation_id = _correlation_id(request)
     try:
         enqueue_feedback(body, correlation_id)
-        return success({"queued": True}, correlation_id)
+        return success(
+            {
+                "queued": True,
+                "requestType": body.requestType,
+                "ticketId": correlation_id if body.requestType == "support" else None,
+            },
+            correlation_id,
+        )
     except AskVeraError as exc:
         return error_response(exc, correlation_id)
 

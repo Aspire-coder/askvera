@@ -21,6 +21,7 @@ import { widgetEventBus, widgetEventTypes } from "../events";
 import { GenericWidgetWrapper } from "../generic-widget/GenericWidgetWrapper";
 import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../generic-widget/types";
 import { renewWidgetAuth } from "./auth";
+import { getWidgetCopy } from "../localization/widgetCopy";
 
 type WidgetRuntimeProps = {
   apiBaseUrl: string;
@@ -41,10 +42,10 @@ type ChatErrorPresentation = {
 };
 
 const baseWidgetConfig: GenericWidgetConfig = {
-  brandName: "ASK Vera",
-  assistantName: "ASK Vera",
+  brandName: "AskVera",
+  assistantName: "AskVera",
   assistantSubtitle: "Enterprise Knowledge Assistant",
-  launcherTitle: "Open ASK Vera",
+  launcherTitle: "Open AskVera",
   footerText: "Answers are generated from approved company documentation.",
   welcomeText: "I can help you find clear answers from approved company documentation.",
   loadingText: "Thinking...",
@@ -83,11 +84,11 @@ const baseWidgetConfig: GenericWidgetConfig = {
   },
   consent: {
     title: "Privacy and Terms",
-    body: "To use ASK Vera, review and accept the legal documents below.",
+    body: "To use AskVera, review and accept the legal documents below.",
     eyebrow: "One quick privacy step",
     acknowledgmentLabel: "I have read and agree to the required privacy and terms documents.",
     loadingText: "Loading legal documents before consent can be recorded.",
-    declineTitle: "No problem. ASK Vera will be here when you are ready.",
+    declineTitle: "No problem. AskVera will be here when you are ready.",
     declineBody: "Thanks for your response. To start chatting, please come back and accept the privacy and terms when you are ready.",
     declineActionLabel: "Review privacy terms",
     policyVersion: "2026.1",
@@ -98,12 +99,38 @@ const baseWidgetConfig: GenericWidgetConfig = {
   policyLinks: [],
   countries: [{ code: "US", label: "United States", languageCodes: ["en"] }],
   languages: [{ code: "en", label: "English", countryCodes: ["US"] }],
-  provider: { name: "ASK Vera API", type: "custom-react" },
-  persistConsent: false,
+  provider: { name: "AskVera API", type: "custom-react" },
+  persistConsent: true,
   sessionStorageKey: "askvera_session_id",
   sessionMetadataStorageKey: "askvera_session_metadata",
   visitorStorageKey: "askvera_visitor_id"
 };
+
+const conversationStorageKey = "askvera_widget_conversation";
+
+function storedLocale() {
+  if (typeof window === "undefined") return { country: "US", language: "en" };
+  try {
+    const metadata = JSON.parse(window.localStorage.getItem("askvera_session_metadata") || "{}") as Record<string, string>;
+    return { country: metadata.country || "US", language: metadata.language || "en" };
+  } catch {
+    return { country: "US", language: "en" };
+  }
+}
+
+function storedMessages(): WidgetMessage[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const sessionId = window.localStorage.getItem("askvera_session_id");
+    const stored = JSON.parse(window.localStorage.getItem(conversationStorageKey) || "{}") as {
+      sessionId?: string;
+      messages?: Array<Omit<WidgetMessage, "content"> & { content: string }>;
+    };
+    return stored.sessionId === sessionId && Array.isArray(stored.messages) ? stored.messages : [];
+  } catch {
+    return [];
+  }
+}
 
 const buildId = (prefix: string) => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -129,12 +156,11 @@ async function loadCompleteWidgetConfig(
     throw new Error("Widget configuration response did not include data.");
   }
 
-  const needsMarketConfig = !widgetConfig.countries?.length || widgetConfig.countries.length <= 1;
   const currentLegalDocuments = getLegalDocuments(widgetConfig);
   const needsLegalDocuments = !currentLegalDocuments.length;
 
   const [marketEnvelope, privacyEnvelope] = await Promise.all([
-    needsMarketConfig ? loadConfig(apiClient) : Promise.resolve(undefined),
+    loadConfig(apiClient),
     needsLegalDocuments ? loadPrivacy(apiClient, selectedCountry, selectedLanguage) : Promise.resolve(undefined)
   ]);
   const loadedLegalDocuments = privacyEnvelope?.data?.documents?.length ? privacyEnvelope.data.documents : currentLegalDocuments;
@@ -152,12 +178,12 @@ function isConsentInstructionMessage(message: WidgetMessage): boolean {
   return message.id.includes("consent-required");
 }
 
-function presentChatError(error: unknown, assistantName = "ASK Vera"): ChatErrorPresentation {
+function presentChatError(error: unknown, assistantName = "AskVera"): ChatErrorPresentation {
   if (error instanceof ApiTimeoutError) {
     return { category: "timeout", title: `${assistantName} is taking longer than expected`, body: "Please try again.", actionLabel: "Retry" };
   }
   if (error instanceof ApiNetworkError) {
-    return { category: "network", title: "Unable to reach ASK Vera", body: "Please check your connection and try again.", actionLabel: "Retry" };
+    return { category: "network", title: "Unable to reach AskVera", body: "Please check your connection and try again.", actionLabel: "Retry" };
   }
   if (error instanceof BackendUnavailableError) {
     return { category: "backend_unavailable", title: `${assistantName} is temporarily unavailable`, body: "Please try again in a few moments.", actionLabel: "Retry" };
@@ -218,8 +244,8 @@ export function WidgetRuntime({
   sdkMessage
 }: WidgetRuntimeProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
-  const [selectedLocale, setSelectedLocale] = useState({ country: "US", language: "en" });
-  const [messages, setMessages] = useState<WidgetMessage[]>([]);
+  const [selectedLocale, setSelectedLocale] = useState(storedLocale);
+  const [messages, setMessages] = useState<WidgetMessage[]>(storedMessages);
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
@@ -254,13 +280,13 @@ export function WidgetRuntime({
       : undefined;
     const primaryColor = apiConfig?.primaryColor || "#2D7FF9";
     const theme = buildThemeConfig({ mode: apiConfig?.theme === "dark" ? "dark" : "light" }, primaryColor);
-    return buildWidgetConfig({
+    const built = buildWidgetConfig({
       baseConfig: baseWidgetConfig,
       runtimeConfig: {
         apiUrl: apiBaseUrl,
-        providerName: apiConfig?.companyName || "ASK Vera API",
-        companyName: apiConfig?.companyName || "ASK Vera",
-        assistantName: "ASK Vera",
+        providerName: "AskVera API",
+        companyName: "AskVera",
+        assistantName: "AskVera",
         logoUrl: apiConfig?.logo,
         launcherIconUrl: apiConfig?.logo,
         accentColor: primaryColor,
@@ -273,6 +299,50 @@ export function WidgetRuntime({
       selectedLanguage: selectedLocale.language,
       legalLinkBuilder: legalViewerHref
     });
+    const localized = getWidgetCopy(selectedLocale.language);
+    return {
+      ...built,
+      genericConfig: {
+        ...built.genericConfig,
+        brandName: "AskVera",
+        assistantName: "AskVera",
+        launcherTitle: "Open AskVera",
+        welcomeText: localized.welcomeBody,
+        footerText: localized.footer,
+        onboarding: {
+          eyebrow: localized.welcomeEyebrow,
+          title: localized.welcomeTitle,
+          body: localized.welcomeBody,
+          next: localized.welcomeNext
+        },
+        statusLabels: { online: localized.online, offline: localized.offline, reconnecting: localized.reconnecting },
+        messageActions: {
+          copy: localized.copy,
+          copied: localized.copied,
+          helpful: localized.helpful,
+          notHelpful: localized.notHelpful
+        },
+        composerStatus: {
+          consentRequired: localized.consentRequired,
+          unavailable: localized.unavailable,
+          waiting: localized.waiting
+        },
+        labels: {
+          ...built.genericConfig.labels,
+          acceptConsentLabel: localized.accept,
+          rejectConsentLabel: localized.decline,
+          messageInputPlaceholder: localized.inputPlaceholder,
+          sendMessageLabel: localized.send
+        },
+        menu: { ...built.genericConfig.menu, newChat: localized.newChat, escalate: localized.support },
+        consent: {
+          ...built.genericConfig.consent,
+          title: localized.privacyTitle,
+          body: localized.privacyBody,
+          acknowledgmentLabel: localized.privacyAcknowledgment
+        }
+      }
+    };
   }, [apiBaseUrl, apiConfig, selectedLocale.country, selectedLocale.language]);
 
   const config = widgetConfig.genericConfig;
@@ -280,6 +350,13 @@ export function WidgetRuntime({
   const appendMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => [...current, message]);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sessionId = window.localStorage.getItem("askvera_session_id");
+    const serializable = messages.filter((message) => typeof message.content === "string");
+    window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId, messages: serializable }));
+  }, [messages]);
 
   useEffect(() => {
     setActiveAuthToken(authToken);
@@ -354,8 +431,8 @@ export function WidgetRuntime({
 
   useEffect(() => {
     if (!clearConversationSignal) return;
-    setMessages([{ id: buildId("clear-chat"), role: "assistant", content: "Conversation cleared." }]);
-  }, [clearConversationSignal]);
+    setMessages([{ id: buildId("clear-chat"), role: "assistant", content: getWidgetCopy(selectedLocale.language).conversationCleared }]);
+  }, [clearConversationSignal, selectedLocale.language]);
 
   const submitChatRequest = async (payload: MessageEventPayload) => {
     return withWidgetAuthRetry((client) => sendMessage(client, {
@@ -380,11 +457,25 @@ export function WidgetRuntime({
     try {
       const envelope = await submitChatRequest(payload);
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
+      const localized = getWidgetCopy(payload.selectedLanguage);
       const assistantMessage: WidgetMessage = {
         id: buildId("assistant"),
         role: "assistant",
         content: envelope.data?.response || "I could not find a response for that question.",
-        metadata: { sources: envelope.data?.sources || [], confidence: envelope.data?.confidence, correlationId }
+        metadata: {
+          sources: envelope.data?.sources || [],
+          confidence: envelope.data?.confidence,
+          correlationId,
+          responseMetadata: envelope.data?.metadata,
+          supportRecommended: Boolean(envelope.data?.metadata?.failureLayer),
+          supportLabel: localized.support,
+          supportCreatingLabel: localized.supportCreating,
+          supportRequestedLabel: localized.supportRequested,
+          actionCopyLabel: localized.copy,
+          actionCopiedLabel: localized.copied,
+          actionHelpfulLabel: localized.helpful,
+          actionNotHelpfulLabel: localized.notHelpful
+        }
       };
       appendMessage(assistantMessage);
       widgetEventBus.emit(widgetEventTypes.MESSAGE_RECEIVED, { visitorId: payload.visitorId, sessionId: payload.sessionId, correlationId, message: assistantMessage });
@@ -418,6 +509,9 @@ export function WidgetRuntime({
       version: payload.policyVersion
     }));
     setMessages((current) => current.filter((message) => !isConsentInstructionMessage(message)));
+    setMessages((current) => current.length ? current : [
+      { id: buildId("greeting"), role: "assistant", content: getWidgetCopy(payload.selectedLanguage).greeting }
+    ]);
     if (pendingMessage) {
       const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
       setPendingMessage(null);
@@ -443,6 +537,32 @@ export function WidgetRuntime({
     }
   };
 
+  const handleSupportRequest = async (state: GenericWidgetRenderState, message?: WidgetMessage) => {
+    const localized = getWidgetCopy(state.selectedLanguage?.code);
+    try {
+      const envelope = await withWidgetAuthRetry((client) => submitFeedback(client, {
+        sessionId: state.sessionId,
+        messageId: message?.id || "user-requested-support",
+        rating: -1,
+        requestType: "support",
+        comment: "User requested additional help from the AskVera widget.",
+        metadata: {
+          country: state.selectedCountry?.code,
+          language: state.selectedLanguage?.code,
+          correlationId: message?.metadata?.correlationId
+        }
+      }));
+      const ticketId = envelope.data?.ticketId || envelope.correlationId;
+      appendMessage({
+        id: buildId("support-ticket"),
+        role: "system",
+        content: localized.supportQueued.replace("{id}", ticketId || "pending")
+      });
+    } catch {
+      appendMessage({ id: buildId("support-error"), role: "system", content: localized.supportFailed });
+    }
+  };
+
   return (
     <GenericWidgetWrapper
       config={config}
@@ -460,7 +580,20 @@ export function WidgetRuntime({
       onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={(payload) => void sendChat(payload)}
       onMessageFeedback={handleMessageFeedback}
-      onNewChat={() => setMessages([])}
+      onEscalate={(payload) => void handleSupportRequest({
+        isOpen: true,
+        selectedCountry: config.countries.find((country) => country.code === payload.selectedCountry),
+        selectedLanguage: config.languages.find((language) => language.code === payload.selectedLanguage),
+        consentAccepted: true,
+        visitorId: payload.visitorId,
+        sessionId: payload.sessionId
+      })}
+      onRequestSupport={(message, state) => handleSupportRequest(state, message)}
+      onNewChat={(payload) => {
+        setMessages([]);
+        window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: payload.sessionId, messages: [] }));
+        firstMessageSentRef.current = false;
+      }}
     />
   );
 }

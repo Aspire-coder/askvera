@@ -25,13 +25,15 @@ export function ConsentPanel({
   return (
     <section className="gw-section gw-consent">
       <div className="gw-consent-heading">
-        <p>One quick privacy step</p>
+        {config.consent.eyebrow ? <p>{config.consent.eyebrow}</p> : null}
         <h2>{config.consent.title}</h2>
       </div>
       <div className="gw-consent-body">{config.consent.body}</div>
       <LegalLinks config={config} />
       {!legalDocumentsReady ? (
-        <p className="gw-consent-loading" role="status">Loading legal documents before consent can be recorded.</p>
+        <p className="gw-consent-loading" role="status">
+          {config.consent.loadingText || "Loading legal documents before consent can be recorded."}
+        </p>
       ) : null}
       <label className="gw-consent-ack">
         <input
@@ -40,7 +42,7 @@ export function ConsentPanel({
           onChange={(event) => setAcknowledged(event.target.checked)}
           disabled={!legalDocumentsReady || accepting}
         />
-        <span>I have read and agree to all of the above documents.</span>
+        <span>{config.consent.acknowledgmentLabel || "I have read and agree to all of the above documents."}</span>
       </label>
       {error ? <p className="gw-consent-error" role="alert">{error}</p> : null}
       <div className="gw-consent-actions">

@@ -141,6 +141,23 @@ export type GenericWidgetConfig = {
     reconnecting?: string;
     offline?: string;
   };
+  onboarding?: {
+    eyebrow: string;
+    title: string;
+    body: string;
+    next: string;
+  };
+  messageActions?: {
+    copy: string;
+    copied: string;
+    helpful: string;
+    notHelpful: string;
+  };
+  composerStatus?: {
+    consentRequired: string;
+    unavailable: string;
+    waiting: string;
+  };
   welcomeText?: ReactNode;
   loadingText: ReactNode;
   loadingMessages?: WidgetLoadingMessages;
@@ -238,6 +255,7 @@ export type GenericWidgetWrapperProps = {
   onSendMessage?: (payload: MessageEventPayload) => void;
   onMessageCopied?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onEscalate?: (payload: LocaleChangePayload) => void;
   onNewChat?: (payload: LocaleChangePayload) => void;
 };

@@ -20,8 +20,14 @@ export function Menu({
 
   return (
     <div className="gw-menu" role="menu">
-      <button type="button" className="gw-menu-item" role="menuitem" onClick={startNewChat}>{config.menu.newChat}</button>
-      {onEscalate ? <button type="button" className="gw-menu-item" role="menuitem" onClick={() => { onDismiss?.(); onEscalate(payload); }}>{config.menu.escalate}</button> : null}
+      <button type="button" className="gw-menu-item" role="menuitem" onClick={startNewChat}>
+        <span className="gw-menu-icon" aria-hidden="true">+</span>
+        <span>{config.menu.newChat}</span>
+      </button>
+      {onEscalate ? <button type="button" className="gw-menu-item" role="menuitem" onClick={() => { onDismiss?.(); onEscalate(payload); }}>
+        <span className="gw-menu-icon" aria-hidden="true">?</span>
+        <span>{config.menu.escalate}</span>
+      </button> : null}
     </div>
   );
 }

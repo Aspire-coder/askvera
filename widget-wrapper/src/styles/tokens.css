@@ -11,7 +11,7 @@
   --gw-space-12: 48px;
   --gw-space-16: 64px;
 
-  --gw-font-display: Georgia, "Times New Roman", serif;
+  --gw-font-display: var(--gw-font);
   --gw-font-sans: var(--gw-font);
   --gw-text-display-size: 23px;
   --gw-text-title-size: 18px;
@@ -26,9 +26,9 @@
   --gw-line-relaxed: 1.55;
   --gw-weight-regular: 400;
   --gw-weight-medium: 500;
-  --gw-weight-semibold: 700;
-  --gw-weight-bold: 800;
-  --gw-weight-heavy: 850;
+  --gw-weight-semibold: 600;
+  --gw-weight-bold: 650;
+  --gw-weight-heavy: 700;
 
   --gw-radius-xs: 4px;
   --gw-radius-sm: 6px;

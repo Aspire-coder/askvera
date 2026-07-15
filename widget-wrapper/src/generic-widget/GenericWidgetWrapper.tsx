@@ -68,6 +68,7 @@ export function GenericWidgetWrapper({
   onSendMessage,
   onMessageCopied,
   onMessageFeedback,
+  onRequestSupport,
   onEscalate,
   onNewChat
 }: GenericWidgetWrapperProps) {
@@ -112,8 +113,8 @@ export function GenericWidgetWrapper({
       sessionManager
     ]
   );
-  const visitorId = restoredSession.visitorId;
-  const sessionId = restoredSession.sessionId;
+  const initialVisitorId = restoredSession.visitorId;
+  const initialSessionId = restoredSession.sessionId;
   const storedLocale = useMemo(() => {
     const country = config.countries.find((option) => option.code === restoredSession.country);
     if (!country) return undefined;
@@ -133,8 +134,8 @@ export function GenericWidgetWrapper({
         loading,
         initialConsentAccepted: initialConsentIsAccepted,
         initialShowSuccess,
-        visitorId,
-        sessionId,
+        visitorId: initialVisitorId,
+        sessionId: initialSessionId,
         sessionCreatedAt,
         policyVersion: config.consent.policyVersion,
         selectedCountry: storedLocale?.country || initialLocale.country,
@@ -150,14 +151,16 @@ export function GenericWidgetWrapper({
       messages,
       openByDefault,
       sessionCreatedAt,
-      sessionId,
+      initialSessionId,
       storedLocale?.country,
       storedLocale?.language,
-      visitorId,
+      initialVisitorId,
       initialConsentIsAccepted
     ]
   );
   const [widgetState, dispatch] = useReducer(widgetReducer, initialState);
+  const visitorId = widgetState.session.visitorId;
+  const sessionId = widgetState.session.sessionId;
   const [consentDeclined, setConsentDeclined] = useState(false);
   const [localRequestPending, setLocalRequestPending] = useState(false);
   const isOpen = selectIsOpen(widgetState);
@@ -180,11 +183,11 @@ export function GenericWidgetWrapper({
   const consentRequired = config.consent.requireConsentBeforeMessaging !== false && !consentAccepted;
   const requestBusy = effectiveLoading || localRequestPending;
   const composerDisabledReason = consentRequired
-    ? "Accept the privacy agreement to begin."
+    ? config.composerStatus?.consentRequired || "Accept the privacy agreement to begin."
     : !connection.online
-      ? "ASK Vera is temporarily unavailable. Please try again in a moment."
+      ? config.composerStatus?.unavailable || "AskVera is temporarily unavailable. Please try again in a moment."
     : requestBusy
-      ? "Waiting for the current response to finish."
+      ? config.composerStatus?.waiting || "Waiting for the current response to finish."
       : "";
   const composerDisabled = Boolean(composerDisabledReason);
   const canSendMessage = Boolean(message.trim()) && !composerDisabled;
@@ -197,6 +200,12 @@ export function GenericWidgetWrapper({
     [config.contextualTopics, config.starterTopics]
   );
   const state: GenericWidgetRenderState = selectRenderState(widgetState);
+  const currentSession = useMemo(() => ({
+    ...restoredSession,
+    visitorId,
+    sessionId,
+    createdAt: widgetState.session.createdAt
+  }), [restoredSession, sessionId, visitorId, widgetState.session.createdAt]);
   const localePayload = createLocalePayload({
     visitorId,
     sessionId,
@@ -314,10 +323,9 @@ export function GenericWidgetWrapper({
   }, [isOpen]);
 
   useEffect(() => {
-    const validation = sessionManager.validate(restoredSession, config.consent.policyVersion);
+    const validation = sessionManager.validate(currentSession, config.consent.policyVersion);
     const legalVersionChanged = Boolean(
-      restoredSession.sessionId === sessionId &&
-        restoredSession.legalVersion &&
+      currentSession.legalVersion &&
         !validation.legalVersionMatches
     );
     if (legalVersionChanged) {
@@ -327,9 +335,9 @@ export function GenericWidgetWrapper({
         sessionId,
         reason: "legal_version_changed"
       });
-      if (config.persistConsent) sessionManager.updateConsent(restoredSession, false, config.consent.policyVersion);
+      if (config.persistConsent) sessionManager.updateConsent(currentSession, false, config.consent.policyVersion);
     }
-    sessionManager.persist(restoredSession, {
+    sessionManager.persist(currentSession, {
       legalVersion: config.consent.policyVersion,
       country: selectedCountry?.code,
       language: selectedLanguage?.code,
@@ -340,7 +348,7 @@ export function GenericWidgetWrapper({
     config.persistConsent,
     consentAccepted,
     events,
-    restoredSession,
+    currentSession,
     sessionId,
     sessionManager,
     selectedCountry?.code,
@@ -357,8 +365,8 @@ export function GenericWidgetWrapper({
       sessionId,
       reason: "backend_required_consent"
     });
-    if (config.persistConsent) sessionManager.updateConsent(restoredSession, false, config.consent.policyVersion);
-  }, [config.consent.policyVersion, config.persistConsent, consentRequiredSignal, events, restoredSession, sessionId, sessionManager, visitorId]);
+    if (config.persistConsent) sessionManager.updateConsent(currentSession, false, config.consent.policyVersion);
+  }, [config.consent.policyVersion, config.persistConsent, consentRequiredSignal, currentSession, events, sessionId, sessionManager, visitorId]);
 
   useEffect(() => {
     if (!openSignal) return;
@@ -474,7 +482,7 @@ export function GenericWidgetWrapper({
       await onAcceptConsent?.(payload);
       dispatch({ type: "ACCEPT_CONSENT" });
       events.emit(widgetEventTypes.CONSENT_ACCEPTED, { visitorId, sessionId, consent: payload });
-      if (config.persistConsent) sessionManager.updateConsent(restoredSession, true, config.consent.policyVersion);
+      if (config.persistConsent) sessionManager.updateConsent(currentSession, true, config.consent.policyVersion);
     } catch {
       dispatch({ type: "REQUIRE_CONSENT", error: "Unable to record your consent. Please try again." });
     } finally {
@@ -595,9 +603,17 @@ export function GenericWidgetWrapper({
               onEscalate={onEscalate}
               onNewChat={(payload) => {
                 dispatch({ type: "SET_MENU_OPEN", open: false });
-                dispatch({ type: "SET_MESSAGES", messages: [] });
-                dispatch({ type: "CLEAR_DRAFT_MESSAGE" });
-                onNewChat?.(payload);
+                const nextSession = sessionManager.reset({
+                  providedVisitorId: visitorId,
+                  legalVersion: config.consent.policyVersion,
+                  country: selectedCountry?.code,
+                  language: selectedLanguage?.code,
+                  consentAccepted
+                });
+                dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt });
+                const nextPayload = { ...payload, visitorId: nextSession.visitorId, sessionId: nextSession.sessionId };
+                events.emit(widgetEventTypes.SESSION_RESET, nextPayload);
+                onNewChat?.(nextPayload);
               }}
             />
           ) : null}
@@ -614,13 +630,10 @@ export function GenericWidgetWrapper({
                   {config.logoUrl ? <img src={config.logoUrl} alt="" /> : <span>{introAssistantName.trim().slice(0, 1) || "A"}</span>}
                 </div>
                 <div>
-                  <p className="gw-onboarding-eyebrow">Welcome</p>
-                  <h2>Hi, I&apos;m {introAssistantName}.</h2>
-                  <p>
-                    I can help you find approved answers about {introCompanyName} products, policies, and business
-                    support.
-                  </p>
-                  <p className="gw-onboarding-next">Choose your market and language to begin.</p>
+                  <p className="gw-onboarding-eyebrow">{config.onboarding?.eyebrow || "Welcome"}</p>
+                  <h2>{config.onboarding?.title || `Hi, I'm ${introAssistantName}.`}</h2>
+                  <p>{config.onboarding?.body || `I can help you find approved answers about ${introCompanyName}.`}</p>
+                  <p className="gw-onboarding-next">{config.onboarding?.next || "Choose your market and language to begin."}</p>
                 </div>
               </section>
             ) : null}
@@ -666,6 +679,7 @@ export function GenericWidgetWrapper({
                 loadingLabel={loadingLabel}
                 onCopyMessage={handleMessageCopied}
                 onMessageFeedback={handleMessageFeedback}
+                onRequestSupport={onRequestSupport}
               />
             ) : null}
             {chatContentVisible && suggestedTopics.length ? (

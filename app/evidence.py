@@ -12,6 +12,7 @@ from typing import Any
 
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
+from services.market_config import get_document_country_codes
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,13 @@ def assistant_meta_response(message: str, language: str = "") -> str | None:
     locale = _locale_key(language)
     routes = _conversation_routes().get(locale, {})
     response = (routes.get("responses", {}) or {}).get(category)
+    return str(response).strip() if response else None
+
+
+def localized_conversation_response(key: str, language: str = "") -> str | None:
+    """Return controlled locale copy for a fallback or conversational response."""
+    routes = _conversation_routes().get(_locale_key(language)) or _conversation_routes().get("en", {})
+    response = (routes.get("responses", {}) or {}).get(key)
     return str(response).strip() if response else None
 
 
@@ -116,6 +124,7 @@ def with_approved_evidence(retrieval_result: RetrievalResult, decision: Evidence
 
 def _has_current_locale_document(documents: list[RetrievedDocument], country: str, language: str) -> bool:
     normalized_country = (country or "").upper()
+    allowed_countries = get_document_country_codes(normalized_country)
     normalized_language = _locale_key(language)
     allowed_languages = {normalized_language}
     if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
@@ -125,7 +134,7 @@ def _has_current_locale_document(documents: list[RetrievedDocument], country: st
             return True
         document_country = (document.country or "").upper()
         document_language = _locale_key(document.language)
-        if document_country == normalized_country and document_language in allowed_languages:
+        if document_country in allowed_countries and document_language in allowed_languages:
             return True
     return False
 

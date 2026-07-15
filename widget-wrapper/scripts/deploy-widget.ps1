@@ -5,10 +5,7 @@ $widgetRoot = Split-Path -Parent $scriptRoot
 
 Push-Location $widgetRoot
 try {
-    npm run build
-    npm run validate-widget
-    npm run upload-widget
-    npm run invalidate-widget
+    node ./scripts/deploy-widget.js @args
 }
 finally {
     Pop-Location

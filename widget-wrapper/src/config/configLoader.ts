@@ -75,19 +75,25 @@ export function buildWidgetConfig({
     validateBackendConfig(backendConfig),
     validateThemeConfig(theme)
   );
+  const copy = backendConfig?.copy || {};
   const genericConfig: GenericWidgetConfig = {
     ...baseConfig,
     brandName: runtime.companyName || baseConfig.brandName,
     assistantName: runtime.assistantName || baseConfig.assistantName,
-    assistantSubtitle: runtime.assistantSubtitle || baseConfig.assistantSubtitle,
+    assistantSubtitle: copy.assistantSubtitle || runtime.assistantSubtitle || baseConfig.assistantSubtitle,
     logoUrl: runtime.logoUrl || baseConfig.logoUrl,
     launcherIconUrl: runtime.launcherIconUrl || runtime.logoUrl || baseConfig.launcherIconUrl,
     launcherTitle: runtime.launcherTitle || baseConfig.launcherTitle,
-    footerText: runtime.footerText || baseConfig.footerText,
-    welcomeText: buildRuntimeWelcomeText(runtime, baseConfig.welcomeText),
+    footerText: copy.footerText || runtime.footerText || baseConfig.footerText,
+    welcomeText: copy.welcomeText || buildRuntimeWelcomeText(runtime, baseConfig.welcomeText),
+    loadingText: copy.loadingText || baseConfig.loadingText,
+    successText: copy.successText || baseConfig.successText,
     provider: { name: runtime.providerName || baseConfig.provider.name, type: "custom-react" },
     labels: {
       ...baseConfig.labels,
+      ...(copy.acceptConsentLabel ? { acceptConsentLabel: copy.acceptConsentLabel } : {}),
+      ...(copy.rejectConsentLabel ? { rejectConsentLabel: copy.rejectConsentLabel } : {}),
+      ...(copy.messageInputPlaceholder ? { messageInputPlaceholder: copy.messageInputPlaceholder } : {}),
       ...(runtime.launcherAriaLabel ? { launcherAriaLabel: runtime.launcherAriaLabel } : {})
     },
     theme: {
@@ -96,6 +102,14 @@ export function buildWidgetConfig({
     },
     consent: {
       ...baseConfig.consent,
+      ...(copy.consentEyebrow ? { eyebrow: copy.consentEyebrow } : {}),
+      ...(copy.consentTitle ? { title: copy.consentTitle } : {}),
+      ...(copy.consentBody ? { body: copy.consentBody } : {}),
+      ...(copy.consentAcknowledgmentLabel ? { acknowledgmentLabel: copy.consentAcknowledgmentLabel } : {}),
+      ...(copy.consentLoadingText ? { loadingText: copy.consentLoadingText } : {}),
+      ...(copy.consentDeclineTitle ? { declineTitle: copy.consentDeclineTitle } : {}),
+      ...(copy.consentDeclineBody ? { declineBody: copy.consentDeclineBody } : {}),
+      ...(copy.consentDeclineActionLabel ? { declineActionLabel: copy.consentDeclineActionLabel } : {}),
       policyVersion: normalizedBackend?.policyVersion || baseConfig.consent.policyVersion
     },
     countries: normalizedBackend?.countries || baseConfig.countries,
@@ -108,8 +122,8 @@ export function buildWidgetConfig({
   };
 
   if (runtime.debug) {
-    for (const warning of validation.warnings) console.warn(`[ASK Vera config] ${warning}`);
-    for (const error of validation.errors) console.error(`[ASK Vera config] ${error}`);
+    for (const warning of validation.warnings) console.warn(`[AskVera config] ${warning}`);
+    for (const error of validation.errors) console.error(`[AskVera config] ${error}`);
   }
 
   return freezeConfig({

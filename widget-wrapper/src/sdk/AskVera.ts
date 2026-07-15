@@ -85,8 +85,8 @@ class AskVeraSdkImpl implements AskVeraSdk {
     const launcher = document.createElement("button");
     launcher.type = "button";
     launcher.className = "askvera-sdk-launcher";
-    launcher.setAttribute("aria-label", "Open ASK Vera chat");
-    launcher.textContent = "Ask Vera";
+    launcher.setAttribute("aria-label", "Open AskVera chat");
+    launcher.textContent = "AskVera";
     launcher.addEventListener("click", () => {
       this.launcher?.remove();
       this.launcher = undefined;

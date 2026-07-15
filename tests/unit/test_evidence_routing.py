@@ -1,6 +1,6 @@
 """Tests for locale-aware non-document routing and generic evidence approval."""
 
-from app.evidence import approve_evidence, classify_intent
+from app.evidence import approve_evidence, assistant_meta_response, classify_intent, localized_conversation_response
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 
 
@@ -18,6 +18,17 @@ def test_routes_substantive_french_question_to_document_grounded_flow() -> None:
 
 def test_routes_unknown_language_to_document_grounded_flow() -> None:
     assert classify_intent("Wie werde ich Manager?", "de") == "policy_fact"
+
+
+def test_routes_launched_language_greetings_without_model_tokens() -> None:
+    assert classify_intent("Hallo", "de-DE") == "assistant_meta"
+    assert classify_intent("Hola", "es-US") == "assistant_meta"
+    assert classify_intent("Hoi", "nl-BE") == "assistant_meta"
+    assert "AskVera" in (assistant_meta_response("Hola", "es") or "")
+
+
+def test_localized_fallback_uses_selected_language() -> None:
+    assert "trouvé" in (localized_conversation_response("insufficient_evidence", "fr-CA") or "")
 
 
 def test_global_document_is_valid_evidence_for_every_locale() -> None:

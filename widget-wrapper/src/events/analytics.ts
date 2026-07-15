@@ -9,7 +9,7 @@ export class ConsoleAnalyticsProvider implements AnalyticsProvider {
 
   trackEvent(event: AnalyticsEvent) {
     if (!this.debug) return;
-    console.info("[ASK Vera Analytics]", event.name, event);
+    console.info("[AskVera Analytics]", event.name, event);
   }
 }
 

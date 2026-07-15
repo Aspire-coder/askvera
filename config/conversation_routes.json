@@ -1,29 +1,70 @@
 {
-  "version": "2026-07-14",
-  "description": "Controlled non-document messages. Add a locale only when that market is launched or evaluated.",
+  "version": "2026-07-15",
+  "description": "Controlled zero-token conversation copy by language.",
   "locales": {
     "en": {
-      "patterns": {
-        "greeting": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"],
-        "thanks": ["thanks", "thank you"],
-        "capability": ["who are you", "what can you help with", "help"]
-      },
+      "patterns": {"greeting": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"], "thanks": ["thanks", "thank you"], "capability": ["who are you", "what can you help with", "help"]},
       "responses": {
-        "greeting": "Hi, I'm ASK Vera. What Forever Living product, policy, or business-support question can I help with?",
-        "thanks": "You're welcome. I'm here whenever you want help finding an approved Forever Living answer.",
-        "capability": "I'm ASK Vera, Forever Living's approved knowledge assistant. I can help find answers about products, company policies, business-plan basics, discounts, bonuses, rank qualifications, ordering, and support topics."
+        "greeting": "Hello, I'm AskVera. How can I help with Forever Living products, policies, or business support?",
+        "thanks": "You're welcome. I'm here whenever you need another approved Forever Living answer.",
+        "capability": "I'm AskVera, Forever Living's approved knowledge assistant. I can help with products, company policies, business-plan basics, discounts, bonuses, rank qualifications, ordering, and support topics.",
+        "insufficient_evidence": "I couldn't find a clear answer in the approved information currently available. You can try rephrasing the question or request additional support.",
+        "off_topic": "I can help with approved Forever Living products, policies, ordering, and business support.",
+        "medical_claim": "I can't provide medical advice or treatment claims. Please check the approved product information and speak with a qualified healthcare professional.",
+        "income_claim": "I can't predict or guarantee earnings. I can explain approved bonus and compensation-plan rules from the published documents.",
+        "bedrock_error": "I couldn't complete that answer just now. Please try again or request additional support."
       }
     },
     "fr": {
-      "patterns": {
-        "greeting": ["bonjour", "salut", "bonsoir"],
-        "thanks": ["merci", "merci beaucoup"],
-        "capability": ["qui es tu", "que peux tu faire", "aide"]
-      },
+      "patterns": {"greeting": ["bonjour", "salut", "bonsoir"], "thanks": ["merci", "merci beaucoup"], "capability": ["qui es tu", "qui etes vous", "que peux tu faire", "aide"]},
       "responses": {
-        "greeting": "Bonjour, je suis ASK Vera. Comment puis-je vous aider avec une question sur les produits, les politiques ou le soutien aux entrepreneurs Forever Living?",
-        "thanks": "Je vous en prie. Je suis la lorsque vous avez besoin d'une reponse approuvee de Forever Living.",
-        "capability": "Je suis ASK Vera, l'assistante de connaissances approuvee de Forever Living. Je peux vous aider a trouver des reponses sur les produits, les politiques, les bases du plan de vente, les rabais, les bonus, les qualifications de niveau, les commandes et le soutien."
+        "greeting": "Bonjour, je suis AskVera. Comment puis-je vous aider avec les produits, les politiques ou le soutien commercial de Forever Living?",
+        "thanks": "Je vous en prie. Je suis là lorsque vous avez besoin d'une autre réponse approuvée de Forever Living.",
+        "capability": "Je suis AskVera, l'assistante de connaissances approuvée de Forever Living. Je peux vous aider avec les produits, les politiques, le plan commercial, les remises, les primes, les qualifications, les commandes et le soutien.",
+        "insufficient_evidence": "Je n'ai pas trouvé de réponse claire dans les informations approuvées actuellement disponibles. Vous pouvez reformuler la question ou demander une aide supplémentaire.",
+        "off_topic": "Je peux vous aider avec les produits, les politiques, les commandes et le soutien commercial approuvés de Forever Living.",
+        "medical_claim": "Je ne peux pas fournir de conseils médicaux ni d'allégations de traitement. Consultez les informations approuvées sur le produit et un professionnel de santé qualifié.",
+        "income_claim": "Je ne peux pas prévoir ni garantir des revenus. Je peux expliquer les règles approuvées relatives aux primes et au plan de rémunération.",
+        "bedrock_error": "Je n'ai pas pu terminer cette réponse. Veuillez réessayer ou demander une aide supplémentaire."
+      }
+    },
+    "es": {
+      "patterns": {"greeting": ["hola", "buenos dias", "buenas tardes", "buenas noches"], "thanks": ["gracias", "muchas gracias"], "capability": ["quien eres", "que puedes hacer", "ayuda"]},
+      "responses": {
+        "greeting": "Hola, soy AskVera. ¿Cómo puedo ayudarte con productos, políticas o soporte comercial de Forever Living?",
+        "thanks": "De nada. Estoy aquí cuando necesites otra respuesta aprobada de Forever Living.",
+        "capability": "Soy AskVera, la asistente de conocimiento aprobado de Forever Living. Puedo ayudarte con productos, políticas, el plan comercial, descuentos, bonos, rangos, pedidos y soporte.",
+        "insufficient_evidence": "No encontré una respuesta clara en la información aprobada disponible. Puedes reformular la pregunta o solicitar ayuda adicional.",
+        "off_topic": "Puedo ayudarte con productos, políticas, pedidos y soporte comercial aprobados de Forever Living.",
+        "medical_claim": "No puedo ofrecer consejos médicos ni afirmaciones de tratamiento. Consulta la información aprobada del producto y a un profesional sanitario cualificado.",
+        "income_claim": "No puedo predecir ni garantizar ingresos. Puedo explicar las reglas aprobadas de bonos y del plan de compensación.",
+        "bedrock_error": "No pude completar esa respuesta. Inténtalo de nuevo o solicita ayuda adicional."
+      }
+    },
+    "de": {
+      "patterns": {"greeting": ["hallo", "guten morgen", "guten tag", "guten abend"], "thanks": ["danke", "vielen dank"], "capability": ["wer bist du", "was kannst du", "hilfe"]},
+      "responses": {
+        "greeting": "Hallo, ich bin AskVera. Wie kann ich bei Produkten, Richtlinien oder geschäftlichen Fragen zu Forever Living helfen?",
+        "thanks": "Gern geschehen. Ich bin hier, wenn Sie eine weitere freigegebene Antwort von Forever Living benötigen.",
+        "capability": "Ich bin AskVera, die freigegebene Wissensassistentin von Forever Living. Ich helfe bei Produkten, Richtlinien, Vergütungsplan, Rabatten, Boni, Qualifikationen, Bestellungen und Support.",
+        "insufficient_evidence": "Ich habe in den derzeit verfügbaren freigegebenen Informationen keine klare Antwort gefunden. Formulieren Sie die Frage anders oder fordern Sie zusätzliche Hilfe an.",
+        "off_topic": "Ich kann bei freigegebenen Produkten, Richtlinien, Bestellungen und geschäftlichen Themen von Forever Living helfen.",
+        "medical_claim": "Ich kann keine medizinische Beratung oder Heilversprechen geben. Prüfen Sie die freigegebenen Produktinformationen und sprechen Sie mit medizinischem Fachpersonal.",
+        "income_claim": "Ich kann kein Einkommen vorhersagen oder garantieren. Ich kann die freigegebenen Bonus- und Vergütungsplanregeln erklären.",
+        "bedrock_error": "Ich konnte diese Antwort nicht abschließen. Versuchen Sie es erneut oder fordern Sie zusätzliche Hilfe an."
+      }
+    },
+    "nl": {
+      "patterns": {"greeting": ["hallo", "hoi", "goedemorgen", "goedemiddag", "goedenavond"], "thanks": ["bedankt", "dank je", "dank u"], "capability": ["wie ben je", "wat kun je", "help"]},
+      "responses": {
+        "greeting": "Hallo, ik ben AskVera. Hoe kan ik helpen met producten, beleid of zakelijke ondersteuning van Forever Living?",
+        "thanks": "Graag gedaan. Ik ben er wanneer u nog een goedgekeurd antwoord van Forever Living nodig hebt.",
+        "capability": "Ik ben AskVera, de goedgekeurde kennisassistent van Forever Living. Ik help met producten, beleid, het marketingplan, kortingen, bonussen, kwalificaties, bestellingen en ondersteuning.",
+        "insufficient_evidence": "Ik vond geen duidelijk antwoord in de momenteel beschikbare goedgekeurde informatie. U kunt de vraag anders formuleren of extra hulp aanvragen.",
+        "off_topic": "Ik kan helpen met goedgekeurde producten, beleid, bestellingen en zakelijke ondersteuning van Forever Living.",
+        "medical_claim": "Ik kan geen medisch advies of behandelingsclaims geven. Bekijk de goedgekeurde productinformatie en raadpleeg een bevoegde zorgverlener.",
+        "income_claim": "Ik kan inkomsten niet voorspellen of garanderen. Ik kan de goedgekeurde bonus- en compensatieregels uitleggen.",
+        "bedrock_error": "Ik kon dat antwoord niet voltooien. Probeer het opnieuw of vraag extra hulp aan."
       }
     }
   }

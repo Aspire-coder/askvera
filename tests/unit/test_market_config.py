@@ -88,3 +88,16 @@ def test_load_market_config_rejects_default_language_not_enabled(tmp_path, monke
 
     with pytest.raises(RuntimeError, match="CA.defaultLanguage"):
         market_config.load_market_config()
+
+
+def test_public_markets_are_limited_to_published_policy_locales() -> None:
+    """The public picker exposes only country/language pairs with published policies."""
+    market_config.load_market_config.cache_clear()
+    market_config.load_policy_locales.cache_clear()
+
+    countries = {country["code"]: country for country in market_config.get_countries()}
+
+    assert set(countries) == {"AT", "BE", "CA", "CH", "DE", "GB", "LU", "NL", "US"}
+    assert countries["CH"]["languages"] == [{"code": "de", "name": "German"}]
+    assert countries["CH"]["defaultLanguage"] == "de"
+    assert market_config.get_document_country_codes("GB") == {"GB", "UK"}

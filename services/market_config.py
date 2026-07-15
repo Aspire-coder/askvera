@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MARKETS_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "markets.json"
+DEFAULT_POLICY_LOCALES_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "policy_locales.json"
 REQUIRED_MARKET_FIELDS = {"code", "name", "enabled", "defaultLanguage", "languages", "privacyVersion", "displayOrder"}
 REQUIRED_LANGUAGE_FIELDS = {"code", "name", "enabled"}
 
@@ -21,6 +22,37 @@ def _config_path() -> Path:
     except ImportError:
         configured_path = None
     return Path(os.environ.get("MARKETS_CONFIG_PATH", configured_path or DEFAULT_MARKETS_CONFIG_PATH))
+
+
+def _policy_locales_path() -> Path:
+    """Return the content-managed catalog of policy locales currently published."""
+    return Path(os.environ.get("POLICY_LOCALES_CONFIG_PATH", DEFAULT_POLICY_LOCALES_CONFIG_PATH))
+
+
+@lru_cache(maxsize=1)
+def load_policy_locales() -> dict[str, dict[str, Any]]:
+    """Load active policy locales without embedding market rules in application code."""
+    path = _policy_locales_path()
+    with path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+    entries = payload.get("locales")
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError(f"Invalid policy locale config: {path} must contain a non-empty locales list.")
+
+    catalog: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        market = str(entry.get("market") or "").upper()
+        languages = [str(value).lower() for value in entry.get("languages", []) if str(value).strip()]
+        if not market or not languages:
+            raise RuntimeError(f"Invalid policy locale config entry in {path}.")
+        catalog[market] = {
+            "languages": set(languages),
+            "documentCountries": {
+                market,
+                *(str(value).upper() for value in entry.get("documentCountries", []) if str(value).strip()),
+            },
+        }
+    return catalog
 
 
 @lru_cache(maxsize=1)
@@ -101,7 +133,12 @@ def _validate_market_config(config: dict[str, Any], config_path: Path) -> None:
 def get_markets() -> list[dict[str, Any]]:
     """Return enabled market objects in display order."""
     markets = load_market_config()["markets"]
-    enabled_markets = [market for market in markets if market.get("enabled", True)]
+    published = load_policy_locales()
+    enabled_markets = [
+        market
+        for market in markets
+        if market.get("enabled", True) and str(market.get("code") or "").upper() in published
+    ]
     return sorted(enabled_markets, key=lambda market: (market.get("displayOrder", 9999), market.get("name", "")))
 
 
@@ -109,17 +146,22 @@ def get_countries() -> list[dict[str, Any]]:
     """Return the country/language shape expected by the public API."""
     countries: list[dict[str, Any]] = []
     for market in get_markets():
+        published_languages = load_policy_locales()[str(market["code"]).upper()]["languages"]
         languages = [
             {"code": language["code"], "name": language["name"]}
             for language in market.get("languages", [])
-            if language.get("enabled", True)
+            if language.get("enabled", True) and str(language["code"]).lower() in published_languages
         ]
         if languages:
             countries.append(
                 {
                     "code": market["code"],
                     "name": market["name"],
-                    "defaultLanguage": market["defaultLanguage"],
+                    "defaultLanguage": (
+                        market["defaultLanguage"]
+                        if market["defaultLanguage"] in {language["code"] for language in languages}
+                        else languages[0]["code"]
+                    ),
                     "privacyVersion": market["privacyVersion"],
                     "displayOrder": market["displayOrder"],
                     "languages": languages,
@@ -140,3 +182,10 @@ def get_language_codes_for_country(country_code: str) -> set[str]:
         if country["code"] == normalized_code:
             return {language["code"] for language in country["languages"]}
     return set()
+
+
+def get_document_country_codes(country_code: str) -> set[str]:
+    """Return index metadata country codes accepted for a public market."""
+    normalized_code = country_code.upper()
+    entry = load_policy_locales().get(normalized_code)
+    return set(entry["documentCountries"]) if entry else {normalized_code}

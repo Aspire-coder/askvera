@@ -176,3 +176,24 @@ def test_guardrail_response_is_not_cacheable() -> None:
     )
 
     assert orchestrator._should_cache_response(response) is False
+
+
+def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:
+    """Accidentally spaced letters are reconstructed before retrieval."""
+    orchestrator = AIOrchestrator()
+
+    query = orchestrator._build_retrieval_query(
+        "H o W  t o  b e c o m e  a  r e c o g n i z e d  m a n a g e r",
+        "",
+        "cid",
+    )
+
+    assert query.lower() == "how to become a recognized manager"
+
+
+def test_normal_sentence_is_not_changed_by_spacing_repair() -> None:
+    """Normal multilingual input is preserved byte-for-byte."""
+    orchestrator = AIOrchestrator()
+    message = "Wie werde ich ein Recognized Manager?"
+
+    assert orchestrator._build_retrieval_query(message, "", "cid") == message

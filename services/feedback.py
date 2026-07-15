@@ -26,4 +26,10 @@ def enqueue_feedback(feedback: FeedbackRequest, correlation_id: str) -> None:
     except (BotoCoreError, ClientError) as exc:
         LOGGER.exception("feedback_enqueue_failed", correlation_id=correlation_id)
         raise AwsServiceError("Feedback queue write failed.") from exc
-    LOGGER.info("feedback_enqueued", correlation_id=correlation_id, session_id=feedback.sessionId, rating=feedback.rating)
+    LOGGER.info(
+        "feedback_enqueued",
+        correlation_id=correlation_id,
+        session_id=feedback.sessionId,
+        rating=feedback.rating,
+        request_type=feedback.requestType,
+    )

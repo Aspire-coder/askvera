@@ -116,3 +116,5 @@ class FeedbackRequest(BaseModel):
     messageId: str
     rating: int = Field(ge=-1, le=1)
     comment: str = Field(default="", max_length=2000)
+    requestType: str = Field(default="feedback", pattern="^(feedback|support)$")
+    metadata: dict[str, Any] = Field(default_factory=dict)

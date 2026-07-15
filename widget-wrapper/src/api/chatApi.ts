@@ -24,6 +24,7 @@ export type ChatResponseData = {
   sources?: ChatSource[];
   confidence?: number;
   correlationId?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export function sendMessage(client: ApiClient, request: ChatRequest) {

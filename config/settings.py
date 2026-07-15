@@ -120,7 +120,7 @@ WIDGET_REGISTRY_JSON = _env_str(
             {
                 "widgetId": "askvera-demo",
                 "organizationId": "askvera",
-                "companyName": "ASK Vera",
+                "companyName": "AskVera",
                 "metadata": {
                     "logo": "",
                     "theme": "light",
@@ -293,7 +293,7 @@ COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.
 COMPREHEND_PII_LANGUAGE_CODES = ["en", "es"]
 # Public organization and assistant names that must not be anonymized in approved answers.
-PII_APPROVED_PUBLIC_TERMS = ["ASK Vera", "Forever Living"]
+PII_APPROVED_PUBLIC_TERMS = ["AskVera", "ASK Vera", "Forever Living"]
 # Privacy notice version displayed by /api/config and stored in consent_log.
 PRIVACY_VERSION = "2026-05-01"
 # Allowed CORS origins for the widget host domains. Found in CloudFront or website deployment settings.
