@@ -3,6 +3,7 @@
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _language_key,
+    _selector_candidates,
     _scope_filter,
 )
 from config import settings
@@ -55,3 +56,19 @@ def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:
 
     assert len(rows) == 1
     assert rows[0][0]["section_title"] == "Original governing title"
+
+
+def test_selector_candidates_reserve_space_for_global_documents() -> None:
+    locale_rows = [
+        ({"id": f"locale-{index}", "access_scope": "country"}, 10.0 - index)
+        for index in range(12)
+    ]
+    global_rows = [
+        ({"id": f"global-{index}", "access_scope": "global"}, 1.0 - index / 10)
+        for index in range(5)
+    ]
+
+    candidates = _selector_candidates([*locale_rows, *global_rows], 9)
+
+    assert len(candidates) == 9
+    assert sum(row["access_scope"] == "global" for row, _score in candidates) == 3

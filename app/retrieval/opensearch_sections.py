@@ -185,13 +185,54 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
 def _selector_candidate_text(row: dict[str, Any], score: float, index: int) -> str:
     """Format one candidate for the evidence selector."""
     content = str(row.get("content") or "")
+    metadata = dict(row.get("metadata") or {})
     return (
         f"Candidate {index}\n"
+        f"Document type: {row.get('document_type', '')}\n"
+        f"Access scope: {row.get('access_scope', 'country')}\n"
+        f"Record type: {metadata.get('directory_section', '')}\n"
+        f"Record country: {metadata.get('record_country', '')}\n"
         f"Section: {row.get('section_id', '')}\n"
         f"Title: {row.get('section_title', '')}\n"
         f"Current score: {score}\n"
         f"Text:\n{content[:1200]}"
     )
+
+
+def _selector_candidates(
+    rows: list[tuple[dict[str, Any], float]],
+    limit: int,
+) -> list[tuple[dict[str, Any], float]]:
+    """Keep top-ranked evidence while reserving room for global documents."""
+    candidates = rows[:limit]
+    global_rows = [pair for pair in rows if pair[0].get("access_scope") == "global"]
+    if not global_rows or limit < 2:
+        return candidates
+
+    global_quota = min(len(global_rows), max(1, limit // 3))
+    selected_global_ids = {
+        str(row.get("id") or "")
+        for row, _score in candidates
+        if row.get("access_scope") == "global"
+    }
+    missing_global = [
+        pair
+        for pair in global_rows
+        if str(pair[0].get("id") or "") not in selected_global_ids
+    ][: max(0, global_quota - len(selected_global_ids))]
+    if not missing_global:
+        return candidates
+
+    replacement_count = len(missing_global)
+    retained: list[tuple[dict[str, Any], float]] = []
+    removable = replacement_count
+    for pair in reversed(candidates):
+        if removable and pair[0].get("access_scope") != "global":
+            removable -= 1
+            continue
+        retained.append(pair)
+    retained.reverse()
+    return [*retained, *missing_global]
 
 
 def _parse_selector_ranks(text: str) -> list[int]:
@@ -376,7 +417,7 @@ class OpenSearchSectionProvider:
             return rows
 
         candidate_limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
-        candidates = rows[:candidate_limit]
+        candidates = _selector_candidates(rows, candidate_limit)
         candidate_text = "\n\n".join(
             _selector_candidate_text(row, score, index)
             for index, (row, score) in enumerate(candidates, start=1)
@@ -384,6 +425,8 @@ class OpenSearchSectionProvider:
         system_prompt = (
             "You select evidence for ASK Vera. Do not answer the user's question. "
             "Choose the candidate approved-document sections that most directly support an answer. "
+            "The user question and a candidate document may use different languages; compare their meaning across languages. "
+            "Use document type, record type, and record country metadata to distinguish office, staff, and policy evidence. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
             "Return only JSON."
         )
