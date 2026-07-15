@@ -28,6 +28,7 @@ HEADER_RE = re.compile(r"Company Policies and the Code of Professional Conduct R
 PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
 SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
+MAX_SECTION_CHARS = 8_000
 TEXT_REPLACEMENTS = {
     "â€™": "'",
     "â€œ": '"',
@@ -135,16 +136,16 @@ def extract_sections(
         end_page = _page_for_offset(page_offsets, max(start, end - 1))
         title = _normalize_title(match.group("title"))
 
-        sections.append(
-            PolicySection(
+        sections.extend(
+            _split_oversized_section(
                 source_file=pdf_path.name,
                 country=country,
                 language=language,
                 section_id=match.group("section"),
                 title=title,
-                start_page=start_page,
-                end_page=end_page,
                 content=body,
+                content_offset=start,
+                page_offsets=page_offsets,
             )
         )
 
@@ -164,6 +165,63 @@ def _normalize_title(title: str) -> str:
     return title[:160]
 
 
+def _split_oversized_section(
+    *,
+    source_file: str,
+    country: str,
+    language: str,
+    section_id: str,
+    title: str,
+    content: str,
+    content_offset: int,
+    page_offsets: list[tuple[int, int, int]],
+) -> list[PolicySection]:
+    if len(content) <= MAX_SECTION_CHARS:
+        return [
+            PolicySection(
+                source_file=source_file,
+                country=country,
+                language=language,
+                section_id=section_id,
+                title=title,
+                start_page=_page_for_offset(page_offsets, content_offset),
+                end_page=_page_for_offset(page_offsets, content_offset + len(content) - 1),
+                content=content,
+            )
+        ]
+
+    chunks: list[tuple[int, str]] = []
+    start = 0
+    while start < len(content):
+        end = min(start + MAX_SECTION_CHARS, len(content))
+        if end < len(content):
+            boundary = content.rfind("\n", start, end)
+            if boundary > start:
+                end = boundary
+        chunks.append((start, content[start:end].strip()))
+        start = end
+        while start < len(content) and content[start].isspace():
+            start += 1
+
+    return [
+        PolicySection(
+            source_file=source_file,
+            country=country,
+            language=language,
+            section_id=f"{section_id}-part-{part_number}",
+            title=_normalize_title(f"{title} (part {part_number})"),
+            start_page=_page_for_offset(page_offsets, content_offset + chunk_start),
+            end_page=_page_for_offset(
+                page_offsets,
+                content_offset + chunk_start + len(chunk) - 1,
+            ),
+            content=chunk,
+        )
+        for part_number, (chunk_start, chunk) in enumerate(chunks, start=1)
+        if chunk
+    ]
+
+
 def _merge_lettered_subsections(sections: list[PolicySection]) -> list[PolicySection]:
     """Split large numbered sections into lettered chunks when useful.
 
@@ -174,6 +232,10 @@ def _merge_lettered_subsections(sections: list[PolicySection]) -> list[PolicySec
     expanded: list[PolicySection] = []
     for section in sections:
         expanded.append(section)
+        if not re.fullmatch(r"\d{1,2}\.\d{1,2}", section.section_id):
+            continue
+        if len(section.content) > MAX_SECTION_CHARS:
+            continue
         matches = list(LETTERED_RE.finditer(section.content))
         if len(matches) < 2:
             continue

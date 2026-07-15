@@ -48,3 +48,22 @@ def test_contents_page_heuristic_ignores_dense_numbered_lists() -> None:
     )
 
     assert extractor._looks_like_contents_page(contents) is True
+
+
+def test_oversized_sections_are_split_into_bounded_parts() -> None:
+    content = "1 General\n" + ("Approved policy text.\n" * 1_000)
+
+    sections = extractor._split_oversized_section(
+        source_file="policy.pdf",
+        country="DE",
+        language="de",
+        section_id="1",
+        title="General",
+        content=content,
+        content_offset=0,
+        page_offsets=[(1, 0, len(content) + 1)],
+    )
+
+    assert len(sections) > 1
+    assert all(len(section.content) <= extractor.MAX_SECTION_CHARS for section in sections)
+    assert sections[0].section_id == "1-part-1"
