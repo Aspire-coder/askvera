@@ -44,7 +44,12 @@ def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch)
         "terms": {"country": ["GB", "UK"]}
     }
     assert _scope_filter("CA", "fr", "global") == {
-        "term": {"access_scope": "global"}
+        "bool": {
+            "filter": [
+                {"term": {"access_scope": "global"}},
+                {"terms": {"language": ["fr"]}},
+            ]
+        }
     }
 
 
@@ -112,7 +117,14 @@ def test_search_queries_use_runtime_planner_instead_of_country_aliases(monkeypat
 def test_directory_query_filters_to_active_global_directory_records() -> None:
     filters = _directory_text_query("Where is the India office?")["query"]["bool"]["filter"]
 
-    assert {"term": {"access_scope": "global"}} in filters
+    assert {
+        "bool": {
+            "filter": [
+                {"term": {"access_scope": "global"}},
+                {"term": {"language": "en"}},
+            ]
+        }
+    } in filters
     assert {"term": {"status": "active"}} in filters
     assert {"term": {"document_type": "office_directory"}} in filters
 

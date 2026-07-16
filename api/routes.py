@@ -18,6 +18,8 @@ from services import cache as cache_service
 from services.consent_service import record_consent
 from services.db import get_engine
 from services.feedback import enqueue_feedback
+from services.analytics import record_chat_interaction, record_feedback_event
+from app.operations import pipeline_trace_store
 from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 from utils.exceptions import AskVeraError
@@ -152,14 +154,34 @@ def _valid_language_codes(country_code: str) -> set[str]:
 def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
+    pipeline_trace_store.start(
+        correlation_id,
+        country=body.country,
+        language=body.language,
+        session_id=body.sessionId,
+        question_preview=body.message,
+    )
     try:
         result = ai_orchestrator.handle_chat(body, correlation_id)
         if isinstance(result, ChatResponse):
+            record_chat_interaction(body, result, correlation_id)
+            pipeline_trace_store.finish(
+                correlation_id,
+                success=True,
+                metadata={
+                    "confidence": result.confidence or 0.0,
+                    "source_count": len(result.citations),
+                    "fallback": bool(result.metadata.get("fallback")),
+                },
+            )
             return success(result.to_api_result(), correlation_id)
+        pipeline_trace_store.finish(correlation_id, success=True)
         return success(result, correlation_id)
     except ConsentRequiredError:
+        pipeline_trace_store.finish(correlation_id, success=False, metadata={"reason": "consent_required"})
         return consent_required_response(correlation_id)
     except AskVeraError as exc:
+        pipeline_trace_store.finish(correlation_id, success=False, metadata={"reason": exc.error_code})
         return error_response(exc, correlation_id)
 
 
@@ -203,6 +225,7 @@ def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse
     """Send user feedback to SQS."""
     correlation_id = _correlation_id(request)
     try:
+        record_feedback_event(body, correlation_id)
         enqueue_feedback(body, correlation_id)
         return success(
             {

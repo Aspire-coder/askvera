@@ -74,18 +74,22 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     """Reject oversized request bodies before route parsing."""
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        max_body_size = settings.MAX_REQUEST_BODY_BYTES
+        if request.url.path == "/api/admin/documents":
+            # Multipart framing adds a small amount of metadata around the file.
+            max_body_size = settings.ADMIN_UPLOAD_MAX_BYTES + (1024 * 1024)
         content_length = request.headers.get("content-length")
         if content_length:
             try:
                 body_size = int(content_length)
             except ValueError:
                 return _error(400, "INVALID_REQUEST", "Invalid request headers.", request)
-            if body_size > settings.MAX_REQUEST_BODY_BYTES:
+            if body_size > max_body_size:
                 LOGGER.warning(
                     "request_body_too_large",
                     path=request.url.path,
                     body_size=body_size,
-                    max_body_size=settings.MAX_REQUEST_BODY_BYTES,
+                    max_body_size=max_body_size,
                     correlation_id=_correlation_id(request),
                 )
                 return _error(413, "REQUEST_TOO_LARGE", "Request body is too large.", request)

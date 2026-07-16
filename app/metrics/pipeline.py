@@ -3,6 +3,7 @@
 from .collector import MetricsCollector, metrics_collector
 from .models import PipelineMetric
 from .publisher import MetricsPublisher, metrics_publisher
+from app.operations import pipeline_trace_store
 
 
 def record_pipeline_metric(
@@ -27,3 +28,10 @@ def record_pipeline_metric(
     selected_publisher = publisher or metrics_publisher
     snapshot = selected_collector.record_pipeline(metric)
     selected_publisher.publish_pipeline(metric, snapshot)
+    pipeline_trace_store.record(
+        correlation_id,
+        stage,
+        success=success,
+        duration_ms=duration_ms,
+        metadata=metadata or {},
+    )

@@ -85,6 +85,105 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS chat_analytics (
+                        correlation_id TEXT PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        question TEXT NOT NULL,
+                        answer TEXT NOT NULL,
+                        topic TEXT NOT NULL DEFAULT 'General assistance',
+                        confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        source_count INTEGER NOT NULL DEFAULT 0,
+                        input_tokens INTEGER NOT NULL DEFAULT 0,
+                        output_tokens INTEGER NOT NULL DEFAULT 0,
+                        fallback BOOLEAN NOT NULL DEFAULT false,
+                        failure_layer TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_chat_analytics_filters
+                    ON chat_analytics (created_at DESC, country, language)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS feedback_events (
+                        event_id TEXT PRIMARY KEY,
+                        correlation_id TEXT NOT NULL DEFAULT '',
+                        session_id TEXT NOT NULL,
+                        message_id TEXT NOT NULL,
+                        rating INTEGER NOT NULL,
+                        comment TEXT NOT NULL DEFAULT '',
+                        request_type TEXT NOT NULL DEFAULT 'feedback',
+                        country TEXT NOT NULL DEFAULT '',
+                        language TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_feedback_events_correlation
+                    ON feedback_events (correlation_id, created_at DESC)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS ingestion_jobs (
+                        job_id TEXT PRIMARY KEY,
+                        filename TEXT NOT NULL,
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        access_scope TEXT NOT NULL DEFAULT 'country',
+                        document_version TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'queued',
+                        progress INTEGER NOT NULL DEFAULT 0,
+                        section_count INTEGER NOT NULL DEFAULT 0,
+                        source_uri TEXT NOT NULL DEFAULT '',
+                        error_message TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS knowledge_documents (
+                        document_id TEXT PRIMARY KEY,
+                        filename TEXT NOT NULL,
+                        source_uri TEXT NOT NULL DEFAULT '',
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        access_scope TEXT NOT NULL DEFAULT 'country',
+                        document_version TEXT NOT NULL DEFAULT '',
+                        section_count INTEGER NOT NULL DEFAULT 0,
+                        content_hash TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false"))

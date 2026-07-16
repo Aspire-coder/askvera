@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from api.middleware import ProtectedRequestLoggingMiddleware, RateLimitMiddleware, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from api.routes import router
+from api.admin_routes import admin_router
 from app.audit import audit_dispatcher, audit_lifecycle
 from app.audit.sinks.firehose import initialize_firehose_sink
 from app.middleware.audit import AuditMiddleware
@@ -112,6 +113,7 @@ app.add_middleware(WidgetAuthMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(DynamicWidgetCorsMiddleware)
 app.include_router(router)
+app.include_router(admin_router)
 
 
 @app.exception_handler(RequestValidationError)

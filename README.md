@@ -35,10 +35,15 @@ flowchart TD
 - `deployment/` - Repeatable EC2, Nginx, systemd, SSL, health check, and rollback assets.
 - `main.py` - App entry point for Uvicorn.
 - `widget-wrapper/` - Reusable React + TypeScript widget wrapper package for embedding any assistant, iframe, script widget, or message feed.
+- `admin-portal/` - Operations portal for live pipeline traces, approved-document ingestion, and experience analytics.
 
 ## Generic Widget Wrapper
 
 The reusable frontend shell lives in `widget-wrapper/` so the full ASK Vera project stays together in this folder. It exports `GenericWidgetWrapper` and `PlainStateGenericWidgetWrapper`, accepts all visible content through config/props, and contains no brand-specific implementation copy. See `widget-wrapper/README.md` for mock chatbot, iframe, and script embed examples.
+
+## Operations Portal
+
+The responsive operations interface lives in `admin-portal/`. It can replay a recent question through the answer pipeline, upload approved policies, product information, training, FAQ, marketing, legal, or operations documents, and review usage and answer-quality analytics by market and language. The portal uses realistic demo data when disconnected and switches to authenticated live APIs when an admin key is supplied. See `docs/OPERATIONS_PORTAL.md` for the data model, security controls, and deployment checklist.
 
 ## IAM Authentication
 

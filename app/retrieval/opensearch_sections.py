@@ -74,7 +74,14 @@ def _language_key(language: str) -> str:
 def _scope_filter(country: str, language: str, scope: str) -> dict[str, Any]:
     """Build an isolated locale or global-document filter."""
     if scope == "global":
-        return {"term": {"access_scope": "global"}}
+        return {
+            "bool": {
+                "filter": [
+                    {"term": {"access_scope": "global"}},
+                    _language_filter(language),
+                ]
+            }
+        }
     return {
         "bool": {
             "filter": [

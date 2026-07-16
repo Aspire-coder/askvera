@@ -52,6 +52,19 @@ def test_request_size_limit_rejects_oversized_body(monkeypatch) -> None:
     assert _json(response)["error"]["code"] == "REQUEST_TOO_LARGE"
 
 
+def test_document_upload_uses_the_separate_admin_limit(monkeypatch) -> None:
+    from api import middleware as middleware_module
+
+    monkeypatch.setattr(middleware_module.settings, "MAX_REQUEST_BODY_BYTES", 4)
+    monkeypatch.setattr(middleware_module.settings, "ADMIN_UPLOAD_MAX_BYTES", 100)
+    middleware = RequestSizeLimitMiddleware(lambda scope, receive, send: None)
+    request = FakeRequest("/api/admin/documents", {"content-length": "80"})
+
+    response = _run(middleware.dispatch(request, _ok_response))
+
+    assert response.status_code == 200
+
+
 def test_endpoint_specific_rate_limit(monkeypatch) -> None:
     from api import middleware as middleware_module
 

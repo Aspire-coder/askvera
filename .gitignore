@@ -38,6 +38,8 @@ app/*
 !app/models/*.py
 !app/orchestrator/
 !app/orchestrator/*.py
+!app/operations/
+!app/operations/*.py
 !app/prompts/
 !app/prompts/*.py
 !app/response/
@@ -71,6 +73,8 @@ askvera-widget-sdk/
 widget-wrapper/dist/
 widget-wrapper/dist-check/
 widget-wrapper/node_modules/
+admin-portal/node_modules/
+admin-portal/dist/
 widget-wrapper/.npm-cache/
 widget-wrapper/demo/dist/
 widget-wrapper/tmp/

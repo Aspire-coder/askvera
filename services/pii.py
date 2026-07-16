@@ -7,6 +7,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
+from utils.redaction import EMAIL_RE, PHONE_RE
 from utils.exceptions import AwsServiceError
 from utils.logging import get_logger
 
@@ -33,10 +34,6 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
         if cleaned:
             kept_lines.append(cleaned)
     return "\n".join(kept_lines)
-
-EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])", re.UNICODE)
-PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{5,}\d)(?!\w)", re.UNICODE)
-
 
 def _pii_language_code(language: str) -> str | None:
     """Return a supported Comprehend PII language code."""
@@ -101,6 +98,11 @@ def _scrub_pattern_pii(text: str, allowed_texts: Iterable[str]) -> str:
         return match.group(0) if _approved_entity(match.group(0), approved) else "[PHONE]"
 
     return PHONE_RE.sub(replace_phone, EMAIL_RE.sub(replace_email, text))
+
+
+def scrub_pattern_pii(text: str, *, allowed_texts: Iterable[str] = ()) -> str:
+    """Mask common language-neutral PII without making a remote AWS call."""
+    return _scrub_pattern_pii(text, allowed_texts)
 
 
 def scrub_pii(

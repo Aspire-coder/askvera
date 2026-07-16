@@ -101,8 +101,14 @@ RATE_LIMIT_POLICIES = {
     "/api/config": _env_int("RATE_LIMIT_CONFIG_PER_MINUTE", 120),
     "/api/widget/init": _env_int("RATE_LIMIT_WIDGET_INIT_PER_MINUTE", 10),
     "/api/widget/refresh": _env_int("RATE_LIMIT_WIDGET_REFRESH_PER_MINUTE", 20),
+    "/api/admin/documents": _env_int("RATE_LIMIT_ADMIN_UPLOAD_PER_MINUTE", 10),
 }
 MAX_REQUEST_BODY_BYTES = _env_int("MAX_REQUEST_BODY_BYTES", 32768)
+# Admin portal authentication and general knowledge ingestion.
+ADMIN_API_KEY = _env_str("ADMIN_API_KEY", "dev-admin-key" if APP_ENV != "production" else "")
+ADMIN_UPLOAD_MAX_BYTES = _env_int("ADMIN_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
+KNOWLEDGE_UPLOAD_BUCKET = _env_str("KNOWLEDGE_UPLOAD_BUCKET", "")
+KNOWLEDGE_UPLOAD_PREFIX = _env_str("KNOWLEDGE_UPLOAD_PREFIX", "approved-knowledge")
 # Widget authentication. Keep disabled by default for local/dev until production
 # registry values and JWT secret are configured.
 WIDGET_AUTH_REQUIRED = _env_bool("WIDGET_AUTH_REQUIRED", False)
@@ -312,6 +318,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:5175",
     "http://127.0.0.1:9000",
     "http://localhost:9000",
+    "http://127.0.0.1:5176",
+    "http://localhost:5176",
 ]
 API_DOMAIN = "api.vera-api.xyz"
 WIDGET_DOMAIN = "chat.vera-api.xyz"
