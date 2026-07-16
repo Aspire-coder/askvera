@@ -22,6 +22,12 @@ import { GenericWidgetWrapper } from "../generic-widget/GenericWidgetWrapper";
 import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../generic-widget/types";
 import { renewWidgetAuth } from "./auth";
 import { getWidgetCopy } from "../localization/widgetCopy";
+import {
+  localePreferenceStorageKey,
+  readLocalePreference,
+  writeLocalePreference,
+  type LocalePreference
+} from "../storage/localePreference";
 
 type WidgetRuntimeProps = {
   apiBaseUrl: string;
@@ -108,11 +114,15 @@ const baseWidgetConfig: GenericWidgetConfig = {
 
 const conversationStorageKey = "askvera_widget_conversation";
 
-function storedLocale() {
+function storedLocale(widgetId?: string): LocalePreference {
   if (typeof window === "undefined") return { country: "US", language: "en" };
   try {
+    const preference = readLocalePreference(window.localStorage, widgetId);
+    if (preference) return preference;
     const metadata = JSON.parse(window.localStorage.getItem("askvera_session_metadata") || "{}") as Record<string, string>;
-    return { country: metadata.country || "US", language: metadata.language || "en" };
+    const migrated = { country: metadata.country || "US", language: metadata.language || "en" };
+    writeLocalePreference(window.localStorage, migrated, widgetId);
+    return migrated;
   } catch {
     return { country: "US", language: "en" };
   }
@@ -244,7 +254,7 @@ export function WidgetRuntime({
   sdkMessage
 }: WidgetRuntimeProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
-  const [selectedLocale, setSelectedLocale] = useState(storedLocale);
+  const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(() => storedLocale(widgetId));
   const [messages, setMessages] = useState<WidgetMessage[]>(storedMessages);
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
@@ -253,6 +263,30 @@ export function WidgetRuntime({
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const conversationGenerationRef = useRef(0);
+
+  const selectLocale = useCallback((locale: LocalePreference) => {
+    if (typeof window !== "undefined") {
+      writeLocalePreference(window.localStorage, locale, widgetId);
+    }
+    setSelectedLocale(locale);
+  }, [widgetId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = localePreferenceStorageKey(widgetId);
+    const synchronizeLocale = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== storageKey || !event.newValue) return;
+      const preference = readLocalePreference(window.localStorage, widgetId);
+      if (!preference) return;
+      setSelectedLocale((current) =>
+        current.country === preference.country && current.language === preference.language
+          ? current
+          : preference
+      );
+    };
+    window.addEventListener("storage", synchronizeLocale);
+    return () => window.removeEventListener("storage", synchronizeLocale);
+  }, [widgetId]);
   const activeAuthTokenRef = useRef(authToken);
   const authRefreshPromiseRef = useRef<Promise<string | undefined> | null>(null);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
@@ -412,11 +446,11 @@ export function WidgetRuntime({
         const selectedCountryConfig = loadedConfig.countries.find((country) => country.code === selectedLocale.country);
         const selectedLanguageConfig = selectedCountryConfig?.languages.find((language) => language.code === selectedLocale.language);
         if (!selectedCountryConfig && firstCountry && firstLanguage) {
-          setSelectedLocale({ country: firstCountry.code, language: firstLanguage.code });
+          selectLocale({ country: firstCountry.code, language: firstLanguage.code });
         } else if (selectedCountryConfig && !selectedLanguageConfig) {
           const fallbackLanguage = selectedCountryConfig.languages[0];
           if (fallbackLanguage) {
-            setSelectedLocale({ country: selectedCountryConfig.code, language: fallbackLanguage.code });
+            selectLocale({ country: selectedCountryConfig.code, language: fallbackLanguage.code });
           }
         }
       })
@@ -428,7 +462,7 @@ export function WidgetRuntime({
     return () => {
       active = false;
     };
-  }, [selectedLocale.country, selectedLocale.language, upsertMessage, withWidgetAuthRetry]);
+  }, [selectLocale, selectedLocale.country, selectedLocale.language, upsertMessage, withWidgetAuthRetry]);
 
   useEffect(() => {
     if (!clearConversationSignal) return;
@@ -582,8 +616,8 @@ export function WidgetRuntime({
       consentRequiredSignal={consentRequiredSignal}
       onHealthCheck={checkBackendHealth}
       onAcceptConsent={handleConsent}
-      onCountryChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
-      onLanguageChange={(payload) => setSelectedLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
+      onCountryChange={(payload) => selectLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
+      onLanguageChange={(payload) => selectLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={(payload) => void sendChat(payload)}
       onMessageFeedback={handleMessageFeedback}
       onEscalate={(payload) => void handleSupportRequest({
