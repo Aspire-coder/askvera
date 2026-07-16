@@ -13,6 +13,8 @@ export type ChatSource = {
   uri: string;
   excerpt?: string;
   page?: string;
+  section?: string;
+  sectionTitle?: string;
   documentVersion?: string;
   country?: string;
   language?: string;

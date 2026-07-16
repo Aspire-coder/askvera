@@ -164,6 +164,15 @@ class ResponseBuilder:
         if not documents:
             return []
 
+        evidence_contract = (retrieval_result.metadata or {}).get("evidence_contract", {})
+        if isinstance(evidence_contract, dict) and evidence_contract.get("status") == "accepted":
+            evidence_ids = {str(identifier) for identifier in evidence_contract.get("evidence_ids", [])}
+            verified = [document for document in documents if not evidence_ids or document.id in evidence_ids]
+            # These documents already passed the claim-level evidence contract.
+            # A second lexical check can incorrectly discard citations when the
+            # answer and source use different languages.
+            return [self._source_for_answer(document, answer) for document in verified[:3]]
+
         answer_numbers = self._numbers(answer)
         ranked = sorted(
             documents,

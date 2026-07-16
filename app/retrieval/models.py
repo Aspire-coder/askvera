@@ -22,7 +22,7 @@ class RetrievedDocument:
 
     def to_source(self) -> dict[str, Any]:
         """Return the API-compatible source shape."""
-        return {
+        source = {
             "title": self.title,
             "uri": self.source,
             "excerpt": self.excerpt,
@@ -32,6 +32,13 @@ class RetrievedDocument:
             "language": self.language,
             "score": self.score,
         }
+        section = str(self.metadata.get("parent_section_id") or self.metadata.get("section_id") or "").strip()
+        section_title = str(self.metadata.get("section_title") or "").strip()
+        if section:
+            source["section"] = section
+        if section_title:
+            source["sectionTitle"] = section_title
+        return source
 
 
 RetrievalDocument = RetrievedDocument

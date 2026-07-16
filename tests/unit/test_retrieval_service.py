@@ -348,3 +348,6 @@ def test_multilingual_query_planner_uses_runtime_question_without_country_aliase
     request_text = runtime.converse.call_args.kwargs["messages"][0]["content"][0]["text"]
     assert "Market: NL" in request_text
     assert "Requested language: nl" in request_text
+    planner_prompt = runtime.converse.call_args.kwargs["system"][0]["text"]
+    assert "requalification" in planner_prompt
+    assert "inactivity" in planner_prompt

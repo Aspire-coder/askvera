@@ -100,10 +100,18 @@ class PromptBuilder:
             return ""
         chunks: list[str] = []
         for index, document in enumerate(retrieval_result.documents, start=1):
+            section = str(
+                document.metadata.get("parent_section_id")
+                or document.metadata.get("section_id")
+                or ""
+            ).strip()
             chunks.append(
                 "\n".join(
                     [
                         f"[Source {index}] {document.title}",
+                        f"Source ID: {document.id}",
+                        f"Policy section: {section or 'not supplied'}",
+                        f"Page: {document.page or 'not supplied'}",
                         f"URI: {document.source}",
                         f"Country: {document.country}",
                         f"Language: {document.language}",

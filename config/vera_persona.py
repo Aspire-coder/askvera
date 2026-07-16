@@ -21,9 +21,9 @@ FALLBACK_RESPONSES = {
         "answer - want me to point you to how to reach them?"
     ),
     "insufficient_evidence": (
-        "I couldn't find a clear answer in the approved policy information currently "
-        "available to me. Please check the official policy document or contact Forever "
-        "Living support for clarification."
+        "The approved policy documents currently available do not contain enough "
+        "information to answer this question clearly. Please rephrase the question or "
+        "contact Forever Living support for an official answer."
     ),
     "income_claim": (
         "I can't share income projections or guarantees - that's not something I'm "

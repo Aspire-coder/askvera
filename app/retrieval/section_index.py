@@ -402,5 +402,10 @@ class SectionSearchProvider:
             country=str(row.get("country") or ""),
             language=str(row.get("language") or ""),
             score=score,
-            metadata=dict(row.get("metadata") or {}),
+            metadata={
+                **dict(row.get("metadata") or {}),
+                "section_id": row.get("section_id", ""),
+                "section_title": row.get("section_title", ""),
+                "parent_section_id": row.get("parent_section_id", ""),
+            },
         )

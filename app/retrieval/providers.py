@@ -255,6 +255,9 @@ def _planned_retrieval_queries(message: str, country: str, language: str, correl
         "You create search queries for a policy knowledge base. Do not answer the user. "
         "Rewrite the user's question into neutral search phrases that would find the exact policy section. "
         "Preserve business terms, acronyms, rank names, bonus names, program names, legal terms, and intent. "
+        "For status or lifecycle questions, include close policy terminology for qualification, "
+        "requalification, recognition, activity, inactivity, termination, and reactivation only when it "
+        "preserves the user's intent. "
         "Fix obvious typos. If the question is not in English, include English search phrases too. "
         "Do not invent facts, numbers, percentages, section IDs, or answers. Return only JSON."
     )

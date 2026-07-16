@@ -28,7 +28,15 @@ def test_routes_launched_language_greetings_without_model_tokens() -> None:
 
 
 def test_localized_fallback_uses_selected_language() -> None:
-    assert "trouvé" in (localized_conversation_response("insufficient_evidence", "fr-CA") or "")
+    assert "documents de politique approuvés" in (
+        localized_conversation_response("insufficient_evidence", "fr-CA") or ""
+    )
+
+
+def test_fallback_explains_that_approved_documents_lack_enough_information() -> None:
+    fallback = localized_conversation_response("insufficient_evidence", "en") or ""
+    assert "approved policy documents" in fallback
+    assert "do not contain enough information" in fallback
 
 
 def test_global_document_is_valid_evidence_for_every_locale() -> None:

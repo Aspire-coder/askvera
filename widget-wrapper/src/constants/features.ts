@@ -1,7 +1,7 @@
 export const WidgetFeatures = {
   analytics: true,
   attachments: false,
-  citations: false,
+  citations: true,
   darkMode: true,
   debugMode: false,
   feedback: true,

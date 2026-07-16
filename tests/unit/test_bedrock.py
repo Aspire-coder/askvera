@@ -26,6 +26,31 @@ def test_build_prompt_replaces_all_variables() -> None:
     assert "chunk" in prompt.system_prompt
 
 
+def test_prompt_context_exposes_exact_evidence_identity_and_location() -> None:
+    """The evidence contract receives stable IDs and user-facing citation metadata."""
+    document = RetrievedDocument(
+        id="policy-4-01-e",
+        title="Benelux Policy",
+        content="Approved policy content.",
+        source="s3://kb/benelux-policy.pdf",
+        page="18",
+        metadata={"section_id": "4.01e", "section_title": "Case Credits"},
+    )
+    prompt = PromptBuilder().build(
+        user_question="question",
+        conversation="",
+        country="NL",
+        language="nl",
+        role="new_prospect",
+        retrieval_result=RetrievalResult(documents=[document], citations=[], confidence=0.9),
+    )
+    assert "Source ID: policy-4-01-e" in prompt.retrieved_context
+    assert "Policy section: 4.01e" in prompt.retrieved_context
+    assert "Page: 18" in prompt.retrieved_context
+    assert document.to_source()["section"] == "4.01e"
+    assert document.to_source()["sectionTitle"] == "Case Credits"
+
+
 def test_bedrock_provider_returns_sources() -> None:
     """Bedrock response is transformed into API data."""
     runtime = MagicMock()

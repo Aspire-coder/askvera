@@ -193,3 +193,40 @@ def test_response_builder_does_not_attach_an_unrelated_source() -> None:
     )
 
     assert response.citations == []
+
+
+def test_verified_evidence_citation_survives_cross_language_answer() -> None:
+    """Claim-verified evidence must not be dropped by language-sensitive token overlap."""
+    document = RetrievedDocument(
+        id="manager-requalification",
+        title="Company Policy - Sec 4.02: Manager Requalification",
+        content="A Manager may requalify under the conditions stated in this section.",
+        source="s3://kb/policy.pdf",
+        page="19",
+        metadata={"section_id": "4.02", "section_title": "Manager Requalification"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.9,
+        metadata={
+            "evidence_contract": {
+                "status": "accepted",
+                "evidence_ids": ["manager-requalification"],
+            }
+        },
+    )
+    response = ResponseBuilder().build(
+        model_response=ModelResponse(
+            text="Een Manager kan zich opnieuw kwalificeren volgens de voorwaarden in dit onderdeel.",
+            citations=[],
+            confidence=0.9,
+            provider="claude",
+            model_name="model",
+        ),
+        retrieval_result=retrieval_result,
+        correlation_id="cid",
+    )
+    assert len(response.citations) == 1
+    assert response.citations[0]["section"] == "4.02"
+    assert response.citations[0]["page"] == "19"

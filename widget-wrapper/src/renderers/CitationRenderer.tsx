@@ -3,6 +3,8 @@ export type RenderedSource = {
   uri?: string;
   excerpt?: string;
   page?: string;
+  section?: string;
+  sectionTitle?: string;
 };
 
 function normalizeSources(value: unknown): RenderedSource[] {
@@ -16,6 +18,8 @@ function normalizeSources(value: unknown): RenderedSource[] {
       uri: typeof record.uri === "string" ? record.uri : undefined,
       excerpt: typeof record.excerpt === "string" ? record.excerpt : undefined,
       page: typeof record.page === "string" ? record.page : typeof record.page === "number" ? String(record.page) : undefined,
+      section: typeof record.section === "string" ? record.section : undefined,
+      sectionTitle: typeof record.sectionTitle === "string" ? record.sectionTitle : undefined,
     };
     if (normalized.title || normalized.uri) sources.push(normalized);
   });
@@ -60,8 +64,10 @@ export function CitationRenderer({
                 <span className="gw-citation-document">{title}</span>
               </div>
               <div className="gw-citation-meta">
+                {source.section ? <span className="gw-citation-section">Section {source.section}</span> : null}
                 {pageLabel ? <span className="gw-citation-page">{pageLabel}</span> : null}
               </div>
+              {source.sectionTitle ? <p>{source.sectionTitle}</p> : null}
               {source.excerpt ? <p>{source.excerpt}</p> : null}
             </article>
           );
