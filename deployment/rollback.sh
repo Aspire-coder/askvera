@@ -41,7 +41,7 @@ sudo -u "${APP_USER}" .venv/bin/python -m pip install -r requirements.txt
 systemctl restart "${SERVICE_NAME}"
 sleep 3
 
-if ! PUBLIC_URL="${HEALTH_BASE_URL}" "${APP_DIR}/deployment/healthcheck.sh"; then
+if ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh"; then
   echo "Rollback health check failed. Service may be unhealthy at ${RESOLVED_REV}." >&2
   exit 1
 fi
