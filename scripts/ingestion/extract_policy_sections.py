@@ -23,7 +23,10 @@ from pypdf import PdfReader
 SECTION_RE = re.compile(
     r"(?m)^(?P<section>\d{1,2}(?:\.\d{1,2})?)\.?\s+(?P<title>[^\W\d_].+)$"
 )
-LETTERED_RE = re.compile(r"(?m)^\((?P<section>[a-z])\)\s+(?P<title>.+)$")
+LIST_ITEM_RE = re.compile(
+    r"(?m)^(?P<label>\([a-z0-9]+\)|[a-z][.)])\s+(?P<title>.+)$",
+    flags=re.IGNORECASE,
+)
 HEADER_RE = re.compile(r"Company Policies and the Code of Professional Conduct Revised \d+")
 PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
@@ -48,17 +51,30 @@ class PolicySection:
     start_page: int
     end_page: int
     content: str
+    document_version: str = ""
+    effective_date: str = ""
+    status: str = "active"
+    chunk_type: str = "section"
+    parent_section_id: str = ""
 
     @property
     def metadata(self) -> dict[str, str | int]:
         return {
             "source_file": self.source_file,
             "country": self.country,
+            "country_code": self.country,
             "language": self.language,
             "section_id": self.section_id,
             "section_title": self.title,
             "start_page": self.start_page,
             "end_page": self.end_page,
+            "document_version": self.document_version,
+            "effective_date": self.effective_date,
+            "status": self.status,
+            "document_type": "policy",
+            "access_scope": "country",
+            "chunk_type": self.chunk_type,
+            "parent_section_id": self.parent_section_id,
         }
 
 
@@ -104,6 +120,9 @@ def extract_sections(
     country: str,
     language: str,
     min_chars: int = 40,
+    document_version: str = "",
+    effective_date: str = "",
+    status: str = "active",
 ) -> list[PolicySection]:
     pages = _read_pages(pdf_path)
     full_text_parts: list[str] = []
@@ -146,10 +165,13 @@ def extract_sections(
                 content=body,
                 content_offset=start,
                 page_offsets=page_offsets,
+                document_version=document_version,
+                effective_date=effective_date,
+                status=status,
             )
         )
 
-    return _merge_lettered_subsections(sections)
+    return _expand_structured_chunks(sections)
 
 
 def _page_for_offset(page_offsets: list[tuple[int, int, int]], offset: int) -> int:
@@ -175,6 +197,9 @@ def _split_oversized_section(
     content: str,
     content_offset: int,
     page_offsets: list[tuple[int, int, int]],
+    document_version: str = "",
+    effective_date: str = "",
+    status: str = "active",
 ) -> list[PolicySection]:
     if len(content) <= MAX_SECTION_CHARS:
         return [
@@ -187,6 +212,9 @@ def _split_oversized_section(
                 start_page=_page_for_offset(page_offsets, content_offset),
                 end_page=_page_for_offset(page_offsets, content_offset + len(content) - 1),
                 content=content,
+                document_version=document_version,
+                effective_date=effective_date,
+                status=status,
             )
         ]
 
@@ -216,46 +244,96 @@ def _split_oversized_section(
                 content_offset + chunk_start + len(chunk) - 1,
             ),
             content=chunk,
+            document_version=document_version,
+            effective_date=effective_date,
+            status=status,
+            chunk_type="section_part",
+            parent_section_id=section_id,
         )
         for part_number, (chunk_start, chunk) in enumerate(chunks, start=1)
         if chunk
     ]
 
 
-def _merge_lettered_subsections(sections: list[PolicySection]) -> list[PolicySection]:
-    """Split large numbered sections into lettered chunks when useful.
+def _compact_numeric_fact(line: str) -> bool:
+    """Recognize a compact table/list row containing a numeric policy fact."""
+    cleaned = " ".join(line.split())
+    return (
+        12 <= len(cleaned) <= 360
+        and any(character.isdigit() for character in cleaned)
+        and bool(re.search(r"[^\W\d_]", cleaned, flags=re.UNICODE))
+    )
 
-    Some policy documents put important rules under 4.01(a), 4.01(b), etc.
-    This keeps the numbered section and also creates precise child chunks.
+
+def _contextual_content(section: PolicySection, content: str) -> str:
+    """Keep each atomic chunk understandable when retrieved on its own."""
+    return f"Section {section.section_id}: {section.title}\n{content.strip()}"
+
+
+def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySection]:
+    """Add generic atomic chunks for list items and numeric table rows.
+
+    The parent section remains available for context. Child chunks make short
+    facts independently retrievable without relying on country, language, or
+    policy-specific aliases.
     """
 
     expanded: list[PolicySection] = []
     for section in sections:
         expanded.append(section)
-        if not re.fullmatch(r"\d{1,2}\.\d{1,2}", section.section_id):
+        if section.chunk_type == "section_part":
             continue
-        if len(section.content) > MAX_SECTION_CHARS:
-            continue
-        matches = list(LETTERED_RE.finditer(section.content))
-        if len(matches) < 2:
-            continue
+        matches = list(LIST_ITEM_RE.finditer(section.content))
 
         for index, match in enumerate(matches):
             start = match.start()
             end = matches[index + 1].start() if index + 1 < len(matches) else len(section.content)
             content = section.content[start:end].strip()
-            if len(content) < 40:
+            if len(content) < 24:
                 continue
+            label = re.sub(r"[^a-z0-9]+", "", match.group("label").casefold()) or str(index + 1)
             expanded.append(
                 PolicySection(
                     source_file=section.source_file,
                     country=section.country,
                     language=section.language,
-                    section_id=f"{section.section_id}{match.group('section')}",
+                    section_id=f"{section.section_id}-{label}",
                     title=_normalize_title(match.group("title")),
                     start_page=section.start_page,
                     end_page=section.end_page,
-                    content=content,
+                    content=_contextual_content(section, content),
+                    document_version=section.document_version,
+                    effective_date=section.effective_date,
+                    status=section.status,
+                    chunk_type="list_item",
+                    parent_section_id=section.section_id,
+                )
+            )
+
+        lines = [" ".join(line.split()) for line in section.content.splitlines()]
+        fact_rows = [
+            (index, line)
+            for index, line in enumerate(lines[1:], start=1)
+            if _compact_numeric_fact(line) and not LIST_ITEM_RE.match(line)
+        ]
+        if len(fact_rows) < 2:
+            continue
+        for row_number, line in fact_rows:
+            expanded.append(
+                PolicySection(
+                    source_file=section.source_file,
+                    country=section.country,
+                    language=section.language,
+                    section_id=f"{section.section_id}-fact-{row_number}",
+                    title=_normalize_title(line[:160]),
+                    start_page=section.start_page,
+                    end_page=section.end_page,
+                    content=_contextual_content(section, line),
+                    document_version=section.document_version,
+                    effective_date=section.effective_date,
+                    status=section.status,
+                    chunk_type="numeric_fact",
+                    parent_section_id=section.section_id,
                 )
             )
     return expanded
@@ -276,11 +354,19 @@ def write_csv(sections: list[PolicySection], path: Path) -> None:
             fieldnames=[
                 "source_file",
                 "country",
+                "country_code",
                 "language",
                 "section_id",
                 "title",
                 "start_page",
                 "end_page",
+                "document_version",
+                "effective_date",
+                "status",
+                "document_type",
+                "access_scope",
+                "chunk_type",
+                "parent_section_id",
                 "content_length",
                 "preview",
             ],
@@ -291,11 +377,19 @@ def write_csv(sections: list[PolicySection], path: Path) -> None:
                 {
                     "source_file": section.source_file,
                     "country": section.country,
+                    "country_code": section.country,
                     "language": section.language,
                     "section_id": section.section_id,
                     "title": section.title,
                     "start_page": section.start_page,
                     "end_page": section.end_page,
+                    "document_version": section.document_version,
+                    "effective_date": section.effective_date,
+                    "status": section.status,
+                    "document_type": "policy",
+                    "access_scope": "country",
+                    "chunk_type": section.chunk_type,
+                    "parent_section_id": section.parent_section_id,
                     "content_length": len(section.content),
                     "preview": section.content[:300],
                 }
@@ -334,11 +428,19 @@ def write_bedrock_files(sections: list[PolicySection], directory: Path) -> None:
             fieldnames=[
                 "source_file",
                 "country",
+                "country_code",
                 "language",
                 "section_id",
                 "section_title",
                 "start_page",
                 "end_page",
+                "document_version",
+                "effective_date",
+                "status",
+                "document_type",
+                "access_scope",
+                "chunk_type",
+                "parent_section_id",
                 "text_file",
                 "metadata_file",
                 "content_length",
@@ -381,6 +483,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--language", required=True)
     parser.add_argument("--output-dir", default=Path("outputs/policy_sections"), type=Path)
     parser.add_argument("--min-chars", default=40, type=int)
+    parser.add_argument("--document-version", default="")
+    parser.add_argument("--effective-date", default="")
+    parser.add_argument("--status", default="active", choices=["active", "inactive"])
     parser.add_argument(
         "--bedrock-dir",
         type=Path,
@@ -396,6 +501,9 @@ def main() -> int:
         country=args.country,
         language=args.language,
         min_chars=args.min_chars,
+        document_version=args.document_version,
+        effective_date=args.effective_date,
+        status=args.status,
     )
 
     stem = args.pdf.stem

@@ -23,7 +23,7 @@ from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
 from services.consent_service import has_valid_consent
-from services.pii import scrub_pii
+from services.pii import remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
@@ -216,6 +216,17 @@ class AIOrchestrator:
                 cards=chat_response.cards,
                 confidence=chat_response.confidence,
                 metadata={**chat_response.metadata, "response_pii_scrubbed": True},
+                correlation_id=chat_response.correlation_id,
+            )
+        cleaned_answer = remove_unresolved_pii_placeholders(chat_response.answer)
+        if cleaned_answer != chat_response.answer:
+            chat_response = ChatResponse(
+                answer=cleaned_answer,
+                citations=chat_response.citations,
+                suggestions=chat_response.suggestions,
+                cards=chat_response.cards,
+                confidence=chat_response.confidence,
+                metadata={**chat_response.metadata, "unresolved_pii_placeholders_removed": True},
                 correlation_id=chat_response.correlation_id,
             )
         chat_response = self._validate_response(

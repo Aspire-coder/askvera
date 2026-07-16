@@ -6,8 +6,6 @@ import json
 import math
 import re
 import unicodedata
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 import boto3
@@ -22,6 +20,7 @@ from services.market_config import get_document_country_codes
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
+from .providers import _planned_retrieval_queries
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
@@ -31,25 +30,6 @@ def _normalize_text(value: str) -> str:
     """Normalize text for glossary trigger checks."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()
     return " ".join("".join(character if character.isalnum() else " " for character in normalized).split())
-
-
-@lru_cache(maxsize=1)
-def _load_search_glossary() -> list[dict[str, Any]]:
-    """Load content-managed search glossary entries."""
-    path = Path(settings.OPENSEARCH_GLOSSARY_PATH)
-    if not path.exists():
-        LOGGER.warning("opensearch_glossary_missing", path=str(path))
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        LOGGER.exception("opensearch_glossary_load_failed", path=str(path))
-        return []
-    entries = payload.get("entries", [])
-    if not isinstance(entries, list):
-        LOGGER.warning("opensearch_glossary_invalid_entries", path=str(path))
-        return []
-    return [entry for entry in entries if isinstance(entry, dict)]
 
 
 @lru_cache(maxsize=1)
@@ -232,6 +212,10 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
         "language": source.get("language", ""),
         "document_type": source.get("document_type", ""),
         "access_scope": source.get("access_scope", "country"),
+        "document_version": source.get("document_version", ""),
+        "effective_date": source.get("effective_date", ""),
+        "chunk_type": source.get("chunk_type", "section"),
+        "parent_section_id": source.get("parent_section_id", ""),
         "section_id": source.get("section_id", ""),
         "section_title": source.get("section_title", ""),
         "start_page": source.get("start_page", ""),
@@ -329,7 +313,7 @@ class OpenSearchSectionProvider:
         del role
         try:
             client = _client()
-            search_messages = self._build_search_queries(message, country, language)
+            search_messages = self._build_search_queries(message, country, language, correlation_id)
             global_search_message = self._global_search_query(message, language, correlation_id)
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
@@ -437,49 +421,18 @@ class OpenSearchSectionProvider:
         )
         return translated.strip('"')
 
-    def _build_search_queries(self, message: str, country: str, language: str) -> list[str]:
-        """Build original, glossary, and optional model-rewritten search queries."""
+    def _build_search_queries(
+        self,
+        message: str,
+        country: str,
+        language: str,
+        correlation_id: str,
+    ) -> list[str]:
+        """Build runtime multilingual queries without country-specific aliases."""
         original = message.strip()
         if not original:
             return [original]
-
-        search_queries = [original]
-        for query in self._glossary_search_queries(original, country, language):
-            if query not in search_queries:
-                search_queries.append(query)
-
-        return search_queries
-
-    def _glossary_search_queries(self, message: str, country: str, language: str) -> list[str]:
-        """Return approved glossary queries that match the user's wording."""
-        if not settings.OPENSEARCH_GLOSSARY_ENABLED:
-            return []
-
-        normalized_message = f" {_normalize_text(message)} "
-        normalized_country = (country or "").upper()
-        normalized_language = _language_key(language)
-        queries: list[str] = []
-
-        for entry in _load_search_glossary():
-            countries = [str(value).upper() for value in entry.get("country", ["*"])]
-            languages = [_language_key(str(value)) if value != "*" else "*" for value in entry.get("language", ["*"])]
-            if "*" not in countries and normalized_country not in countries:
-                continue
-            if "*" not in languages and normalized_language not in languages:
-                continue
-
-            triggers = [_normalize_text(str(trigger)) for trigger in entry.get("triggers", [])]
-            if not any(f" {trigger} " in normalized_message for trigger in triggers if trigger):
-                continue
-
-            for query in entry.get("queries", []):
-                normalized_query = str(query or "").strip()
-                if normalized_query and normalized_query not in queries:
-                    queries.append(normalized_query)
-                if len(queries) >= settings.OPENSEARCH_GLOSSARY_QUERY_LIMIT:
-                    return queries
-
-        return queries
+        return _planned_retrieval_queries(original, country, language, correlation_id)
 
     def _merge_hits(
         self,
@@ -628,7 +581,7 @@ class OpenSearchSectionProvider:
             source=str(source_uri),
             excerpt=content[:300],
             page=page,
-            document_version="",
+            document_version=str(row.get("document_version") or ""),
             country=str(row.get("country") or ""),
             language=str(row.get("language") or ""),
             score=score,

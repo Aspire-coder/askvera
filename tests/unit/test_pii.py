@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from services.pii import _pii_language_code, scrub_pii
+from services.pii import _pii_language_code, remove_unresolved_pii_placeholders, scrub_pii
 
 
 def test_scrub_pii_replaces_detected_entities() -> None:
@@ -102,3 +102,15 @@ def test_approved_public_assistant_name_is_not_anonymized() -> None:
         )
 
     assert answer == "I'm ASK Vera."
+
+
+def test_unresolved_contact_placeholder_line_is_removed() -> None:
+    answer = "Contact Support:\n- **[ADDRESS]:** +31 88 646 0200\nOr email support@example.com"
+
+    assert remove_unresolved_pii_placeholders(answer) == "Contact Support:\nOr email support@example.com"
+
+
+def test_unresolved_placeholders_are_removed_inline() -> None:
+    answer = "If you're in the Benelux region ([ADDRESS], [ADDRESS]), disputes use arbitration."
+
+    assert remove_unresolved_pii_placeholders(answer) == "If you're in the Benelux region, disputes use arbitration."

@@ -67,3 +67,26 @@ def test_oversized_sections_are_split_into_bounded_parts() -> None:
     assert len(sections) > 1
     assert all(len(section.content) <= extractor.MAX_SECTION_CHARS for section in sections)
     assert sections[0].section_id == "1-part-1"
+
+
+def test_numeric_table_rows_become_country_agnostic_atomic_facts() -> None:
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="NL",
+        language="nl",
+        section_id="4.01",
+        title="Marketingplan",
+        start_page=8,
+        end_page=8,
+        content="4.01 Marketingplan\nAssistant Supervisor 2 CC in twee maanden\nSupervisor 10 CC in één maand\nManager 120 CC in twee maanden",
+        document_version="2025-05",
+        effective_date="2025-06-15",
+    )
+
+    chunks = extractor._expand_structured_chunks([parent])
+    facts = [chunk for chunk in chunks if chunk.chunk_type == "numeric_fact"]
+
+    assert len(facts) == 3
+    assert any("Supervisor 10 CC" in fact.content for fact in facts)
+    assert all(fact.parent_section_id == "4.01" for fact in facts)
+    assert all(fact.metadata["status"] == "active" for fact in facts)

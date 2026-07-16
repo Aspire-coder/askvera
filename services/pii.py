@@ -12,6 +12,27 @@ from utils.logging import get_logger
 
 LOGGER = get_logger("services.pii")
 
+
+def remove_unresolved_pii_placeholders(text: str) -> str:
+    """Remove user-visible redaction markers from a generated response.
+
+    Approved contacts are preserved before this point via ``allowed_texts``. A
+    remaining marker therefore represents ungrounded content and should not be
+    displayed as a broken support contact.
+    """
+    if not text or "[" not in text:
+        return text
+    kept_lines: list[str] = []
+    for line in text.splitlines():
+        if re.search(r"\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\]\s*:", line, flags=re.IGNORECASE):
+            continue
+        cleaned = re.sub(r"\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\](?:\s*,\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\])*", "", line, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\(\s*\)", "", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+        if cleaned:
+            kept_lines.append(cleaned)
+    return "\n".join(kept_lines)
+
 EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?![\w.-])", re.UNICODE)
 PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{5,}\d)(?!\w)", re.UNICODE)
 

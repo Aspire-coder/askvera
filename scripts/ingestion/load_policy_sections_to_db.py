@@ -110,6 +110,11 @@ def load_sections(
                 "section_title": section["title"],
                 "start_page": section["start_page"],
                 "end_page": section["end_page"],
+                "document_version": section.get("document_version", ""),
+                "effective_date": section.get("effective_date", ""),
+                "status": section.get("status", "active"),
+                "chunk_type": section.get("chunk_type", "section"),
+                "parent_section_id": section.get("parent_section_id", ""),
             }
             connection.execute(
                 text(

@@ -69,7 +69,7 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-15.2")
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
-RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-15-directory-v3")
+RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-16-atomic-sections-v1")
 # RDS PostgreSQL database identifier. Found in RDS -> Databases -> database-1.
 RDS_DB_IDENTIFIER = "database-1"
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
@@ -177,7 +177,10 @@ BEDROCK_RETRIEVAL_CANDIDATE_COUNT = _env_int(
 )
 BEDROCK_RETRIEVAL_CONFIGURATION = _env_str("BEDROCK_RETRIEVAL_CONFIGURATION", "vector").lower()
 BEDROCK_STRONG_LOCAL_MATCH_THRESHOLD = _env_float("BEDROCK_STRONG_LOCAL_MATCH_THRESHOLD", 0.52)
-BEDROCK_QUERY_PLANNER_ENABLED = _env_bool("BEDROCK_QUERY_PLANNER_ENABLED", False)
+# Generic multilingual query rewriting is enabled by default. It produces
+# search phrases from each question at runtime, so new markets do not require
+# country-specific aliases in source code or configuration.
+BEDROCK_QUERY_PLANNER_ENABLED = _env_bool("BEDROCK_QUERY_PLANNER_ENABLED", True)
 BEDROCK_QUERY_PLANNER_QUERY_COUNT = _env_int("BEDROCK_QUERY_PLANNER_QUERY_COUNT", 4)
 BEDROCK_EVIDENCE_SELECTOR_ENABLED = _env_bool("BEDROCK_EVIDENCE_SELECTOR_ENABLED", False)
 BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)

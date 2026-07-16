@@ -398,7 +398,7 @@ class SectionSearchProvider:
             source=str(source_uri),
             excerpt=content[:300],
             page=page,
-            document_version="",
+            document_version=str((row.get("metadata") or {}).get("document_version") or ""),
             country=str(row.get("country") or ""),
             language=str(row.get("language") or ""),
             score=score,

@@ -1,9 +1,15 @@
 """Unit tests for retrieval normalization."""
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
     _expanded_retrieval_query,
+    _planned_retrieval_queries,
     _reference_score,
+    _retrieval_configuration,
     _retrieval_queries,
     _rerank_documents,
     confidence_from_sources,
@@ -247,6 +253,20 @@ def test_reference_score_reads_bedrock_retrieve_score_shapes() -> None:
     assert _reference_score({"metadata": {"retrieval_score": "0.63"}}) == 0.63
 
 
+def test_bedrock_filter_accepts_old_and_new_country_metadata_keys() -> None:
+    configuration = _retrieval_configuration(country="NL", language="nl", managed=False)
+    filters = configuration["vectorSearchConfiguration"]["filter"]["andAll"]
+
+    assert filters[0] == {
+        "orAll": [
+            {"equals": {"key": "country_code", "value": "NL"}},
+            {"equals": {"key": "country", "value": "NL"}},
+        ]
+    }
+    assert {"equals": {"key": "language", "value": "nl"}} in filters
+    assert {"equals": {"key": "status", "value": "active"}} in filters
+
+
 def test_provider_dedupe_keeps_different_chunks_with_same_prefix() -> None:
     """Chunk dedupe should not erase different sections that start similarly."""
     provider = BedrockRetrievalProvider()
@@ -293,3 +313,38 @@ def test_retrieval_query_expands_bonus_terms() -> None:
 
     assert "personal retail bonus" in query
     assert "personal retail bonus" in queries
+
+
+def test_multilingual_query_planner_uses_runtime_question_without_country_aliases(monkeypatch) -> None:
+    """Any market/language can create search phrases from the live question."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [
+                    {
+                        "text": '{"queries":["voorwaarden supervisor case credits","supervisor case credit requirements"]}'
+                    }
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    queries = _planned_retrieval_queries(
+        "Hoeveel CC zijn nodig om Supervisor te worden?",
+        "NL",
+        "nl",
+        "cid",
+    )
+
+    assert queries[0] == "Hoeveel CC zijn nodig om Supervisor te worden?"
+    assert "supervisor case credit requirements" in queries
+    request_text = runtime.converse.call_args.kwargs["messages"][0]["content"][0]["text"]
+    assert "Market: NL" in request_text
+    assert "Requested language: nl" in request_text

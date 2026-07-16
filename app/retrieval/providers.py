@@ -245,7 +245,7 @@ def _parse_planned_queries(text: str) -> list[str]:
     return parsed
 
 
-def _planned_retrieval_queries(message: str, correlation_id: str) -> list[str]:
+def _planned_retrieval_queries(message: str, country: str, language: str, correlation_id: str) -> list[str]:
     """Use a focused model pass to create retrieval queries from the user question."""
     base_queries = _retrieval_queries(message)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
@@ -259,7 +259,7 @@ def _planned_retrieval_queries(message: str, correlation_id: str) -> list[str]:
         "Do not invent facts, numbers, percentages, section IDs, or answers. Return only JSON."
     )
     user_prompt = (
-        f"User question:\n{message}\n\n"
+        f"Market: {country}\nRequested language: {language}\nUser question:\n{message}\n\n"
         "Return JSON exactly like this: "
         "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"]}. "
         f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
@@ -550,7 +550,12 @@ def _retrieval_configuration(*, country: str, language: str, managed: bool) -> d
             "overrideSearchType": "HYBRID",
             "filter": {
                 "andAll": [
-                    {"equals": {"key": "country_code", "value": country}},
+                    {
+                        "orAll": [
+                            {"equals": {"key": "country_code", "value": country}},
+                            {"equals": {"key": "country", "value": country}},
+                        ]
+                    },
                     {"equals": {"key": "language", "value": language}},
                     {"equals": {"key": "status", "value": "active"}},
                 ]
@@ -570,7 +575,7 @@ class BedrockRetrievalProvider:
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         """Call the standalone Retrieve API for reliable source scores."""
-        retrieval_queries = _planned_retrieval_queries(message, correlation_id)
+        retrieval_queries = _planned_retrieval_queries(message, country, language, correlation_id)
         retrieval_results: list[dict[str, Any]] = []
         use_managed_search = settings.BEDROCK_RETRIEVAL_CONFIGURATION == "managed"
         try:

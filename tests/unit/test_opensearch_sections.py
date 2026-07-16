@@ -1,5 +1,6 @@
 """Tests for generic OpenSearch section retrieval behavior."""
 
+from app.retrieval import opensearch_sections
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
@@ -89,6 +90,23 @@ def test_global_search_query_skips_translation_for_matching_language(monkeypatch
     )
 
     assert query == "Where is the Mexico office?"
+
+
+def test_search_queries_use_runtime_planner_instead_of_country_aliases(monkeypatch) -> None:
+    monkeypatch.setattr(
+        opensearch_sections,
+        "_planned_retrieval_queries",
+        lambda message, country, language, correlation_id: [message, "semantic policy query"],
+    )
+
+    queries = OpenSearchSectionProvider()._build_search_queries(
+        "Een korte beleidsvraag",
+        "NL",
+        "nl",
+        "cid",
+    )
+
+    assert queries == ["Een korte beleidsvraag", "semantic policy query"]
 
 
 def test_directory_query_filters_to_active_global_directory_records() -> None:
