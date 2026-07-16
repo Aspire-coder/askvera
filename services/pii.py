@@ -29,6 +29,7 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
         cleaned = re.sub(r"\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\](?:\s*,\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\])*", "", line, flags=re.IGNORECASE)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+        cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
         if cleaned:
             kept_lines.append(cleaned)
     return "\n".join(kept_lines)
