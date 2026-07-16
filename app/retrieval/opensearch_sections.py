@@ -6,6 +6,7 @@ import json
 import math
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any
 
 import boto3
