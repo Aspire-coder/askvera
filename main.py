@@ -1,6 +1,5 @@
 """ASK Vera FastAPI application entry point."""
 
-import signal
 import time
 from collections.abc import Generator
 from contextlib import asynccontextmanager
@@ -33,7 +32,6 @@ from utils.logging import configure_logging, get_logger
 configure_logging()
 LOGGER = get_logger("main")
 shutdown_requested = False
-_previous_sigterm_handler: object = signal.SIG_DFL
 
 
 def _init_optional_cache(max_attempts: int = 3) -> None:
@@ -56,19 +54,10 @@ def _init_optional_cache(max_attempts: int = 3) -> None:
             time.sleep(delay_seconds)
 
 
-def _handle_sigterm(signum: int, _frame: object) -> None:
-    """Record a graceful shutdown request for EC2 Auto Scaling scale-in."""
-    global shutdown_requested
-    shutdown_requested = True
-    LOGGER.info("shutdown_signal_received", signal=signum)
-    if callable(_previous_sigterm_handler) and _previous_sigterm_handler is not _handle_sigterm:
-        _previous_sigterm_handler(signum, _frame)
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     """Validate config, initialise clients, and close cleanly on shutdown."""
-    global _previous_sigterm_handler, shutdown_requested
+    global shutdown_requested
     shutdown_requested = False
     loaded_config = settings.load_ssm_config()
     LOGGER.info(
@@ -88,8 +77,6 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     )
     market_config = load_market_config()
     LOGGER.info("market_config_loaded", market_count=len(market_config["markets"]))
-    _previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
-    signal.signal(signal.SIGTERM, _handle_sigterm)
     init_aws_clients()
     legal_documents = load_legal_documents()
     LOGGER.info("legal_documents_ready", document_count=len(legal_documents["documents"]))
@@ -105,10 +92,11 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     try:
         yield
     finally:
+        shutdown_requested = True
+        LOGGER.info("shutdown_draining")
         await audit_lifecycle.stop()
         close_cache()
         close_db()
-        signal.signal(signal.SIGTERM, _previous_sigterm_handler)
         LOGGER.info("shutdown_complete")
 
 
