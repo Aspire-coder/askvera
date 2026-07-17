@@ -50,6 +50,53 @@ def test_contents_page_heuristic_ignores_dense_numbered_lists() -> None:
     assert extractor._looks_like_contents_page(contents) is True
 
 
+def test_contents_page_heuristic_keeps_policy_page_with_several_sections() -> None:
+    policy_page = "\n".join(
+        [
+            "3 Preferred Customer",
+            "3.01 Preferred Customer is solely a consumer of approved products.",
+            "Supporting policy text that continues across several lines.",
+            "3.02 Preferred Customers purchase products at a discount.",
+            "Additional explanatory policy text for this section.",
+            "3.03 A Preferred Customer may opt in to the Marketing Plan.",
+            "More approved policy information appears here.",
+            "3.04 Qualification requirements are described below.",
+            "4 Marketing Plan",
+            "4.01 Sales volume determines the achieved sales level.",
+            "Detailed policy language continues on the page.",
+        ]
+    )
+
+    assert extractor._looks_like_contents_page(policy_page) is False
+
+
+def test_top_level_numbered_prose_is_not_a_section_heading() -> None:
+    text = "\n".join(
+        [
+            "18 or older, may enter into an agreement with the company.",
+            "50 or 60 case credits are required for the three levels.",
+            "18 Legal requirements",
+            "21 RESPONSIBILITY, WARRANTY,",
+            "18.01 Individual arbitration",
+        ]
+    )
+
+    matches = list(extractor._iter_section_matches(text))
+
+    assert [match.group("section") for match in matches] == ["18", "21", "18.01"]
+
+
+def test_duplicate_section_ids_receive_stable_occurrence_suffixes() -> None:
+    sections = [
+        extractor.PolicySection("policy.pdf", "IT", "it", "1", "Main", 1, 1, "Main"),
+        extractor.PolicySection("policy.pdf", "IT", "it", "1", "Annex", 2, 2, "Annex"),
+    ]
+
+    unique = extractor._ensure_unique_section_ids(sections)
+
+    assert [section.section_id for section in unique] == ["1", "1-occurrence-2"]
+
+
 def test_oversized_sections_are_split_into_bounded_parts() -> None:
     content = "1 General\n" + ("Approved policy text.\n" * 1_000)
 

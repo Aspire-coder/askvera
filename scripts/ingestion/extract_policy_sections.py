@@ -10,7 +10,7 @@ import argparse
 import csv
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -103,15 +103,38 @@ def _read_pages(pdf_path: Path) -> list[tuple[int, str]]:
 
 def _looks_like_contents_page(text: str) -> bool:
     """Detect a dense numbered list without depending on its language."""
-    heading_lines = sum(
-        bool(SECTION_RE.match(line))
-        for line in text.splitlines()
+    lines = [line for line in text.splitlines() if line.strip()]
+    heading_lines = sum(bool(SECTION_RE.match(line)) for line in lines)
+    dotted_entries = sum(bool(re.search(r"\.{3,}\s*\d+\s*$", line)) for line in lines)
+    heading_ratio = heading_lines / max(1, len(lines))
+    return heading_lines >= 6 and (dotted_entries >= 3 or heading_ratio >= 0.75)
+
+
+def _looks_like_section_heading(match: re.Match[str]) -> bool:
+    """Reject numbered prose while preserving language-neutral headings."""
+    section_id = match.group("section")
+    title = match.group("title").strip()
+    if "." in section_id:
+        return True
+
+    letters = [character for character in title if character.isalpha()]
+    uppercase_ratio = (
+        sum(character.isupper() for character in letters) / len(letters)
+        if letters
+        else 0.0
     )
-    return heading_lines >= 6
+    title_is_uppercase = uppercase_ratio >= 0.75
+    if len(title) > 100 and not title_is_uppercase:
+        return False
+    if title.endswith((".", ",", ";", ":")) and not title_is_uppercase:
+        return False
+    return True
 
 
 def _iter_section_matches(page_text: str) -> Iterable[re.Match[str]]:
-    yield from SECTION_RE.finditer(page_text)
+    for match in SECTION_RE.finditer(page_text):
+        if _looks_like_section_heading(match):
+            yield match
 
 
 def extract_sections(
@@ -171,7 +194,26 @@ def extract_sections(
             )
         )
 
-    return _expand_structured_chunks(sections)
+    return _ensure_unique_section_ids(_expand_structured_chunks(sections))
+
+
+def _ensure_unique_section_ids(sections: list[PolicySection]) -> list[PolicySection]:
+    """Keep identifiers stable and unique when numbering restarts in annexes."""
+    occurrences: dict[str, int] = {}
+    unique: list[PolicySection] = []
+    for section in sections:
+        occurrence = occurrences.get(section.section_id, 0) + 1
+        occurrences[section.section_id] = occurrence
+        if occurrence == 1:
+            unique.append(section)
+            continue
+        unique.append(
+            replace(
+                section,
+                section_id=f"{section.section_id}-occurrence-{occurrence}",
+            )
+        )
+    return unique
 
 
 def _page_for_offset(page_offsets: list[tuple[int, int, int]], offset: int) -> int:

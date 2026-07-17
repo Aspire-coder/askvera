@@ -97,7 +97,21 @@ def test_public_markets_are_limited_to_published_policy_locales() -> None:
 
     countries = {country["code"]: country for country in market_config.get_countries()}
 
-    assert set(countries) == {"AT", "BE", "CA", "CH", "DE", "GB", "LU", "NL", "US"}
+    assert set(countries) == {
+        "AT",
+        "BE",
+        "CA",
+        "CH",
+        "DE",
+        "DK",
+        "FI",
+        "GB",
+        "IT",
+        "LU",
+        "NL",
+        "NO",
+        "US",
+    }
     assert countries["CH"]["languages"] == [{"code": "de", "name": "German"}]
     assert countries["CH"]["defaultLanguage"] == "de"
     assert market_config.get_document_country_codes("GB") == {"GB", "UK"}
