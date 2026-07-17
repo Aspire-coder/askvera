@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings
 from services.db import get_engine
-from utils.exceptions import AwsServiceError
+from utils.exceptions import AwsServiceError, SessionExpiredError
 from utils.logging import get_logger
 from utils.validators import ConsentRequest
 
@@ -17,7 +17,7 @@ LOGGER = get_logger("services.consent_service")
 def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
     """Write consent metadata and mark the session as consented for the current legal version."""
     accepted_at = consent.timestamp or datetime.now(UTC).isoformat()
-    expires_at = datetime.now(UTC) + timedelta(hours=settings.SESSION_TIMEOUT_HOURS)
+    expires_at = datetime.now(UTC) + timedelta(seconds=settings.SESSION_TTL_SECONDS)
     try:
         with get_engine().begin() as connection:
             connection.execute(
@@ -36,7 +36,7 @@ def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
                     "correlation_id": correlation_id,
                 },
             )
-            connection.execute(
+            session_result = connection.execute(
                 text(
                     """
                     INSERT INTO chat_sessions (
@@ -67,8 +67,10 @@ def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
                         consent_legal_version = EXCLUDED.consent_legal_version,
                         consent_accepted_at = EXCLUDED.consent_accepted_at,
                         last_activity_at = now(),
-                        expires_at = GREATEST(chat_sessions.expires_at, EXCLUDED.expires_at),
+                        expires_at = EXCLUDED.expires_at,
                         updated_at = now()
+                    WHERE chat_sessions.ended_at IS NULL
+                      AND chat_sessions.expires_at > now()
                     """
                 ),
                 {
@@ -78,6 +80,10 @@ def record_consent(consent: ConsentRequest, correlation_id: str) -> None:
                     "accepted_at": accepted_at,
                 },
             )
+            if not session_result.rowcount:
+                raise SessionExpiredError()
+    except SessionExpiredError:
+        raise
     except SQLAlchemyError as exc:
         LOGGER.exception("consent_write_failed", correlation_id=correlation_id)
         raise AwsServiceError("Consent logging failed.") from exc
@@ -102,6 +108,7 @@ def has_valid_consent(session_id: str, correlation_id: str = "system") -> bool:
                     SELECT consent_accepted, consent_legal_version, expires_at
                     FROM chat_sessions
                     WHERE session_id = :session_id
+                      AND ended_at IS NULL
                       AND expires_at > now()
                     """
                 ),

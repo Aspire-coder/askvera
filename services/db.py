@@ -80,7 +80,9 @@ def create_schema(correlation_id: str = "startup") -> None:
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         consent_accepted BOOLEAN NOT NULL DEFAULT false,
                         consent_legal_version TEXT,
-                        consent_accepted_at TIMESTAMPTZ
+                        consent_accepted_at TIMESTAMPTZ,
+                        ended_at TIMESTAMPTZ,
+                        end_reason TEXT
                     )
                     """
                 )
@@ -189,6 +191,8 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_legal_version TEXT"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ"))
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ"))
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS end_reason TEXT"))
             connection.execute(
                 text(
                     """

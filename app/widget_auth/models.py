@@ -12,6 +12,7 @@ class WidgetInitRequest(BaseModel):
 
     widgetId: str = Field(min_length=1, max_length=128)
     origin: str | None = Field(default=None, min_length=1, max_length=512)
+    resumeSessionId: str | None = Field(default=None, min_length=1, max_length=128)
 
     @field_validator("origin")
     @classmethod
@@ -49,6 +50,7 @@ class WidgetInitResponse(BaseModel):
     """Successful widget initialization payload."""
 
     token: str
+    sessionId: str
 
 
 class WidgetRefreshResponse(BaseModel):

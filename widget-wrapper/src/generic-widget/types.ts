@@ -101,8 +101,14 @@ export type WidgetMenuLabels = {
   settings: string;
   history: string;
   newChat: string;
+  endChat: string;
+  confirmEndChat: string;
+  cancelEndChat: string;
   escalate: string;
 };
+
+export type SessionResetReason = "new_chat" | "user_ended" | "idle_timeout";
+export type SessionResetResult = { sessionId?: string } | void;
 
 export type WidgetConsentConfig = {
   title: string;
@@ -175,6 +181,7 @@ export type GenericWidgetConfig = {
   defaultCountryCode?: string;
   defaultLanguageCode?: string;
   persistConsent?: boolean;
+  sessionIdleTimeoutMinutes?: number;
   sessionStorageKey?: string;
   sessionMetadataStorageKey?: string;
   visitorStorageKey?: string;
@@ -257,5 +264,5 @@ export type GenericWidgetWrapperProps = {
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onEscalate?: (payload: LocaleChangePayload) => void;
-  onNewChat?: (payload: LocaleChangePayload) => void;
+  onNewChat?: (payload: LocaleChangePayload, reason?: SessionResetReason) => SessionResetResult | Promise<SessionResetResult>;
 };

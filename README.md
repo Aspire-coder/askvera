@@ -115,6 +115,15 @@ sudo ./deployment/deploy.sh
 
 See `deployment/README.md` before running these on EC2.
 
+## Conversation Lifecycle
+
+- Conversations expire after `SESSION_IDLE_TIMEOUT_MINUTES` (30 minutes by default).
+- Reloading or reopening the widget resumes an unexpired server session.
+- **New chat** and **End chat** close the current server session and create a new authenticated session.
+- Closed sessions cannot accept more messages or be reopened by submitting consent again.
+- Session activity and transcript retention are separate. Ended transcripts remain for
+  `CHAT_TRANSCRIPT_RETENTION_DAYS` (90 days by default) before cleanup.
+
 ## CORS
 
 Production CORS allows:

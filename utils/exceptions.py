@@ -74,3 +74,13 @@ class AwsServiceError(AskVeraError):
 
     error_code = "AWS_SERVICE_ERROR"
     status_code = 502
+
+
+class SessionExpiredError(AskVeraError):
+    """Raised when a closed or inactive conversation receives a new message."""
+
+    error_code = "SESSION_EXPIRED"
+    status_code = 409
+
+    def __init__(self, message: str = "This chat has ended. Please start a new chat.") -> None:
+        super().__init__(message)

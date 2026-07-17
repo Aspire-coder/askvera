@@ -101,6 +101,7 @@ RATE_LIMIT_POLICIES = {
     "/api/config": _env_int("RATE_LIMIT_CONFIG_PER_MINUTE", 120),
     "/api/widget/init": _env_int("RATE_LIMIT_WIDGET_INIT_PER_MINUTE", 10),
     "/api/widget/refresh": _env_int("RATE_LIMIT_WIDGET_REFRESH_PER_MINUTE", 20),
+    "/api/session/end": _env_int("RATE_LIMIT_SESSION_END_PER_MINUTE", 20),
     "/api/admin/documents": _env_int("RATE_LIMIT_ADMIN_UPLOAD_PER_MINUTE", 10),
 }
 MAX_REQUEST_BODY_BYTES = _env_int("MAX_REQUEST_BODY_BYTES", 32768)
@@ -117,7 +118,7 @@ WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
 WIDGET_JWT_ISSUER = _env_str("WIDGET_JWT_ISSUER", "ask-vera")
 WIDGET_JWT_AUDIENCE = _env_str("WIDGET_JWT_AUDIENCE", "widget-api")
 WIDGET_JWT_CLOCK_SKEW_SECONDS = _env_int("WIDGET_JWT_CLOCK_SKEW_SECONDS", 60)
-WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/privacy", "/api/config", "/api/widget/config"]
+WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/session/end", "/api/privacy", "/api/config", "/api/widget/config"]
 WIDGET_ALLOW_LOCALHOST_ORIGINS = _env_bool("WIDGET_ALLOW_LOCALHOST_ORIGINS", APP_ENV != "production")
 WIDGET_REGISTRY_PROVIDER = _env_str("WIDGET_REGISTRY_PROVIDER", "json")
 WIDGET_REGISTRY_TABLE = _env_str("WIDGET_REGISTRY_TABLE", "AskVeraWidgets")
@@ -226,15 +227,19 @@ S3_BUCKET = "askverachat-prod-kb"
 LEGAL_BUCKET = "askverachat-prod-content"
 LEGAL_PREFIX = "legal"
 LEGAL_VERSION = "2026.1"
-# Session TTL in seconds. Used by PostgreSQL chat_sessions.expires_at.
-SESSION_TIMEOUT_HOURS = 2
+# Session inactivity timeout. A closed or idle session keeps its transcript for
+# retention/audit purposes, but cannot receive additional chat messages.
+SESSION_IDLE_TIMEOUT_MINUTES = _env_int("SESSION_IDLE_TIMEOUT_MINUTES", 30)
+SESSION_TTL_SECONDS = SESSION_IDLE_TIMEOUT_MINUTES * 60
+# Backward-compatible alias for integrations that still read the old setting.
+SESSION_TIMEOUT_HOURS = SESSION_TTL_SECONDS / (60 * 60)
 MAX_SESSION_DAYS = 7
-SESSION_TTL_SECONDS = SESSION_TIMEOUT_HOURS * 60 * 60
 
 # Chat memory storage for conversation history.
 # Use "postgres" in production. Use "memory" only for local tests or demos.
 CHAT_MEMORY_BACKEND = _env_str("CHAT_MEMORY_BACKEND", "postgres").lower()
 CHAT_HISTORY_MAX_MESSAGES = _env_int("CHAT_HISTORY_MAX_MESSAGES", 10)
+CHAT_TRANSCRIPT_RETENTION_DAYS = _env_int("CHAT_TRANSCRIPT_RETENTION_DAYS", 90)
 # ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.
 REDIS_CACHE_NAME = "askverachat-cache"
 # ElastiCache Valkey primary endpoint hostname. Found in ElastiCache -> Valkey cache -> Connectivity.
@@ -386,6 +391,9 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
         globals()["BEDROCK_REGION"] = globals()["AWS_REGION"]
     if "BEDROCK_REGION" in loaded and "AWS_REGION" not in loaded:
         globals()["AWS_REGION"] = globals()["BEDROCK_REGION"]
+    if "SESSION_IDLE_TIMEOUT_MINUTES" in loaded:
+        globals()["SESSION_TTL_SECONDS"] = int(globals()["SESSION_IDLE_TIMEOUT_MINUTES"]) * 60
+        globals()["SESSION_TIMEOUT_HOURS"] = globals()["SESSION_TTL_SECONDS"] / (60 * 60)
 
     _SSM_CONFIG = loaded
     return loaded

@@ -129,10 +129,18 @@ def append_session_turn(session_id: str, user_message: str, vera_response: str, 
 
 
 def cleanup_expired_sessions(correlation_id: str = "session-cleanup") -> int:
-    """Delete expired chat sessions and return the number of removed rows."""
+    """Delete sessions only after the configured transcript-retention period."""
     try:
         with get_engine().begin() as connection:
-            result = connection.execute(text("DELETE FROM chat_sessions WHERE expires_at < now()"))
+            result = connection.execute(
+                text(
+                    """
+                    DELETE FROM chat_sessions
+                    WHERE expires_at < now() - (:retention_days * interval '1 day')
+                    """
+                ),
+                {"retention_days": settings.CHAT_TRANSCRIPT_RETENTION_DAYS},
+            )
             deleted = int(result.rowcount or 0)
     except SQLAlchemyError as exc:
         LOGGER.exception("session_cleanup_failed", correlation_id=correlation_id)

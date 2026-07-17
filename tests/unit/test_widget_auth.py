@@ -43,7 +43,26 @@ def test_widget_init_issues_short_lived_token(monkeypatch) -> None:
     assert claims["widgetId"] == "widget-1"
     assert claims["organizationId"] == "org-1"
     assert claims["origin"] == "https://example.com"
+    assert response.sessionId == claims["sessionId"]
     assert claims["exp"] > int(time())
+
+
+def test_widget_init_resumes_only_an_active_server_session(monkeypatch) -> None:
+    """A browser resume request keeps the same ID only after server validation."""
+    from app.widget_auth import service as service_module
+
+    monkeypatch.setattr(service_module.settings, "WIDGET_REGISTRY_JSON", _registry())
+    monkeypatch.setattr(service_module.settings, "WIDGET_JWT_SECRET", "test-secret")
+    monkeypatch.setattr(service_module, "can_resume_session", lambda session_id, *_: session_id == "resume-me")
+    service = WidgetAuthService()
+
+    response = service.initialize(
+        WidgetInitRequest(widgetId="widget-1", origin="https://example.com", resumeSessionId="resume-me"),
+        "cid",
+    )
+
+    assert response.sessionId == "resume-me"
+    assert decode_widget_token(response.token)["sessionId"] == "resume-me"
 
 
 def test_widget_init_rejects_unapproved_origin(monkeypatch) -> None:

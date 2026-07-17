@@ -3,6 +3,7 @@ import type { WidgetInitResponseData } from "../api";
 export type WidgetAuthSession = {
   token: string;
   widgetId?: string;
+  sessionId?: string;
   expiresAt: number;
 };
 
@@ -31,6 +32,7 @@ export class WidgetSessionStore {
     const session = {
       token: response.token,
       widgetId: typeof claims.widgetId === "string" ? claims.widgetId : undefined,
+      sessionId: response.sessionId || (typeof claims.sessionId === "string" ? claims.sessionId : undefined),
       expiresAt: typeof claims.exp === "number" ? claims.exp * 1000 : Date.now() + 15 * 60 * 1000
     };
     window.sessionStorage.setItem(this.storageKey, JSON.stringify(session));

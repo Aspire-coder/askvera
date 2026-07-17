@@ -29,6 +29,7 @@ from services.consent_service import has_valid_consent
 from services.pii import remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
+from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.logging import get_logger
 from utils.validators import ChatRequest
@@ -84,7 +85,8 @@ class AIOrchestrator:
             role=body.role,
             session_id=body.sessionId,
         )
-        validate_and_touch_session(body.sessionId, correlation_id)
+        if validate_and_touch_session(body.sessionId, correlation_id) is False:
+            raise SessionExpiredError()
         if not has_valid_consent(body.sessionId, correlation_id):
             raise ConsentRequiredError()
 

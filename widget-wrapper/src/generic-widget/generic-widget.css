@@ -1996,6 +1996,38 @@
   background: rgba(248, 196, 0, 0.15);
 }
 
+.gw-menu-confirm {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(248, 196, 0, 0.12);
+}
+
+.gw-menu-confirm button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #4b4b4d;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.gw-menu-confirm .gw-menu-confirm-end {
+  background: #246b45;
+  color: #ffffff;
+}
+
+.gw-menu-confirm button:focus-visible {
+  outline: 2px solid #246b45;
+  outline-offset: 2px;
+}
+
 .gw-field select:disabled {
   cursor: not-allowed;
   opacity: 0.55;

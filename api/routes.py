@@ -16,6 +16,7 @@ from app.widget_auth.service import WidgetAuthError
 from config import settings
 from services import cache as cache_service
 from services.consent_service import record_consent
+from services.session_service import close_session
 from services.db import get_engine
 from services.feedback import enqueue_feedback
 from services.analytics import record_chat_interaction, record_feedback_event
@@ -24,7 +25,7 @@ from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
-from utils.validators import ChatRequest, ConsentRequest, Envelope, FeedbackRequest
+from utils.validators import ChatRequest, ConsentRequest, EndSessionRequest, Envelope, FeedbackRequest
 
 router = APIRouter()
 LOGGER = get_logger("api.routes")
@@ -58,6 +59,22 @@ def consent_required_response(correlation_id: str) -> JSONResponse:
             "message": "You must accept the legal documents before chatting.",
             "legalVersion": settings.LEGAL_VERSION,
         },
+        correlationId=correlation_id,
+    )
+    return JSONResponse(status_code=403, content=envelope.model_dump())
+
+
+def _session_matches_widget_token(request: Request, session_id: str) -> bool:
+    """Prevent one authenticated widget session from operating on another."""
+    claims = getattr(request.state, "widget_auth", {}) or {}
+    claimed_session_id = str(claims.get("sessionId") or "")
+    return not settings.WIDGET_AUTH_REQUIRED or claimed_session_id == session_id
+
+
+def _session_mismatch_response(correlation_id: str) -> JSONResponse:
+    envelope = Envelope(
+        success=False,
+        error={"code": "SESSION_MISMATCH", "message": "Please start a new chat."},
         correlationId=correlation_id,
     )
     return JSONResponse(status_code=403, content=envelope.model_dump())
@@ -154,6 +171,8 @@ def _valid_language_codes(country_code: str) -> set[str]:
 def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
+    if not _session_matches_widget_token(request, body.sessionId):
+        return _session_mismatch_response(correlation_id)
     pipeline_trace_store.start(
         correlation_id,
         country=body.country,
@@ -222,9 +241,24 @@ def privacy(request: Request, country: str | None = None, lang: str | None = Non
 def consent(body: ConsentRequest, request: Request) -> Envelope | JSONResponse:
     """Record user privacy consent."""
     correlation_id = _correlation_id(request)
+    if not _session_matches_widget_token(request, body.sessionId):
+        return _session_mismatch_response(correlation_id)
     try:
         record_consent(body, correlation_id)
         return success({"recorded": True, "legalVersion": settings.LEGAL_VERSION}, correlation_id)
+    except AskVeraError as exc:
+        return error_response(exc, correlation_id)
+
+
+@router.post("/api/session/end", response_model=None)
+def end_session(body: EndSessionRequest, request: Request) -> Envelope | JSONResponse:
+    """End a chat while retaining its transcript and consent audit records."""
+    correlation_id = _correlation_id(request)
+    if not _session_matches_widget_token(request, body.sessionId):
+        return _session_mismatch_response(correlation_id)
+    try:
+        closed = close_session(body.sessionId, body.reason, correlation_id)
+        return success({"ended": True, "found": closed, "reason": body.reason}, correlation_id)
     except AskVeraError as exc:
         return error_response(exc, correlation_id)
 
@@ -233,6 +267,8 @@ def consent(body: ConsentRequest, request: Request) -> Envelope | JSONResponse:
 def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse:
     """Send user feedback to SQS."""
     correlation_id = _correlation_id(request)
+    if not _session_matches_widget_token(request, body.sessionId):
+        return _session_mismatch_response(correlation_id)
     try:
         record_feedback_event(body, correlation_id)
         enqueue_feedback(body, correlation_id)

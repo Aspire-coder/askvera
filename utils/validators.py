@@ -109,6 +109,13 @@ class ConsentRequest(BaseModel):
         return self
 
 
+class EndSessionRequest(BaseModel):
+    """Request to close a chat while retaining its audit records."""
+
+    sessionId: str = Field(min_length=1, max_length=128)
+    reason: str = Field(default="user_ended", pattern="^(user_ended|new_chat|idle_timeout)$")
+
+
 class FeedbackRequest(BaseModel):
     """Validated feedback queue body."""
 

@@ -71,3 +71,32 @@ def test_validate_and_touch_session_rejects_session_over_max_lifetime(monkeypatc
 
     assert session_service.validate_and_touch_session("session-1", "cid") is False
     assert connection.execute.call_count == 1
+
+
+def test_validate_and_touch_session_rejects_closed_session(monkeypatch) -> None:
+    """An explicitly ended chat cannot be reopened by another message."""
+    now = datetime.now(UTC)
+    engine, connection = _engine_with_row(
+        {
+            "session_id": "session-1",
+            "created_at": now - timedelta(minutes=5),
+            "expires_at": now + timedelta(minutes=30),
+            "ended_at": now - timedelta(seconds=1),
+        }
+    )
+    monkeypatch.setattr(session_service, "get_engine", lambda: engine)
+
+    assert session_service.validate_and_touch_session("session-1", "cid") is False
+    assert connection.execute.call_count == 1
+
+
+def test_close_session_retains_row_and_records_reason(monkeypatch) -> None:
+    """Closing uses an update so transcript and audit fields remain stored."""
+    engine, connection = _engine_with_row(None)
+    connection.execute.return_value.rowcount = 1
+    monkeypatch.setattr(session_service, "get_engine", lambda: engine)
+
+    assert session_service.close_session("session-1", "user_ended", "cid") is True
+    query = str(connection.execute.call_args.args[0])
+    assert "UPDATE chat_sessions" in query
+    assert "ended_at" in query

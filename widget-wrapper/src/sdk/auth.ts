@@ -43,7 +43,8 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig, options: 
 
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
-    origin: getCurrentOrigin()
+    origin: getCurrentOrigin(),
+    resumeSessionId: options.forceNew ? undefined : window.localStorage.getItem("askvera_session_id") || undefined
   });
   if (!envelope.data) {
     throw new Error("Widget initialization did not return a session token.");
@@ -79,7 +80,8 @@ export async function renewWidgetAuth(config: AskVeraRuntimeConfig, currentToken
 
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
-    origin: getCurrentOrigin()
+    origin: getCurrentOrigin(),
+    resumeSessionId: window.localStorage.getItem("askvera_session_id") || undefined
   });
   if (!envelope.data) {
     throw new Error("Widget initialization did not return a session token.");

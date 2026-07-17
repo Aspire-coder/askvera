@@ -72,19 +72,20 @@ export class SessionManager {
     const visitorId = options.providedVisitorId || this.readStoredId(this.keys.visitorStorageKey) || this.createVisitorId();
     const sessionId = options.providedSessionId || this.readStoredId(this.keys.sessionStorageKey) || this.createSessionId();
     const stored = this.readMetadata();
-    const restored = stored && stored.sessionId === sessionId && !this.isExpired(stored);
-    const createdAt = restored ? stored.createdAt : this.now().toISOString();
+    const storedSessionMatches = Boolean(stored && stored.sessionId === sessionId);
+    const restored = Boolean(storedSessionMatches && stored && !this.isExpired(stored));
+    const createdAt = restored ? stored!.createdAt : this.now().toISOString();
 
     return {
       schemaVersion: SESSION_SCHEMA_VERSION,
       visitorId,
       sessionId,
       legalVersion: options.legalVersion,
-      country: restored ? stored.country : options.country,
-      language: restored ? stored.language : options.language,
+      country: restored ? stored!.country : options.country,
+      language: restored ? stored!.language : options.language,
       createdAt,
-      expiresAt: restored ? stored.expiresAt : undefined,
-      consentAccepted: restored ? stored.consentAccepted : options.consentAccepted
+      expiresAt: restored ? stored!.expiresAt : undefined,
+      consentAccepted: restored && stored ? stored.consentAccepted : storedSessionMatches ? options.consentAccepted : false
     };
   }
 

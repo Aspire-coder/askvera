@@ -20,7 +20,7 @@ import { buildThemeConfig, buildWidgetConfig, type BackendConfig } from "../conf
 import { widgetEventBus, widgetEventTypes } from "../events";
 import { GenericWidgetWrapper } from "../generic-widget/GenericWidgetWrapper";
 import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../generic-widget/types";
-import { renewWidgetAuth } from "./auth";
+import { authenticateWidget, renewWidgetAuth } from "./auth";
 import { getWidgetCopy } from "../localization/widgetCopy";
 import {
   localePreferenceStorageKey,
@@ -86,6 +86,9 @@ const baseWidgetConfig: GenericWidgetConfig = {
     settings: "Settings",
     history: "History",
     newChat: "New chat",
+    endChat: "End chat",
+    confirmEndChat: "End this chat",
+    cancelEndChat: "Cancel",
     escalate: "Contact support"
   },
   consent: {
@@ -107,12 +110,27 @@ const baseWidgetConfig: GenericWidgetConfig = {
   languages: [{ code: "en", label: "English", countryCodes: ["US"] }],
   provider: { name: "AskVera API", type: "custom-react" },
   persistConsent: true,
+  sessionIdleTimeoutMinutes: 30,
   sessionStorageKey: "askvera_session_id",
   sessionMetadataStorageKey: "askvera_session_metadata",
   visitorStorageKey: "askvera_visitor_id"
 };
 
 const conversationStorageKey = "askvera_widget_conversation";
+
+function sessionIdFromToken(token?: string): string | undefined {
+  if (!token) return undefined;
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return undefined;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, "=");
+    const claims = JSON.parse(window.atob(padded)) as Record<string, unknown>;
+    return typeof claims.sessionId === "string" ? claims.sessionId : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function storedLocale(widgetId?: string): LocalePreference {
   if (typeof window === "undefined") return { country: "US", language: "en" };
@@ -128,10 +146,10 @@ function storedLocale(widgetId?: string): LocalePreference {
   }
 }
 
-function storedMessages(): WidgetMessage[] {
+function storedMessages(expectedSessionId?: string): WidgetMessage[] {
   if (typeof window === "undefined") return [];
   try {
-    const sessionId = window.localStorage.getItem("askvera_session_id");
+    const sessionId = expectedSessionId || window.localStorage.getItem("askvera_session_id");
     const stored = JSON.parse(window.localStorage.getItem(conversationStorageKey) || "{}") as {
       sessionId?: string;
       messages?: Array<Omit<WidgetMessage, "content"> & { content: string }>;
@@ -255,11 +273,13 @@ export function WidgetRuntime({
 }: WidgetRuntimeProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(() => storedLocale(widgetId));
-  const [messages, setMessages] = useState<WidgetMessage[]>(storedMessages);
+  const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken)));
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
   const [activeAuthToken, setActiveAuthToken] = useState(authToken);
+  const [activeAuthSessionId, setActiveAuthSessionId] = useState(() => sessionIdFromToken(authToken));
+  const [lifecycleResetSignal, setLifecycleResetSignal] = useState(0);
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const conversationGenerationRef = useRef(0);
@@ -369,7 +389,7 @@ export function WidgetRuntime({
           messageInputPlaceholder: localized.inputPlaceholder,
           sendMessageLabel: localized.send
         },
-        menu: { ...built.genericConfig.menu, newChat: localized.newChat, escalate: localized.support },
+        menu: { ...built.genericConfig.menu, newChat: localized.newChat, endChat: localized.endChat, confirmEndChat: localized.confirmEndChat, cancelEndChat: localized.cancelEndChat, escalate: localized.support },
         consent: {
           ...built.genericConfig.consent,
           title: localized.privacyTitle,
@@ -396,6 +416,7 @@ export function WidgetRuntime({
   useEffect(() => {
     setActiveAuthToken(authToken);
     activeAuthTokenRef.current = authToken;
+    setActiveAuthSessionId(sessionIdFromToken(authToken));
   }, [authToken]);
 
   const refreshWidgetAuth = useCallback(async () => {
@@ -406,6 +427,7 @@ export function WidgetRuntime({
       .then((refreshed) => {
         setActiveAuthToken(refreshed.token);
         activeAuthTokenRef.current = refreshed.token;
+        setActiveAuthSessionId(refreshed.session?.sessionId || sessionIdFromToken(refreshed.token));
         return refreshed.token;
       })
       .finally(() => {
@@ -524,6 +546,10 @@ export function WidgetRuntime({
         appendMessage({ id: buildId("consent-required"), role: "system", content: <ErrorMessageContent presentation={presentChatError(error, config.assistantName || config.brandName)} /> });
         return;
       }
+      if (error instanceof ApiRequestError && (error.code === "SESSION_EXPIRED" || error.code === "SESSION_MISMATCH")) {
+        setLifecycleResetSignal((value) => value + 1);
+        return;
+      }
       const presentation = presentChatError(error, config.assistantName || config.brandName);
       emitErrorEvent(error, presentation, payload);
       appendMessage({
@@ -611,7 +637,8 @@ export function WidgetRuntime({
       openByDefault
       openSignal={openSignal}
       closeSignal={closeSignal}
-      resetSignal={resetSignal}
+      resetSignal={resetSignal + lifecycleResetSignal}
+      sessionId={activeAuthSessionId}
       outboundMessage={sdkMessage}
       consentRequiredSignal={consentRequiredSignal}
       onHealthCheck={checkBackendHealth}
@@ -629,14 +656,26 @@ export function WidgetRuntime({
         sessionId: payload.sessionId
       })}
       onRequestSupport={(message, state) => handleSupportRequest(state, message)}
-      onNewChat={(payload) => {
+      onNewChat={async (payload, reason = "new_chat") => {
+        try {
+          await withWidgetAuthRetry((client) => client.post("/api/session/end", { sessionId: payload.sessionId, reason }));
+        } catch (error) {
+          if (!(error instanceof ApiRequestError) || !["SESSION_EXPIRED", "SESSION_MISMATCH"].includes(error.code || "")) throw error;
+        }
+        const freshAuth = await authenticateWidget({ apiUrl: apiBaseUrl, widgetId }, { forceNew: true });
+        const freshSessionId = freshAuth.session?.sessionId || sessionIdFromToken(freshAuth.token);
+        if (!freshAuth.token || !freshSessionId) throw new Error("A new authenticated chat session could not be created.");
+        setActiveAuthToken(freshAuth.token);
+        activeAuthTokenRef.current = freshAuth.token;
+        setActiveAuthSessionId(freshSessionId);
         conversationGenerationRef.current += 1;
         requestInFlightRef.current = false;
         setLoading(false);
         setPendingMessage(null);
         setMessages([]);
-        window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: payload.sessionId, messages: [] }));
+        window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: freshSessionId, messages: [] }));
         firstMessageSentRef.current = false;
+        return { sessionId: freshSessionId };
       }}
     />
   );

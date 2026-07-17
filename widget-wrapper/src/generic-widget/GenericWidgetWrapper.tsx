@@ -180,6 +180,11 @@ export function GenericWidgetWrapper({
   const panelRef = useRef<HTMLElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const submitLockRef = useRef(false);
+  const resetInFlightRef = useRef(false);
+  const idleTimeoutMs = Math.max(1, config.sessionIdleTimeoutMinutes || 30) * 60 * 1000;
+  const sessionExpiryRef = useRef(
+    restoredSession.expiresAt ? new Date(restoredSession.expiresAt).getTime() : Date.now() + idleTimeoutMs
+  );
   const consentRequired = config.consent.requireConsentBeforeMessaging !== false && !consentAccepted;
   const requestBusy = effectiveLoading || localRequestPending;
   const composerDisabledReason = consentRequired
@@ -214,6 +219,43 @@ export function GenericWidgetWrapper({
     selectedCountry: selectedCountry?.code || "",
     selectedLanguage: selectedLanguage?.code || ""
   });
+
+  const touchSession = () => {
+    sessionExpiryRef.current = Date.now() + idleTimeoutMs;
+    sessionManager.persist(currentSession, {
+      legalVersion: config.consent.policyVersion,
+      country: selectedCountry?.code,
+      language: selectedLanguage?.code,
+      consentAccepted,
+      expiresAt: new Date(sessionExpiryRef.current).toISOString()
+    });
+  };
+
+  const resetConversation = async (reason: "new_chat" | "user_ended" | "idle_timeout") => {
+    if (resetInFlightRef.current) return;
+    resetInFlightRef.current = true;
+    try {
+      const replacement = await onNewChat?.(localePayload, reason);
+      const nextSession = sessionManager.reset({
+        providedVisitorId: visitorId,
+        providedSessionId: replacement?.sessionId,
+        legalVersion: config.consent.policyVersion,
+        country: undefined,
+        language: undefined,
+        consentAccepted: false
+      });
+      sessionExpiryRef.current = Date.now() + idleTimeoutMs;
+      setConsentDeclined(false);
+      dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt, clearLocale: true });
+      events.emit(widgetEventTypes.SESSION_RESET, {
+        visitorId: nextSession.visitorId,
+        sessionId: nextSession.sessionId,
+        metadata: { reason }
+      });
+    } finally {
+      resetInFlightRef.current = false;
+    }
+  };
 
   useEffect(() => {
     events.emit(widgetEventTypes.WIDGET_INITIALIZED, { visitorId, sessionId });
@@ -343,7 +385,8 @@ export function GenericWidgetWrapper({
       legalVersion: config.consent.policyVersion,
       country: selectedCountry?.code,
       language: selectedLanguage?.code,
-      consentAccepted
+      consentAccepted,
+      expiresAt: new Date(sessionExpiryRef.current).toISOString()
     });
   }, [
     config.consent.policyVersion,
@@ -357,6 +400,13 @@ export function GenericWidgetWrapper({
     selectedLanguage?.code,
     visitorId
   ]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (Date.now() >= sessionExpiryRef.current) void resetConversation("idle_timeout");
+    }, 15000);
+    return () => window.clearInterval(timer);
+  });
 
   useEffect(() => {
     if (!consentRequiredSignal) return;
@@ -384,15 +434,8 @@ export function GenericWidgetWrapper({
 
   useEffect(() => {
     if (!resetSignal) return;
-    const nextSession = sessionManager.reset({
-      legalVersion: config.consent.policyVersion,
-      country: undefined,
-      language: undefined
-    });
-    setConsentDeclined(false);
-    dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt, clearLocale: true });
-    events.emit(widgetEventTypes.SESSION_RESET, { visitorId: nextSession.visitorId, sessionId: nextSession.sessionId });
-  }, [config.consent.policyVersion, events, resetSignal, sessionManager]);
+    void resetConversation("new_chat");
+  }, [resetSignal]);
 
   useEffect(() => {
     if (!outboundMessage?.id || !outboundMessage.text.trim()) return;
@@ -483,6 +526,7 @@ export function GenericWidgetWrapper({
       setConsentDeclined(false);
       dispatch({ type: "START_CONSENT_SUBMIT" });
       await onAcceptConsent?.(payload);
+      touchSession();
       dispatch({ type: "ACCEPT_CONSENT" });
       events.emit(widgetEventTypes.CONSENT_ACCEPTED, { visitorId, sessionId, consent: payload });
       if (config.persistConsent) sessionManager.updateConsent(currentSession, true, config.consent.policyVersion);
@@ -509,6 +553,7 @@ export function GenericWidgetWrapper({
       widgetProviderName: config.provider.name,
       widgetProviderType: config.provider.type
     };
+    touchSession();
     dispatch({ type: "CLEAR_DRAFT_MESSAGE" });
     events.emit(widgetEventTypes.MESSAGE_SENT, { visitorId, sessionId, message: payload });
     onSendMessage?.(payload);
@@ -604,26 +649,9 @@ export function GenericWidgetWrapper({
               payload={localePayload}
               onDismiss={() => dispatch({ type: "SET_MENU_OPEN", open: false })}
               onEscalate={onEscalate}
-              onNewChat={(payload) => {
+              onNewChat={async (_payload, reason) => {
                 dispatch({ type: "SET_MENU_OPEN", open: false });
-                const nextSession = sessionManager.reset({
-                  providedVisitorId: visitorId,
-                  legalVersion: config.consent.policyVersion,
-                  country: undefined,
-                  language: undefined,
-                  consentAccepted: false
-                });
-                setConsentDeclined(false);
-                dispatch({ type: "RESET_SESSION", visitorId: nextSession.visitorId, sessionId: nextSession.sessionId, createdAt: nextSession.createdAt, clearLocale: true });
-                const nextPayload = {
-                  ...payload,
-                  visitorId: nextSession.visitorId,
-                  sessionId: nextSession.sessionId,
-                  selectedCountry: "",
-                  selectedLanguage: ""
-                };
-                events.emit(widgetEventTypes.SESSION_RESET, nextPayload);
-                onNewChat?.(nextPayload);
+                await resetConversation(reason);
               }}
             />
           ) : null}

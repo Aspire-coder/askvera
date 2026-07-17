@@ -9,6 +9,7 @@ from config import settings
 from app.widget_registry.service import WidgetRegistryService, widget_registry_service
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
+from services.session_service import can_resume_session
 
 from .jwt import WidgetTokenError, decode_widget_token, encode_widget_token, revoke_widget_token_id
 from .models import WidgetAuthClaims, WidgetInitRequest, WidgetInitResponse, WidgetRefreshResponse, WidgetRegistration
@@ -65,6 +66,7 @@ class WidgetAuthService:
     def _response_from_claims(self, claims: WidgetAuthClaims) -> WidgetInitResponse:
         return WidgetInitResponse(
             token=encode_widget_token(claims.model_dump()),
+            sessionId=claims.sessionId,
         )
 
     def initialize(self, request: WidgetInitRequest, correlation_id: str, client_ip: str | None = None) -> WidgetInitResponse:
@@ -90,7 +92,8 @@ class WidgetAuthService:
             )
             raise WidgetAuthError()
 
-        session_id = str(uuid4())
+        requested_session_id = str(request.resumeSessionId or "")
+        session_id = requested_session_id if can_resume_session(requested_session_id, correlation_id) else str(uuid4())
         claims = self._build_claims(registration, origin_validation.normalized_origin, session_id)
         LOGGER.info(
             "widget_auth_initialized",

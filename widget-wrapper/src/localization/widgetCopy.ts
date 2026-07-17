@@ -12,6 +12,9 @@ export type WidgetCopy = {
   inputPlaceholder: string;
   send: string;
   newChat: string;
+  endChat: string;
+  confirmEndChat: string;
+  cancelEndChat: string;
   support: string;
   supportQueued: string;
   supportFailed: string;
@@ -40,7 +43,7 @@ const copy: Record<string, WidgetCopy> = {
     privacyBody: "Review and accept the required legal documents to use AskVera.",
     privacyAcknowledgment: "I have read and agree to the required privacy and terms documents.",
     accept: "I agree", decline: "Not now", inputPlaceholder: "Ask a question", send: "Send message",
-    newChat: "New chat", support: "Request support", supportQueued: "Your support request has been created. Reference: {id}",
+    newChat: "New chat", endChat: "End chat", confirmEndChat: "End this chat", cancelEndChat: "Cancel", support: "Request support", supportQueued: "Your support request has been created. Reference: {id}",
     supportFailed: "The support request could not be created. Please try again.", supportCreating: "Creating...", supportRequested: "Requested", conversationCleared: "A new chat is ready.",
     footer: "Answers are generated from approved company documentation.", online: "Online", offline: "Offline",
     reconnecting: "Reconnecting", consentRequired: "Accept the privacy agreement to begin.", unavailable: "AskVera is temporarily unavailable. Please try again in a moment.", waiting: "Waiting for the current response to finish.", copy: "Copy", copied: "Copied", helpful: "Helpful", notHelpful: "Not helpful"
@@ -53,7 +56,7 @@ const copy: Record<string, WidgetCopy> = {
     privacyBody: "Consultez et acceptez les documents juridiques requis pour utiliser AskVera.",
     privacyAcknowledgment: "J'ai lu et j'accepte les documents requis sur la confidentialite et les conditions.",
     accept: "J'accepte", decline: "Pas maintenant", inputPlaceholder: "Posez une question", send: "Envoyer",
-    newChat: "Nouvelle conversation", support: "Demander de l'aide", supportQueued: "Votre demande d'aide a ete creee. Reference : {id}",
+    newChat: "Nouvelle conversation", endChat: "Terminer la conversation", confirmEndChat: "Terminer ce chat", cancelEndChat: "Annuler", support: "Demander de l'aide", supportQueued: "Votre demande d'aide a ete creee. Reference : {id}",
     supportFailed: "La demande d'aide n'a pas pu etre creee. Veuillez reessayer.", supportCreating: "Création...", supportRequested: "Demandé", conversationCleared: "Une nouvelle conversation est prete.",
     footer: "Les reponses sont generees a partir de documents approuves.", online: "En ligne", offline: "Hors ligne",
     reconnecting: "Reconnexion", consentRequired: "Acceptez l'accord de confidentialité pour commencer.", unavailable: "AskVera est temporairement indisponible. Veuillez réessayer dans un instant.", waiting: "Attendez la fin de la réponse en cours.", copy: "Copier", copied: "Copie", helpful: "Utile", notHelpful: "Pas utile"
@@ -66,7 +69,7 @@ const copy: Record<string, WidgetCopy> = {
     privacyBody: "Revisa y acepta los documentos legales requeridos para usar AskVera.",
     privacyAcknowledgment: "He leido y acepto los documentos requeridos de privacidad y condiciones.",
     accept: "Acepto", decline: "Ahora no", inputPlaceholder: "Haz una pregunta", send: "Enviar",
-    newChat: "Nuevo chat", support: "Solicitar ayuda", supportQueued: "Tu solicitud de ayuda fue creada. Referencia: {id}",
+    newChat: "Nuevo chat", endChat: "Finalizar chat", confirmEndChat: "Finalizar este chat", cancelEndChat: "Cancelar", support: "Solicitar ayuda", supportQueued: "Tu solicitud de ayuda fue creada. Referencia: {id}",
     supportFailed: "No se pudo crear la solicitud de ayuda. Intentalo de nuevo.", supportCreating: "Creando...", supportRequested: "Solicitado", conversationCleared: "Hay un nuevo chat listo.",
     footer: "Las respuestas se generan a partir de documentos aprobados.", online: "En linea", offline: "Sin conexion",
     reconnecting: "Reconectando", consentRequired: "Acepta el acuerdo de privacidad para comenzar.", unavailable: "AskVera no está disponible temporalmente. Inténtalo de nuevo en un momento.", waiting: "Espera a que termine la respuesta actual.", copy: "Copiar", copied: "Copiado", helpful: "Util", notHelpful: "No util"
@@ -79,7 +82,7 @@ const copy: Record<string, WidgetCopy> = {
     privacyBody: "Prufen und akzeptieren Sie die erforderlichen rechtlichen Dokumente, um AskVera zu verwenden.",
     privacyAcknowledgment: "Ich habe die erforderlichen Datenschutz- und Bedingungsdokumente gelesen und stimme ihnen zu.",
     accept: "Ich stimme zu", decline: "Nicht jetzt", inputPlaceholder: "Frage stellen", send: "Senden",
-    newChat: "Neuer Chat", support: "Support anfordern", supportQueued: "Ihre Supportanfrage wurde erstellt. Referenz: {id}",
+    newChat: "Neuer Chat", endChat: "Chat beenden", confirmEndChat: "Diesen Chat beenden", cancelEndChat: "Abbrechen", support: "Support anfordern", supportQueued: "Ihre Supportanfrage wurde erstellt. Referenz: {id}",
     supportFailed: "Die Supportanfrage konnte nicht erstellt werden. Bitte versuchen Sie es erneut.", supportCreating: "Wird erstellt...", supportRequested: "Angefordert", conversationCleared: "Ein neuer Chat ist bereit.",
     footer: "Antworten werden aus freigegebenen Unternehmensdokumenten erstellt.", online: "Online", offline: "Offline",
     reconnecting: "Verbindung wird hergestellt", consentRequired: "Akzeptieren Sie die Datenschutzvereinbarung, um zu beginnen.", unavailable: "AskVera ist vorübergehend nicht verfügbar. Versuchen Sie es gleich noch einmal.", waiting: "Warten Sie, bis die aktuelle Antwort abgeschlossen ist.", copy: "Kopieren", copied: "Kopiert", helpful: "Hilfreich", notHelpful: "Nicht hilfreich"
@@ -92,7 +95,7 @@ const copy: Record<string, WidgetCopy> = {
     privacyBody: "Bekijk en accepteer de vereiste juridische documenten om AskVera te gebruiken.",
     privacyAcknowledgment: "Ik heb de vereiste privacy- en voorwaardendocumenten gelezen en ga ermee akkoord.",
     accept: "Ik ga akkoord", decline: "Niet nu", inputPlaceholder: "Stel een vraag", send: "Versturen",
-    newChat: "Nieuwe chat", support: "Hulp aanvragen", supportQueued: "Uw hulpverzoek is aangemaakt. Referentie: {id}",
+    newChat: "Nieuwe chat", endChat: "Chat beeindigen", confirmEndChat: "Deze chat beeindigen", cancelEndChat: "Annuleren", support: "Hulp aanvragen", supportQueued: "Uw hulpverzoek is aangemaakt. Referentie: {id}",
     supportFailed: "Het hulpverzoek kon niet worden aangemaakt. Probeer het opnieuw.", supportCreating: "Aanmaken...", supportRequested: "Aangevraagd", conversationCleared: "Een nieuwe chat staat klaar.",
     footer: "Antwoorden worden gemaakt op basis van goedgekeurde bedrijfsdocumenten.", online: "Online", offline: "Offline",
     reconnecting: "Opnieuw verbinden", consentRequired: "Accepteer de privacyovereenkomst om te beginnen.", unavailable: "AskVera is tijdelijk niet beschikbaar. Probeer het zo opnieuw.", waiting: "Wacht tot het huidige antwoord klaar is.", copy: "Kopieren", copied: "Gekopieerd", helpful: "Nuttig", notHelpful: "Niet nuttig"
