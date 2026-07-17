@@ -14,12 +14,13 @@ from utils.redaction import redact_common_pii
 PIPELINE_ORDER = {
     "request_received": 0,
     "governance": 1,
-    "retrieval": 2,
-    "prompt_build": 3,
-    "model_generate": 4,
-    "validation": 5,
-    "response_build": 6,
-    "response_delivered": 7,
+    "cache_lookup": 2,
+    "retrieval": 3,
+    "prompt_build": 4,
+    "model_generate": 5,
+    "validation": 6,
+    "response_build": 7,
+    "response_delivered": 8,
 }
 
 
@@ -65,6 +66,7 @@ class PipelineTraceStore:
         *,
         country: str = "",
         language: str = "",
+        role: str = "",
         session_id: str = "",
         question_preview: str = "",
     ) -> PipelineTrace:
@@ -80,7 +82,12 @@ class PipelineTraceStore:
             self._traces.move_to_end(correlation_id)
             while len(self._traces) > self.capacity:
                 self._traces.popitem(last=False)
-            self._record(trace, "request_received", "complete")
+            self._record(
+                trace,
+                "request_received",
+                "complete",
+                metadata={"country": country, "language": language, "role": role, "transport": "HTTPS"},
+            )
             return trace
 
     def record(

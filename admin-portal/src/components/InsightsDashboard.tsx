@@ -63,6 +63,16 @@ export function InsightsDashboard({ apiKey }: { apiKey: string }) {
 
   useEffect(() => { void refresh(); }, [apiKey, days, country, language, feedback]);
 
+  const resetDashboard = () => {
+    setDays("30");
+    setCountry("");
+    setLanguage("");
+    setFeedback("not_helpful");
+    setQuery("");
+    setSelected(null);
+    if (days === "30" && !country && !language && feedback === "not_helpful") void refresh();
+  };
+
   const filteredInteractions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return interactions.filter((item) => {
@@ -81,7 +91,7 @@ export function InsightsDashboard({ apiKey }: { apiKey: string }) {
     <section className="page-section" aria-labelledby="insights-title">
       <div className="page-heading dashboard-heading">
         <div><span className="eyebrow">Experience intelligence</span><h1 id="insights-title">Know what users need next.</h1><p>Measure adoption, answer quality, knowledge gaps and AI usage across every market.</p></div>
-        <span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span>
+        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span><button className="button secondary" onClick={resetDashboard}>Reset dashboard</button></div>
       </div>
 
       <div className="filter-bar surface">

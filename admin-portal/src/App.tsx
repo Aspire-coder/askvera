@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { ChartIcon, FlowIcon, KeyIcon, UploadIcon } from "./icons";
+import { ChartIcon, FlowIcon, KeyIcon } from "./icons";
 import { FlowVisualizer } from "./components/FlowVisualizer";
-import { KnowledgeUploader } from "./components/KnowledgeUploader";
 import { InsightsDashboard } from "./components/InsightsDashboard";
 import type { View } from "./types";
 
 const nav = [
   { id: "flow" as const, label: "Live flow", detail: "Follow an answer", icon: <FlowIcon /> },
-  { id: "knowledge" as const, label: "Knowledge", detail: "Upload and index", icon: <UploadIcon /> },
   { id: "insights" as const, label: "Insights", detail: "Measure and improve", icon: <ChartIcon /> }
 ];
 
@@ -39,7 +37,6 @@ export function App() {
       <main className="main-content">
         <header className="mobile-header"><div className="brand"><div className="brand-mark">V</div><strong>AskVera Operations</strong></div><button onClick={() => setSettingsOpen(true)}><KeyIcon /></button></header>
         {view === "flow" ? <FlowVisualizer apiKey={apiKey} /> : null}
-        {view === "knowledge" ? <KnowledgeUploader apiKey={apiKey} /> : null}
         {view === "insights" ? <InsightsDashboard apiKey={apiKey} /> : null}
         <nav className="mobile-nav" aria-label="Admin sections">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
       </main>

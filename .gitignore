@@ -74,6 +74,7 @@ widget-wrapper/dist/
 widget-wrapper/dist-check/
 widget-wrapper/node_modules/
 admin-portal/node_modules/
+admin-portal/.env.local
 admin-portal/dist/
 widget-wrapper/.npm-cache/
 widget-wrapper/demo/dist/

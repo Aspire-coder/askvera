@@ -38,6 +38,7 @@ class GovernanceEngine:
         """Evaluate text through risk policies and guardrail provider."""
         started = perf_counter()
         success = False
+        decision: GovernanceDecision | None = None
         try:
             risk_decision = self.risk_engine.evaluate(
                 RiskContext(
@@ -100,7 +101,14 @@ class GovernanceEngine:
                 duration_ms=round((perf_counter() - started) * 1000, 2),
                 success=success,
                 correlation_id=correlation_id,
-                metadata={"country": country, "language": language, "role": role},
+                metadata={
+                    "country": country,
+                    "language": language,
+                    "role": role,
+                    "provider": decision.provider if decision else self.default_provider,
+                    "action": decision.action.value if decision else "ERROR",
+                    "riskLevel": decision.risk_level.value if decision else "unknown",
+                },
             )
 
     def _from_risk_refusal(self, risk_decision: RiskDecision, correlation_id: str) -> GovernanceDecision:

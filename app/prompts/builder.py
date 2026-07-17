@@ -42,6 +42,7 @@ class PromptBuilder:
         started = perf_counter()
         success = False
         correlation_id = (metadata or {}).get("correlation_id", "")
+        package: PromptPackage | None = None
         try:
             retrieved_context = retrieved_documents if retrieved_documents is not None else self._format_retrieval_context(retrieval_result)
             rendered_system = (
@@ -91,7 +92,17 @@ class PromptBuilder:
                 duration_ms=round((perf_counter() - started) * 1000, 2),
                 success=success,
                 correlation_id=correlation_id,
-                metadata={"country": country, "language": language, "role": role, "promptVersion": prompt_version},
+                metadata={
+                    "country": country,
+                    "language": language,
+                    "role": role,
+                    "promptVersion": prompt_version,
+                    "sourceCount": package.metadata.get("retrieval_source_count", 0) if package else 0,
+                    "hasConversation": package.metadata.get("has_conversation", False) if package else False,
+                    "systemCharacters": len(package.system_prompt) if package else 0,
+                    "contextCharacters": len(package.retrieved_context) if package else 0,
+                    "questionCharacters": len(user_question),
+                },
             )
 
     def _format_retrieval_context(self, retrieval_result: RetrievalResult | None) -> str:

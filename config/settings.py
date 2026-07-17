@@ -250,7 +250,7 @@ ELASTICACHE_REDIS_HOST = REDIS_HOST
 ELASTICACHE_REDIS_PORT = REDIS_PORT
 # Redis TTL for answer cache in seconds. Found in architecture plan for cache layer.
 CACHE_TTL_SECONDS = 7200
-CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "3")
+CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "4")
 # Audit Firehose sink configuration. Defaults are overridden by production.env, then by SSM.
 AUDIT_FIREHOSE_ENABLED = _env_bool("AUDIT_FIREHOSE_ENABLED", False)
 AUDIT_FIREHOSE_STREAM = _env_str("AUDIT_FIREHOSE_STREAM", "askvera-audit")

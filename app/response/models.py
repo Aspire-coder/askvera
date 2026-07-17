@@ -31,10 +31,13 @@ class ChatResponse:
 
     def to_cache_value(self) -> dict[str, Any]:
         """Return the cache-safe response shape used by existing cache readers."""
+        token_usage = self.metadata.get("token_usage") if isinstance(self.metadata, dict) else {}
         return {
             "response": self.answer,
             "sources": self.citations,
             "confidence": self.confidence or 0.0,
+            "token_usage": dict(token_usage or {}),
+            "model_name": str(self.metadata.get("model_name") or "") if isinstance(self.metadata, dict) else "",
         }
 
     def _public_metadata(self) -> dict[str, Any]:

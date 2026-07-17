@@ -28,6 +28,7 @@ class OutputValidator:
         """Run all validators against a response context."""
         started = perf_counter()
         success = False
+        result: ValidationResult | None = None
         try:
             result = ValidationResult()
             for validator in self.validators:
@@ -40,7 +41,12 @@ class OutputValidator:
                 duration_ms=round((perf_counter() - started) * 1000, 2),
                 success=success,
                 correlation_id=context.correlation_id,
-                metadata={"validatorCount": len(self.validators)},
+                metadata={
+                    "validatorCount": len(self.validators),
+                    "issueCount": len(result.issues) if result else 0,
+                    "highestSeverity": result.highest_severity.value if result else "ERROR",
+                    "valid": bool(result.valid) if result else False,
+                },
             )
 
 

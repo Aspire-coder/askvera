@@ -1,4 +1,4 @@
-import { demoConfig, demoInteractions, demoJobs, demoOverview, demoTrace } from "./demoData";
+import { demoCachedTrace, demoConfig, demoInteractions, demoJobs, demoOverview, demoTrace } from "./demoData";
 import type { AdminConfig, AnalyticsOverview, IngestionJob, Interaction, PipelineTrace } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
@@ -48,7 +48,7 @@ export async function withDemoFallback<T>(live: () => Promise<T>, fallback: T): 
 
 export const demo = {
   config: demoConfig,
-  traces: [demoTrace],
+  traces: [demoTrace, demoCachedTrace],
   overview: demoOverview,
   interactions: demoInteractions,
   jobs: demoJobs

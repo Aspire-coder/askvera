@@ -40,8 +40,10 @@ class RetrievalService:
         """Return approved documents for a chat request."""
         started = perf_counter()
         success = False
+        result: RetrievalResult | None = None
+        provider = self._current_provider()
         try:
-            result = self._current_provider().retrieve(message, country, language, role, correlation_id)
+            result = provider.retrieve(message, country, language, role, correlation_id)
             success = True
             return result
         finally:
@@ -50,7 +52,14 @@ class RetrievalService:
                 duration_ms=round((perf_counter() - started) * 1000, 2),
                 success=success,
                 correlation_id=correlation_id,
-                metadata={"country": country, "language": language, "role": role},
+                metadata={
+                    "country": country,
+                    "language": language,
+                    "role": role,
+                    "provider": type(provider).__name__,
+                    "sourceCount": len(result.documents) if result else 0,
+                    "confidence": round(float(result.confidence), 3) if result else 0.0,
+                },
             )
 
 

@@ -27,6 +27,7 @@ class ModelRouter:
         started = perf_counter()
         success = False
         provider_name = self.default_provider
+        response: ModelResponse | None = None
         try:
             provider = self.registry.get(self.default_provider)
             provider_name = provider.name
@@ -45,12 +46,20 @@ class ModelRouter:
             success = True
             return response
         finally:
+            usage = response.token_usage if response and isinstance(response.token_usage, dict) else {}
             record_pipeline_metric(
                 stage=STAGE_MODEL_GENERATE,
                 duration_ms=round((perf_counter() - started) * 1000, 2),
                 success=success,
                 correlation_id=correlation_id,
-                metadata={"provider": provider_name, "sourceCount": len(retrieval_result.documents)},
+                metadata={
+                    "provider": response.provider if response else provider_name,
+                    "model": response.model_name if response else "",
+                    "sourceCount": len(retrieval_result.documents),
+                    "inputTokens": int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0),
+                    "outputTokens": int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0),
+                    "finishReason": response.finish_reason if response else "",
+                },
             )
 
 

@@ -1,7 +1,7 @@
 from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationContext, ValidationResult
-from app.validation.validators.numeric_grounding_validator import NumericGroundingValidator
+from app.validation.validators.numeric_grounding_validator import NumericGroundingValidator, remove_unsupported_numeric_sentences
 
 
 def _context(answer: str, source_text: str, metadata: dict | None = None) -> ValidationContext:
@@ -48,6 +48,29 @@ def test_numeric_grounding_accepts_claim_present_in_source() -> None:
 
     assert result.valid
     assert result.issues == []
+
+
+def test_numeric_grounding_ignores_bracketed_source_reference() -> None:
+    result = ValidationResult()
+    context = _context(
+        "Supervisor requires 10 Open Group Case Credits [3].",
+        "Supervisor is achieved by generating a total of 10 Open Group Case Credits.",
+    )
+    NumericGroundingValidator().validate(context, result)
+    assert not result.has_critical()
+
+
+def test_numeric_repair_removes_only_unsupported_sentence() -> None:
+    context = _context(
+        "Supervisor requires 10 Open Group Case Credits. You must also wait 3 years.",
+        "Supervisor is achieved by generating a total of 10 Open Group Case Credits.",
+    )
+    repaired, removed = remove_unsupported_numeric_sentences(
+        context.chat_response.answer,
+        context.retrieval_result.documents,
+    )
+    assert repaired == "Supervisor requires 10 Open Group Case Credits."
+    assert removed == ["3"]
 
 
 def test_numeric_grounding_blocks_claim_absent_from_source() -> None:

@@ -158,12 +158,15 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
         correlation_id,
         country=body.country,
         language=body.language,
+        role=body.role,
         session_id=body.sessionId,
         question_preview=body.message,
     )
     try:
         result = ai_orchestrator.handle_chat(body, correlation_id)
         if isinstance(result, ChatResponse):
+            token_usage = result.metadata.get("token_usage") if isinstance(result.metadata, dict) else {}
+            token_usage = token_usage if isinstance(token_usage, dict) else {}
             record_chat_interaction(body, result, correlation_id)
             pipeline_trace_store.finish(
                 correlation_id,
@@ -172,6 +175,12 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
                     "confidence": result.confidence or 0.0,
                     "source_count": len(result.citations),
                     "fallback": bool(result.metadata.get("fallback")),
+                    "provider": str(result.metadata.get("provider") or ""),
+                    "model": str(result.metadata.get("model_name") or ""),
+                    "inputTokens": int(token_usage.get("inputTokens", token_usage.get("input_tokens", 0)) or 0),
+                    "outputTokens": int(token_usage.get("outputTokens", token_usage.get("output_tokens", 0)) or 0),
+                    "cacheHit": str(result.metadata.get("cache") or "").lower() == "hit",
+                    "tokensSaved": int(result.metadata.get("cache_token_savings", 0) or 0),
                 },
             )
             return success(result.to_api_result(), correlation_id)

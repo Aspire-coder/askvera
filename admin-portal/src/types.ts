@@ -1,4 +1,4 @@
-export type View = "flow" | "knowledge" | "insights";
+export type View = "flow" | "insights";
 
 export type TraceStage = {
   stage: string;

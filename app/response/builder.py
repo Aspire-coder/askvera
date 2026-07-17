@@ -105,11 +105,18 @@ class ResponseBuilder:
                 duration_ms=round((perf_counter() - started) * 1000, 2),
                 success=success,
                 correlation_id=correlation_id,
-                metadata={"responseSource": "model"},
+                metadata={
+                    "responseSource": chat_response.metadata.get("cache", "model") if success else "error",
+                    "citationCount": len(chat_response.citations) if success else 0,
+                    "confidence": round(float(chat_response.confidence or 0.0), 3) if success else 0.0,
+                },
             )
 
     def from_cached(self, cached: dict[str, Any], correlation_id: str) -> ChatResponse:
         """Build a canonical response from the existing cache shape."""
+        original_usage = dict(cached.get("token_usage") or {})
+        saved_input_tokens = int(original_usage.get("inputTokens", original_usage.get("input_tokens", 0)) or 0)
+        saved_output_tokens = int(original_usage.get("outputTokens", original_usage.get("output_tokens", 0)) or 0)
         chat_response = ChatResponse(
             answer=str(cached.get("response", "")),
             citations=list(cached.get("sources", [])),
@@ -117,7 +124,16 @@ class ResponseBuilder:
             cards=[],
             confidence=float(cached.get("confidence", 0.0) or 0.0),
             correlation_id=correlation_id,
-            metadata={"cache": "hit", "correlation_id": correlation_id},
+            metadata={
+                "cache": "hit",
+                "correlation_id": correlation_id,
+                "provider": "cache",
+                "model_name": str(cached.get("model_name") or "cached response"),
+                "token_usage": {"inputTokens": 0, "outputTokens": 0},
+                "cache_token_savings": saved_input_tokens + saved_output_tokens,
+                "cached_input_tokens": saved_input_tokens,
+                "cached_output_tokens": saved_output_tokens,
+            },
         )
         LOGGER.info(
             "response_builder_chat_response_built",

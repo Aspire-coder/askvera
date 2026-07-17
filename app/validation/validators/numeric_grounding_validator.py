@@ -156,6 +156,8 @@ def _extract_claims(answer: str) -> list[MeasurableClaim]:
     claims: list[MeasurableClaim] = []
     seen: set[str] = set()
     for match in NUMERIC_CLAIM_PATTERN.finditer(answer):
+        if _is_structural_reference(answer, match.start(), match.end()):
+            continue
         claim = MeasurableClaim(
             text=match.group(0),
             number=match.group("number"),
@@ -169,6 +171,73 @@ def _extract_claims(answer: str) -> list[MeasurableClaim]:
             seen.add(key)
             claims.append(claim)
     return claims
+
+
+def _is_structural_reference(answer: str, start: int, end: int) -> bool:
+    """Ignore presentation numbers that are not measurable factual claims."""
+    before = answer[start - 1 : start] if start else ""
+    after = answer[end : end + 1]
+    if before in {"[", "("} and after in {"]", ")"}:
+        return True
+
+    line_start = answer.rfind("\n", 0, start) + 1
+    line_prefix = answer[line_start:start]
+    if not line_prefix.strip() and after in {")", ":"}:
+        return True
+    return False
+
+
+def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> list[MeasurableClaim]:
+    """Return factual numeric claims that no retrieved source supports."""
+    source_texts = [
+        _normalize(str(getattr(document, "content", "") or ""))
+        for document in source_documents
+        if getattr(document, "content", "")
+    ]
+    if not source_texts:
+        return []
+    return [
+        claim
+        for claim in _extract_claims(answer)
+        if not any(_claim_is_supported(claim, source_text) for source_text in source_texts)
+    ]
+
+
+def remove_unsupported_numeric_sentences(answer: str, source_documents: list[object]) -> tuple[str, list[str]]:
+    """Remove only sentences containing unsupported numbers, preserving grounded text."""
+    unsupported = unsupported_numeric_claims(answer, source_documents)
+    if not unsupported:
+        return answer, []
+
+    spans: list[tuple[int, int]] = []
+    for claim in unsupported:
+        left = max(answer.rfind(delimiter, 0, claim.start) for delimiter in (".", "!", "?", "\n"))
+        right_candidates = [
+            position
+            for position in (
+                answer.find(".", claim.end),
+                answer.find("!", claim.end),
+                answer.find("?", claim.end),
+                answer.find("\n", claim.end),
+            )
+            if position != -1
+        ]
+        right = min(right_candidates) + 1 if right_candidates else len(answer)
+        spans.append((left + 1, right))
+
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    repaired = answer
+    for start, end in reversed(merged):
+        repaired = repaired[:start] + repaired[end:]
+    repaired = re.sub(r"[ \t]+\n", "\n", repaired)
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
+    return repaired, [claim.text for claim in unsupported]
 
 
 class NumericGroundingValidator:

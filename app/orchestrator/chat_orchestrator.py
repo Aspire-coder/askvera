@@ -1,8 +1,10 @@
 """AI chat orchestration for AskVera."""
 
 import re
+from time import perf_counter
 
 from app.models.responses import ModelResponse
+from app.operations import pipeline_trace_store
 from app.models.router import ModelRouter, model_router
 from app.evidence import (
     assistant_meta_response,
@@ -18,6 +20,7 @@ from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
+from app.validation.validators.numeric_grounding_validator import remove_unsupported_numeric_sentences
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
@@ -104,7 +107,24 @@ class AIOrchestrator:
             return chat_response
 
         cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
+        cache_started = perf_counter()
         cached = get_cache_value(cache_key, correlation_id)
+        cached_usage = dict(cached.get("token_usage") or {}) if cached else {}
+        saved_input_tokens = int(cached_usage.get("inputTokens", cached_usage.get("input_tokens", 0)) or 0)
+        saved_output_tokens = int(cached_usage.get("outputTokens", cached_usage.get("output_tokens", 0)) or 0)
+        pipeline_trace_store.record(
+            correlation_id,
+            "cache_lookup",
+            success=True,
+            duration_ms=round((perf_counter() - cache_started) * 1000, 2),
+            metadata={
+                "service": "Amazon ElastiCache for Valkey",
+                "cacheHit": bool(cached),
+                "tokensSaved": saved_input_tokens + saved_output_tokens,
+                "inputTokensSaved": saved_input_tokens,
+                "outputTokensSaved": saved_output_tokens,
+            },
+        )
         if cached:
             chat_response = self._validate_response(
                 self.response_builder.from_cached(cached, correlation_id),
@@ -514,6 +534,53 @@ class AIOrchestrator:
                 ],
             )
         if result.has_critical():
+            critical_codes = {
+                str(issue.code).upper()
+                for issue in result.issues
+                if issue.severity.value.upper() == "CRITICAL"
+            }
+            if (
+                critical_codes
+                and all(code == "NUMERIC_CLAIM_UNGROUNDED" for code in critical_codes)
+                and retrieval_result is not None
+                and retrieval_result.documents
+            ):
+                repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
+                    chat_response.answer,
+                    retrieval_result.documents,
+                )
+                if repaired_answer and repaired_answer != chat_response.answer:
+                    repaired_response = ChatResponse(
+                        answer=repaired_answer,
+                        citations=chat_response.citations,
+                        suggestions=chat_response.suggestions,
+                        cards=chat_response.cards,
+                        confidence=chat_response.confidence,
+                        metadata={
+                            **(chat_response.metadata or {}),
+                            "numeric_claim_repair": True,
+                            "removed_numeric_claims": removed_numbers,
+                        },
+                        correlation_id=chat_response.correlation_id,
+                    )
+                    repaired_result = self.output_validator.validate(
+                        ValidationContext(
+                            chat_response=repaired_response,
+                            model_response=model_response,
+                            retrieval_result=retrieval_result,
+                            country=body.country,
+                            language=body.language,
+                            role=body.role,
+                            correlation_id=correlation_id,
+                        )
+                    )
+                    if not repaired_result.has_critical():
+                        LOGGER.warning(
+                            "output_validator_numeric_claims_repaired",
+                            correlation_id=correlation_id,
+                            removed_numeric_claims=removed_numbers,
+                        )
+                        return self._with_validation_metadata(repaired_response, repaired_result)
             failure_layer = self._validation_failure_layer(result)
             LOGGER.warning(
                 "output_validator_critical_fallback",

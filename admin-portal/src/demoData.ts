@@ -12,14 +12,32 @@ export const demoTrace: PipelineTrace = {
   started_at: iso(14),
   completed_at: iso(11),
   stages: [
-    { stage: "request_received", status: "complete", duration_ms: 12, timestamp: iso(14), metadata: {} },
-    { stage: "governance", status: "complete", duration_ms: 84, timestamp: iso(13.8), metadata: { decision: "allowed" } },
-    { stage: "retrieval", status: "complete", duration_ms: 476, timestamp: iso(13.1), metadata: { source_count: 4, confidence: 0.91 } },
-    { stage: "prompt_build", status: "complete", duration_ms: 7, timestamp: iso(12.5), metadata: { promptVersion: "v1" } },
-    { stage: "model_generate", status: "complete", duration_ms: 1380, timestamp: iso(11.8), metadata: { model: "Claude" } },
-    { stage: "validation", status: "complete", duration_ms: 21, timestamp: iso(11.4), metadata: { status: "grounded" } },
-    { stage: "response_build", status: "complete", duration_ms: 8, timestamp: iso(11.2), metadata: { citations: 1 } },
-    { stage: "response_delivered", status: "complete", duration_ms: 16, timestamp: iso(11), metadata: { source_count: 1, confidence: 0.91 } }
+    { stage: "request_received", status: "complete", duration_ms: 12, timestamp: iso(14), metadata: { country: "BE", language: "nl", role: "FBO", transport: "HTTPS" } },
+    { stage: "governance", status: "complete", duration_ms: 84, timestamp: iso(13.8), metadata: { provider: "Bedrock Guardrails", action: "ALLOW", riskLevel: "LOW" } },
+    { stage: "cache_lookup", status: "complete", duration_ms: 9, timestamp: iso(13.4), metadata: { provider: "Amazon ElastiCache for Valkey", cacheHit: false, tokensSaved: 0 } },
+    { stage: "retrieval", status: "complete", duration_ms: 476, timestamp: iso(13.1), metadata: { provider: "OpenSearch Hybrid", sourceCount: 4, confidence: 0.91 } },
+    { stage: "prompt_build", status: "complete", duration_ms: 7, timestamp: iso(12.5), metadata: { promptVersion: "2026-07", sourceCount: 4, hasConversation: true, systemCharacters: 11842, contextCharacters: 7230 } },
+    { stage: "model_generate", status: "complete", duration_ms: 1380, timestamp: iso(11.8), metadata: { provider: "Claude via Bedrock", model: "Claude Haiku 4.5", sourceCount: 4, inputTokens: 3428, outputTokens: 286, finishReason: "end_turn" } },
+    { stage: "validation", status: "complete", duration_ms: 21, timestamp: iso(11.4), metadata: { validatorCount: 7, issueCount: 0, highestSeverity: "PASS", valid: true } },
+    { stage: "response_build", status: "complete", duration_ms: 8, timestamp: iso(11.2), metadata: { responseSource: "model", citationCount: 1, confidence: 0.91 } },
+    { stage: "response_delivered", status: "complete", duration_ms: 16, timestamp: iso(11), metadata: { source_count: 1, confidence: 0.91, provider: "claude", inputTokens: 3428, outputTokens: 286 } }
+  ]
+};
+
+export const demoCachedTrace: PipelineTrace = {
+  correlation_id: "demo-cache-91b8",
+  country: "BE",
+  language: "en",
+  session_id: "demo-cache-session",
+  question_preview: "How do I become a Supervisor?",
+  started_at: iso(48),
+  completed_at: iso(47.8),
+  stages: [
+    { stage: "request_received", status: "complete", duration_ms: 9, timestamp: iso(48), metadata: { country: "BE", language: "en", role: "FBO", transport: "HTTPS" } },
+    { stage: "governance", status: "complete", duration_ms: 52, timestamp: iso(47.96), metadata: { provider: "Bedrock Guardrails", action: "ALLOW", riskLevel: "LOW" } },
+    { stage: "cache_lookup", status: "complete", duration_ms: 4, timestamp: iso(47.9), metadata: { provider: "Amazon ElastiCache for Valkey", cacheHit: true, tokensSaved: 3714, inputTokensSaved: 3428, outputTokensSaved: 286 } },
+    { stage: "validation", status: "complete", duration_ms: 13, timestamp: iso(47.86), metadata: { validatorCount: 7, issueCount: 0, highestSeverity: "PASS", valid: true } },
+    { stage: "response_delivered", status: "complete", duration_ms: 7, timestamp: iso(47.8), metadata: { source_count: 1, confidence: 0.94, provider: "cache", cacheHit: true, tokensSaved: 3714, inputTokens: 0, outputTokens: 0 } }
   ]
 };
 
