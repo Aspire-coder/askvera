@@ -33,6 +33,7 @@ from utils.logging import configure_logging, get_logger
 configure_logging()
 LOGGER = get_logger("main")
 shutdown_requested = False
+_previous_sigterm_handler: object = signal.SIG_DFL
 
 
 def _init_optional_cache(max_attempts: int = 3) -> None:
@@ -60,11 +61,15 @@ def _handle_sigterm(signum: int, _frame: object) -> None:
     global shutdown_requested
     shutdown_requested = True
     LOGGER.info("shutdown_signal_received", signal=signum)
+    if callable(_previous_sigterm_handler) and _previous_sigterm_handler is not _handle_sigterm:
+        _previous_sigterm_handler(signum, _frame)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     """Validate config, initialise clients, and close cleanly on shutdown."""
+    global _previous_sigterm_handler, shutdown_requested
+    shutdown_requested = False
     loaded_config = settings.load_ssm_config()
     LOGGER.info(
         "ssm_config_loaded",
@@ -83,6 +88,7 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     )
     market_config = load_market_config()
     LOGGER.info("market_config_loaded", market_count=len(market_config["markets"]))
+    _previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGTERM, _handle_sigterm)
     init_aws_clients()
     legal_documents = load_legal_documents()
@@ -96,11 +102,14 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     except Exception:
         LOGGER.exception("monitoring_initialization_failed", stage="startup")
     LOGGER.info("startup_complete")
-    yield
-    await audit_lifecycle.stop()
-    close_cache()
-    close_db()
-    LOGGER.info("shutdown_complete")
+    try:
+        yield
+    finally:
+        await audit_lifecycle.stop()
+        close_cache()
+        close_db()
+        signal.signal(signal.SIGTERM, _previous_sigterm_handler)
+        LOGGER.info("shutdown_complete")
 
 
 app = FastAPI(title="ASK Vera", version=settings.APP_VERSION, lifespan=lifespan)
