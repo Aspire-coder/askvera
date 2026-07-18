@@ -35,7 +35,7 @@ class PromptBuilder:
         retrieved_documents: str | None = None,
         persona: str = SYSTEM_PROMPT,
         compliance_rules: str = COMPLIANCE_PROMPT,
-        prompt_version: str = "v1",
+        prompt_version: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> PromptPackage:
         """Assemble a complete prompt package."""
@@ -44,6 +44,7 @@ class PromptBuilder:
         correlation_id = (metadata or {}).get("correlation_id", "")
         package: PromptPackage | None = None
         try:
+            effective_prompt_version = prompt_version or settings.PROMPT_VERSION
             retrieved_context = retrieved_documents if retrieved_documents is not None else self._format_retrieval_context(retrieval_result)
             rendered_system = (
                 persona.replace("{{user_language}}", language)
@@ -64,7 +65,7 @@ class PromptBuilder:
                 country=country,
                 language=language,
                 role=role,
-                prompt_version=prompt_version,
+                prompt_version=effective_prompt_version,
                 metadata={
                     "user_question": user_question,
                     "has_conversation": bool(conversation.strip()),
@@ -80,7 +81,7 @@ class PromptBuilder:
                 country=country,
                 language=language,
                 role=role,
-                prompt_version=prompt_version,
+                prompt_version=effective_prompt_version,
                 source_count=package.metadata["retrieval_source_count"],
                 has_conversation=package.metadata["has_conversation"],
             )
@@ -96,7 +97,7 @@ class PromptBuilder:
                     "country": country,
                     "language": language,
                     "role": role,
-                    "promptVersion": prompt_version,
+                    "promptVersion": package.prompt_version if package else (prompt_version or settings.PROMPT_VERSION),
                     "sourceCount": package.metadata.get("retrieval_source_count", 0) if package else 0,
                     "hasConversation": package.metadata.get("has_conversation", False) if package else False,
                     "systemCharacters": len(package.system_prompt) if package else 0,

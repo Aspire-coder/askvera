@@ -24,6 +24,27 @@ def test_build_prompt_replaces_all_variables() -> None:
     assert "{{" not in prompt.system_prompt
     assert "US" in prompt.system_prompt
     assert "chunk" in prompt.system_prompt
+    assert prompt.prompt_version == "2026-07-17.1"
+
+
+def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
+    """Static instructions stay compact while preserving answer safeguards."""
+    prompt = PromptBuilder().build(
+        user_question="question",
+        conversation="",
+        country="CA",
+        language="fr",
+        role="new_prospect",
+        retrieved_documents="",
+    )
+
+    normalized_prompt = " ".join(prompt.system_prompt.split())
+    assert len(prompt.system_prompt) < 4000
+    assert "complete response in that language" in normalized_prompt
+    assert "Use only the retrieved authorised chunks" in normalized_prompt
+    assert "Numbers, percentages, dates, timeframes" in normalized_prompt
+    assert "Never combine countries" in normalized_prompt
+    assert "history only for conversational continuity" in normalized_prompt
 
 
 def test_prompt_context_exposes_exact_evidence_identity_and_location() -> None:
@@ -85,6 +106,8 @@ def test_bedrock_provider_returns_sources() -> None:
     assert result["sources"][0]["uri"] == "s3://kb/doc.pdf"
     assert result["sources"][0]["page"] == "4"
     assert result["sources"][0]["documentVersion"] == "v2"
+    converse_params = runtime.converse.call_args.kwargs
+    assert converse_params["inferenceConfig"] == {"maxTokens": 1024}
 
 
 def test_confidence_uses_scores_when_available() -> None:

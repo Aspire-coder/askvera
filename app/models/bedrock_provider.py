@@ -105,6 +105,7 @@ class BedrockClaudeProvider:
             "modelId": settings.BEDROCK_MODEL_ARN,
             "system": [{"text": prompt.system_prompt}],
             "messages": [{"role": "user", "content": [{"text": prompt.user_prompt}]}],
+            "inferenceConfig": {"maxTokens": settings.BEDROCK_MAX_OUTPUT_TOKENS},
             "guardrailConfig": {
                 "guardrailIdentifier": settings.BEDROCK_GUARDRAIL_ID,
                 "guardrailVersion": settings.BEDROCK_GUARDRAIL_VERSION,

@@ -62,7 +62,7 @@ APP_VERSION = "1.0.0"
 # Runtime environment. Production disables development-only auth conveniences.
 APP_ENV = _env_str("APP_ENV", "development").lower()
 # Prompt/cache version values used to invalidate stale AI responses after content or policy changes.
-PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-15.2")
+PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-17.1")
 # Rotate this value whenever approved indexed content is published. Keeping it
 # configurable lets the ingestion workflow invalidate stale answers without a
 # code change.
@@ -163,6 +163,9 @@ BEDROCK_DATA_SOURCE_ID = _env_str("BEDROCK_DATA_SOURCE_ID", "JSAC3THB67")
 BEDROCK_DATASOURCE_ID = BEDROCK_DATA_SOURCE_ID
 # Bedrock model ARN or inference profile ARN. Found in Bedrock -> Model access or Inference profiles.
 BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
+# Generous ceiling that prevents runaway responses without shortening normal
+# policy and directory answers.
+BEDROCK_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_MAX_OUTPUT_TOKENS", 1024)
 # Bedrock Guardrail ID. Found in Bedrock -> Guardrails -> your guardrail -> Guardrail ID.
 BEDROCK_GUARDRAIL_ID = "idy33rbs9v1i"
 # Bedrock Guardrail version. Found in Bedrock -> Guardrails -> Versions.
