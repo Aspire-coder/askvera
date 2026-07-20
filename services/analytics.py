@@ -12,7 +12,7 @@ from app.response.models import ChatResponse
 from services.db import get_engine
 from utils.redaction import redact_common_pii
 from utils.logging import get_logger
-from utils.validators import ChatRequest, FeedbackRequest
+from utils.validators import ChatRequest, FeedbackRequest, SupportRequest
 
 LOGGER = get_logger("services.analytics")
 
@@ -118,6 +118,43 @@ def record_feedback_event(feedback: FeedbackRequest, correlation_id: str) -> Non
             )
     except SQLAlchemyError:
         LOGGER.exception("feedback_analytics_write_failed", correlation_id=correlation_id)
+
+
+def record_support_delivery(
+    request: SupportRequest,
+    *,
+    ticket_id: str,
+    correlation_id: str,
+    route_name: str,
+) -> None:
+    """Store delivery metadata without retaining support contact details or text."""
+    try:
+        with get_engine().begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO support_requests (
+                        ticket_id, correlation_id, session_id, message_id, country,
+                        language, route_name, delivery_status, created_at
+                    ) VALUES (
+                        :ticket_id, :correlation_id, :session_id, :message_id, :country,
+                        :language, :route_name, 'submitted', now()
+                    )
+                    ON CONFLICT (ticket_id) DO NOTHING
+                    """
+                ),
+                {
+                    "ticket_id": ticket_id,
+                    "correlation_id": correlation_id,
+                    "session_id": request.sessionId,
+                    "message_id": request.messageId,
+                    "country": request.country,
+                    "language": request.language,
+                    "route_name": route_name,
+                },
+            )
+    except SQLAlchemyError:
+        LOGGER.exception("support_audit_write_failed", correlation_id=correlation_id, ticket_id=ticket_id)
 
 
 def analytics_overview(*, days: int = 30, country: str = "", language: str = "") -> dict[str, Any]:

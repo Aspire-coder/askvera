@@ -92,11 +92,12 @@ AWS_MAX_ATTEMPTS = 3
 # Basic per-IP in-process request limiting for public widget endpoints.
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
-RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback"]
+RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support"]
 RATE_LIMIT_POLICIES = {
     "/api/chat": _env_int("RATE_LIMIT_CHAT_PER_MINUTE", 30),
     "/api/consent": _env_int("RATE_LIMIT_CONSENT_PER_MINUTE", 20),
     "/api/feedback": _env_int("RATE_LIMIT_FEEDBACK_PER_MINUTE", 15),
+    "/api/support": _env_int("RATE_LIMIT_SUPPORT_PER_MINUTE", 5),
     "/api/privacy": _env_int("RATE_LIMIT_PRIVACY_PER_MINUTE", 120),
     "/api/config": _env_int("RATE_LIMIT_CONFIG_PER_MINUTE", 120),
     "/api/widget/init": _env_int("RATE_LIMIT_WIDGET_INIT_PER_MINUTE", 10),
@@ -118,7 +119,7 @@ WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
 WIDGET_JWT_ISSUER = _env_str("WIDGET_JWT_ISSUER", "ask-vera")
 WIDGET_JWT_AUDIENCE = _env_str("WIDGET_JWT_AUDIENCE", "widget-api")
 WIDGET_JWT_CLOCK_SKEW_SECONDS = _env_int("WIDGET_JWT_CLOCK_SKEW_SECONDS", 60)
-WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/session/end", "/api/privacy", "/api/config", "/api/widget/config"]
+WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support", "/api/session/end", "/api/privacy", "/api/config", "/api/widget/config"]
 WIDGET_ALLOW_LOCALHOST_ORIGINS = _env_bool("WIDGET_ALLOW_LOCALHOST_ORIGINS", APP_ENV != "production")
 WIDGET_REGISTRY_PROVIDER = _env_str("WIDGET_REGISTRY_PROVIDER", "json")
 WIDGET_REGISTRY_TABLE = _env_str("WIDGET_REGISTRY_TABLE", "AskVeraWidgets")
@@ -308,6 +309,12 @@ ENABLE_OK_NOTIFICATIONS = _env_bool("ENABLE_OK_NOTIFICATIONS", True)
 ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS = _env_bool("ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS", False)
 # SQS feedback queue URL. Found in SQS -> Queues -> your feedback queue -> URL.
 SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askverachat-feedback"
+# Support requests are delivered through Amazon SES. Recipient routing remains
+# server-side so internal addresses are never exposed in the public widget.
+SUPPORT_EMAIL_ENABLED = _env_bool("SUPPORT_EMAIL_ENABLED", False)
+SUPPORT_EMAIL_FROM = _env_str("SUPPORT_EMAIL_FROM", "")
+SUPPORT_EMAIL_SUBJECT_PREFIX = _env_str("SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera support request")
+SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.

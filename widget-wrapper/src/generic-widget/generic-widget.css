@@ -1965,6 +1965,84 @@
   }
 }
 
+.gw-support-form {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.gw-support-form-heading p,
+.gw-support-form-privacy,
+.gw-support-form-error {
+  margin: 4px 0 0;
+}
+
+.gw-support-form-heading p,
+.gw-support-form-privacy {
+  color: var(--gw-muted-text-color);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.gw-support-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--gw-text-color);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.gw-support-form input,
+.gw-support-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--gw-border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--gw-text-color);
+  font: inherit;
+  font-weight: 450;
+  padding: 10px 11px;
+  outline: none;
+}
+
+.gw-support-form input:focus,
+.gw-support-form textarea:focus {
+  border-color: var(--gw-accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gw-accent-color) 14%, transparent);
+}
+
+.gw-support-form textarea {
+  min-height: 92px;
+  max-height: 180px;
+  resize: vertical;
+}
+
+.gw-support-form-error {
+  color: var(--gw-error-color, #b42318);
+  font-size: 12px;
+}
+
+.gw-support-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.gw-support-form-actions button {
+  min-height: 38px;
+}
+
+@media (max-width: 420px) {
+  .gw-support-form-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 /* Keep the assistant menu above the scrollable conversation and easy to operate. */
 .gw-menu {
   top: 72px;

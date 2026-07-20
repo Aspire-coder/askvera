@@ -3,6 +3,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
+import re
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from config.vera_persona import ROLE_CONTENT_SCOPES
@@ -125,3 +127,50 @@ class FeedbackRequest(BaseModel):
     comment: str = Field(default="", max_length=2000)
     requestType: str = Field(default="feedback", pattern="^(feedback|support)$")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SupportRequest(BaseModel):
+    """Validated customer support handoff request."""
+
+    sessionId: str = Field(min_length=1, max_length=128)
+    messageId: str = Field(default="", max_length=128)
+    firstName: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=254)
+    question: str = Field(min_length=1, max_length=4000)
+    country: str = Field(min_length=2, max_length=64)
+    language: str = Field(min_length=2, max_length=16)
+
+    @field_validator("firstName", "question")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("This field is required.")
+        return normalized
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "\r" in normalized or "\n" in normalized or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+            raise ValueError("Enter a valid email address.")
+        return normalized
+
+    @field_validator("country")
+    @classmethod
+    def validate_country(cls, value: str) -> str:
+        normalized = value.upper()
+        if normalized not in _country_codes():
+            raise ValueError("Unsupported country.")
+        return normalized
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, value: str) -> str:
+        return value.lower()
+
+    @model_validator(mode="after")
+    def validate_locale_pair(self) -> "SupportRequest":
+        if self.language not in _language_codes_for_country(self.country):
+            raise ValueError("Unsupported language for country.")
+        return self

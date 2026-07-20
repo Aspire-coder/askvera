@@ -146,6 +146,23 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(
                 text(
                     """
+                    CREATE TABLE IF NOT EXISTS support_requests (
+                        ticket_id TEXT PRIMARY KEY,
+                        correlation_id TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        message_id TEXT NOT NULL DEFAULT '',
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        route_name TEXT NOT NULL,
+                        delivery_status TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS ingestion_jobs (
                         job_id TEXT PRIMARY KEY,
                         filename TEXT NOT NULL,

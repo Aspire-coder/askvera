@@ -14,11 +14,13 @@ import {
   sendMessage,
   submitConsent,
   submitFeedback,
+  submitSupportRequest,
   type ConfigResponseData
 } from "../api";
 import { buildThemeConfig, buildWidgetConfig, type BackendConfig } from "../config";
 import { widgetEventBus, widgetEventTypes } from "../events";
 import { GenericWidgetWrapper } from "../generic-widget/GenericWidgetWrapper";
+import { SupportRequestForm } from "../generic-widget/SupportRequestForm";
 import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState, MessageEventPayload, WidgetMessage } from "../generic-widget/types";
 import { authenticateWidget, renewWidgetAuth } from "./auth";
 import { getWidgetCopy } from "../localization/widgetCopy";
@@ -447,6 +449,7 @@ export function WidgetRuntime({
   }, [apiBaseUrl, apiConfig, selectedLocale.country, selectedLocale.language]);
 
   const config = widgetConfig.genericConfig;
+  const supportAvailable = Boolean(apiConfig?.supportCountries?.includes(selectedLocale.country));
 
   const appendMessage = useCallback((message: WidgetMessage) => {
     setMessages((current) => [...current, message]);
@@ -652,28 +655,56 @@ export function WidgetRuntime({
 
   const handleSupportRequest = async (state: GenericWidgetRenderState, message?: WidgetMessage) => {
     const localized = getWidgetCopy(state.selectedLanguage?.code);
-    try {
-      const envelope = await withWidgetAuthRetry((client) => submitFeedback(client, {
-        sessionId: state.sessionId,
-        messageId: message?.id || "user-requested-support",
-        rating: -1,
-        requestType: "support",
-        comment: "User requested additional help from the AskVera widget.",
-        metadata: {
-          country: state.selectedCountry?.code,
-          language: state.selectedLanguage?.code,
-          correlationId: message?.metadata?.correlationId
-        }
-      }));
-      const ticketId = envelope.data?.ticketId || envelope.correlationId;
-      appendMessage({
-        id: buildId("support-ticket"),
-        role: "system",
-        content: localized.supportQueued.replace("{id}", ticketId || "pending")
-      });
-    } catch {
-      appendMessage({ id: buildId("support-error"), role: "system", content: localized.supportFailed });
-    }
+    const messageIndex = message ? messages.findIndex((item) => item.id === message.id) : -1;
+    const relatedQuestion = messageIndex > 0
+      ? [...messages.slice(0, messageIndex)].reverse().find((item) => item.role === "user" && typeof item.content === "string")
+      : undefined;
+    const formId = buildId("support-form");
+
+    const closeForm = () => setMessages((current) => current.filter((item) => item.id !== formId));
+    const formMessage: WidgetMessage = {
+      id: formId,
+      role: "system",
+      content: (
+        <SupportRequestForm
+          labels={{
+            title: localized.supportFormTitle,
+            body: localized.supportFormBody,
+            firstName: localized.supportFirstName,
+            email: localized.supportEmail,
+            question: localized.supportQuestion,
+            submit: localized.supportSubmit,
+            cancel: localized.supportCancel,
+            privacy: localized.supportPrivacy,
+            invalidEmail: localized.supportInvalidEmail
+          }}
+          initialQuestion={typeof relatedQuestion?.content === "string" ? relatedQuestion.content : ""}
+          onCancel={closeForm}
+          onSubmit={async (values) => {
+            try {
+              const envelope = await withWidgetAuthRetry((client) => submitSupportRequest(client, {
+                sessionId: state.sessionId,
+                messageId: message?.id || "user-requested-support",
+                firstName: values.firstName,
+                email: values.email,
+                question: values.question,
+                country: state.selectedCountry?.code || "",
+                language: state.selectedLanguage?.code || ""
+              }));
+              const ticketId = envelope.data?.ticketId || envelope.correlationId;
+              upsertMessage({ id: formId, role: "system", content: localized.supportQueued.replace("{id}", ticketId) });
+            } catch (error) {
+              if (error instanceof ApiRequestError && error.code === "SUPPORT_ROUTE_UNAVAILABLE") {
+                throw new Error(localized.supportNoRoute);
+              }
+              throw new Error(localized.supportFailed);
+            }
+          }}
+        />
+      ),
+      metadata: { supportForm: true, copyText: "" }
+    };
+    setMessages((current) => [...current.filter((item) => !item.metadata?.supportForm), formMessage]);
   };
 
   return (
@@ -695,15 +726,15 @@ export function WidgetRuntime({
       onLanguageChange={(payload) => selectLocale({ country: payload.selectedCountry, language: payload.selectedLanguage })}
       onSendMessage={(payload) => void sendChat(payload)}
       onMessageFeedback={handleMessageFeedback}
-      onEscalate={(payload) => void handleSupportRequest({
+      onEscalate={supportAvailable ? (payload) => void handleSupportRequest({
         isOpen: true,
         selectedCountry: config.countries.find((country) => country.code === payload.selectedCountry),
         selectedLanguage: config.languages.find((language) => language.code === payload.selectedLanguage),
         consentAccepted: true,
         visitorId: payload.visitorId,
         sessionId: payload.sessionId
-      })}
-      onRequestSupport={(message, state) => handleSupportRequest(state, message)}
+      }) : undefined}
+      onRequestSupport={supportAvailable ? (message, state) => handleSupportRequest(state, message) : undefined}
       onNewChat={async (payload, reason = "new_chat") => {
         try {
           await withWidgetAuthRetry((client) => client.post("/api/session/end", { sessionId: payload.sessionId, reason }));

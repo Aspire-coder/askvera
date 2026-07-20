@@ -76,6 +76,20 @@ class AwsServiceError(AskVeraError):
     status_code = 502
 
 
+class SupportUnavailableError(AskVeraError):
+    """Raised when support delivery is not configured or temporarily fails."""
+
+    error_code = "SUPPORT_UNAVAILABLE"
+    status_code = 503
+
+
+class SupportRouteUnavailableError(AskVeraError):
+    """Raised when the selected market has no support destination."""
+
+    error_code = "SUPPORT_ROUTE_UNAVAILABLE"
+    status_code = 422
+
+
 class SessionExpiredError(AskVeraError):
     """Raised when a closed or inactive conversation receives a new message."""
 

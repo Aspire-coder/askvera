@@ -648,7 +648,7 @@ export function GenericWidgetWrapper({
               config={config}
               payload={localePayload}
               onDismiss={() => dispatch({ type: "SET_MENU_OPEN", open: false })}
-              onEscalate={onEscalate}
+              onEscalate={consentAccepted ? onEscalate : undefined}
               onNewChat={async (_payload, reason) => {
                 dispatch({ type: "SET_MENU_OPEN", open: false });
                 await resetConversation(reason);

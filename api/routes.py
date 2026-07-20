@@ -15,17 +15,18 @@ from app.widget_auth.jwt import WidgetTokenError
 from app.widget_auth.service import WidgetAuthError
 from config import settings
 from services import cache as cache_service
-from services.consent_service import record_consent
+from services.consent_service import has_valid_consent, record_consent
 from services.session_service import close_session
 from services.db import get_engine
 from services.feedback import enqueue_feedback
-from services.analytics import record_chat_interaction, record_feedback_event
+from services.analytics import record_chat_interaction, record_feedback_event, record_support_delivery
 from app.operations import pipeline_trace_store
 from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
+from services.support import send_support_request, support_country_codes
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
-from utils.validators import ChatRequest, ConsentRequest, EndSessionRequest, Envelope, FeedbackRequest
+from utils.validators import ChatRequest, ConsentRequest, EndSessionRequest, Envelope, FeedbackRequest, SupportRequest
 
 router = APIRouter()
 LOGGER = get_logger("api.routes")
@@ -158,6 +159,7 @@ def widget_config(request: Request) -> Envelope | JSONResponse:
             "legalDocs": documents["documents"],
             "starterTopics": metadata.get("starterTopics"),
             "contextualTopics": metadata.get("contextualTopics"),
+            "supportCountries": support_country_codes(),
         },
         correlation_id,
     )
@@ -277,6 +279,34 @@ def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse
                 "queued": True,
                 "requestType": body.requestType,
                 "ticketId": correlation_id if body.requestType == "support" else None,
+            },
+            correlation_id,
+        )
+    except AskVeraError as exc:
+        return error_response(exc, correlation_id)
+
+
+@router.post("/api/support", response_model=None)
+def support(body: SupportRequest, request: Request) -> Envelope | JSONResponse:
+    """Route a consented support request to the selected market's support team."""
+    correlation_id = _correlation_id(request)
+    if not _session_matches_widget_token(request, body.sessionId):
+        return _session_mismatch_response(correlation_id)
+    try:
+        if not has_valid_consent(body.sessionId, correlation_id):
+            return consent_required_response(correlation_id)
+        delivery = send_support_request(body, correlation_id)
+        record_support_delivery(
+            body,
+            ticket_id=delivery.ticket_id,
+            correlation_id=correlation_id,
+            route_name=delivery.route_name,
+        )
+        return success(
+            {
+                "submitted": True,
+                "ticketId": delivery.ticket_id,
+                "department": delivery.route_name,
             },
             correlation_id,
         )
