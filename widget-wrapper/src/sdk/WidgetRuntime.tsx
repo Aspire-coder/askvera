@@ -184,18 +184,20 @@ async function loadCompleteWidgetConfig(
     throw new Error("Widget configuration response did not include data.");
   }
 
-  const currentLegalDocuments = getLegalDocuments(widgetConfig);
-  const needsLegalDocuments = !currentLegalDocuments.length;
-
-  const [marketEnvelope, privacyEnvelope] = await Promise.all([
-    loadConfig(apiClient),
-    needsLegalDocuments ? loadPrivacy(apiClient, selectedCountry, selectedLanguage) : Promise.resolve(undefined)
-  ]);
-  const loadedLegalDocuments = privacyEnvelope?.data?.documents?.length ? privacyEnvelope.data.documents : currentLegalDocuments;
+  const marketEnvelope = await loadConfig(apiClient);
+  const countries = marketEnvelope?.data?.countries?.length ? marketEnvelope.data.countries : widgetConfig.countries;
+  const country = countries.find((candidate) => candidate.code === selectedCountry) || countries[0];
+  const language = country?.languages.find((candidate) => candidate.code === selectedLanguage) || country?.languages[0];
+  const privacyEnvelope = country && language
+    ? await loadPrivacy(apiClient, country.code, language.code)
+    : undefined;
+  const loadedLegalDocuments = privacyEnvelope?.data?.documents?.length
+    ? privacyEnvelope.data.documents
+    : getLegalDocuments(widgetConfig);
 
   return {
     ...widgetConfig,
-    countries: marketEnvelope?.data?.countries?.length ? marketEnvelope.data.countries : widgetConfig.countries,
+    countries,
     privacyVersion: privacyEnvelope?.data?.version || marketEnvelope?.data?.privacyVersion || widgetConfig.privacyVersion,
     legalDocuments: loadedLegalDocuments,
     legalDocs: loadedLegalDocuments
@@ -288,7 +290,10 @@ export function WidgetRuntime({
     if (typeof window !== "undefined") {
       writeLocalePreference(window.localStorage, locale, widgetId);
     }
-    setApiConfig(null);
+    setApiConfig((current) => current
+      ? { ...current, legalDocuments: [], legalDocs: [] }
+      : current
+    );
     setSelectedLocale(locale);
   }, [widgetId]);
 
@@ -682,6 +687,7 @@ export function WidgetRuntime({
 
   return (
     <GenericWidgetWrapper
+      key={apiConfig ? "configured" : "loading"}
       config={config}
       messages={messages}
       loading={loading}
