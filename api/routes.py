@@ -344,19 +344,19 @@ def deep_health() -> JSONResponse:
         status_code = 503
 
     try:
-        if cache_service._redis_client is None:
-            checks["redis"] = "not_configured"
-        else:
-            cache_service._redis_client.ping()
-            checks["redis"] = "healthy"
+        checks["redis"] = cache_service.cache_health()
     except Exception:
         LOGGER.exception("deep_health_redis_failed", correlation_id="health")
         checks["redis"] = "unhealthy"
         status_code = 503
 
+    def configured_setting(name: str) -> bool:
+        value = str(getattr(settings, name, "") or "").strip()
+        return bool(value) and not value.startswith("REPLACE_WITH")
+
     configured = {
         "bedrock": all(
-            getattr(settings, name, "").startswith("REPLACE_WITH") is False
+            configured_setting(name)
             for name in ["BEDROCK_KB_ID", "BEDROCK_MODEL_ARN", "BEDROCK_GUARDRAIL_ID", "BEDROCK_GUARDRAIL_VERSION"]
         ),
         "comprehend": bool(settings.COMPREHEND_PII_LANGUAGE_CODE),

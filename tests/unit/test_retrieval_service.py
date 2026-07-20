@@ -7,6 +7,7 @@ from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
     _expanded_retrieval_query,
+    _planned_retrieval_plan,
     _planned_retrieval_queries,
     _reference_score,
     _retrieval_configuration,
@@ -351,3 +352,81 @@ def test_multilingual_query_planner_uses_runtime_question_without_country_aliase
     planner_prompt = runtime.converse.call_args.kwargs["system"][0]["text"]
     assert "requalification" in planner_prompt
     assert "inactivity" in planner_prompt
+    assert "global_directory" in planner_prompt
+
+
+def test_query_planner_selects_document_scope_from_semantic_intent(monkeypatch) -> None:
+    """Policy questions stay local while contact questions may use the global directory."""
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        {
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": '{"queries":["product classification policy"],'
+                            '"document_scopes":["locale_policy"],'
+                            '"answer_shape":"content"}'
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": '{"queries":["Mexico office email"],'
+                            '"document_scopes":["global_directory"]}'
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": '{"queries":["Code of Conduct section"],'
+                            '"document_scopes":["locale_policy"],'
+                            '"answer_shape":"document_structure"}'
+                        }
+                    ]
+                }
+            }
+        },
+    ]
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    policy_plan = _planned_retrieval_plan(
+        "How are ingestible products classified in the policy?",
+        "US",
+        "en",
+        "policy-cid",
+    )
+    directory_plan = _planned_retrieval_plan(
+        "What is the Mexico office email address?",
+        "CA",
+        "en",
+        "directory-cid",
+    )
+    structure_plan = _planned_retrieval_plan(
+        "Which section contains the Code of Conduct?",
+        "NO",
+        "en",
+        "structure-cid",
+    )
+
+    assert policy_plan.include_global_documents is False
+    assert policy_plan.prefer_outline is False
+    assert directory_plan.include_global_documents is True
+    assert directory_plan.prefer_outline is False
+    assert structure_plan.include_global_documents is False
+    assert structure_plan.prefer_outline is True

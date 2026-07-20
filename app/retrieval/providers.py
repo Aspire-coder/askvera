@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -92,6 +93,15 @@ class RetrievalProvider(Protocol):
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         """Return approved source documents for a user question."""
         ...
+
+
+@dataclass(frozen=True)
+class RetrievalQueryPlan:
+    """Runtime search phrases and document scopes selected for one question."""
+
+    queries: list[str]
+    include_global_documents: bool = False
+    prefer_outline: bool = False
 
 
 def _metadata_value(metadata: dict[str, Any], *keys: str) -> str:
@@ -231,8 +241,8 @@ def _retrieval_queries(message: str) -> list[str]:
     return [message, *unique_additions[:4]]
 
 
-def _parse_planned_queries(text: str) -> list[str]:
-    """Parse planner-generated query strings from a compact JSON model response."""
+def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool]:
+    """Parse planner-generated queries and content scopes from compact JSON."""
     stripped = text.strip()
     json_match = re.search(r"\{.*\}", stripped, flags=re.S)
     payload = json.loads(json_match.group(0) if json_match else stripped)
@@ -242,14 +252,26 @@ def _parse_planned_queries(text: str) -> list[str]:
         cleaned = re.sub(r"\s+", " ", str(query)).strip()
         if cleaned and cleaned not in parsed:
             parsed.append(cleaned)
-    return parsed
+    scopes = {
+        str(scope).strip().lower()
+        for scope in payload.get("document_scopes", [])
+        if str(scope).strip()
+    }
+    answer_shape = str(payload.get("answer_shape", "content")).strip().lower()
+    return parsed, "global_directory" in scopes, answer_shape == "document_structure"
 
 
-def _planned_retrieval_queries(message: str, country: str, language: str, correlation_id: str) -> list[str]:
-    """Use a focused model pass to create retrieval queries from the user question."""
+def _planned_retrieval_plan(
+    message: str,
+    country: str,
+    language: str,
+    correlation_id: str,
+) -> RetrievalQueryPlan:
+    """Create multilingual search phrases and choose relevant document scopes."""
     base_queries = _retrieval_queries(message)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
-        return base_queries
+        # Preserve directory availability when the planner is intentionally off.
+        return RetrievalQueryPlan(base_queries, include_global_documents=True)
 
     system_prompt = (
         "You create search queries for a policy knowledge base. Do not answer the user. "
@@ -259,12 +281,19 @@ def _planned_retrieval_queries(message: str, country: str, language: str, correl
         "requalification, recognition, activity, inactivity, termination, and reactivation only when it "
         "preserves the user's intent. "
         "Fix obvious typos. If the question is not in English, include English search phrases too. "
-        "Do not invent facts, numbers, percentages, section IDs, or answers. Return only JSON."
+        "Also choose document scopes. Use locale_policy for company-policy rules, definitions, fees, returns, "
+        "bonuses, ranks, and document-section questions. Add global_directory only when the user asks for an "
+        "office, address, phone number, email address, website, or named staff contact. A market or country name "
+        "inside a policy question does not make it a directory question. Do not invent facts, numbers, percentages, "
+        "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
+        "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
+        "Return only JSON."
     )
     user_prompt = (
         f"Market: {country}\nRequested language: {language}\nUser question:\n{message}\n\n"
         "Return JSON exactly like this: "
-        "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"]}. "
+        "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"],"
+        "\"document_scopes\":[\"locale_policy\"],\"answer_shape\":\"content\"}. "
         f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
     )
     try:
@@ -274,10 +303,10 @@ def _planned_retrieval_queries(message: str, country: str, language: str, correl
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],
         )
         text = response["output"]["message"]["content"][0].get("text", "")
-        planned_queries = _parse_planned_queries(text)
+        planned_queries, include_global_documents, prefer_outline = _parse_planned_query_plan(text)
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
-        return base_queries
+        return RetrievalQueryPlan(base_queries, include_global_documents=True)
 
     merged: list[str] = []
     for query in [message, *planned_queries, *base_queries[1:]]:
@@ -289,8 +318,19 @@ def _planned_retrieval_queries(message: str, country: str, language: str, correl
         correlation_id=correlation_id,
         planned_query_count=len(planned_queries),
         query_count=len(merged),
+        include_global_documents=include_global_documents,
+        prefer_outline=prefer_outline,
     )
-    return merged
+    return RetrievalQueryPlan(
+        merged,
+        include_global_documents=include_global_documents,
+        prefer_outline=prefer_outline,
+    )
+
+
+def _planned_retrieval_queries(message: str, country: str, language: str, correlation_id: str) -> list[str]:
+    """Return only query strings for providers without multiple document scopes."""
+    return _planned_retrieval_plan(message, country, language, correlation_id).queries
 
 
 def _phrase_score(message: str, document_text: str) -> float:

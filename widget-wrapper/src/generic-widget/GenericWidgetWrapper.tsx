@@ -5,7 +5,7 @@ import { Header } from "./Header";
 import { Menu } from "./Menu";
 import { MessageFeed, type LoadingDisplayState } from "./MessageFeed";
 import { RegionSelector } from "./RegionSelector";
-import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetMessage, WidgetTheme } from "./types";
+import type { GenericWidgetRenderState, GenericWidgetWrapperProps, MessageEventPayload, WidgetMessage } from "./types";
 import { WidgetEventBus, widgetEventBus, widgetEventTypes } from "../events";
 import { createSessionManager } from "../services";
 import { buildThemeVars } from "../themes";

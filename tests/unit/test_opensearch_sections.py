@@ -6,9 +6,11 @@ from app.retrieval.opensearch_sections import (
     _directory_record_country_score,
     _directory_text_query,
     _language_key,
+    _outline_text_query,
     _selector_candidates,
     _scope_filter,
 )
+from app.retrieval.providers import RetrievalQueryPlan
 from config import settings
 
 
@@ -114,6 +116,56 @@ def test_search_queries_use_runtime_planner_instead_of_country_aliases(monkeypat
     assert queries == ["Een korte beleidsvraag", "semantic policy query"]
 
 
+def test_search_plan_carries_runtime_document_scope(monkeypatch) -> None:
+    monkeypatch.setattr(
+        opensearch_sections,
+        "_planned_retrieval_plan",
+        lambda message, country, language, correlation_id: RetrievalQueryPlan(
+            [message, "policy definition"],
+            include_global_documents=False,
+            prefer_outline=True,
+        ),
+    )
+
+    plan = OpenSearchSectionProvider()._build_search_plan(
+        "Hva betyr CC?",
+        "NO",
+        "no",
+        "cid",
+    )
+
+    assert plan.queries == ["Hva betyr CC?", "policy definition"]
+    assert plan.include_global_documents is False
+    assert plan.prefer_outline is True
+
+
+def test_outline_chunks_are_prioritized_only_for_structure_questions() -> None:
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [
+            {
+                **_hit("body", "Repeated body mention", 9.0),
+                "_source": {
+                    **_hit("body", "Repeated body mention", 9.0)["_source"],
+                    "chunk_type": "section",
+                },
+            },
+            {
+                **_hit("outline", "Policy document outline", 3.0),
+                "_source": {
+                    **_hit("outline", "Policy document outline", 3.0)["_source"],
+                    "chunk_type": "document_outline",
+                    "content": "22 Code of Conduct",
+                },
+            },
+        ],
+        [],
+        "Which section contains the Code of Conduct?",
+        prefer_outline=True,
+    )
+
+    assert rows[0][0]["id"] == "outline"
+
+
 def test_directory_query_filters_to_active_global_directory_records() -> None:
     filters = _directory_text_query("Where is the India office?")["query"]["bool"]["filter"]
 
@@ -127,6 +179,14 @@ def test_directory_query_filters_to_active_global_directory_records() -> None:
     } in filters
     assert {"term": {"status": "active"}} in filters
     assert {"term": {"document_type": "office_directory"}} in filters
+
+
+def test_outline_query_is_locale_isolated_and_outline_only() -> None:
+    filters = _outline_text_query("Which section contains returns?", "CA", "en")["query"]["bool"]["filter"]
+
+    assert _scope_filter("CA", "en", "locale") in filters
+    assert {"term": {"status": "active"}} in filters
+    assert {"term": {"chunk_type": "document_outline"}} in filters
 
 
 def test_directory_country_score_derives_acronyms_from_record_metadata() -> None:

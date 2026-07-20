@@ -137,3 +137,64 @@ def test_numeric_table_rows_become_country_agnostic_atomic_facts() -> None:
     assert any("Supervisor 10 CC" in fact.content for fact in facts)
     assert all(fact.parent_section_id == "4.01" for fact in facts)
     assert all(fact.metadata["status"] == "active" for fact in facts)
+
+
+def test_definition_entries_inside_large_section_parts_become_atomic_chunks() -> None:
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="NO",
+        language="no",
+        section_id="2-part-1",
+        title="Definisjoner (part 1)",
+        start_page=5,
+        end_page=7,
+        content=(
+            "2 Definisjoner\n"
+            "CC: Case Credit.\n"
+            "Case Credit: Produktenes interne verdi. En verdi som tildeles hvert produkt.\n"
+            "Aktiv FBO: En FBO som oppfyller de månedlige kravene."
+        ),
+        chunk_type="section_part",
+        parent_section_id="2",
+    )
+
+    chunks = extractor._expand_structured_chunks([parent])
+    definitions = [chunk for chunk in chunks if chunk.chunk_type == "definition"]
+
+    assert [chunk.title for chunk in definitions] == ["CC", "Case Credit", "Aktiv FBO"]
+    assert any("tildeles hvert produkt" in chunk.content for chunk in definitions)
+    assert all(chunk.parent_section_id == "2" for chunk in definitions)
+
+
+def test_contents_pages_are_preserved_as_document_outline_chunks() -> None:
+    pages = [
+        (
+            1,
+            "\n".join(
+                [
+                    "1 Introduction",
+                    "2 Definitions",
+                    "3 Preferred Customer",
+                    "4 Marketing Plan",
+                    "5 Manager Status",
+                    "6 Leadership Bonus",
+                ]
+            ),
+        ),
+        (2, "1 Introduction\nApproved policy text."),
+    ]
+
+    outlines = extractor._outline_chunks(
+        pages,
+        source_file="policy.pdf",
+        country="CA",
+        language="en",
+        document_version="",
+        effective_date="",
+        status="active",
+    )
+
+    assert len(outlines) == 1
+    assert outlines[0].section_id == "outline-page-1"
+    assert outlines[0].chunk_type == "document_outline"
+    assert "6 Leadership Bonus" in outlines[0].content

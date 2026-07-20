@@ -1,10 +1,6 @@
 """Models for widget authentication."""
 
-from datetime import UTC, datetime
-
 from pydantic import BaseModel, Field, field_validator
-
-from app.widget_registry.models import WidgetRegistration, WidgetStatus
 
 
 class WidgetInitRequest(BaseModel):

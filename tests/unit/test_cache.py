@@ -21,11 +21,25 @@ def test_build_cache_key_is_version_aware(monkeypatch) -> None:
     assert first != second
 
 
-def test_get_and_set_cache_value() -> None:
+def test_get_and_set_cache_value(monkeypatch) -> None:
     """Cache values are JSON encoded and decoded."""
     client = MagicMock()
     client.get.return_value = '{"response": "ok"}'
-    cache._redis_client = client
+    monkeypatch.setattr(cache, "_redis_client", client)
     assert cache.get_cache_value("k", "cid") == {"response": "ok"}
     cache.set_cache_value("k", {"response": "ok"}, "cid")
     client.setex.assert_called_once()
+
+
+def test_cache_health_reports_not_configured(monkeypatch) -> None:
+    monkeypatch.setattr(cache, "_redis_client", None)
+
+    assert cache.cache_health() == "not_configured"
+
+
+def test_cache_health_pings_configured_client(monkeypatch) -> None:
+    client = MagicMock()
+    monkeypatch.setattr(cache, "_redis_client", client)
+
+    assert cache.cache_health() == "healthy"
+    client.ping.assert_called_once_with()

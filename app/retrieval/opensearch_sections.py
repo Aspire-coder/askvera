@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import unicodedata
 from functools import lru_cache
 from typing import Any
@@ -21,7 +20,7 @@ from services.market_config import get_document_country_codes
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
-from .providers import _planned_retrieval_queries
+from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
@@ -159,6 +158,13 @@ def _directory_text_query(message: str) -> dict[str, Any]:
             }
         },
     }
+
+
+def _outline_text_query(message: str, country: str, language: str) -> dict[str, Any]:
+    """Search document outlines without letting repeated body text crowd them out."""
+    query = _text_query(message, country, language, scope="locale")
+    query["query"]["bool"]["filter"].append({"term": {"chunk_type": "document_outline"}})
+    return query
 
 
 def _directory_record_country_score(message: str, row: dict[str, Any]) -> float:
@@ -321,8 +327,9 @@ class OpenSearchSectionProvider:
         del role
         try:
             client = _client()
-            search_messages = self._build_search_queries(message, country, language, correlation_id)
-            global_search_message = self._global_search_query(message, language, correlation_id)
+            search_plan = self._build_search_plan(message, country, language, correlation_id)
+            search_messages = search_plan.queries
+            global_search_message = ""
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
             for index, search_message in enumerate(search_messages):
@@ -344,16 +351,25 @@ class OpenSearchSectionProvider:
                     for hit in vector_response.get("hits", {}).get("hits", [])
                 )
 
-            global_text_response = client.search(
-                index=settings.OPENSEARCH_INDEX,
-                body=_directory_text_query(global_search_message),
-            )
-            global_vector_response = client.search(
-                index=settings.OPENSEARCH_INDEX,
-                body=_vector_query(global_search_message, country, language, scope="global"),
-            )
-            text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
-            vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
+            if search_plan.prefer_outline:
+                outline_response = client.search(
+                    index=settings.OPENSEARCH_INDEX,
+                    body=_outline_text_query(message, country, language),
+                )
+                text_hits.extend(outline_response.get("hits", {}).get("hits", []))
+
+            if search_plan.include_global_documents:
+                global_search_message = self._global_search_query(message, language, correlation_id)
+                global_text_response = client.search(
+                    index=settings.OPENSEARCH_INDEX,
+                    body=_directory_text_query(global_search_message),
+                )
+                global_vector_response = client.search(
+                    index=settings.OPENSEARCH_INDEX,
+                    body=_vector_query(global_search_message, country, language, scope="global"),
+                )
+                text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
+                vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
         except OpenSearchException:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
@@ -362,6 +378,7 @@ class OpenSearchSectionProvider:
             text_hits,
             vector_hits,
             message,
+            prefer_outline=search_plan.prefer_outline,
         )
         rows = self._select_evidence_rows(message, rows, correlation_id)
 
@@ -377,8 +394,10 @@ class OpenSearchSectionProvider:
             metadata={
                 "provider": "opensearch_section",
                 "candidate_count": len(rows),
-                "search_query_count": len(search_messages) + 1,
-                "global_query_translated": global_search_message != message,
+                "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
+                "global_documents_searched": search_plan.include_global_documents,
+                "outline_preferred": search_plan.prefer_outline,
+                "global_query_translated": bool(global_search_message) and global_search_message != message,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
                     for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
@@ -442,11 +461,26 @@ class OpenSearchSectionProvider:
             return [original]
         return _planned_retrieval_queries(original, country, language, correlation_id)
 
+    def _build_search_plan(
+        self,
+        message: str,
+        country: str,
+        language: str,
+        correlation_id: str,
+    ) -> RetrievalQueryPlan:
+        """Build runtime queries and select only relevant content scopes."""
+        original = message.strip()
+        if not original:
+            return RetrievalQueryPlan([original], include_global_documents=False)
+        return _planned_retrieval_plan(original, country, language, correlation_id)
+
     def _merge_hits(
         self,
         text_hits: list[dict[str, Any]],
         vector_hits: list[dict[str, Any]],
         message: str,
+        *,
+        prefer_outline: bool = False,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
         for hit in text_hits:
@@ -471,7 +505,12 @@ class OpenSearchSectionProvider:
 
         self._normalize_opensearch_ranks(list(merged.values()))
         scored = [
-            (row, _source_score(row, message) + _directory_record_country_score(message, row))
+            (
+                row,
+                _source_score(row, message)
+                + _directory_record_country_score(message, row)
+                + (2.0 if prefer_outline and row.get("chunk_type") == "document_outline" else 0.0),
+            )
             for row in merged.values()
         ]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)

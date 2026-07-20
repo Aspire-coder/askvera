@@ -65,6 +65,36 @@ def load_market_config() -> dict[str, Any]:
     return config
 
 
+def _validate_languages(code: str, languages: object) -> set[str]:
+    """Validate one market's language entries and return enabled codes."""
+    if not isinstance(languages, list) or not languages:
+        raise RuntimeError(f"Invalid market config: {code}.languages must be a non-empty list.")
+
+    enabled_codes: set[str] = set()
+    all_codes: set[str] = set()
+    for index, language in enumerate(languages):
+        if not isinstance(language, dict):
+            raise RuntimeError(f"Invalid market config: {code}.languages[{index}] must be an object.")
+
+        missing_fields = REQUIRED_LANGUAGE_FIELDS - set(language)
+        if missing_fields:
+            raise RuntimeError(
+                f"Invalid market config: {code}.languages[{index}] is missing "
+                f"{', '.join(sorted(missing_fields))}."
+            )
+
+        language_code = str(language["code"])
+        if language_code in all_codes:
+            raise RuntimeError(f"Invalid market config: duplicate language {language_code} in {code}.")
+        all_codes.add(language_code)
+
+        if not isinstance(language["enabled"], bool):
+            raise RuntimeError(f"Invalid market config: {code}.{language_code}.enabled must be true or false.")
+        if language["enabled"]:
+            enabled_codes.add(language_code)
+    return enabled_codes
+
+
 def _validate_market_config(config: dict[str, Any], config_path: Path) -> None:
     """Fail fast when markets.json is malformed."""
     markets = config.get("markets")
@@ -96,33 +126,8 @@ def _validate_market_config(config: dict[str, Any], config_path: Path) -> None:
             raise RuntimeError(f"Invalid market config: duplicate displayOrder {market['displayOrder']}.")
         seen_display_orders.add(market["displayOrder"])
 
-        languages = market["languages"]
-        if not isinstance(languages, list) or not languages:
-            raise RuntimeError(f"Invalid market config: {code}.languages must be a non-empty list.")
-
         default_language = str(market["defaultLanguage"])
-        enabled_language_codes: set[str] = set()
-        all_language_codes: set[str] = set()
-        for language_index, language in enumerate(languages):
-            if not isinstance(language, dict):
-                raise RuntimeError(f"Invalid market config: {code}.languages[{language_index}] must be an object.")
-
-            missing_language_fields = REQUIRED_LANGUAGE_FIELDS - set(language)
-            if missing_language_fields:
-                raise RuntimeError(
-                    f"Invalid market config: {code}.languages[{language_index}] is missing "
-                    f"{', '.join(sorted(missing_language_fields))}."
-                )
-
-            language_code = str(language["code"])
-            if language_code in all_language_codes:
-                raise RuntimeError(f"Invalid market config: duplicate language {language_code} in {code}.")
-            all_language_codes.add(language_code)
-
-            if not isinstance(language["enabled"], bool):
-                raise RuntimeError(f"Invalid market config: {code}.{language_code}.enabled must be true or false.")
-            if language["enabled"]:
-                enabled_language_codes.add(language_code)
+        enabled_language_codes = _validate_languages(code, market["languages"])
 
         if market["enabled"] and default_language not in enabled_language_codes:
             raise RuntimeError(

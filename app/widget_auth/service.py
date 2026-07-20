@@ -6,13 +6,14 @@ from time import time
 from uuid import uuid4
 
 from config import settings
+from app.widget_registry.models import WidgetRegistration
 from app.widget_registry.service import WidgetRegistryService, widget_registry_service
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
 from services.session_service import can_resume_session
 
 from .jwt import WidgetTokenError, decode_widget_token, encode_widget_token, revoke_widget_token_id
-from .models import WidgetAuthClaims, WidgetInitRequest, WidgetInitResponse, WidgetRefreshResponse, WidgetRegistration
+from .models import WidgetAuthClaims, WidgetInitRequest, WidgetInitResponse, WidgetRefreshResponse
 from .origin_validator import is_origin_allowed
 
 LOGGER = get_logger("app.widget_auth.service")
@@ -158,5 +159,6 @@ class WidgetAuthService:
         )
         response = self._response_from_claims(claims)
         return WidgetRefreshResponse(**response.model_dump())
+
 
 widget_auth_service = WidgetAuthService(widget_registry_service)

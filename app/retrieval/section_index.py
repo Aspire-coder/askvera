@@ -25,6 +25,7 @@ from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.section_index")
 
+
 def _tokens(text_value: str) -> list[str]:
     """Return Unicode word tokens in source order without language-specific rules."""
     tokens: list[str] = []

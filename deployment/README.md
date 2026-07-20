@@ -89,5 +89,6 @@ The widget is built separately and deployed to static hosting for `chat.vera-api
 ```bash
 cd widget-wrapper
 npm ci
-npm run build:demo
+npm run build
+npm run validate-widget
 ```

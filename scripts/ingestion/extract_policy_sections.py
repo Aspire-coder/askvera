@@ -27,6 +27,9 @@ LIST_ITEM_RE = re.compile(
     r"(?m)^(?P<label>\([a-z0-9]+\)|[a-z][.)])\s+(?P<title>.+)$",
     flags=re.IGNORECASE,
 )
+DEFINITION_ENTRY_RE = re.compile(
+    r"(?m)^(?P<label>[^\n:]{2,100}?)\s*:\s+(?P<body>[^\n].*)$"
+)
 HEADER_RE = re.compile(r"Company Policies and the Code of Professional Conduct Revised \d+")
 PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
@@ -91,14 +94,24 @@ def _clean_page_text(text: str) -> str:
     return "\n".join(lines)
 
 
-def _read_pages(pdf_path: Path) -> list[tuple[int, str]]:
+def _read_pdf_pages(pdf_path: Path) -> list[tuple[int, str]]:
+    """Read and clean every text-bearing PDF page."""
     reader = PdfReader(str(pdf_path))
     pages: list[tuple[int, str]] = []
     for index, page in enumerate(reader.pages, start=1):
         text = _clean_page_text(page.extract_text() or "")
-        if text and not _looks_like_contents_page(text):
+        if text:
             pages.append((index, text))
     return pages
+
+
+def _read_pages(pdf_path: Path) -> list[tuple[int, str]]:
+    """Read policy-body pages while keeping outlines out of section parsing."""
+    return [
+        (page_number, text)
+        for page_number, text in _read_pdf_pages(pdf_path)
+        if not _looks_like_contents_page(text)
+    ]
 
 
 def _looks_like_contents_page(text: str) -> bool:
@@ -147,7 +160,12 @@ def extract_sections(
     effective_date: str = "",
     status: str = "active",
 ) -> list[PolicySection]:
-    pages = _read_pages(pdf_path)
+    all_pages = _read_pdf_pages(pdf_path)
+    pages = [
+        (page_number, text)
+        for page_number, text in all_pages
+        if not _looks_like_contents_page(text)
+    ]
     full_text_parts: list[str] = []
     page_offsets: list[tuple[int, int, int]] = []
     cursor = 0
@@ -194,7 +212,47 @@ def extract_sections(
             )
         )
 
-    return _ensure_unique_section_ids(_expand_structured_chunks(sections))
+    outlines = _outline_chunks(
+        all_pages,
+        source_file=pdf_path.name,
+        country=country,
+        language=language,
+        document_version=document_version,
+        effective_date=effective_date,
+        status=status,
+    )
+    return _ensure_unique_section_ids([*outlines, *_expand_structured_chunks(sections)])
+
+
+def _outline_chunks(
+    pages: list[tuple[int, str]],
+    *,
+    source_file: str,
+    country: str,
+    language: str,
+    document_version: str,
+    effective_date: str,
+    status: str,
+) -> list[PolicySection]:
+    """Preserve table-of-contents pages for section-location questions."""
+    return [
+        PolicySection(
+            source_file=source_file,
+            country=country,
+            language=language,
+            section_id=f"outline-page-{page_number}",
+            title="Policy document outline",
+            start_page=page_number,
+            end_page=page_number,
+            content=text,
+            document_version=document_version,
+            effective_date=effective_date,
+            status=status,
+            chunk_type="document_outline",
+        )
+        for page_number, text in pages
+        if _looks_like_contents_page(text)
+    ]
 
 
 def _ensure_unique_section_ids(sections: list[PolicySection]) -> list[PolicySection]:
@@ -312,6 +370,45 @@ def _contextual_content(section: PolicySection, content: str) -> str:
     return f"Section {section.section_id}: {section.title}\n{content.strip()}"
 
 
+def _definition_chunks(section: PolicySection) -> list[PolicySection]:
+    """Create atomic chunks from language-neutral ``label: definition`` entries."""
+    matches = [
+        match
+        for match in DEFINITION_ENTRY_RE.finditer(section.content)
+        if any(character.isalpha() for character in match.group("label"))
+        and not SECTION_RE.match(match.group(0))
+        and not LIST_ITEM_RE.match(match.group(0))
+    ]
+    if not matches:
+        return []
+
+    parent_section_id = section.parent_section_id or section.section_id
+    chunks: list[PolicySection] = []
+    for index, match in enumerate(matches, start=1):
+        end = matches[index].start() if index < len(matches) else len(section.content)
+        content = section.content[match.start() : end].strip()
+        if len(content) < 8:
+            continue
+        chunks.append(
+            PolicySection(
+                source_file=section.source_file,
+                country=section.country,
+                language=section.language,
+                section_id=f"{section.section_id}-definition-{index}",
+                title=_normalize_title(match.group("label")),
+                start_page=section.start_page,
+                end_page=section.end_page,
+                content=_contextual_content(section, content),
+                document_version=section.document_version,
+                effective_date=section.effective_date,
+                status=section.status,
+                chunk_type="definition",
+                parent_section_id=parent_section_id,
+            )
+        )
+    return chunks
+
+
 def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySection]:
     """Add generic atomic chunks for list items and numeric table rows.
 
@@ -323,6 +420,7 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
     expanded: list[PolicySection] = []
     for section in sections:
         expanded.append(section)
+        expanded.extend(_definition_chunks(section))
         if section.chunk_type == "section_part":
             continue
         matches = list(LIST_ITEM_RE.finditer(section.content))

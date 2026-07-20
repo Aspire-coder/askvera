@@ -35,6 +35,7 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
             kept_lines.append(cleaned)
     return "\n".join(kept_lines)
 
+
 def _pii_language_code(language: str) -> str | None:
     """Return a supported Comprehend PII language code."""
     normalized = (language or settings.COMPREHEND_PII_LANGUAGE_CODE).split("-", 1)[0].lower()

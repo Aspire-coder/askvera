@@ -103,6 +103,14 @@ def close_cache(correlation_id: str = "shutdown") -> None:
         LOGGER.info("cache_closed", correlation_id=correlation_id)
 
 
+def cache_health() -> str:
+    """Return cache health without exposing the module's client internals."""
+    if _redis_client is None:
+        return "not_configured"
+    _redis_client.ping()
+    return "healthy"
+
+
 def build_cache_key(message: str, country: str, language: str, role: str) -> str:
     """Build a versioned locale-aware SHA256 cache key."""
     versions = "|".join(
