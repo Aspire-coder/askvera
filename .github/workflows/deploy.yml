@@ -26,6 +26,9 @@ jobs:
       - name: Compile Python source
         run: python -m compileall app api config services utils scripts tests
 
+      - name: Lint Python source
+        run: python -m flake8 api app config services utils main.py
+
       - name: Test
         run: python -m pytest tests/unit -q
 
@@ -39,11 +42,20 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: widget-wrapper/package-lock.json
+          cache-dependency-path: |
+            widget-wrapper/package-lock.json
+            admin-portal/package-lock.json
 
-      - name: Build widget demo
+      - name: Build production widget
         working-directory: widget-wrapper
         run: |
           npm ci
           npm run typecheck
-          npm run build:demo
+          npm run build
+          npm run validate-widget
+
+      - name: Build admin portal
+        working-directory: admin-portal
+        run: |
+          npm ci
+          npm run build

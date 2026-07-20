@@ -1,0 +1,4 @@
+[flake8]
+exclude = .git,.pytest-*,admin-portal,widget-wrapper
+extend-ignore = E203,E501,W503
+max-complexity = 15
