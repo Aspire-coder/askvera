@@ -206,29 +206,29 @@ function isConsentInstructionMessage(message: WidgetMessage): boolean {
   return message.id.includes("consent-required");
 }
 
-function presentChatError(error: unknown, assistantName = "AskVera"): ChatErrorPresentation {
+function presentChatError(error: unknown, localized: ReturnType<typeof getWidgetCopy>, assistantName = "AskVera"): ChatErrorPresentation {
   if (error instanceof ApiTimeoutError) {
-    return { category: "timeout", title: `${assistantName} is taking longer than expected`, body: "Please try again.", actionLabel: "Retry" };
+    return { category: "timeout", title: assistantName, body: localized.slowResponse, actionLabel: localized.retry };
   }
   if (error instanceof ApiNetworkError) {
-    return { category: "network", title: "Unable to reach AskVera", body: "Please check your connection and try again.", actionLabel: "Retry" };
+    return { category: "network", title: assistantName, body: localized.retrying, actionLabel: localized.retry };
   }
   if (error instanceof BackendUnavailableError) {
-    return { category: "backend_unavailable", title: `${assistantName} is temporarily unavailable`, body: "Please try again in a few moments.", actionLabel: "Retry" };
+    return { category: "backend_unavailable", title: assistantName, body: localized.unavailable, actionLabel: localized.retry };
   }
   if (error instanceof ApiRequestError && error.code === "CONSENT_REQUIRED") {
-    return { category: "consent_required", title: "Consent is required", body: "Please accept the legal documents before chatting." };
+    return { category: "consent_required", title: localized.privacyTitle, body: localized.consentRequired };
   }
   if (error instanceof ApiRequestError && error.status === 429) {
-    return { category: "rate_limited", title: `${assistantName} is receiving a lot of requests`, body: "Please wait a moment, then try again.", actionLabel: "Retry" };
+    return { category: "rate_limited", title: assistantName, body: localized.waiting, actionLabel: localized.retry };
   }
   if (error instanceof ApiRequestError && (error.status === 400 || error.status === 422)) {
-    return { category: "validation", title: `${assistantName} could not send that request`, body: "Please review your message and try again.", actionLabel: "Retry" };
+    return { category: "validation", title: assistantName, body: localized.unavailable, actionLabel: localized.retry };
   }
   if (error instanceof ApiUnauthorizedError) {
-    return { category: "validation", title: `${assistantName} cannot complete this request`, body: "Please refresh your session or try again.", actionLabel: "Retry" };
+    return { category: "validation", title: assistantName, body: localized.unavailable, actionLabel: localized.retry };
   }
-  return { category: "unknown", title: "Something went wrong", body: "Please try again in a few moments.", actionLabel: "Retry" };
+  return { category: "unknown", title: assistantName, body: localized.unavailable, actionLabel: localized.retry };
 }
 
 function ErrorMessageContent({ presentation, onRetry }: { presentation: ChatErrorPresentation; onRetry?: () => void }) {
@@ -288,6 +288,7 @@ export function WidgetRuntime({
     if (typeof window !== "undefined") {
       writeLocalePreference(window.localStorage, locale, widgetId);
     }
+    setApiConfig(null);
     setSelectedLocale(locale);
   }, [widgetId]);
 
@@ -361,9 +362,19 @@ export function WidgetRuntime({
         ...built.genericConfig,
         brandName: "AskVera",
         assistantName: "AskVera",
-        launcherTitle: "Open AskVera",
+        assistantSubtitle: localized.assistantSubtitle,
+        launcherTitle: localized.openAssistant,
         welcomeText: localized.welcomeBody,
         footerText: localized.footer,
+        loadingText: localized.thinking,
+        loadingMessages: {
+          thinking: localized.thinking,
+          searching: localized.searching,
+          generating: localized.generating,
+          reconnecting: localized.retrying,
+          slowResponse: localized.slowResponse
+        },
+        successText: localized.privacySaved,
         onboarding: {
           eyebrow: localized.welcomeEyebrow,
           title: localized.welcomeTitle,
@@ -377,6 +388,14 @@ export function WidgetRuntime({
           helpful: localized.helpful,
           notHelpful: localized.notHelpful
         },
+        citationLabels: {
+          references: localized.references,
+          sourcesUsed: localized.sourcesUsed,
+          primarySource: localized.primarySource,
+          supportingSource: localized.supportingSource,
+          source: localized.source,
+          section: localized.section
+        },
         composerStatus: {
           consentRequired: localized.consentRequired,
           unavailable: localized.unavailable,
@@ -384,17 +403,48 @@ export function WidgetRuntime({
         },
         labels: {
           ...built.genericConfig.labels,
+          launcherAriaLabel: localized.openAssistant,
+          closeAriaLabel: localized.closeAssistant,
+          menuAriaLabel: localized.openMenu,
+          countryLabel: localized.market,
+          languageLabel: localized.language,
+          countryPlaceholder: localized.selectMarket,
+          languagePlaceholder: localized.selectLanguage,
           acceptConsentLabel: localized.accept,
           rejectConsentLabel: localized.decline,
+          messageInputLabel: localized.inputPlaceholder,
           messageInputPlaceholder: localized.inputPlaceholder,
-          sendMessageLabel: localized.send
+          sendMessageLabel: localized.send,
+          legalLinksLabel: localized.reviewDocuments,
+          childrenRegionLabel: localized.openAssistant,
+          successDismissLabel: localized.closeAssistant,
+          panelAriaLabel: localized.openAssistant,
+          onboardingAriaLabel: localized.welcomeEyebrow,
+          attachFileLabel: localized.inputPlaceholder,
+          composerHint: localized.composerHint,
+          userRoleLabel: localized.you,
+          systemRoleLabel: localized.system,
+          messageActionsLabel: localized.copy,
+          copyResponseLabel: localized.copy,
+          markHelpfulLabel: localized.helpful,
+          markNotHelpfulLabel: localized.notHelpful,
+          responseCopiedLabel: localized.copied,
+          legalReviewTitle: localized.reviewDocuments,
+          saveDocumentLabel: localized.saveAsPdf,
+          closeLegalDocumentLabel: localized.closeLegal,
+          savingConsentLabel: localized.privacySaving
         },
         menu: { ...built.genericConfig.menu, newChat: localized.newChat, endChat: localized.endChat, confirmEndChat: localized.confirmEndChat, cancelEndChat: localized.cancelEndChat, escalate: localized.support },
         consent: {
           ...built.genericConfig.consent,
+          eyebrow: localized.privacyEyebrow,
           title: localized.privacyTitle,
           body: localized.privacyBody,
-          acknowledgmentLabel: localized.privacyAcknowledgment
+          acknowledgmentLabel: localized.privacyAcknowledgment,
+          loadingText: localized.privacyLoading,
+          declineTitle: localized.declineTitle,
+          declineBody: localized.declineBody,
+          declineActionLabel: localized.reviewPrivacy
         }
       }
     };
@@ -479,7 +529,7 @@ export function WidgetRuntime({
       .catch((error) => {
         if (!active) return;
         widgetEventBus.emit(widgetEventTypes.BACKEND_DISCONNECTED, { error: describeApiError(error) });
-        upsertMessage({ id: "config-warning", role: "system", content: `Widget configuration could not load. ${describeApiError(error)}` });
+        upsertMessage({ id: "config-warning", role: "system", content: getWidgetCopy(selectedLocale.language).unavailable });
       });
     return () => {
       active = false;
@@ -520,7 +570,7 @@ export function WidgetRuntime({
       const assistantMessage: WidgetMessage = {
         id: buildId("assistant"),
         role: "assistant",
-        content: envelope.data?.response || "I could not find a response for that question.",
+        content: envelope.data?.response || localized.unavailable,
         metadata: {
           sources: envelope.data?.sources || [],
           confidence: envelope.data?.confidence,
@@ -541,16 +591,17 @@ export function WidgetRuntime({
     } catch (error) {
       if (conversationGeneration !== conversationGenerationRef.current) return;
       if (error instanceof ApiRequestError && error.code === "CONSENT_REQUIRED") {
+        const localized = getWidgetCopy(payload.selectedLanguage);
         setPendingMessage(payload);
         setConsentRequiredSignal((value) => value + 1);
-        appendMessage({ id: buildId("consent-required"), role: "system", content: <ErrorMessageContent presentation={presentChatError(error, config.assistantName || config.brandName)} /> });
+        appendMessage({ id: buildId("consent-required"), role: "system", content: <ErrorMessageContent presentation={presentChatError(error, localized, config.assistantName || config.brandName)} /> });
         return;
       }
       if (error instanceof ApiRequestError && (error.code === "SESSION_EXPIRED" || error.code === "SESSION_MISMATCH")) {
         setLifecycleResetSignal((value) => value + 1);
         return;
       }
-      const presentation = presentChatError(error, config.assistantName || config.brandName);
+      const presentation = presentChatError(error, getWidgetCopy(payload.selectedLanguage), config.assistantName || config.brandName);
       emitErrorEvent(error, presentation, payload);
       appendMessage({
         id: buildId("api-error"),

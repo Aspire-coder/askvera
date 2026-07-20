@@ -26,9 +26,9 @@ function normalizeSources(value: unknown): RenderedSource[] {
   return sources;
 }
 
-function sourceTitle(source: RenderedSource): string {
+function sourceTitle(source: RenderedSource, fallback: string): string {
   if (source.title) return source.title;
-  if (!source.uri) return "Source";
+  if (!source.uri) return fallback;
   try {
     return decodeURIComponent(new URL(source.uri).pathname.split("/").filter(Boolean).pop() || source.uri);
   } catch {
@@ -43,28 +43,35 @@ function formatPage(page?: string): string | null {
 }
 
 export function CitationRenderer({
-  sources
+  sources,
+  labels
 }: {
   sources: unknown;
+  labels?: WidgetCitationLabels;
 }) {
   const normalized = normalizeSources(sources);
   if (!normalized.length) return null;
+  const copy = labels || {
+    references: "References", sourcesUsed: "Sources used for this answer",
+    primarySource: "Primary source", supportingSource: "Supporting source",
+    source: "Source", section: "Section"
+  };
 
   return (
-    <details className="gw-citations" aria-label="References">
-      <summary className="gw-citations-title">Sources used for this answer ({normalized.length})</summary>
+    <details className="gw-citations" aria-label={copy.references}>
+      <summary className="gw-citations-title">{copy.sourcesUsed} ({normalized.length})</summary>
       <div className="gw-citation-list">
         {normalized.map((source, index) => {
-          const title = sourceTitle(source);
+          const title = sourceTitle(source, copy.source);
           const pageLabel = formatPage(source.page);
           return (
             <article key={`${title}-${index}`} className="gw-citation-card">
               <div className="gw-citation-heading">
-                <span className="gw-citation-kind">{index === 0 ? "Primary source" : "Supporting source"}</span>
+                <span className="gw-citation-kind">{index === 0 ? copy.primarySource : copy.supportingSource}</span>
                 <span className="gw-citation-document">{title}</span>
               </div>
               <div className="gw-citation-meta">
-                {source.section ? <span className="gw-citation-section">Section {source.section}</span> : null}
+                {source.section ? <span className="gw-citation-section">{copy.section} {source.section}</span> : null}
                 {pageLabel ? <span className="gw-citation-page">{pageLabel}</span> : null}
               </div>
               {source.sectionTitle ? <p>{source.sectionTitle}</p> : null}
@@ -76,3 +83,4 @@ export function CitationRenderer({
     </details>
   );
 }
+import type { WidgetCitationLabels } from "../generic-widget/types";

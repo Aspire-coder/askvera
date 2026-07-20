@@ -411,7 +411,7 @@ export function GenericWidgetWrapper({
   useEffect(() => {
     if (!consentRequiredSignal) return;
     setConsentDeclined(false);
-    dispatch({ type: "REQUIRE_CONSENT", error: "Please review and accept the legal documents before chatting." });
+      dispatch({ type: "REQUIRE_CONSENT", error: config.composerStatus?.consentRequired || "Please review and accept the legal documents before chatting." });
     events.emit(widgetEventTypes.CONSENT_REQUIRED, {
       visitorId,
       sessionId,
@@ -636,7 +636,7 @@ export function GenericWidgetWrapper({
           className={`gw-panel ${showSuccess ? "gw-panel-has-success" : ""} ${consentAccepted ? "gw-panel-consented" : "gw-panel-needs-consent"}`}
           role="dialog"
           aria-modal="false"
-          aria-label={`${config.brandName} assistant widget`}
+          aria-label={config.labels.panelAriaLabel || `${config.brandName} assistant widget`}
           tabIndex={-1}
           onKeyDown={(event) => {
             if (event.key === "Escape") closeWidget();
@@ -663,7 +663,7 @@ export function GenericWidgetWrapper({
           ) : null}
           <div className="gw-content">
             {consentRequired && !consentDeclined ? (
-              <section className="gw-onboarding-intro" aria-label="Welcome">
+              <section className="gw-onboarding-intro" aria-label={config.labels.onboardingAriaLabel || "Welcome"}>
                 <div className="gw-onboarding-mark" aria-hidden="true">
                   {config.logoUrl ? <img src={config.logoUrl} alt="" /> : <span>{introAssistantName.trim().slice(0, 1) || "A"}</span>}
                 </div>
@@ -738,7 +738,7 @@ export function GenericWidgetWrapper({
           <form className={`gw-composer ${composerDisabled ? "gw-composer-disabled" : ""}`} onSubmit={handleSubmit}>
             <label className="gw-sr-only" htmlFor="gw-message-input">{config.labels.messageInputLabel}</label>
             <div className="gw-composer-shell">
-              <button type="button" className="gw-composer-tool" aria-label="Attach a file" disabled>
+              <button type="button" className="gw-composer-tool" aria-label={config.labels.attachFileLabel || "Attach a file"} disabled>
                 <span aria-hidden="true">+</span>
               </button>
               <textarea
@@ -755,7 +755,7 @@ export function GenericWidgetWrapper({
               <button type="submit" className="gw-primary-button" disabled={!canSendMessage}>{config.labels.sendMessageLabel}</button>
             </div>
             {composerDisabledReason ? <div id="gw-composer-status" className="gw-composer-status">{composerDisabledReason}</div> : null}
-            <div id="gw-composer-hint" className="gw-composer-hint">Enter to send. Shift + Enter for a new line.</div>
+            <div id="gw-composer-hint" className="gw-composer-hint">{config.labels.composerHint || "Enter to send. Shift + Enter for a new line."}</div>
           </form>
         </section>
       ) : null}

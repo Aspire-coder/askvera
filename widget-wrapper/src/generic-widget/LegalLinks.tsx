@@ -96,14 +96,14 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
   return (
     <>
       <nav className="gw-legal" aria-label={config.labels.legalLinksLabel}>
-        <div className="gw-legal-title">Review required documents</div>
+        <div className="gw-legal-title">{config.labels.legalReviewTitle || "Review required documents"}</div>
         {config.policyLinks.map((link) => (
           <div key={link.id} className="gw-legal-item">
             <span aria-hidden="true">{"\u2713"}</span>
             {link.html ? (
               <div className="gw-legal-document-actions">
                 <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">{link.label}</button>
-                <button type="button" className="gw-legal-print-button" onClick={() => printDocument(link.id)} aria-label={`Save ${link.label} as PDF`} title="Save as PDF">
+                <button type="button" className="gw-legal-print-button" onClick={() => printDocument(link.id)} aria-label={`${config.labels.saveDocumentLabel || "Save as PDF"}: ${link.label}`} title={config.labels.saveDocumentLabel || "Save as PDF"}>
                   <DownloadIcon />
                 </button>
               </div>
@@ -130,7 +130,7 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
           >
             <header className="gw-legal-modal-header">
               <h3 id={modalTitleId}>{activeDocument.label}</h3>
-              <button ref={closeButtonRef} type="button" className="gw-icon-button" onClick={closeDocument} aria-label="Close legal document">
+              <button ref={closeButtonRef} type="button" className="gw-icon-button" onClick={closeDocument} aria-label={config.labels.closeLegalDocumentLabel || "Close legal document"}>
                 <span aria-hidden="true">{"\u00d7"}</span>
               </button>
             </header>

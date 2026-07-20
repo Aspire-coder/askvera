@@ -48,7 +48,7 @@ export function ConsentPanel({
       <div className="gw-consent-actions">
         <button type="button" className="gw-consent-skip" onClick={onReject} disabled={accepting}>{config.labels.rejectConsentLabel}</button>
         <button type="button" className="gw-primary-button" onClick={onAccept} disabled={acceptDisabled}>
-          {accepting ? "Saving..." : config.labels.acceptConsentLabel}
+          {accepting ? config.labels.savingConsentLabel || "Saving..." : config.labels.acceptConsentLabel}
         </button>
       </div>
     </section>

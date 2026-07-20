@@ -8,8 +8,8 @@ export type LoadingDisplayState = "hidden" | "typing" | "skeleton" | "slow" | "r
 
 function roleLabel(role: MessageRole, config: GenericWidgetConfig): string {
   if (role === "assistant") return config.assistantName || config.brandName;
-  if (role === "user") return "You";
-  return "System";
+  if (role === "user") return config.labels.userRoleLabel || "You";
+  return config.labels.systemRoleLabel || "System";
 }
 
 function assistantMark(config: GenericWidgetConfig): string {
@@ -50,12 +50,14 @@ async function copyTextToClipboard(text: string) {
 
 function MessageActions({
   message,
+  config,
   state,
   onCopyMessage,
   onMessageFeedback,
   onRequestSupport
 }: {
   message: WidgetMessage;
+  config: GenericWidgetConfig;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
@@ -92,15 +94,15 @@ function MessageActions({
   };
 
   return (
-    <div className="gw-message-actions" aria-label="Message actions">
-      <button type="button" className="gw-message-action" onClick={handleCopy} disabled={!copyText} aria-label="Copy assistant response">
+    <div className="gw-message-actions" aria-label={config.labels.messageActionsLabel || "Message actions"}>
+      <button type="button" className="gw-message-action" onClick={handleCopy} disabled={!copyText} aria-label={config.labels.copyResponseLabel || "Copy assistant response"}>
         {copied ? ((message.metadata?.actionCopiedLabel as string) || "Copied") : ((message.metadata?.actionCopyLabel as string) || "Copy")}
       </button>
       <button
         type="button"
         className={`gw-message-action ${rating === 1 ? "gw-message-action-active" : ""}`}
         onClick={() => void handleFeedback(1)}
-        aria-label="Mark response as helpful"
+        aria-label={config.labels.markHelpfulLabel || "Mark response as helpful"}
         aria-pressed={rating === 1}
       >
         {(message.metadata?.actionHelpfulLabel as string) || "Helpful"}
@@ -109,7 +111,7 @@ function MessageActions({
         type="button"
         className={`gw-message-action ${rating === -1 ? "gw-message-action-active" : ""}`}
         onClick={() => void handleFeedback(-1)}
-        aria-label="Mark response as not helpful"
+        aria-label={config.labels.markNotHelpfulLabel || "Mark response as not helpful"}
         aria-pressed={rating === -1}
       >
         {(message.metadata?.actionNotHelpfulLabel as string) || "Not helpful"}
@@ -123,7 +125,7 @@ function MessageActions({
               : ((message.metadata?.supportLabel as string) || "Request support")}
         </button>
       ) : null}
-      {copied ? <span className="gw-sr-only" role="status">Response copied.</span> : null}
+      {copied ? <span className="gw-sr-only" role="status">{config.labels.responseCopiedLabel || "Response copied."}</span> : null}
     </div>
   );
 }
@@ -161,10 +163,11 @@ function MessageCard({
           <span className="gw-message-author">{label}</span>
         </header>
         <div className="gw-message-body">{content}</div>
-        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} /> : null}
+        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} labels={config.citationLabels} /> : null}
         {isAssistant ? (
           <MessageActions
             message={message}
+            config={config}
             state={state}
             onCopyMessage={onCopyMessage}
             onMessageFeedback={onMessageFeedback}

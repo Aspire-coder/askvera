@@ -95,6 +95,21 @@ export type WidgetLabels = {
   legalLinksLabel: string;
   childrenRegionLabel: string;
   successDismissLabel: string;
+  panelAriaLabel?: string;
+  onboardingAriaLabel?: string;
+  attachFileLabel?: string;
+  composerHint?: string;
+  userRoleLabel?: string;
+  systemRoleLabel?: string;
+  messageActionsLabel?: string;
+  copyResponseLabel?: string;
+  markHelpfulLabel?: string;
+  markNotHelpfulLabel?: string;
+  responseCopiedLabel?: string;
+  legalReviewTitle?: string;
+  saveDocumentLabel?: string;
+  closeLegalDocumentLabel?: string;
+  savingConsentLabel?: string;
 };
 
 export type WidgetMenuLabels = {
@@ -133,6 +148,15 @@ export type WidgetLoadingMessages = {
   slowResponse?: ReactNode;
 };
 
+export type WidgetCitationLabels = {
+  references: string;
+  sourcesUsed: string;
+  primarySource: string;
+  supportingSource: string;
+  source: string;
+  section: string;
+};
+
 export type GenericWidgetConfig = {
   brandName: string;
   assistantName?: string;
@@ -159,6 +183,7 @@ export type GenericWidgetConfig = {
     helpful: string;
     notHelpful: string;
   };
+  citationLabels?: WidgetCitationLabels;
   composerStatus?: {
     consentRequired: string;
     unavailable: string;
