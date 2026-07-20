@@ -23,7 +23,6 @@ import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState
 import { authenticateWidget, renewWidgetAuth } from "./auth";
 import { getWidgetCopy } from "../localization/widgetCopy";
 import {
-  localePreferenceStorageKey,
   readLocalePreference,
   writeLocalePreference,
   type LocalePreference
@@ -132,13 +131,21 @@ function sessionIdFromToken(token?: string): string | undefined {
   }
 }
 
-function storedLocale(widgetId?: string): LocalePreference {
+function storedLocale(widgetId?: string, expectedSessionId?: string): LocalePreference {
   if (typeof window === "undefined") return { country: "US", language: "en" };
   try {
-    const preference = readLocalePreference(window.localStorage, widgetId);
-    if (preference) return preference;
-    const metadata = JSON.parse(window.localStorage.getItem("askvera_session_metadata") || "{}") as Record<string, string>;
-    const migrated = { country: metadata.country || "US", language: metadata.language || "en" };
+    const rawMetadata = window.localStorage.getItem("askvera_session_metadata");
+    if (rawMetadata) {
+      const metadata = JSON.parse(rawMetadata) as Record<string, string>;
+      if (!expectedSessionId || metadata.sessionId === expectedSessionId) {
+        return { country: metadata.country || "US", language: metadata.language || "en" };
+      }
+    }
+    if (!expectedSessionId) {
+      const preference = readLocalePreference(window.localStorage, widgetId);
+      if (preference) return preference;
+    }
+    const migrated = { country: "US", language: "en" };
     writeLocalePreference(window.localStorage, migrated, widgetId);
     return migrated;
   } catch {
@@ -274,7 +281,7 @@ export function WidgetRuntime({
   sdkMessage
 }: WidgetRuntimeProps) {
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
-  const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(() => storedLocale(widgetId));
+  const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(() => storedLocale(widgetId, sessionIdFromToken(authToken)));
   const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken)));
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
@@ -297,22 +304,6 @@ export function WidgetRuntime({
     setSelectedLocale(locale);
   }, [widgetId]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storageKey = localePreferenceStorageKey(widgetId);
-    const synchronizeLocale = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== storageKey || !event.newValue) return;
-      const preference = readLocalePreference(window.localStorage, widgetId);
-      if (!preference) return;
-      setSelectedLocale((current) =>
-        current.country === preference.country && current.language === preference.language
-          ? current
-          : preference
-      );
-    };
-    window.addEventListener("storage", synchronizeLocale);
-    return () => window.removeEventListener("storage", synchronizeLocale);
-  }, [widgetId]);
   const activeAuthTokenRef = useRef(authToken);
   const authRefreshPromiseRef = useRef<Promise<string | undefined> | null>(null);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
@@ -731,6 +722,9 @@ export function WidgetRuntime({
         setPendingMessage(null);
         setMessages([]);
         window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: freshSessionId, messages: [] }));
+        const defaultLocale = { country: "US", language: "en" };
+        writeLocalePreference(window.localStorage, defaultLocale, widgetId);
+        setSelectedLocale(defaultLocale);
         firstMessageSentRef.current = false;
         return { sessionId: freshSessionId };
       }}
