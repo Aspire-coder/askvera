@@ -1,13 +1,5 @@
 import type { GenericWidgetConfig, WidgetCountryOption, WidgetLanguageOption } from "./types";
 
-function displayName(type: "region" | "language", code: string, locale: string, fallback: string): string {
-  try {
-    return new Intl.DisplayNames([locale], { type }).of(code) || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 export function RegionSelector({
   config,
   countries,
@@ -25,7 +17,6 @@ export function RegionSelector({
   onCountryChange: (countryCode: string) => void;
   onLanguageChange: (languageCode: string) => void;
 }) {
-  const displayLocale = selectedLanguageCode || config.defaultLanguageCode || "en";
   return (
     <section className="gw-section gw-region-selector">
       <label className="gw-field">
@@ -34,7 +25,7 @@ export function RegionSelector({
           {config.labels.countryPlaceholder ? <option value="">{config.labels.countryPlaceholder}</option> : null}
           {countries.map((country) => (
             <option key={country.code} value={country.code}>
-              {displayName("region", country.code, displayLocale, country.label)}
+              {country.label}
             </option>
           ))}
         </select>
@@ -49,7 +40,7 @@ export function RegionSelector({
           {config.labels.languagePlaceholder ? <option value="">{config.labels.languagePlaceholder}</option> : null}
           {languages.map((language) => (
             <option key={language.code} value={language.code}>
-              {displayName("language", language.code, displayLocale, language.label)}
+              {language.label}
             </option>
           ))}
         </select>
