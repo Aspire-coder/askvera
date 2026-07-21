@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
-from app.models.bedrock_provider import BedrockClaudeProvider
+from app.models.bedrock_provider import BedrockClaudeProvider, _reset_circuit_breaker
 from app.prompts import PromptBuilder
 from app.retrieval import RetrievedDocument, RetrievalResult, confidence_from_sources
-from utils.exceptions import LowConfidenceError
+from utils.exceptions import BedrockServiceError, LowConfidenceError
 
 
 def test_build_prompt_replaces_all_variables() -> None:
@@ -212,6 +213,66 @@ def test_bedrock_provider_raises_when_no_sources_are_available() -> None:
             retrieval_result,
             "cid",
         )
+
+
+def test_bedrock_provider_uses_configured_fallback_for_transient_failure(monkeypatch) -> None:
+    """A throttled primary model can fail over without bypassing the normal prompt."""
+    _reset_circuit_breaker()
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "slow down"}, "ResponseMetadata": {"HTTPStatusCode": 429}},
+            "Converse",
+        ),
+        {"output": {"message": {"content": [{"text": "Fallback answer"}]}}},
+    ]
+    monkeypatch.setattr("app.models.bedrock_provider.get_aws_clients", lambda: SimpleNamespace(bedrock_runtime=runtime))
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_FALLBACK_MODEL_ARN", "fallback-model")
+    retrieval_result = RetrievalResult(
+        documents=[RetrievedDocument(id="doc", title="doc", content="evidence", source="s3://kb/doc", score=0.9)],
+        citations=[],
+        confidence=0.9,
+    )
+
+    result = BedrockClaudeProvider().generate(
+        build_prompt_package("question", "US", "en", "new_prospect", retrieval_result),
+        retrieval_result,
+        "cid",
+    )
+
+    assert result.text == "Fallback answer"
+    assert result.model_name == "fallback-model"
+    assert result.metadata["model_fallback_used"] is True
+    assert [call.kwargs["modelId"] for call in runtime.converse.call_args_list] == [
+        "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "fallback-model",
+    ]
+
+
+def test_bedrock_provider_does_not_fallback_for_non_transient_error(monkeypatch) -> None:
+    """Permission errors should surface instead of being hidden by another model."""
+    _reset_circuit_breaker()
+    runtime = MagicMock()
+    runtime.converse.side_effect = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "denied"}, "ResponseMetadata": {"HTTPStatusCode": 403}},
+        "Converse",
+    )
+    monkeypatch.setattr("app.models.bedrock_provider.get_aws_clients", lambda: SimpleNamespace(bedrock_runtime=runtime))
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_FALLBACK_MODEL_ARN", "fallback-model")
+    retrieval_result = RetrievalResult(
+        documents=[RetrievedDocument(id="doc", title="doc", content="evidence", source="s3://kb/doc", score=0.9)],
+        citations=[],
+        confidence=0.9,
+    )
+
+    with pytest.raises(BedrockServiceError):
+        BedrockClaudeProvider().generate(
+            build_prompt_package("question", "US", "en", "new_prospect", retrieval_result),
+            retrieval_result,
+            "cid",
+        )
+
+    assert runtime.converse.call_count == 1
 
 
 def build_prompt_package(message: str, country: str, language: str, role: str, retrieval_result: RetrievalResult):

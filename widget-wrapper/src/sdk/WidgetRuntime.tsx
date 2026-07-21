@@ -300,6 +300,7 @@ export function WidgetRuntime({
   const requestInFlightRef = useRef(false);
   const conversationGenerationRef = useRef(0);
   const configRequestGenerationRef = useRef(0);
+  const consecutiveFailureCountRef = useRef(0);
 
   const selectLocale = useCallback((locale: LocalePreference) => {
     if (typeof window !== "undefined") {
@@ -583,6 +584,9 @@ export function WidgetRuntime({
       if (conversationGeneration !== conversationGenerationRef.current) return;
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
       const localized = getWidgetCopy(payload.selectedLanguage);
+      const failedAnswer = Boolean(envelope.data?.metadata?.failureLayer);
+      consecutiveFailureCountRef.current = failedAnswer ? consecutiveFailureCountRef.current + 1 : 0;
+      const recommendationThreshold = Math.max(1, apiConfig?.supportRecommendationThreshold || 2);
       const assistantMessage: WidgetMessage = {
         id: buildId("assistant"),
         role: "assistant",
@@ -592,7 +596,7 @@ export function WidgetRuntime({
           confidence: envelope.data?.confidence,
           correlationId,
           responseMetadata: envelope.data?.metadata,
-          supportRecommended: Boolean(envelope.data?.metadata?.failureLayer),
+          supportRecommended: supportAvailable && consecutiveFailureCountRef.current >= recommendationThreshold,
           supportLabel: localized.support,
           supportCreatingLabel: localized.supportCreating,
           supportRequestedLabel: localized.supportRequested,
@@ -769,6 +773,7 @@ export function WidgetRuntime({
         setLoading(false);
         setPendingMessage(null);
         setMessages([]);
+        consecutiveFailureCountRef.current = 0;
         window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: freshSessionId, messages: [] }));
         firstMessageSentRef.current = false;
         return { sessionId: freshSessionId };

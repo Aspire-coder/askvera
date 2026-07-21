@@ -121,6 +121,7 @@ def build_cache_key(message: str, country: str, language: str, role: str) -> str
             settings.PROMPT_VERSION,
             settings.BEDROCK_GUARDRAIL_VERSION,
             settings.BEDROCK_MODEL_ARN,
+            settings.BEDROCK_FALLBACK_MODEL_ARN,
         ]
     )
     digest = hashlib.sha256(f"{message}|{country}|{language}|{role}|{versions}".encode("utf-8")).hexdigest()

@@ -160,6 +160,7 @@ def widget_config(request: Request) -> Envelope | JSONResponse:
             "starterTopics": metadata.get("starterTopics"),
             "contextualTopics": metadata.get("contextualTopics"),
             "supportCountries": support_country_codes(),
+            "supportRecommendationThreshold": max(1, settings.SUPPORT_RECOMMEND_AFTER_FAILURES),
         },
         correlation_id,
     )
@@ -219,7 +220,15 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
 def config(request: Request) -> Envelope:
     """Return country list, supported languages, and privacy version."""
     correlation_id = _correlation_id(request)
-    return success({"countries": get_countries(), "privacyVersion": settings.PRIVACY_VERSION}, correlation_id)
+    return success(
+        {
+            "countries": get_countries(),
+            "privacyVersion": settings.PRIVACY_VERSION,
+            "supportCountries": support_country_codes(),
+            "supportRecommendationThreshold": max(1, settings.SUPPORT_RECOMMEND_AFTER_FAILURES),
+        },
+        correlation_id,
+    )
 
 
 @router.get("/api/privacy", response_model=None)

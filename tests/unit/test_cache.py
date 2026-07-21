@@ -21,6 +21,15 @@ def test_build_cache_key_is_version_aware(monkeypatch) -> None:
     assert first != second
 
 
+def test_build_cache_key_rotates_with_fallback_model(monkeypatch) -> None:
+    """Cache keys rotate when the configured fallback model changes."""
+    monkeypatch.setattr(cache.settings, "BEDROCK_FALLBACK_MODEL_ARN", "fallback-v1")
+    first = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    monkeypatch.setattr(cache.settings, "BEDROCK_FALLBACK_MODEL_ARN", "fallback-v2")
+    second = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    assert first != second
+
+
 def test_get_and_set_cache_value(monkeypatch) -> None:
     """Cache values are JSON encoded and decoded."""
     client = MagicMock()

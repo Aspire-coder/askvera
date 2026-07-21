@@ -92,3 +92,24 @@ npm ci
 npm run build
 npm run validate-widget
 ```
+
+## Publishing Approved Knowledge
+
+For a production source replacement, rotate the answer-cache namespace only
+after the complete active load succeeds:
+
+```bash
+python -B scripts/ingestion/load_policy_sections_to_opensearch.py \
+  --jsonl /path/to/document.sections.jsonl \
+  --source-uri-prefix s3://approved-bucket/path \
+  --status active \
+  --replace-source \
+  --publish-kb-version auto
+
+sudo systemctl restart askvera
+```
+
+The EC2 role needs `ssm:PutParameter` only for the configured
+`/askverachat/prod/KB_VERSION` parameter. Staging loads and failed replacements
+never rotate the version. Roll back by restoring the previous approved source
+and previous `KB_VERSION`, then restart the API.

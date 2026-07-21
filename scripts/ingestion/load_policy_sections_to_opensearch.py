@@ -12,6 +12,7 @@ import hashlib
 import json
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -232,7 +233,37 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--recreate-index", action="store_true", help="Delete and recreate the index before loading")
+    parser.add_argument(
+        "--publish-kb-version",
+        default="",
+        help=(
+            "After a successful active replacement, update the KB_VERSION SSM parameter. "
+            "Use 'auto' for a timestamped version. Restart the API after publication."
+        ),
+    )
+    parser.add_argument(
+        "--kb-version-parameter",
+        default=f"{settings.SSM_PARAMETER_PATH.rstrip('/')}/KB_VERSION",
+        help="SSM parameter updated by --publish-kb-version.",
+    )
     return parser.parse_args()
+
+
+def _publish_kb_version(requested_version: str, parameter_name: str, ingestion_id: str) -> str:
+    """Rotate the cache namespace only after a complete active publication."""
+    version = requested_version.strip()
+    if version.lower() == "auto":
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        version = f"{timestamp}-{ingestion_id[:8]}"
+    if not version:
+        raise ValueError("A non-empty KB version is required.")
+    boto3.client("ssm", region_name=settings.AWS_REGION).put_parameter(
+        Name=parameter_name,
+        Type="String",
+        Value=version,
+        Overwrite=True,
+    )
+    return version
 
 
 def _source_identity(sections: list[dict[str, Any]]) -> tuple[str, str, str]:
@@ -305,6 +336,8 @@ def main() -> int:
         raise ValueError(f"No sections found in {args.jsonl}")
     if args.replace_source and args.status != "active":
         raise ValueError("--replace-source is only valid with --status active.")
+    if args.publish_kb_version and (args.status != "active" or not args.replace_source):
+        raise ValueError("--publish-kb-version requires --status active and --replace-source.")
     source_identity = _source_identity(sections) if args.replace_source else None
 
     ingestion_id = uuid.uuid4().hex
@@ -353,6 +386,14 @@ def main() -> int:
         if delete_errors:
             print(json.dumps(delete_errors[:3], indent=2))
             return 1
+    if args.publish_kb_version:
+        published_version = _publish_kb_version(
+            args.publish_kb_version,
+            args.kb_version_parameter,
+            ingestion_id,
+        )
+        print(f"Published KB version: {published_version}")
+        print("Restart the AskVera API to activate the new cache namespace.")
     return 0
 
 

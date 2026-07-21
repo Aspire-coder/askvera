@@ -164,6 +164,11 @@ BEDROCK_DATA_SOURCE_ID = _env_str("BEDROCK_DATA_SOURCE_ID", "JSAC3THB67")
 BEDROCK_DATASOURCE_ID = BEDROCK_DATA_SOURCE_ID
 # Bedrock model ARN or inference profile ARN. Found in Bedrock -> Model access or Inference profiles.
 BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
+# Optional secondary generation model. Keep empty until the fallback model has
+# passed the same retrieval and validation evaluation suite as the primary.
+BEDROCK_FALLBACK_MODEL_ARN = _env_str("BEDROCK_FALLBACK_MODEL_ARN", "")
+BEDROCK_CIRCUIT_BREAKER_FAILURE_THRESHOLD = _env_int("BEDROCK_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 3)
+BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS = _env_int("BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS", 60)
 # Generous ceiling that prevents runaway responses without shortening normal
 # policy and directory answers.
 BEDROCK_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_MAX_OUTPUT_TOKENS", 1024)
@@ -314,6 +319,7 @@ SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askve
 SUPPORT_EMAIL_ENABLED = _env_bool("SUPPORT_EMAIL_ENABLED", False)
 SUPPORT_EMAIL_FROM = _env_str("SUPPORT_EMAIL_FROM", "")
 SUPPORT_EMAIL_SUBJECT_PREFIX = _env_str("SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera support request")
+SUPPORT_RECOMMEND_AFTER_FAILURES = _env_int("SUPPORT_RECOMMEND_AFTER_FAILURES", 2)
 SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
