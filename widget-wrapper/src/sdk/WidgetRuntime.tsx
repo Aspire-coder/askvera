@@ -296,6 +296,7 @@ export function WidgetRuntime({
   const [activeAuthToken, setActiveAuthToken] = useState(authToken);
   const [activeAuthSessionId, setActiveAuthSessionId] = useState(() => sessionIdFromToken(authToken));
   const [lifecycleResetSignal, setLifecycleResetSignal] = useState(0);
+  const selectedLocaleRef = useRef(selectedLocale);
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const conversationGenerationRef = useRef(0);
@@ -303,6 +304,11 @@ export function WidgetRuntime({
   const consecutiveFailureCountRef = useRef(0);
 
   const selectLocale = useCallback((locale: LocalePreference) => {
+    const currentLocale = selectedLocaleRef.current;
+    if (currentLocale.country === locale.country && currentLocale.language === locale.language) {
+      return;
+    }
+    selectedLocaleRef.current = locale;
     if (typeof window !== "undefined") {
       writeLocalePreference(window.localStorage, locale, widgetId);
     }
