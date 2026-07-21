@@ -7,6 +7,7 @@ type RenderBlock = {
   header?: string;
   rows?: string[];
   level?: number;
+  start?: number;
   variant?: "policy" | "compliance" | "notice";
   fields?: Array<{ label: string; value: string; href?: string }>;
 };
@@ -91,7 +92,11 @@ function isTableSeparator(line: string): boolean {
 }
 
 function parseDirectoryField(line: string) {
-  const normalized = line.replace(/^[-*]\s+/, "").trim();
+  const normalized = line
+    .replace(/^[-*]\s+/, "")
+    .replace(/^\*{1,2}/, "")
+    .replace(/\*{1,2}$/, "")
+    .trim();
   for (const option of DIRECTORY_LABELS) {
     const match = option.pattern.exec(normalized);
     if (!match) continue;
@@ -102,12 +107,58 @@ function parseDirectoryField(line: string) {
   return null;
 }
 
+function parseDirectoryFields(lines: string[], startIndex: number) {
+  const fields: Array<{ label: string; value: string; href?: string }> = [];
+  let pendingLabel = "";
+  let pendingValues: string[] = [];
+  let index = startIndex;
+
+  const flushPending = () => {
+    if (!pendingLabel || !pendingValues.length) return;
+    const value = pendingValues.join(" ").trim();
+    const href = /^email$/i.test(pendingLabel)
+      ? `mailto:${value}`
+      : /phone|telephone|tel/i.test(pendingLabel)
+        ? `tel:${value.replace(/[^\d+]/g, "")}`
+        : /^https?:\/\//i.test(value)
+          ? value
+          : undefined;
+    fields.push({ label: pendingLabel, value, href });
+    pendingLabel = "";
+    pendingValues = [];
+  };
+
+  while (index < lines.length && lines[index].trim() && !/^#{1,3}\s+/.test(lines[index].trim())) {
+    const raw = lines[index].trim();
+    const directField = parseDirectoryField(raw);
+    if (directField) {
+      flushPending();
+      fields.push(directField);
+      index += 1;
+      continue;
+    }
+
+    const normalized = raw.replace(/^\*{1,2}/, "").replace(/\*{1,2}$/, "").trim();
+    const labelOnly = /^([^:]{1,60}):\s*$/.exec(normalized);
+    if (labelOnly) {
+      flushPending();
+      pendingLabel = labelOnly[1].trim();
+    } else if (pendingLabel) {
+      pendingValues.push(normalized);
+    }
+    index += 1;
+  }
+  flushPending();
+  return { fields, nextIndex: index };
+}
+
 function parseBlocks(content: string): RenderBlock[] {
   const lines = normalizeMessageContent(content).split("\n");
   const blocks: RenderBlock[] = [];
   let paragraph: string[] = [];
   let listItems: string[] = [];
   let orderedItems: string[] = [];
+  let orderedListStart = 1;
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -124,8 +175,9 @@ function parseBlocks(content: string): RenderBlock[] {
 
   const flushOrderedList = () => {
     if (!orderedItems.length) return;
-    blocks.push({ type: "ordered", items: orderedItems });
+    blocks.push({ type: "ordered", items: orderedItems, start: orderedListStart });
     orderedItems = [];
+    orderedListStart = 1;
   };
 
   const flushAll = () => {
@@ -190,16 +242,13 @@ function parseBlocks(content: string): RenderBlock[] {
         index -= 1;
         blocks.push({ type: "callout", variant, header: title, content: body.join(" ") });
       } else if (/office|directory|contact/i.test(title)) {
-        const fields: Array<{ label: string; value: string; href?: string }> = [];
-        index += 1;
-        while (index < lines.length && lines[index].trim() && !/^#{1,3}\s+/.test(lines[index].trim())) {
-          const field = parseDirectoryField(lines[index].trim());
-          if (field) fields.push(field);
-          index += 1;
+        const parsed = parseDirectoryFields(lines, index + 1);
+        if (parsed.fields.length) {
+          blocks.push({ type: "directory", header: title, fields: parsed.fields });
+          index = parsed.nextIndex - 1;
+        } else {
+          blocks.push({ type: "heading", level: heading[1].length, content: title });
         }
-        index -= 1;
-        if (fields.length) blocks.push({ type: "directory", header: title, fields });
-        else blocks.push({ type: "heading", level: heading[1].length, content: title });
       } else {
         blocks.push({ type: "heading", level: heading[1].length, content: title });
       }
@@ -237,11 +286,12 @@ function parseBlocks(content: string): RenderBlock[] {
       continue;
     }
 
-    const ordered = /^\d+\.\s+(.+)$/.exec(line);
+    const ordered = /^(\d+)\.\s+(.+)$/.exec(line);
     if (ordered) {
       flushParagraph();
       flushList();
-      orderedItems.push(ordered[1]);
+      if (!orderedItems.length) orderedListStart = Number.parseInt(ordered[1], 10);
+      orderedItems.push(ordered[2]);
       continue;
     }
 
@@ -323,7 +373,7 @@ function renderBlock(block: RenderBlock, index: number): ReactNode {
       );
     case "ordered":
       return (
-        <ol key={`ol-${index}`}>
+        <ol key={`ol-${index}`} start={block.start}>
           {(block.items || []).map((item, itemIndex) => (
             <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
           ))}
