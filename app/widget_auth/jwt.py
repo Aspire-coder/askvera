@@ -10,6 +10,7 @@ from time import time
 from typing import Any
 
 from config import settings
+from services.security_state import security_state
 from utils.exceptions import AskVeraError
 
 
@@ -30,18 +31,14 @@ class WidgetTokenRevokedError(WidgetTokenError):
         super().__init__("Widget session token has been revoked.")
 
 
-_REVOKED_TOKEN_IDS: set[str] = set()
-
-
-def revoke_widget_token_id(jti: str) -> None:
-    """Revoke a widget token ID for the current process."""
-    if jti:
-        _REVOKED_TOKEN_IDS.add(jti)
+def revoke_widget_token_id(jti: str, expires_at: int | None = None) -> None:
+    """Revoke a widget token ID across all API processes."""
+    security_state.revoke_widget_token(jti, expires_at)
 
 
 def is_widget_token_revoked(jti: str | None) -> bool:
     """Return True when a widget token ID is revoked."""
-    return bool(jti and jti in _REVOKED_TOKEN_IDS)
+    return security_state.is_widget_token_revoked(jti)
 
 
 def _b64url_encode(data: bytes) -> str:

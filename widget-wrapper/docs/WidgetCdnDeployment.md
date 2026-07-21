@@ -110,17 +110,21 @@ Never commit AWS credentials.
 
 ## Rollback
 
-Rollback is not automated yet. To roll back manually:
-
-1. Copy the known-good versioned release back to `widget/latest/`.
-2. Invalidate `/widget/latest/*`.
-3. Verify `widget/latest/widget.js` and `widget/latest/widget.css` in CloudFront.
-
-Future work can add:
+Promote a known-good immutable release back to `widget/latest/` and invalidate
+the CloudFront alias with one command:
 
 ```bash
-npm run rollback-widget v1.0.0
+npm run rollback-widget -- v1.0.20
 ```
+
+Preview the rollback without changing AWS:
+
+```bash
+npm run rollback-widget -- v1.0.20 --dry-run
+```
+
+The command verifies that both release assets exist before it changes `latest`.
+It never modifies the immutable versioned release.
 
 ## Troubleshooting
 

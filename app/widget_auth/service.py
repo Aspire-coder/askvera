@@ -148,7 +148,10 @@ class WidgetAuthService:
             )
             raise WidgetAuthError()
 
-        revoke_widget_token_id(str(existing_claims.get("jti", "")))
+        revoke_widget_token_id(
+            str(existing_claims.get("jti", "")),
+            int(existing_claims.get("exp", 0)) or None,
+        )
         claims = self._build_claims(registration, origin_validation.normalized_origin, str(existing_claims.get("sessionId", "")))
         LOGGER.info(
             "widget_auth_token_refreshed",

@@ -1,14 +1,14 @@
 """API request middleware."""
 
 from collections.abc import Awaitable, Callable
-from collections import defaultdict, deque
-from time import monotonic, perf_counter
+from time import perf_counter
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import settings
+from services.security_state import SecurityStateUnavailable, security_state
 from utils.logging import get_logger
 
 LOGGER = get_logger("api.middleware")
@@ -20,7 +20,9 @@ def _correlation_id(request: Request) -> str:
 
 def _client_ip(request: Request) -> str:
     forwarded_for = request.headers.get("x-forwarded-for", "")
-    client_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else ""
+    # Nginx appends the actual peer address to X-Forwarded-For. Using the last
+    # value prevents a caller-supplied first entry from bypassing rate limits.
+    client_ip = forwarded_for.rsplit(",", 1)[-1].strip() if forwarded_for else ""
     if not client_ip and request.client:
         client_ip = request.client.host
     return client_ip or "unknown"
@@ -38,11 +40,7 @@ def _error(status_code: int, code: str, message: str, request: Request) -> JSONR
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Small per-process rate limiter with endpoint-specific policies."""
-
-    def __init__(self, app: object) -> None:
-        super().__init__(app)
-        self._requests: dict[str, deque[float]] = defaultdict(deque)
+    """Shared endpoint-specific rate limiter with a local development fallback."""
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """Reject obvious bursts before they reach AWS-backed services."""
@@ -51,13 +49,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = _client_ip(request)
-        key = f"{client_ip or 'unknown'}:{request.url.path}"
-        now = monotonic()
-        window_start = now - settings.RATE_LIMIT_WINDOW_SECONDS
-        history = self._requests[key]
-        while history and history[0] < window_start:
-            history.popleft()
-        if len(history) >= limit:
+        try:
+            allowed = security_state.allow_request(
+                client_ip,
+                request.url.path,
+                limit,
+                settings.RATE_LIMIT_WINDOW_SECONDS,
+            )
+        except SecurityStateUnavailable:
+            LOGGER.exception(
+                "rate_limit_state_unavailable",
+                path=request.url.path,
+                correlation_id=_correlation_id(request),
+            )
+            return _error(503, "SERVICE_UNAVAILABLE", "Service is temporarily unavailable.", request)
+        if not allowed:
             LOGGER.warning(
                 "rate_limit_exceeded",
                 path=request.url.path,
@@ -66,7 +72,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 correlation_id=_correlation_id(request),
             )
             return _error(429, "RATE_LIMITED", "Too many requests. Please try again shortly.", request)
-        history.append(now)
         return await call_next(request)
 
 

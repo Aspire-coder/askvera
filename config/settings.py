@@ -89,7 +89,8 @@ POSTGRES_CONNECT_TIMEOUT_SECONDS = 5
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
 AWS_MAX_ATTEMPTS = 3
-# Basic per-IP in-process request limiting for public widget endpoints.
+# Per-IP request limiting for public widget endpoints. Production uses Valkey
+# so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
 RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support"]
@@ -105,6 +106,9 @@ RATE_LIMIT_POLICIES = {
     "/api/session/end": _env_int("RATE_LIMIT_SESSION_END_PER_MINUTE", 20),
     "/api/admin/documents": _env_int("RATE_LIMIT_ADMIN_UPLOAD_PER_MINUTE", 10),
 }
+SHARED_SECURITY_STATE_ENABLED = _env_bool("SHARED_SECURITY_STATE_ENABLED", True)
+SHARED_SECURITY_STATE_REQUIRED = _env_bool("SHARED_SECURITY_STATE_REQUIRED", APP_ENV == "production")
+SHARED_SECURITY_STATE_PREFIX = _env_str("SHARED_SECURITY_STATE_PREFIX", "ask-vera:security")
 MAX_REQUEST_BODY_BYTES = _env_int("MAX_REQUEST_BODY_BYTES", 32768)
 # Admin portal authentication and general knowledge ingestion.
 ADMIN_API_KEY = _env_str("ADMIN_API_KEY", "dev-admin-key" if APP_ENV != "production" else "")

@@ -35,13 +35,16 @@ shutdown_requested = False
 
 
 def _init_optional_cache(max_attempts: int = 3) -> None:
-    """Initialise Redis if available, but keep the API online without cache."""
+    """Initialise Redis, requiring it for shared production security state."""
     for attempt in range(max_attempts):
         try:
             init_cache()
             return
         except Exception:
             if attempt == max_attempts - 1:
+                if settings.SHARED_SECURITY_STATE_REQUIRED:
+                    LOGGER.exception("redis_cache_unavailable_startup_blocked")
+                    raise ConfigurationError("Valkey is required for shared production security state.")
                 LOGGER.exception("redis_cache_unavailable_continuing_without_cache")
                 return
             delay_seconds = 2**attempt

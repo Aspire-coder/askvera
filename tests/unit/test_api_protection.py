@@ -70,6 +70,8 @@ def test_endpoint_specific_rate_limit(monkeypatch) -> None:
 
     monkeypatch.setattr(middleware_module.settings, "RATE_LIMIT_POLICIES", {"/api/chat": 1})
     monkeypatch.setattr(middleware_module.settings, "RATE_LIMIT_WINDOW_SECONDS", 60)
+    monkeypatch.setattr(middleware_module.settings, "SHARED_SECURITY_STATE_ENABLED", False)
+    middleware_module.security_state.reset_local_state()
     middleware = RateLimitMiddleware(lambda scope, receive, send: None)
     request = FakeRequest("/api/chat")
 
@@ -78,3 +80,19 @@ def test_endpoint_specific_rate_limit(monkeypatch) -> None:
 
     assert response.status_code == 429
     assert _json(response)["error"]["code"] == "RATE_LIMITED"
+
+
+def test_rate_limit_uses_proxy_appended_client_address(monkeypatch) -> None:
+    from api import middleware as middleware_module
+
+    monkeypatch.setattr(middleware_module.settings, "RATE_LIMIT_POLICIES", {"/api/chat": 1})
+    monkeypatch.setattr(middleware_module.settings, "RATE_LIMIT_WINDOW_SECONDS", 60)
+    monkeypatch.setattr(middleware_module.settings, "SHARED_SECURITY_STATE_ENABLED", False)
+    middleware_module.security_state.reset_local_state()
+    first = FakeRequest("/api/chat", {"x-forwarded-for": "spoofed, 203.0.113.20"})
+    second = FakeRequest("/api/chat", {"x-forwarded-for": "different-spoof, 203.0.113.20"})
+
+    assert _run(RateLimitMiddleware(lambda scope, receive, send: None).dispatch(first, _ok_response)).status_code == 200
+    response = _run(RateLimitMiddleware(lambda scope, receive, send: None).dispatch(second, _ok_response))
+
+    assert response.status_code == 429

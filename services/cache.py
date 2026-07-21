@@ -103,6 +103,11 @@ def close_cache(correlation_id: str = "shutdown") -> None:
         LOGGER.info("cache_closed", correlation_id=correlation_id)
 
 
+def get_cache_client() -> redis.Redis | None:
+    """Return the initialized Valkey client for shared application state."""
+    return _redis_client
+
+
 def cache_health() -> str:
     """Return cache health without exposing the module's client internals."""
     if _redis_client is None:

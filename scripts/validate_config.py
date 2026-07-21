@@ -10,15 +10,59 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import settings
 
 PLACEHOLDER_PREFIX = "REPLACE_WITH"
+DEVELOPMENT_SECRETS = {"dev-admin-key", "dev-only-change-before-production"}
+
+
+def _is_missing(value: object) -> bool:
+    return value in (None, "") or (isinstance(value, str) and value.startswith(PLACEHOLDER_PREFIX))
+
+
+def _require(missing: list[str], name: str) -> None:
+    if _is_missing(getattr(settings, name, "")):
+        missing.append(name)
 
 
 def validate() -> list[str]:
     """Return missing or placeholder required setting names."""
     missing: list[str] = []
     for name in settings.REQUIRED_VALUES:
-        value = getattr(settings, name, "")
-        if value in (None, "") or (isinstance(value, str) and value.startswith(PLACEHOLDER_PREFIX)):
-            missing.append(name)
+        _require(missing, name)
+
+    if settings.APP_ENV != "production":
+        return missing
+
+    for name in (
+        "ADMIN_API_KEY",
+        "WIDGET_JWT_SECRET",
+        "BEDROCK_MODEL_ARN",
+        "BEDROCK_GUARDRAIL_ID",
+        "BEDROCK_GUARDRAIL_VERSION",
+        "SQS_FEEDBACK_QUEUE_URL",
+    ):
+        _require(missing, name)
+
+    if settings.ADMIN_API_KEY in DEVELOPMENT_SECRETS:
+        missing.append("ADMIN_API_KEY (development value is not allowed)")
+    if settings.WIDGET_JWT_SECRET in DEVELOPMENT_SECRETS:
+        missing.append("WIDGET_JWT_SECRET (development value is not allowed)")
+    if not settings.WIDGET_AUTH_REQUIRED:
+        missing.append("WIDGET_AUTH_REQUIRED (must be true in production)")
+    if settings.WIDGET_ALLOW_LOCALHOST_ORIGINS:
+        missing.append("WIDGET_ALLOW_LOCALHOST_ORIGINS (must be false in production)")
+    if settings.CHAT_MEMORY_BACKEND != "postgres":
+        missing.append("CHAT_MEMORY_BACKEND (must be postgres in production)")
+    if not settings.SHARED_SECURITY_STATE_ENABLED or not settings.SHARED_SECURITY_STATE_REQUIRED:
+        missing.append("SHARED_SECURITY_STATE_REQUIRED (must be enabled in production)")
+
+    if settings.RETRIEVAL_PROVIDER == "opensearch_section":
+        _require(missing, "OPENSEARCH_ENDPOINT")
+        _require(missing, "OPENSEARCH_INDEX")
+    if settings.AUDIT_FIREHOSE_ENABLED:
+        _require(missing, "AUDIT_FIREHOSE_STREAM")
+    if settings.SUPPORT_EMAIL_ENABLED:
+        _require(missing, "SUPPORT_EMAIL_FROM")
+        if not settings.SUPPORT_ROUTES_JSON:
+            missing.append("SUPPORT_ROUTES_JSON")
     return missing
 
 
@@ -26,11 +70,11 @@ def main() -> int:
     """Print validation result and return a process exit code."""
     missing = validate()
     if missing:
-        print("ASK Vera configuration is incomplete. Fill these values in config/settings.py:")
+        print("AskVera configuration is incomplete. Configure these values through the environment or SSM:")
         for name in missing:
             print(f"- {name}")
         return 1
-    print("ASK Vera configuration is complete.")
+    print("AskVera configuration is complete.")
     return 0
 
 
