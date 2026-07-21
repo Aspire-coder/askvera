@@ -34,6 +34,7 @@ import {
   filterLanguagesByCountry
 } from "./utils";
 import "./generic-widget.css";
+import "./reference-polish.css";
 
 const HealthCheckIntervalMs = 30000;
 
