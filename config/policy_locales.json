@@ -13,6 +13,7 @@
     { "market": "LU", "languages": ["fr", "en"] },
     { "market": "NL", "languages": ["nl", "en"] },
     { "market": "NO", "languages": ["no", "en"] },
+    { "market": "RS", "languages": ["sr"] },
     { "market": "SE", "languages": ["sv", "en"] },
     { "market": "CH", "languages": ["de"] },
     { "market": "GB", "languages": ["en"], "documentCountries": ["UK"] }

@@ -86,10 +86,10 @@ const baseWidgetConfig: GenericWidgetConfig = {
   menu: {
     settings: "Settings",
     history: "History",
-    newChat: "New chat",
-    endChat: "End chat",
-    confirmEndChat: "End this chat",
-    cancelEndChat: "Cancel",
+    newChat: "Start new chat",
+    newChatConfirmation: "Starting a new chat will end and clear this conversation.",
+    confirmNewChat: "Start new chat",
+    cancelNewChat: "Cancel",
     escalate: "Contact support"
   },
   consent: {
@@ -187,19 +187,24 @@ async function loadCompleteWidgetConfig(
   selectedCountry: string,
   selectedLanguage: string
 ): Promise<ConfigResponseData> {
-  const widgetEnvelope = await loadWidgetConfig(apiClient);
+  const [widgetEnvelope, marketEnvelope] = await Promise.all([
+    loadWidgetConfig(apiClient),
+    loadConfig(apiClient)
+  ]);
   const widgetConfig = widgetEnvelope.data;
   if (!widgetConfig) {
     throw new Error("Widget configuration response did not include data.");
   }
 
-  const marketEnvelope = await loadConfig(apiClient);
   const countries = marketEnvelope?.data?.countries?.length ? marketEnvelope.data.countries : widgetConfig.countries;
   const country = countries.find((candidate) => candidate.code === selectedCountry) || countries[0];
   const language = country?.languages.find((candidate) => candidate.code === selectedLanguage) || country?.languages[0];
   const privacyEnvelope = country && language
     ? await loadPrivacy(apiClient, country.code, language.code)
     : undefined;
+  if (country && language && !privacyEnvelope?.data?.documents?.length) {
+    throw new Error(`No legal documents were returned for ${country.code}/${language.code}.`);
+  }
   const loadedLegalDocuments = privacyEnvelope?.data?.documents?.length
     ? privacyEnvelope.data.documents
     : getLegalDocuments(widgetConfig);
@@ -294,6 +299,7 @@ export function WidgetRuntime({
   const firstMessageSentRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const conversationGenerationRef = useRef(0);
+  const configRequestGenerationRef = useRef(0);
 
   const selectLocale = useCallback((locale: LocalePreference) => {
     if (typeof window !== "undefined") {
@@ -432,7 +438,7 @@ export function WidgetRuntime({
           closeLegalDocumentLabel: localized.closeLegal,
           savingConsentLabel: localized.privacySaving
         },
-        menu: { ...built.genericConfig.menu, newChat: localized.newChat, endChat: localized.endChat, confirmEndChat: localized.confirmEndChat, cancelEndChat: localized.cancelEndChat, escalate: localized.support },
+        menu: { ...built.genericConfig.menu, newChat: localized.newChat, newChatConfirmation: localized.newChatConfirmation, confirmNewChat: localized.confirmNewChat, cancelNewChat: localized.cancelNewChat, escalate: localized.support },
         consent: {
           ...built.genericConfig.consent,
           eyebrow: localized.privacyEyebrow,
@@ -507,9 +513,13 @@ export function WidgetRuntime({
 
   useEffect(() => {
     let active = true;
-    withWidgetAuthRetry((client) => loadCompleteWidgetConfig(client, selectedLocale.country, selectedLocale.language))
-      .then((loadedConfig) => {
-        if (!active) return;
+    let retryTimer: number | undefined;
+    const requestGeneration = ++configRequestGenerationRef.current;
+
+    const load = async (attempt = 0): Promise<void> => {
+      try {
+        const loadedConfig = await withWidgetAuthRetry((client) => loadCompleteWidgetConfig(client, selectedLocale.country, selectedLocale.language));
+        if (!active || requestGeneration !== configRequestGenerationRef.current) return;
         widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, {});
         setApiConfig(loadedConfig);
         const firstCountry = loadedConfig.countries[0];
@@ -524,14 +534,21 @@ export function WidgetRuntime({
             selectLocale({ country: selectedCountryConfig.code, language: fallbackLanguage.code });
           }
         }
-      })
-      .catch((error) => {
-        if (!active) return;
+      } catch (error) {
+        if (!active || requestGeneration !== configRequestGenerationRef.current) return;
+        if (attempt < 2) {
+          retryTimer = window.setTimeout(() => void load(attempt + 1), 300 * (2 ** attempt));
+          return;
+        }
         widgetEventBus.emit(widgetEventTypes.BACKEND_DISCONNECTED, { error: describeApiError(error) });
         upsertMessage({ id: "config-warning", role: "system", content: getWidgetCopy(selectedLocale.language).unavailable });
-      });
+      }
+    };
+
+    void load();
     return () => {
       active = false;
+      if (retryTimer) window.clearTimeout(retryTimer);
     };
   }, [selectLocale, selectedLocale.country, selectedLocale.language, upsertMessage, withWidgetAuthRetry]);
 
@@ -753,9 +770,6 @@ export function WidgetRuntime({
         setPendingMessage(null);
         setMessages([]);
         window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: freshSessionId, messages: [] }));
-        const defaultLocale = { country: "US", language: "en" };
-        writeLocalePreference(window.localStorage, defaultLocale, widgetId);
-        setSelectedLocale(defaultLocale);
         firstMessageSentRef.current = false;
         return { sessionId: freshSessionId };
       }}

@@ -116,9 +116,9 @@ export type WidgetMenuLabels = {
   settings: string;
   history: string;
   newChat: string;
-  endChat: string;
-  confirmEndChat: string;
-  cancelEndChat: string;
+  newChatConfirmation: string;
+  confirmNewChat: string;
+  cancelNewChat: string;
   escalate: string;
 };
 

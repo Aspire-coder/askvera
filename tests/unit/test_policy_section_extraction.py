@@ -35,6 +35,19 @@ def test_section_match_supports_common_numbering_layouts() -> None:
     assert [match.group("section") for match in matches] == ["1", "1.3", "11.01"]
 
 
+def test_inline_policy_headings_are_restored_without_locale_rules() -> None:
+    line = (
+        "Introductory policy text. 1.02 (a) General obligations apply. "
+        "3. Preferred Customer 3.01 A Preferred Customer is a consumer."
+    )
+
+    cleaned = extractor._clean_page_text(line)
+    matches = list(extractor._iter_section_matches(cleaned))
+
+    assert [match.group("section") for match in matches] == ["1.02", "3", "3.01"]
+    assert matches[0].group("title").startswith("(a) General obligations")
+
+
 def test_contents_page_heuristic_ignores_dense_numbered_lists() -> None:
     contents = "\n".join(
         [
@@ -68,6 +81,34 @@ def test_contents_page_heuristic_keeps_policy_page_with_several_sections() -> No
     )
 
     assert extractor._looks_like_contents_page(policy_page) is False
+
+
+def test_dense_inline_sections_with_long_prose_are_not_an_outline() -> None:
+    policy_page = " ".join(
+        f"3.0{number} Approved policy text " + ("with substantive requirements " * 12)
+        for number in range(1, 7)
+    )
+
+    cleaned = extractor._clean_page_text(policy_page)
+
+    assert extractor._looks_like_contents_page(cleaned) is False
+
+
+def test_front_matter_preserves_cover_page_metadata() -> None:
+    chunks = extractor._front_matter_chunks(
+        [(1, "Company policy\nPosted 01 June 2026\nEffective 01 July 2026\nTable of contents")],
+        source_file="policy.pdf",
+        country="SE",
+        language="en",
+        document_version="",
+        effective_date="",
+        status="active",
+    )
+
+    assert len(chunks) == 1
+    assert chunks[0].chunk_type == "document_front_matter"
+    assert chunks[0].start_page == 1
+    assert "Effective 01 July 2026" in chunks[0].content
 
 
 def test_top_level_numbered_prose_is_not_a_section_heading() -> None:

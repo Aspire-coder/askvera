@@ -2083,6 +2083,14 @@
   background: rgba(248, 196, 0, 0.12);
 }
 
+.gw-menu-confirm-message {
+  grid-column: 1 / -1;
+  margin: 2px 4px 4px;
+  color: #4e5258;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .gw-menu-confirm button {
   min-height: 38px;
   border: 0;
@@ -2096,7 +2104,7 @@
   font-weight: 650;
 }
 
-.gw-menu-confirm .gw-menu-confirm-end {
+.gw-menu-confirm .gw-menu-confirm-primary {
   background: #246b45;
   color: #ffffff;
 }

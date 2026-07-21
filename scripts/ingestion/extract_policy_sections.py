@@ -21,7 +21,16 @@ from pypdf import PdfReader
 # one-digit subsections ("1.3."), and two-digit subsections ("11.01").
 # Require a letter in the title so PDF page-number pairs are not headings.
 SECTION_RE = re.compile(
-    r"(?m)^(?P<section>\d{1,2}(?:\.\d{1,2})?)\.?\s+(?P<title>[^\W\d_].+)$"
+    r"(?m)^(?P<section>\d{1,2}(?:\.\d{1,2})?)\.?\s+"
+    r"(?P<title>(?:\([a-z0-9]+\)\s+)?[^\W\d_].+)$",
+    flags=re.IGNORECASE,
+)
+INLINE_SUBSECTION_RE = re.compile(
+    r"(?<!^)(?<=\s)(?=\d{1,2}\.\d{2}\.?\s+(?:\([a-z0-9]+\)\s+)?[^\W\d_])",
+    flags=re.IGNORECASE,
+)
+INLINE_TOP_LEVEL_RE = re.compile(
+    r"(?<!^)(?<=\s)(?=(?P<section>\d{1,2})\.\s+(?P<title>[^\W\d_]))"
 )
 LIST_ITEM_RE = re.compile(
     r"(?m)^(?P<label>\([a-z0-9]+\)|[a-z][.)])\s+(?P<title>.+)$",
@@ -90,8 +99,27 @@ def _clean_page_text(text: str) -> str:
         line = WHITESPACE_RE.sub(" ", raw_line).strip()
         if not line or PAGE_NUMBER_RE.match(line):
             continue
-        lines.append(line)
+        lines.extend(_split_inline_section_headings(line))
     return "\n".join(lines)
+
+
+def _split_inline_section_headings(line: str) -> list[str]:
+    """Restore heading boundaries lost by PDF text extraction."""
+    split_offsets = {match.start() for match in INLINE_SUBSECTION_RE.finditer(line)}
+    split_offsets.update(
+        match.start()
+        for match in INLINE_TOP_LEVEL_RE.finditer(line)
+        if match.group("title").isupper()
+    )
+    if not split_offsets:
+        return [line]
+
+    offsets = [0, *sorted(split_offsets), len(line)]
+    return [
+        line[offsets[index] : offsets[index + 1]].strip()
+        for index in range(len(offsets) - 1)
+        if line[offsets[index] : offsets[index + 1]].strip()
+    ]
 
 
 def _read_pdf_pages(pdf_path: Path) -> list[tuple[int, str]]:
@@ -120,7 +148,11 @@ def _looks_like_contents_page(text: str) -> bool:
     heading_lines = sum(bool(SECTION_RE.match(line)) for line in lines)
     dotted_entries = sum(bool(re.search(r"\.{3,}\s*\d+\s*$", line)) for line in lines)
     heading_ratio = heading_lines / max(1, len(lines))
-    return heading_lines >= 6 and (dotted_entries >= 3 or heading_ratio >= 0.75)
+    average_line_chars = sum(len(line) for line in lines) / max(1, len(lines))
+    return heading_lines >= 6 and (
+        dotted_entries >= 3
+        or (heading_ratio >= 0.75 and average_line_chars <= 160)
+    )
 
 
 def _looks_like_section_heading(match: re.Match[str]) -> bool:
@@ -221,7 +253,51 @@ def extract_sections(
         effective_date=effective_date,
         status=status,
     )
-    return _ensure_unique_section_ids([*outlines, *_expand_structured_chunks(sections)])
+    front_matter = _front_matter_chunks(
+        all_pages,
+        source_file=pdf_path.name,
+        country=country,
+        language=language,
+        document_version=document_version,
+        effective_date=effective_date,
+        status=status,
+    )
+    return _ensure_unique_section_ids([*front_matter, *outlines, *_expand_structured_chunks(sections)])
+
+
+def _front_matter_chunks(
+    pages: list[tuple[int, str]],
+    *,
+    source_file: str,
+    country: str,
+    language: str,
+    document_version: str,
+    effective_date: str,
+    status: str,
+) -> list[PolicySection]:
+    """Preserve cover-page metadata independently from a long contents page."""
+    if not pages:
+        return []
+    page_number, text = pages[0]
+    content = text[: min(len(text), 1800)].strip()
+    if not content:
+        return []
+    return [
+        PolicySection(
+            source_file=source_file,
+            country=country,
+            language=language,
+            section_id=f"front-matter-page-{page_number}",
+            title="Policy document front matter",
+            start_page=page_number,
+            end_page=page_number,
+            content=content,
+            document_version=document_version,
+            effective_date=effective_date,
+            status=status,
+            chunk_type="document_front_matter",
+        )
+    ]
 
 
 def _outline_chunks(
