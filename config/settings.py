@@ -325,6 +325,7 @@ SUPPORT_EMAIL_FROM = _env_str("SUPPORT_EMAIL_FROM", "")
 SUPPORT_EMAIL_SUBJECT_PREFIX = _env_str("SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera support request")
 SUPPORT_RECOMMEND_AFTER_FAILURES = _env_int("SUPPORT_RECOMMEND_AFTER_FAILURES", 2)
 SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
+SUPPORT_DEFAULT_ROUTE_JSON: dict[str, str] = json.loads(_env_str("SUPPORT_DEFAULT_ROUTE_JSON", "{}"))
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.

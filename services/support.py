@@ -11,6 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
+from services.market_config import get_country_codes
 from utils.exceptions import SupportRouteUnavailableError, SupportUnavailableError
 from utils.logging import get_logger
 from utils.validators import SupportRequest
@@ -33,20 +34,32 @@ def _routes() -> dict[str, dict[str, str]]:
     return routes
 
 
+def _valid_route(route: object) -> bool:
+    return (
+        isinstance(route, dict)
+        and bool(str(route.get("department") or "").strip())
+        and bool(str(route.get("email") or "").strip())
+    )
+
+
 def support_country_codes() -> list[str]:
     """Return configured support markets without exposing route destinations."""
     if not settings.SUPPORT_EMAIL_ENABLED or not isinstance(settings.SUPPORT_ROUTES_JSON, dict):
         return []
+    if _valid_route(settings.SUPPORT_DEFAULT_ROUTE_JSON):
+        return sorted(get_country_codes())
     return sorted(
         str(country).upper()
         for country, route in settings.SUPPORT_ROUTES_JSON.items()
-        if isinstance(route, dict) and route.get("department") and route.get("email")
+        if _valid_route(route)
     )
 
 
 def _route_for(country: str) -> tuple[str, str]:
     route: Any = _routes().get(country.upper())
-    if not isinstance(route, dict):
+    if not _valid_route(route):
+        route = settings.SUPPORT_DEFAULT_ROUTE_JSON
+    if not _valid_route(route):
         raise SupportRouteUnavailableError("Support requests are not yet available for this market.")
     department = str(route.get("department") or "").strip()
     recipient = str(route.get("email") or "").strip()

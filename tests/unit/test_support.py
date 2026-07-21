@@ -54,6 +54,7 @@ def test_support_delivery_routes_server_side_and_uses_reply_to(monkeypatch):
         "SUPPORT_ROUTES_JSON",
         {"GB": {"department": "Customer Services", "email": "tickets@example.com"}},
     )
+    monkeypatch.setattr(support.settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
     monkeypatch.setattr(support, "get_aws_clients", lambda: SimpleNamespace(ses=ses))
 
     delivery = support.send_support_request(request(), "12345678-abcd")
@@ -69,6 +70,7 @@ def test_support_delivery_rejects_unconfigured_market(monkeypatch):
     monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_ENABLED", True)
     monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_FROM", "askvera@example.com")
     monkeypatch.setattr(support.settings, "SUPPORT_ROUTES_JSON", {})
+    monkeypatch.setattr(support.settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
     with pytest.raises(SupportRouteUnavailableError):
         support.send_support_request(request(), "cid")
 
@@ -90,4 +92,40 @@ def test_support_country_codes_expose_availability_not_destinations(monkeypatch)
             "XX": {"department": "", "email": "missing@example.com"},
         },
     )
+    monkeypatch.setattr(support.settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
     assert support.support_country_codes() == ["DE", "GB"]
+
+
+def test_default_route_supports_every_published_market(monkeypatch):
+    ses = FakeSes()
+    monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_ENABLED", True)
+    monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_FROM", "askvera@example.com")
+    monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera support")
+    monkeypatch.setattr(support.settings, "SUPPORT_ROUTES_JSON", {})
+    monkeypatch.setattr(
+        support.settings,
+        "SUPPORT_DEFAULT_ROUTE_JSON",
+        {"department": "Global Support", "email": "global@example.com"},
+    )
+    monkeypatch.setattr(support, "get_country_codes", lambda: {"CA", "GB", "US"})
+    monkeypatch.setattr(support, "get_aws_clients", lambda: SimpleNamespace(ses=ses))
+
+    assert support.support_country_codes() == ["CA", "GB", "US"]
+    delivery = support.send_support_request(request(), "cid")
+    assert delivery.route_name == "Global Support"
+    assert ses.calls[0]["Destination"] == {"ToAddresses": ["global@example.com"]}
+
+
+def test_country_route_overrides_default_route(monkeypatch):
+    monkeypatch.setattr(
+        support.settings,
+        "SUPPORT_ROUTES_JSON",
+        {"GB": {"department": "UK Support", "email": "uk@example.com"}},
+    )
+    monkeypatch.setattr(
+        support.settings,
+        "SUPPORT_DEFAULT_ROUTE_JSON",
+        {"department": "Global Support", "email": "global@example.com"},
+    )
+
+    assert support._route_for("GB") == ("UK Support", "uk@example.com")

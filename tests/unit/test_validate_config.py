@@ -24,6 +24,8 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "sections")
     monkeypatch.setattr(settings, "AUDIT_FIREHOSE_ENABLED", False)
     monkeypatch.setattr(settings, "SUPPORT_EMAIL_ENABLED", False)
+    monkeypatch.setattr(settings, "SUPPORT_ROUTES_JSON", {})
+    monkeypatch.setattr(settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
 
 
 def test_valid_production_configuration_passes(monkeypatch) -> None:
@@ -52,8 +54,23 @@ def test_support_email_requires_sender_and_routes_in_production(monkeypatch) -> 
     monkeypatch.setattr(settings, "SUPPORT_EMAIL_ENABLED", True)
     monkeypatch.setattr(settings, "SUPPORT_EMAIL_FROM", "")
     monkeypatch.setattr(settings, "SUPPORT_ROUTES_JSON", {})
+    monkeypatch.setattr(settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
 
     failures = validate()
 
     assert "SUPPORT_EMAIL_FROM" in failures
-    assert "SUPPORT_ROUTES_JSON" in failures
+    assert "SUPPORT_ROUTES_JSON or SUPPORT_DEFAULT_ROUTE_JSON" in failures
+
+
+def test_support_email_accepts_default_route_in_production(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "SUPPORT_EMAIL_ENABLED", True)
+    monkeypatch.setattr(settings, "SUPPORT_EMAIL_FROM", "askvera@example.com")
+    monkeypatch.setattr(settings, "SUPPORT_ROUTES_JSON", {})
+    monkeypatch.setattr(
+        settings,
+        "SUPPORT_DEFAULT_ROUTE_JSON",
+        {"department": "Global Support", "email": "global@example.com"},
+    )
+
+    assert validate() == []

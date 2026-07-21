@@ -61,8 +61,18 @@ def validate() -> list[str]:
         _require(missing, "AUDIT_FIREHOSE_STREAM")
     if settings.SUPPORT_EMAIL_ENABLED:
         _require(missing, "SUPPORT_EMAIL_FROM")
-        if not settings.SUPPORT_ROUTES_JSON:
-            missing.append("SUPPORT_ROUTES_JSON")
+        has_market_routes = any(
+            isinstance(route, dict) and route.get("department") and route.get("email")
+            for route in settings.SUPPORT_ROUTES_JSON.values()
+        ) if isinstance(settings.SUPPORT_ROUTES_JSON, dict) else False
+        default_route = settings.SUPPORT_DEFAULT_ROUTE_JSON
+        has_default_route = (
+            isinstance(default_route, dict)
+            and default_route.get("department")
+            and default_route.get("email")
+        )
+        if not has_market_routes and not has_default_route:
+            missing.append("SUPPORT_ROUTES_JSON or SUPPORT_DEFAULT_ROUTE_JSON")
     return missing
 
 
