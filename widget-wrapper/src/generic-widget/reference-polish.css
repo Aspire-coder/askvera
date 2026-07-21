@@ -25,10 +25,36 @@
   --gw-field-bg: #f0eee9;
   --gw-field-text: var(--gw-reference-ink);
   --gw-focus-ring: rgba(232, 183, 0, 0.28);
+  --gw-text-title-size: 16px;
+  --gw-text-heading-size: 15px;
+  --gw-text-body-size: 14px;
+  --gw-text-chat-size: 15px;
+  --gw-text-caption-size: 12px;
+  --gw-text-label-size: 11px;
   --gw-line-body: 1.52;
-  --gw-line-relaxed: 1.62;
-  --gw-weight-bold: 620;
-  --gw-weight-heavy: 650;
+  --gw-line-relaxed: 1.58;
+  --gw-weight-regular: 400;
+  --gw-weight-medium: 500;
+  --gw-weight-semibold: 600;
+  --gw-weight-bold: 600;
+  --gw-weight-heavy: 600;
+  font-size: 14px;
+  font-weight: 400;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+  font-synthesis: none;
+  letter-spacing: 0;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.gw-root *,
+.gw-root *::before,
+.gw-root *::after {
+  box-sizing: border-box;
+  font-family: inherit;
+  letter-spacing: 0;
 }
 
 .gw-panel {
@@ -60,14 +86,17 @@
 
 .gw-title {
   color: var(--gw-reference-ink);
-  font-size: 17px;
-  font-weight: 620;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .gw-subtitle,
 .gw-status {
   color: var(--gw-reference-muted);
-  font-weight: 450;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
 }
 
 .gw-header-mark,
@@ -105,6 +134,9 @@
 .gw-section-title,
 .gw-legal-title {
   color: #8a6b00;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .gw-onboarding-intro h2,
@@ -115,7 +147,7 @@
 .gw-message h5,
 .gw-message strong {
   color: var(--gw-reference-ink);
-  font-weight: 620;
+  font-weight: 600;
 }
 
 .gw-onboarding-intro p,
@@ -178,6 +210,9 @@
 .gw-message-feed {
   gap: 22px;
   color: var(--gw-reference-ink);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.58;
 }
 
 .gw-message {
@@ -235,12 +270,38 @@
 
 .gw-message-meta {
   color: #85857f;
-  font-weight: 450;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
 }
 
 .gw-message-author {
   color: var(--gw-reference-ink);
-  font-weight: 580;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gw-message-body,
+.gw-message-body p,
+.gw-message-body li {
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.58;
+}
+
+.gw-message-body h3 {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.gw-message-body h4,
+.gw-message-body h5 {
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.gw-message-body strong {
+  font-weight: 600;
 }
 
 .gw-citations {
@@ -252,6 +313,8 @@
 .gw-composer-tool {
   background: #efede7;
   color: var(--gw-reference-muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .gw-citations-title:hover,
@@ -299,6 +362,8 @@
   color: var(--gw-reference-ink);
   font-size: 15px;
   font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.45;
 }
 
 .gw-composer .gw-primary-button {
