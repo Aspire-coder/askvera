@@ -12,7 +12,9 @@
         "off_topic": "I can help with approved Forever Living products, policies, ordering, and business support.",
         "medical_claim": "I can't provide medical advice or treatment claims. Please check the approved product information and speak with a qualified healthcare professional.",
         "income_claim": "I can't predict or guarantee earnings. I can explain approved bonus and compensation-plan rules from the published documents.",
-        "bedrock_error": "I couldn't complete that answer just now. Please try again or request additional support."
+        "bedrock_error": "I couldn't complete that answer just now. Please try again or request additional support.",
+        "sensitive_pii": "For your privacy, I removed sensitive personal information from your message. AskVera does not use or save government IDs, payment details, passwords, or other sensitive identifiers. Please ask again without personal details.",
+        "guardrail_blocked": "I couldn't provide that response because it did not pass AskVera's safety checks. Please rephrase the question without private information or unsafe claims."
       }
     },
     "fr": {
@@ -25,7 +27,9 @@
         "off_topic": "Je peux vous aider avec les produits, les politiques, les commandes et le soutien commercial approuvés de Forever Living.",
         "medical_claim": "Je ne peux pas fournir de conseils médicaux ni d'allégations de traitement. Consultez les informations approuvées sur le produit et un professionnel de santé qualifié.",
         "income_claim": "Je ne peux pas prévoir ni garantir des revenus. Je peux expliquer les règles approuvées relatives aux primes et au plan de rémunération.",
-        "bedrock_error": "Je n'ai pas pu terminer cette réponse. Veuillez réessayer ou demander une aide supplémentaire."
+        "bedrock_error": "Je n'ai pas pu terminer cette réponse. Veuillez réessayer ou demander une aide supplémentaire.",
+        "sensitive_pii": "Pour protéger votre vie privée, j'ai supprimé les informations personnelles sensibles de votre message. AskVera n'utilise ni n'enregistre les pièces d'identité, les données de paiement, les mots de passe ou d'autres identifiants sensibles. Reformulez votre question sans données personnelles.",
+        "guardrail_blocked": "Je n'ai pas pu fournir cette réponse, car elle n'a pas satisfait aux contrôles de sécurité d'AskVera. Reformulez la question sans informations privées ni allégations à risque."
       }
     },
     "es": {
@@ -38,7 +42,9 @@
         "off_topic": "Puedo ayudarte con productos, políticas, pedidos y soporte comercial aprobados de Forever Living.",
         "medical_claim": "No puedo ofrecer consejos médicos ni afirmaciones de tratamiento. Consulta la información aprobada del producto y a un profesional sanitario cualificado.",
         "income_claim": "No puedo predecir ni garantizar ingresos. Puedo explicar las reglas aprobadas de bonos y del plan de compensación.",
-        "bedrock_error": "No pude completar esa respuesta. Inténtalo de nuevo o solicita ayuda adicional."
+        "bedrock_error": "No pude completar esa respuesta. Inténtalo de nuevo o solicita ayuda adicional.",
+        "sensitive_pii": "Para proteger tu privacidad, eliminé la información personal confidencial del mensaje. AskVera no usa ni guarda identificaciones oficiales, datos de pago, contraseñas u otros identificadores confidenciales. Vuelve a preguntar sin datos personales.",
+        "guardrail_blocked": "No pude proporcionar esa respuesta porque no superó los controles de seguridad de AskVera. Reformula la pregunta sin información privada ni afirmaciones inseguras."
       }
     },
     "de": {
@@ -51,7 +57,9 @@
         "off_topic": "Ich kann bei freigegebenen Produkten, Richtlinien, Bestellungen und geschäftlichen Themen von Forever Living helfen.",
         "medical_claim": "Ich kann keine medizinische Beratung oder Heilversprechen geben. Prüfen Sie die freigegebenen Produktinformationen und sprechen Sie mit medizinischem Fachpersonal.",
         "income_claim": "Ich kann kein Einkommen vorhersagen oder garantieren. Ich kann die freigegebenen Bonus- und Vergütungsplanregeln erklären.",
-        "bedrock_error": "Ich konnte diese Antwort nicht abschließen. Versuchen Sie es erneut oder fordern Sie zusätzliche Hilfe an."
+        "bedrock_error": "Ich konnte diese Antwort nicht abschließen. Versuchen Sie es erneut oder fordern Sie zusätzliche Hilfe an.",
+        "sensitive_pii": "Zum Schutz Ihrer Privatsphäre habe ich sensible persönliche Angaben aus Ihrer Nachricht entfernt. AskVera verwendet oder speichert keine Ausweis-, Zahlungs- oder Zugangsdaten. Stellen Sie die Frage bitte erneut ohne persönliche Daten.",
+        "guardrail_blocked": "Ich konnte diese Antwort nicht bereitstellen, weil sie die Sicherheitsprüfungen von AskVera nicht bestanden hat. Formulieren Sie die Frage bitte ohne private Angaben oder unsichere Behauptungen neu."
       }
     },
     "nl": {
@@ -64,7 +72,9 @@
         "off_topic": "Ik kan helpen met goedgekeurde producten, beleid, bestellingen en zakelijke ondersteuning van Forever Living.",
         "medical_claim": "Ik kan geen medisch advies of behandelingsclaims geven. Bekijk de goedgekeurde productinformatie en raadpleeg een bevoegde zorgverlener.",
         "income_claim": "Ik kan inkomsten niet voorspellen of garanderen. Ik kan de goedgekeurde bonus- en compensatieregels uitleggen.",
-        "bedrock_error": "Ik kon dat antwoord niet voltooien. Probeer het opnieuw of vraag extra hulp aan."
+        "bedrock_error": "Ik kon dat antwoord niet voltooien. Probeer het opnieuw of vraag extra hulp aan.",
+        "sensitive_pii": "Om uw privacy te beschermen heb ik gevoelige persoonsgegevens uit uw bericht verwijderd. AskVera gebruikt of bewaart geen identiteits-, betaal- of inloggegevens. Stel uw vraag opnieuw zonder persoonlijke gegevens.",
+        "guardrail_blocked": "Ik kon dat antwoord niet geven omdat het niet door de veiligheidscontroles van AskVera kwam. Formuleer de vraag opnieuw zonder privégegevens of onveilige claims."
       }
     }
   }

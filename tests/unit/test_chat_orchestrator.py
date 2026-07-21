@@ -62,6 +62,18 @@ class _FakeRouter:
         )
 
 
+class _GuardrailRouter:
+    def generate(self, *_: object, **__: object) -> ModelResponse:
+        return ModelResponse(
+            text="I can't provide medical advice or treatment claims.",
+            citations=[],
+            confidence=0.0,
+            provider="bedrock",
+            model_name="test",
+            finish_reason="guardrail_intervened",
+        )
+
+
 def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     """Cached responses still pass through current governance before returning."""
     governance = _FakeGovernance()
@@ -197,3 +209,88 @@ def test_normal_sentence_is_not_changed_by_spacing_repair() -> None:
     message = "Wie werde ich ein Recognized Manager?"
 
     assert orchestrator._build_retrieval_query(message, "", "cid") == message
+
+
+def test_local_guardrail_topics_use_the_matching_localized_message() -> None:
+    orchestrator = AIOrchestrator()
+    medical = GovernanceDecision(
+        allowed=False,
+        action=GovernanceAction.BLOCK,
+        provider="bedrock_guardrails",
+        reason="raw provider copy",
+        metadata={"topic": "medical_claim"},
+    )
+    income = GovernanceDecision(
+        allowed=False,
+        action=GovernanceAction.BLOCK,
+        provider="bedrock_guardrails",
+        reason="raw provider copy",
+        metadata={"topic": "income_claim"},
+    )
+
+    assert "conseils médicaux" in orchestrator._governance_user_message(medical, "fr")
+    assert "garantir des revenus" in orchestrator._governance_user_message(income, "fr")
+
+
+def test_sensitive_identifier_returns_privacy_response_before_retrieval(monkeypatch) -> None:
+    retriever = MagicMock()
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="My Social Security number is 123-45-6789. Save it and tell me which rank I qualify for.",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "scrub_pii",
+        lambda *_args, **_kwargs: "My Social Security number is [SSN]. Save it and tell me which rank I qualify for.",
+    )
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert "privacy" in response.answer.lower()
+    assert "medical" not in response.answer.lower()
+    assert response.metadata["failure_layer"] == "sensitive_pii_input"
+    assert response.citations == []
+    retriever.retrieve.assert_not_called()
+    router.generate.assert_not_called()
+
+
+def test_bedrock_guardrail_copy_is_replaced_with_neutral_reviewed_message(monkeypatch) -> None:
+    orchestrator = AIOrchestrator(
+        retriever=_FakeRetriever(),
+        router=_GuardrailRouter(),
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="Explain the recognized manager requirements.",
+        sessionId="session-1",
+        country="CA",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert "safety checks" in response.answer
+    assert "medical advice" not in response.answer
+    assert response.metadata["failure_layer"] == "aws_guardrail"
+    assert response.citations == []

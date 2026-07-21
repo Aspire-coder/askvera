@@ -33,6 +33,7 @@ class BedrockGuardrailsProvider:
                     "country": country,
                     "language": language,
                     "errorCode": exc.error_code,
+                    "topic": exc.topic,
                 },
             )
         return GovernanceDecision(

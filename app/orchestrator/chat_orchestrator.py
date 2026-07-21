@@ -26,7 +26,7 @@ from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
 from services.cache import build_cache_key, get_cache_value, set_cache_value
 from services.consent_service import has_valid_consent
-from services.pii import remove_unresolved_pii_placeholders, scrub_pii
+from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
@@ -96,6 +96,24 @@ class AIOrchestrator:
             body.language,
             preserve_location_names=True,
         )
+        if contains_sensitive_pii_placeholder(scrubbed_input):
+            chat_response = self.response_builder.fallback(
+                localized_conversation_response("sensitive_pii", body.language)
+                or (
+                    "For your privacy, I removed sensitive personal information from your message. "
+                    "AskVera does not use or save government IDs, payment details, passwords, or other "
+                    "sensitive identifiers. Please ask again without personal details."
+                ),
+                correlation_id,
+                metadata={
+                    "fallback": False,
+                    "failure_layer": "sensitive_pii_input",
+                    "response_source": "privacy",
+                    "input_pii_scrubbed": True,
+                },
+            )
+            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
+            return chat_response
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
@@ -192,6 +210,20 @@ class AIOrchestrator:
                 body,
                 correlation_id,
                 retrieval_result=retrieval_result,
+            )
+
+        if model_response.finish_reason == "guardrail_intervened":
+            return self.response_builder.fallback(
+                localized_conversation_response("guardrail_blocked", body.language)
+                or (
+                    "I couldn't provide that response because it did not pass AskVera's safety checks. "
+                    "Please rephrase the question without private information or unsafe claims."
+                ),
+                correlation_id,
+                metadata={
+                    "failure_layer": "aws_guardrail",
+                    "response_source": "guardrail",
+                },
             )
 
         contracted_response = self._apply_evidence_contract(model_response, retrieval_result, correlation_id)
@@ -461,11 +493,14 @@ class AIOrchestrator:
         """Convert internal governance reasons into user-friendly copy."""
         risk_issues = (decision.metadata or {}).get("risk", {}).get("issues", [])
         issue_codes = {str(issue.get("code", "")).lower() for issue in risk_issues}
+        guardrail_topic = str((decision.metadata or {}).get("topic", "")).lower()
 
-        if any("income" in code for code in issue_codes):
+        if guardrail_topic == "income_claim" or any("income" in code for code in issue_codes):
             return localized_conversation_response("income_claim", language) or FALLBACK_RESPONSES["income_claim"]
-        if any("medical" in code or "health" in code for code in issue_codes):
+        if guardrail_topic == "medical_claim" or any("medical" in code or "health" in code for code in issue_codes):
             return localized_conversation_response("medical_claim", language) or FALLBACK_RESPONSES["medical_claim"]
+        if guardrail_topic == "off_topic":
+            return localized_conversation_response("off_topic", language) or FALLBACK_RESPONSES["off_topic"]
         if decision.reason == "Governance provider failed.":
             return localized_conversation_response("bedrock_error", language) or FALLBACK_RESPONSES["bedrock_error"]
         if decision.reason in {

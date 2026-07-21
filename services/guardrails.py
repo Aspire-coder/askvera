@@ -19,5 +19,5 @@ def check_text(text: str, correlation_id: str) -> None:
     for topic in ["income_claim", "medical_claim", "off_topic"]:
         if _matches(topic, text):
             LOGGER.warning("guardrail_blocked", correlation_id=correlation_id, topic=topic)
-            raise GuardrailBlockedError(FALLBACK_RESPONSES[topic])
+            raise GuardrailBlockedError(FALLBACK_RESPONSES[topic], topic=topic)
     LOGGER.info("guardrail_passed", correlation_id=correlation_id)

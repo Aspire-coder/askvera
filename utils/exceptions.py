@@ -47,6 +47,10 @@ class GuardrailBlockedError(AskVeraError):
     error_code = "GUARDRAIL_BLOCKED"
     status_code = 400
 
+    def __init__(self, message: str, *, topic: str = "") -> None:
+        super().__init__(message)
+        self.topic = topic
+
 
 class LowConfidenceError(AskVeraError):
     """Raised when retrieved knowledge does not meet the confidence threshold."""

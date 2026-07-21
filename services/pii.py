@@ -7,11 +7,18 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
-from utils.redaction import EMAIL_RE, PHONE_RE
+from utils.redaction import EMAIL_RE, GOVERNMENT_ID_RE, PHONE_RE, redact_payment_cards
 from utils.exceptions import AwsServiceError
 from utils.logging import get_logger
 
 LOGGER = get_logger("services.pii")
+SENSITIVE_PII_PLACEHOLDERS = frozenset({"GOVERNMENT_ID", "PAYMENT_CARD", "SSN", "CREDIT_DEBIT_NUMBER"})
+
+
+def contains_sensitive_pii_placeholder(text: str) -> bool:
+    """Return whether scrubbed input contains high-risk personal data."""
+    placeholders = {item.upper() for item in re.findall(r"\[([A-Z_]+)\]", text or "", flags=re.IGNORECASE)}
+    return bool(placeholders & SENSITIVE_PII_PLACEHOLDERS)
 
 
 def remove_unresolved_pii_placeholders(text: str) -> str:
@@ -98,7 +105,9 @@ def _scrub_pattern_pii(text: str, allowed_texts: Iterable[str]) -> str:
     def replace_phone(match: re.Match[str]) -> str:
         return match.group(0) if _approved_entity(match.group(0), approved) else "[PHONE]"
 
-    return PHONE_RE.sub(replace_phone, EMAIL_RE.sub(replace_email, text))
+    scrubbed = GOVERNMENT_ID_RE.sub("[GOVERNMENT_ID]", text)
+    scrubbed = redact_payment_cards(scrubbed)
+    return PHONE_RE.sub(replace_phone, EMAIL_RE.sub(replace_email, scrubbed))
 
 
 def scrub_pattern_pii(text: str, *, allowed_texts: Iterable[str] = ()) -> str:
@@ -147,5 +156,6 @@ def scrub_pii(
         if preserve_location_names and entity_type in {"ADDRESS", "LOCATION"} and _looks_like_location_name(entity_text):
             continue
         scrubbed = f"{scrubbed[:start]}[{entity_type}]{scrubbed[end:]}"
+    scrubbed = _scrub_pattern_pii(scrubbed, approved)
     LOGGER.info("pii_scrubbed", correlation_id=correlation_id, entity_count=len(response.get("Entities", [])), language=language_code)
     return scrubbed

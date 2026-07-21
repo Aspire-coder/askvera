@@ -10,7 +10,7 @@ def test_trace_store_orders_stages_and_masks_common_pii() -> None:
         country="BE",
         language="nl",
         session_id="session-1",
-        question_preview="Email me at user@example.com or +32 470 12 34 56",
+        question_preview="Email me at user@example.com, +32 470 12 34 56, ID 123-45-6789",
     )
     store.record("trace-1", "retrieval", success=True, duration_ms=91.237)
     store.record("trace-1", "governance", success=True, duration_ms=14)
@@ -19,7 +19,7 @@ def test_trace_store_orders_stages_and_masks_common_pii() -> None:
     trace = store.get("trace-1")
 
     assert trace is not None
-    assert trace["question_preview"] == "Email me at [EMAIL] or [PHONE]"
+    assert trace["question_preview"] == "Email me at [EMAIL], [PHONE], ID [GOVERNMENT_ID]"
     assert [stage["stage"] for stage in trace["stages"]] == [
         "request_received",
         "governance",

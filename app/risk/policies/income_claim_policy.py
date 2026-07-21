@@ -2,6 +2,7 @@
 
 from app.risk.models import PolicyAction, RiskContext, RiskIssue, RiskLevel
 from app.risk.rules import RiskPolicyMetadata
+from config.guardrail_topics import DENIED_TOPICS
 
 
 class IncomeClaimPolicy:
@@ -15,7 +16,7 @@ class IncomeClaimPolicy:
         risk_level=RiskLevel.HIGH,
         action=PolicyAction.WARN,
     )
-    phrases = ("guaranteed income", "get rich", "earnings guarantee", "passive income")
+    phrases = tuple(DENIED_TOPICS["income_claim"])
 
     def evaluate(self, context: RiskContext) -> list[RiskIssue]:
         message = (context.user_message or "").lower()

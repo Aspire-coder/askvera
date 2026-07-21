@@ -3,7 +3,13 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from services.pii import _pii_language_code, remove_unresolved_pii_placeholders, scrub_pii
+from services.pii import (
+    _pii_language_code,
+    contains_sensitive_pii_placeholder,
+    remove_unresolved_pii_placeholders,
+    scrub_pattern_pii,
+    scrub_pii,
+)
 
 
 def test_scrub_pii_replaces_detected_entities() -> None:
@@ -114,3 +120,15 @@ def test_unresolved_placeholders_are_removed_inline() -> None:
     answer = "If you're in the Benelux region ([ADDRESS], [ADDRESS]), disputes use arbitration."
 
     assert remove_unresolved_pii_placeholders(answer) == "If you're in the Benelux region, disputes use arbitration."
+
+
+def test_government_id_is_scrubbed_without_language_specific_service() -> None:
+    scrubbed = scrub_pattern_pii("My identifier is 123-45-6789")
+
+    assert scrubbed == "My identifier is [GOVERNMENT_ID]"
+    assert contains_sensitive_pii_placeholder(scrubbed) is True
+
+
+def test_valid_payment_card_is_scrubbed_but_long_phone_is_not_misclassified() -> None:
+    assert scrub_pattern_pii("Card 4111 1111 1111 1111") == "Card [PAYMENT_CARD]"
+    assert "[PAYMENT_CARD]" not in scrub_pattern_pii("Office +44 1926 626 600")

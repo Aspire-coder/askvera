@@ -2,6 +2,7 @@
 
 from app.risk.models import PolicyAction, RiskContext, RiskIssue, RiskLevel
 from app.risk.rules import RiskPolicyMetadata
+from config.guardrail_topics import DENIED_TOPICS
 
 
 class MedicalClaimPolicy:
@@ -15,7 +16,7 @@ class MedicalClaimPolicy:
         risk_level=RiskLevel.HIGH,
         action=PolicyAction.WARN,
     )
-    phrases = ("cure", "treat", "prevent disease", "diabetes", "cancer")
+    phrases = tuple(DENIED_TOPICS["medical_claim"])
 
     def evaluate(self, context: RiskContext) -> list[RiskIssue]:
         message = (context.user_message or "").lower()
