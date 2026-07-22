@@ -145,8 +145,8 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       </div>
 
       <div className="metric-grid">
-        <article className="metric-card surface"><span>Active users</span><strong>{compact.format(overview.totals.users)}</strong><small>Unique chat sessions</small></article>
-        <article className="metric-card surface"><span>Questions asked</span><strong>{compact.format(overview.totals.questions)}</strong><small>{(overview.totals.questions / Math.max(overview.totals.users, 1)).toFixed(1)} per user</small></article>
+        <article className="metric-card surface"><span>Unique sessions</span><strong>{compact.format(overview.totals.users)}</strong><small>Sessions with questions in this range</small></article>
+        <article className="metric-card surface"><span>Questions asked</span><strong>{compact.format(overview.totals.questions)}</strong><small>{(overview.totals.questions / Math.max(overview.totals.users, 1)).toFixed(1)} per session</small></article>
         <article className="metric-card surface"><span>Helpful answers</span><strong>{percent(overview.totals.helpfulRate)}</strong><small>{compact.format(feedbackTotal)} rated answers</small></article>
         <article className="metric-card token-metric surface">
           <span>AI tokens</span><strong>{compact.format(overview.totals.tokens)}</strong>
