@@ -1,4 +1,4 @@
-from app.risk.models import RiskContext
+from app.risk.models import PolicyAction, RiskContext
 from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 
 
@@ -33,6 +33,19 @@ def test_income_claim_policy_still_flags_guaranteed_income_claims() -> None:
 
     assert len(issues) == 1
     assert issues[0].code == "INCOME_CLAIM_RISK"
+    assert issues[0].action == PolicyAction.REFUSE
+
+
+def test_income_claim_policy_flags_promotional_guaranteed_earnings_copy() -> None:
+    policy = IncomeClaimPolicy()
+
+    issues = policy.evaluate(
+        _context("Write a post saying I am guaranteed to earn $10,000 a month with Forever.")
+    )
+
+    assert len(issues) == 1
+    assert issues[0].code == "INCOME_CLAIM_RISK"
+    assert issues[0].action == PolicyAction.REFUSE
 
 
 def test_income_claim_policy_still_flags_passive_income_with_bonus_terms() -> None:

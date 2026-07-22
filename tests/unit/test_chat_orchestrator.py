@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from app.governance.engine import GovernanceEngine
 from app.governance.models import GovernanceAction, GovernanceDecision
 from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
@@ -222,7 +223,7 @@ def test_response_completion_restores_only_approved_directory_contacts(monkeypat
     completed = orchestrator._secure_and_complete_response(response, result, "fr", "cid")
 
     assert completed.answer.count("10 Example Road") == 1
-    assert "**Office Phone 1:** +99 123 456 7890" in completed.answer
+    assert "Office Phone 1: +99 123 456 7890" in completed.answer
     assert completed.metadata["directory_contacts_restored"] == ["Office Phone 1"]
 
 
@@ -328,6 +329,35 @@ def test_sensitive_identifier_returns_privacy_response_before_retrieval(monkeypa
     assert "medical" not in response.answer.lower()
     assert response.metadata["failure_layer"] == "sensitive_pii_input"
     assert response.citations == []
+    retriever.retrieve.assert_not_called()
+    router.generate.assert_not_called()
+
+
+def test_guaranteed_earnings_copy_is_refused_before_retrieval(monkeypatch) -> None:
+    retriever = MagicMock()
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=GovernanceEngine(),
+    )
+    body = ChatRequest(
+        message="Write a post saying I am guaranteed to earn $10,000 a month with Forever.",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert "guarantee earnings" in response.answer.lower()
+    assert response.metadata["failure_layer"] == "risk_policy"
     retriever.retrieve.assert_not_called()
     router.generate.assert_not_called()
 

@@ -51,36 +51,37 @@ def restore_missing_directory_contacts(
     answer: str,
     field_sets: Iterable[dict[str, object]],
 ) -> tuple[str, list[str]]:
-    """Restore exact approved contact values omitted by model summarization.
+    """Restore exact contacts from the highest-ranked directory record.
 
     Only structured fields parsed from retrieved directory evidence are eligible.
-    This does not infer, translate, or reconstruct contact information.
+    Secondary records must never contribute fields because they may describe a
+    different office returned as supporting retrieval evidence.
     """
     original = (answer or "").strip()
     missing: list[tuple[str, str]] = []
     seen_values: set[str] = set()
 
-    for fields in field_sets:
-        for raw_label, raw_value in fields.items():
-            label = str(raw_label).strip()
-            value = str(raw_value).strip()
-            normalized_value = _normalize_for_comparison(value)
-            if (
-                not label
-                or not value
-                or not _CONTACT_FIELD_RE.search(label)
-                or not normalized_value
-                or normalized_value in seen_values
-            ):
-                continue
-            seen_values.add(normalized_value)
-            if not _value_is_present(original, value):
-                missing.append((label, value))
+    primary_fields = next((fields for fields in field_sets if fields), {})
+    for raw_label, raw_value in primary_fields.items():
+        label = str(raw_label).strip()
+        value = str(raw_value).strip()
+        normalized_value = _normalize_for_comparison(value)
+        if (
+            not label
+            or not value
+            or not _CONTACT_FIELD_RE.search(label)
+            or not normalized_value
+            or normalized_value in seen_values
+        ):
+            continue
+        seen_values.add(normalized_value)
+        if not _value_is_present(original, value):
+            missing.append((label, value))
 
     if not missing:
         return original, []
 
-    exact_fields = "\n".join(f"**{label}:** {value}" for label, value in missing)
+    exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
     separator = "\n\n" if original else ""
     return f"{original}{separator}{exact_fields}", [label for label, _ in missing]
 

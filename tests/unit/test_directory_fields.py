@@ -14,8 +14,8 @@ def test_restores_exact_missing_contact_fields_for_any_country() -> None:
 
     completed, restored = restore_missing_directory_contacts(answer, [fields])
 
-    assert "**Office Address:** 10 Example Road, Capital City" in completed
-    assert "**Office Phone 1:** +99 123 456 7890" in completed
+    assert "Office Address: 10 Example Road, Capital City" in completed
+    assert "Office Phone 1: +99 123 456 7890" in completed
     assert completed.count("support@example.test") == 1
     assert restored == ["Office Address", "Office Phone 1"]
 
@@ -38,3 +38,22 @@ def test_ignores_non_contact_directory_metadata() -> None:
 
     assert completed == answer
     assert restored == []
+
+
+def test_never_mixes_contacts_from_secondary_directory_records() -> None:
+    answer = "Italy office\nAddress: Via Example 10, Rome"
+    italy = {
+        "Address": "Via Example 10, Rome",
+        "Office Phone": "+39 06 1234 5678",
+    }
+    mexico = {
+        "Office Phone": "+52 55 3300 9400",
+        "General Mailbox": "support-mx@example.test",
+    }
+
+    completed, restored = restore_missing_directory_contacts(answer, [italy, mexico])
+
+    assert "Office Phone: +39 06 1234 5678" in completed
+    assert "+52 55 3300 9400" not in completed
+    assert "support-mx@example.test" not in completed
+    assert restored == ["Office Phone"]
