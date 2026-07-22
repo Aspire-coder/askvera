@@ -197,3 +197,32 @@ def test_directory_country_score_derives_acronyms_from_record_metadata() -> None
 
     assert _directory_record_country_score("Give me the UK office address", row) == 2.2
     assert _directory_record_country_score("Give me the United Kingdom office address", row) == 2.4
+
+
+def test_translated_directory_query_only_boosts_matching_global_record() -> None:
+    """Translated place names improve directory ranking without changing policy scoring."""
+    mexico = _hit("mexico", "Mexico office", 1.0)
+    mexico["_source"].update(
+        {
+            "document_type": "office_directory",
+            "access_scope": "global",
+            "metadata": {"record_country": "Mexico"},
+        }
+    )
+    canada = _hit("canada", "Canada office", 2.0)
+    canada["_source"].update(
+        {
+            "document_type": "office_directory",
+            "access_scope": "global",
+            "metadata": {"record_country": "Canada"},
+        }
+    )
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [canada, mexico],
+        [],
+        "coordonnees du bureau au Mexique",
+        directory_message="coordonnees du bureau au Mexique Mexico office contact details",
+    )
+
+    assert rows[0][0]["id"] == "mexico"

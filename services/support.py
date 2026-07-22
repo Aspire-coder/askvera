@@ -12,6 +12,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import get_country_codes
+from services.pii import contains_sensitive_pii_placeholder, scrub_pii
 from utils.exceptions import SupportRouteUnavailableError, SupportUnavailableError
 from utils.logging import get_logger
 from utils.validators import SupportRequest
@@ -72,6 +73,22 @@ def _ticket_id(correlation_id: str) -> str:
     date = datetime.now(UTC).strftime("%Y%m%d")
     reference = "".join(character for character in correlation_id if character.isalnum())[:10].upper()
     return f"ASKVERA-{date}-{reference}"
+
+
+def sanitize_support_question(body: SupportRequest, correlation_id: str) -> SupportRequest:
+    """Remove incidental PII and reject secrets before support delivery."""
+    safe_question = scrub_pii(
+        body.question,
+        correlation_id,
+        body.language,
+        allowed_texts=(body.firstName, body.email),
+        preserve_location_names=True,
+    )
+    if contains_sensitive_pii_placeholder(safe_question):
+        raise SupportUnavailableError(
+            "Remove passwords, government IDs, payment details, and other sensitive identifiers before submitting support."
+        )
+    return body.model_copy(update={"question": safe_question})
 
 
 def send_support_request(body: SupportRequest, correlation_id: str) -> SupportDelivery:

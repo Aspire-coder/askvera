@@ -211,6 +211,14 @@ def test_normal_sentence_is_not_changed_by_spacing_repair() -> None:
     assert orchestrator._build_retrieval_query(message, "", "cid") == message
 
 
+def test_ambiguous_single_spaced_letters_are_left_for_query_planner() -> None:
+    """Do not collapse a noisy sentence into one unsearchable token."""
+    orchestrator = AIOrchestrator()
+    message = "H o w t o b e c o m e a r e c o g n i z e d m a n a g e r"
+
+    assert orchestrator._build_retrieval_query(message, "", "cid") == message
+
+
 def test_local_guardrail_topics_use_the_matching_localized_message() -> None:
     orchestrator = AIOrchestrator()
     medical = GovernanceDecision(

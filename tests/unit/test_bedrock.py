@@ -45,6 +45,7 @@ def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
     assert "Use only the retrieved authorised chunks" in normalized_prompt
     assert "Numbers, percentages, dates, timeframes" in normalized_prompt
     assert "Never combine countries" in normalized_prompt
+    assert "do not suggest replacement testimonials" in normalized_prompt
     assert "history only for conversational continuity" in normalized_prompt
 
 
