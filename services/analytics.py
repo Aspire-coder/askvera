@@ -15,11 +15,12 @@ from utils.logging import get_logger
 from utils.validators import TRAFFIC_SOURCES, ChatRequest, FeedbackRequest, SupportRequest
 
 LOGGER = get_logger("services.analytics")
+FILTER_TRAFFIC_SOURCES = TRAFFIC_SOURCES | {"legacy"}
 
 
 def _normalize_traffic_source(value: str) -> str:
     normalized = value.lower().strip()
-    if normalized and normalized not in TRAFFIC_SOURCES:
+    if normalized and normalized not in FILTER_TRAFFIC_SOURCES:
         raise ValueError("Unsupported traffic source.")
     return normalized
 

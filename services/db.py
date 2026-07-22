@@ -104,7 +104,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                         output_tokens INTEGER NOT NULL DEFAULT 0,
                         fallback BOOLEAN NOT NULL DEFAULT false,
                         failure_layer TEXT NOT NULL DEFAULT '',
-                        traffic_source TEXT NOT NULL DEFAULT 'widget',
+                        traffic_source TEXT NOT NULL DEFAULT 'legacy',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                     """
@@ -114,7 +114,25 @@ def create_schema(correlation_id: str = "startup") -> None:
                 text(
                     """
                     ALTER TABLE chat_analytics
-                    ADD COLUMN IF NOT EXISTS traffic_source TEXT NOT NULL DEFAULT 'widget'
+                    ADD COLUMN IF NOT EXISTS traffic_source TEXT NOT NULL DEFAULT 'legacy'
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE chat_analytics
+                    ALTER COLUMN traffic_source SET DEFAULT 'legacy'
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE chat_analytics
+                    SET traffic_source = 'legacy'
+                    WHERE traffic_source = 'widget'
+                      AND created_at < TIMESTAMPTZ '2026-07-22 21:46:00+00'
                     """
                 )
             )
@@ -123,7 +141,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                     UPDATE chat_analytics
                     SET traffic_source = 'evaluation'
-                    WHERE traffic_source = 'widget' AND session_id LIKE 'csv-%'
+                    WHERE traffic_source <> 'evaluation' AND session_id LIKE 'csv-%'
                     """
                 )
             )

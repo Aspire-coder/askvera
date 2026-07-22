@@ -55,6 +55,7 @@ def test_traffic_source_accepts_supported_test_categories() -> None:
 
     assert request.trafficSource == "evaluation"
     assert _normalize_traffic_source("backend_test") == "backend_test"
+    assert _normalize_traffic_source("legacy") == "legacy"
 
 
 def test_traffic_source_rejects_unknown_categories() -> None:
