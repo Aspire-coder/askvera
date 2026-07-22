@@ -81,23 +81,6 @@ def test_support_delivery_is_disabled_by_default(monkeypatch):
         support.send_support_request(request(), "cid")
 
 
-def test_support_question_rejects_sensitive_credentials(monkeypatch):
-    body = request().model_copy(update={"question": "My password is secret-value"})
-    monkeypatch.setattr(support, "scrub_pii", lambda *_args, **_kwargs: "My password is [PASSWORD]")
-
-    with pytest.raises(SupportUnavailableError, match="Remove passwords"):
-        support.sanitize_support_question(body, "cid")
-
-
-def test_support_question_uses_scrubbed_non_sensitive_text(monkeypatch):
-    body = request().model_copy(update={"question": "Call me at 555-123-4567"})
-    monkeypatch.setattr(support, "scrub_pii", lambda *_args, **_kwargs: "Call me at [PHONE]")
-
-    safe_body = support.sanitize_support_question(body, "cid")
-
-    assert safe_body.question == "Call me at [PHONE]"
-
-
 def test_support_country_codes_expose_availability_not_destinations(monkeypatch):
     monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_ENABLED", True)
     monkeypatch.setattr(

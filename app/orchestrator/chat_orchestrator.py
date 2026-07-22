@@ -163,26 +163,6 @@ class AIOrchestrator:
                 return self._governance_fallback(governance_decision, correlation_id, body.language)
             return chat_response
 
-        return self._handle_uncached_chat(
-            body=body,
-            correlation_id=correlation_id,
-            scrubbed_input=scrubbed_input,
-            retrieval_query=retrieval_query,
-            history=history,
-            cache_key=cache_key,
-        )
-
-    def _handle_uncached_chat(
-        self,
-        *,
-        body: ChatRequest,
-        correlation_id: str,
-        scrubbed_input: str,
-        retrieval_query: str,
-        history: str,
-        cache_key: str,
-    ) -> ChatResponse:
-        """Retrieve, generate, validate, and persist a cache-miss response."""
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
         client_action = str((retrieval_result.metadata or {}).get("client_action") or "")
         if client_action == "open_support_form":
@@ -434,11 +414,6 @@ class AIOrchestrator:
             return message
 
         groups = re.split(r"\s{2,}", message.strip())
-        # A single run such as "h o w t o" has no reliable word boundaries.
-        # Keep it intact so the multilingual query planner can interpret it;
-        # joining it here would create the much harder token "howto".
-        if len(groups) == 1:
-            return message
         repaired: list[str] = []
         for group in groups:
             group_tokens = group.split()

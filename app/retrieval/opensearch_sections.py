@@ -389,9 +389,6 @@ class OpenSearchSectionProvider:
             text_hits,
             vector_hits,
             message,
-            directory_message=" ".join(
-                part for part in (message, global_search_message) if part
-            ),
             prefer_outline=search_plan.prefer_outline,
         )
         rows = self._select_evidence_rows(message, rows, correlation_id)
@@ -495,7 +492,6 @@ class OpenSearchSectionProvider:
         vector_hits: list[dict[str, Any]],
         message: str,
         *,
-        directory_message: str = "",
         prefer_outline: bool = False,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
@@ -524,7 +520,7 @@ class OpenSearchSectionProvider:
             (
                 row,
                 _source_score(row, message)
-                + _directory_record_country_score(directory_message or message, row)
+                + _directory_record_country_score(message, row)
                 + (2.0 if prefer_outline and row.get("chunk_type") == "document_outline" else 0.0),
             )
             for row in merged.values()

@@ -12,24 +12,7 @@ from utils.exceptions import AwsServiceError
 from utils.logging import get_logger
 
 LOGGER = get_logger("services.pii")
-SENSITIVE_PII_PLACEHOLDERS = frozenset(
-    {
-        "AWS_ACCESS_KEY",
-        "AWS_SECRET_KEY",
-        "BANK_ACCOUNT_NUMBER",
-        "BANK_ROUTING",
-        "CREDIT_DEBIT_CVV",
-        "CREDIT_DEBIT_EXPIRY",
-        "CREDIT_DEBIT_NUMBER",
-        "DRIVER_ID",
-        "GOVERNMENT_ID",
-        "PASSPORT_NUMBER",
-        "PASSWORD",
-        "PAYMENT_CARD",
-        "PIN",
-        "SSN",
-    }
-)
+SENSITIVE_PII_PLACEHOLDERS = frozenset({"GOVERNMENT_ID", "PAYMENT_CARD", "SSN", "CREDIT_DEBIT_NUMBER"})
 
 
 def contains_sensitive_pii_placeholder(text: str) -> bool:
@@ -51,16 +34,10 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
     for line in text.splitlines():
         if re.search(r"\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\]\s*:", line, flags=re.IGNORECASE):
             continue
-        had_placeholder = bool(
-            re.search(r"\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\]", line, flags=re.IGNORECASE)
-        )
         cleaned = re.sub(r"\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\](?:\s*,\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\])*", "", line, flags=re.IGNORECASE)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
-        label_candidate = re.sub(r"[*_`]", "", cleaned).strip()
-        if had_placeholder and re.fullmatch(r"(?:-\s*)?[^:\n]{1,80}:", label_candidate):
-            continue
         if cleaned:
             kept_lines.append(cleaned)
     return "\n".join(kept_lines)

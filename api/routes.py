@@ -23,7 +23,7 @@ from services.analytics import record_chat_interaction, record_feedback_event, r
 from app.operations import pipeline_trace_store
 from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
-from services.support import sanitize_support_question, send_support_request, support_country_codes
+from services.support import send_support_request, support_country_codes
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
 from utils.validators import ChatRequest, ConsentRequest, EndSessionRequest, Envelope, FeedbackRequest, SupportRequest
@@ -304,10 +304,9 @@ def support(body: SupportRequest, request: Request) -> Envelope | JSONResponse:
     try:
         if not has_valid_consent(body.sessionId, correlation_id):
             return consent_required_response(correlation_id)
-        safe_body = sanitize_support_question(body, correlation_id)
-        delivery = send_support_request(safe_body, correlation_id)
+        delivery = send_support_request(body, correlation_id)
         record_support_delivery(
-            safe_body,
+            body,
             ticket_id=delivery.ticket_id,
             correlation_id=correlation_id,
             route_name=delivery.route_name,

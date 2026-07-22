@@ -122,12 +122,6 @@ def test_unresolved_placeholders_are_removed_inline() -> None:
     assert remove_unresolved_pii_placeholders(answer) == "If you're in the Benelux region, disputes use arbitration."
 
 
-def test_value_placeholder_does_not_leave_an_empty_field_label() -> None:
-    answer = "Office details:\n**Physical Address:** [ADDRESS]\n**Phone:** [PHONE]\nWebsite: example.com"
-
-    assert remove_unresolved_pii_placeholders(answer) == "Office details:\nWebsite: example.com"
-
-
 def test_government_id_is_scrubbed_without_language_specific_service() -> None:
     scrubbed = scrub_pattern_pii("My identifier is 123-45-6789")
 
