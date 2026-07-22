@@ -42,7 +42,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [days, setDays] = useState("30");
   const [country, setCountry] = useState("");
   const [language, setLanguage] = useState("");
-  const [feedback, setFeedback] = useState("not_helpful");
+  const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Interaction | null>(null);
 
@@ -67,10 +67,10 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setDays("30");
     setCountry("");
     setLanguage("");
-    setFeedback("not_helpful");
+    setFeedback("all");
     setQuery("");
     setSelected(null);
-    if (days === "30" && !country && !language && feedback === "not_helpful") void refresh();
+    if (days === "30" && !country && !language && feedback === "all") void refresh();
   };
 
   const filteredInteractions = useMemo(() => {
