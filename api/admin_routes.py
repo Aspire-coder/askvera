@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Annotated, Any
@@ -53,8 +54,20 @@ def overview(
     days: int = 30,
     country: str = "",
     language: str = "",
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> dict[str, Any]:
-    return _payload(analytics_overview(days=days, country=country, language=language), request)
+    try:
+        result = analytics_overview(
+            days=days,
+            country=country,
+            language=language,
+            start=start,
+            end=end,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _payload(result, request)
 
 
 @admin_router.get("/analytics/interactions")
@@ -65,19 +78,24 @@ def interactions(
     language: str = "",
     feedback: str = "all",
     limit: int = 100,
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> dict[str, Any]:
     if feedback not in {"all", "helpful", "not_helpful"}:
         raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
-    return _payload(
-        interaction_list(
+    try:
+        result = interaction_list(
             days=days,
             country=country,
             language=language,
             feedback=feedback,
             limit=limit,
-        ),
-        request,
-    )
+            start=start,
+            end=end,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _payload(result, request)
 
 
 @admin_router.get("/traces")

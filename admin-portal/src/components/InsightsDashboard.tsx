@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
-import type { AnalyticsOverview, Interaction } from "../types";
+import type { AnalyticsOverview, Interaction, Market } from "../types";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 const dateLabel = (value: string) => new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
+const interactionDateLabel = (value: string) => new Date(value).toLocaleString([], {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit"
+});
 
 function TrendChart({ overview }: { overview: AnalyticsOverview }) {
   const data = overview.trend;
@@ -38,8 +44,11 @@ function RankedBars({ data }: { data: Array<{ label: string; value: number }> })
 export function InsightsDashboard({ credentials }: { credentials: AdminCredentials }) {
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
   const [interactions, setInteractions] = useState<Interaction[]>(demo.interactions);
+  const [markets, setMarkets] = useState<Market[]>(demo.config.countries);
   const [mode, setMode] = useState<DataMode>("demo");
   const [days, setDays] = useState("30");
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
   const [country, setCountry] = useState("");
   const [language, setLanguage] = useState("");
   const [feedback, setFeedback] = useState("all");
@@ -49,29 +58,50 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const refresh = async () => {
     const overviewFilters = new URLSearchParams({ days });
     const interactionFilters = new URLSearchParams({ days, feedback, limit: "100" });
+    if (startAt) {
+      const start = new Date(startAt).toISOString();
+      overviewFilters.set("start", start);
+      interactionFilters.set("start", start);
+    }
+    if (endAt) {
+      const end = new Date(endAt).toISOString();
+      overviewFilters.set("end", end);
+      interactionFilters.set("end", end);
+    }
     if (country) { overviewFilters.set("country", country); interactionFilters.set("country", country); }
     if (language) { overviewFilters.set("language", language); interactionFilters.set("language", language); }
     const api = new AdminApi(credentials);
-    const [overviewResult, interactionResult] = await Promise.all([
+    const [overviewResult, interactionResult, configResult] = await Promise.all([
       withDemoFallback(() => api.overview(overviewFilters), demo.overview),
-      withDemoFallback(() => api.interactions(interactionFilters), demo.interactions)
+      withDemoFallback(() => api.interactions(interactionFilters), demo.interactions),
+      withDemoFallback(() => api.config(), demo.config)
     ]);
     setOverview(overviewResult.data);
     setInteractions(interactionResult.data);
-    setMode(overviewResult.mode === "live" && interactionResult.mode === "live" ? "live" : "demo");
+    setMarkets(configResult.data.countries);
+    setMode(overviewResult.mode === "live" && interactionResult.mode === "live" && configResult.mode === "live" ? "live" : "demo");
   };
 
-  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, country, language, feedback]);
+  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, feedback]);
 
   const resetDashboard = () => {
     setDays("30");
+    setStartAt("");
+    setEndAt("");
     setCountry("");
     setLanguage("");
     setFeedback("all");
     setQuery("");
     setSelected(null);
-    if (days === "30" && !country && !language && feedback === "all") void refresh();
+    if (days === "30" && !startAt && !endAt && !country && !language && feedback === "all") void refresh();
   };
+
+  const availableLanguages = useMemo(() => {
+    const source = country ? markets.filter((market) => market.code === country) : markets;
+    const unique = new Map<string, string>();
+    source.flatMap((market) => market.languages).forEach((item) => unique.set(item.code, item.name));
+    return [...unique].map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [country, markets]);
 
   const filteredInteractions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -95,10 +125,13 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       </div>
 
       <div className="filter-bar surface">
-        <label><span>Period</span><select value={days} onChange={(event) => setDays(event.target.value)}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
-        <label><span>Country</span><select value={country} onChange={(event) => setCountry(event.target.value)}><option value="">All countries</option>{demo.config.countries.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></label>
-        <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option value="">All languages</option><option value="nl">Dutch</option><option value="fr">French</option><option value="en">English</option></select></label>
+        <label><span>Quick range</span><select value={days} onChange={(event) => { setDays(event.target.value); setStartAt(""); setEndAt(""); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+        <label><span>From date and hour</span><input type="datetime-local" value={startAt} max={endAt || undefined} onChange={(event) => setStartAt(event.target.value)} /></label>
+        <label><span>To date and hour</span><input type="datetime-local" value={endAt} min={startAt || undefined} onChange={(event) => setEndAt(event.target.value)} /></label>
+        <label><span>Country</span><select value={country} onChange={(event) => { setCountry(event.target.value); setLanguage(""); }}><option value="">All countries</option>{markets.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></label>
+        <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option value="">All languages</option>{availableLanguages.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
         <button className="button primary" onClick={() => void refresh()}>Apply filters</button>
+        <small className="filter-note">Date and hour use your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</small>
       </div>
 
       <div className="metric-grid">
@@ -124,7 +157,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <div className="review-list surface">
           {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelected(item)}>
             <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>
-            <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {dateLabel(item.created_at)}</small></span>
+            <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {interactionDateLabel(item.created_at)}</small></span>
             <span className="confidence">{percent(item.confidence)}</span><ArrowIcon />
           </button>)}
           {!filteredInteractions.length ? <div className="empty-state">No answers match these filters.</div> : null}

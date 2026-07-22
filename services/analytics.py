@@ -17,6 +17,25 @@ from utils.validators import ChatRequest, FeedbackRequest, SupportRequest
 LOGGER = get_logger("services.analytics")
 
 
+def _analytics_window(
+    *,
+    days: int,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """Return a bounded UTC analytics window, preferring explicit timestamps."""
+    now = datetime.now(UTC)
+
+    def as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    window_start = as_utc(start) if start else now - timedelta(days=max(1, min(int(days), 365)))
+    window_end = as_utc(end) if end else now
+    if window_start >= window_end:
+        raise ValueError("The analytics start time must be before the end time.")
+    return window_start, window_end
+
+
 def _token_counts(response: ChatResponse) -> tuple[int, int]:
     usage = response.metadata.get("token_usage") if response.metadata else None
     if not isinstance(usage, dict):
@@ -157,12 +176,19 @@ def record_support_delivery(
         LOGGER.exception("support_audit_write_failed", correlation_id=correlation_id, ticket_id=ticket_id)
 
 
-def analytics_overview(*, days: int = 30, country: str = "", language: str = "") -> dict[str, Any]:
+def analytics_overview(
+    *,
+    days: int = 30,
+    country: str = "",
+    language: str = "",
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict[str, Any]:
     """Return aggregate usage, feedback, topic, locale, and daily trend data."""
     days = max(1, min(int(days), 365))
-    since = datetime.now(UTC) - timedelta(days=days)
-    filters = ["created_at >= :since"]
-    parameters: dict[str, Any] = {"since": since}
+    since, until = _analytics_window(days=days, start=start, end=end)
+    filters = ["created_at >= :since", "created_at < :until"]
+    parameters: dict[str, Any] = {"since": since, "until": until}
     if country:
         filters.append("country = :country")
         parameters["country"] = country.upper()
@@ -193,6 +219,7 @@ def analytics_overview(*, days: int = 30, country: str = "", language: str = "")
                 FROM feedback_events f
                 LEFT JOIN chat_analytics c ON c.correlation_id = f.correlation_id
                 WHERE COALESCE(c.created_at, f.created_at) >= :since
+                  AND COALESCE(c.created_at, f.created_at) < :until
                   {"AND c.country = :country" if country else ""}
                   {"AND c.language = :language" if language else ""}
                 """
@@ -255,11 +282,17 @@ def interaction_list(
     language: str = "",
     feedback: str = "all",
     limit: int = 100,
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent questions with optional negative-feedback filtering."""
-    since = datetime.now(UTC) - timedelta(days=max(1, min(int(days), 365)))
-    filters = ["c.created_at >= :since"]
-    parameters: dict[str, Any] = {"since": since, "limit": max(1, min(int(limit), 500))}
+    since, until = _analytics_window(days=days, start=start, end=end)
+    filters = ["c.created_at >= :since", "c.created_at < :until"]
+    parameters: dict[str, Any] = {
+        "since": since,
+        "until": until,
+        "limit": max(1, min(int(limit), 500)),
+    }
     if country:
         filters.append("c.country = :country")
         parameters["country"] = country.upper()
