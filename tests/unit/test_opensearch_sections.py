@@ -139,6 +139,29 @@ def test_search_plan_carries_runtime_document_scope(monkeypatch) -> None:
     assert plan.prefer_outline is True
 
 
+def test_high_confidence_conversation_route_skips_opensearch(monkeypatch) -> None:
+    provider = OpenSearchSectionProvider()
+    monkeypatch.setattr(
+        provider,
+        "_build_search_plan",
+        lambda *_: RetrievalQueryPlan(
+            ["I am having fever."],
+            conversation_intent="medical_claim",
+            intent_confidence=0.98,
+        ),
+    )
+    monkeypatch.setattr(
+        opensearch_sections,
+        "_client",
+        lambda: (_ for _ in ()).throw(AssertionError("OpenSearch must not be called")),
+    )
+
+    result = provider.retrieve("I am having fever.", "US", "en", "new_prospect", "cid")
+
+    assert result.documents == []
+    assert result.metadata["conversation_intent"] == "medical_claim"
+
+
 def test_outline_chunks_are_prioritized_only_for_structure_questions() -> None:
     rows = OpenSearchSectionProvider()._merge_hits(
         [

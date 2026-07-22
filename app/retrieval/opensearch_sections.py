@@ -336,6 +336,23 @@ class OpenSearchSectionProvider:
                     metadata={
                         "provider": "opensearch_section",
                         "client_action": search_plan.client_action,
+                        "conversation_intent": "support_request",
+                        "intent_confidence": search_plan.intent_confidence,
+                    },
+                )
+            if (
+                search_plan.conversation_intent != "knowledge"
+                and search_plan.intent_confidence >= settings.BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE
+            ):
+                return RetrievalResult(
+                    documents=[],
+                    citations=[],
+                    confidence=1.0,
+                    metadata={
+                        "provider": "opensearch_section",
+                        "conversation_intent": search_plan.conversation_intent,
+                        "conversation_subtype": search_plan.conversation_subtype,
+                        "intent_confidence": search_plan.intent_confidence,
                     },
                 )
             client = _client()
@@ -409,6 +426,7 @@ class OpenSearchSectionProvider:
                 "global_documents_searched": search_plan.include_global_documents,
                 "outline_preferred": search_plan.prefer_outline,
                 "client_action": search_plan.client_action,
+                "conversation_intent": "knowledge",
                 "global_query_translated": bool(global_search_message) and global_search_message != message,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()

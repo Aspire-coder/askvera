@@ -7,6 +7,7 @@ from app.models.responses import ModelResponse
 from app.operations import pipeline_trace_store
 from app.models.router import ModelRouter, model_router
 from app.evidence import (
+    EvidenceDecision,
     assistant_meta_response,
     approve_evidence,
     classify_intent,
@@ -96,22 +97,8 @@ class AIOrchestrator:
             body.language,
             preserve_location_names=True,
         )
-        if contains_sensitive_pii_placeholder(scrubbed_input):
-            chat_response = self.response_builder.fallback(
-                localized_conversation_response("sensitive_pii", body.language)
-                or (
-                    "For your privacy, I removed sensitive personal information from your message. "
-                    "AskVera does not use or save government IDs, payment details, passwords, or other "
-                    "sensitive identifiers. Please ask again without personal details."
-                ),
-                correlation_id,
-                metadata={
-                    "fallback": False,
-                    "failure_layer": "sensitive_pii_input",
-                    "response_source": "privacy",
-                    "input_pii_scrubbed": True,
-                },
-            )
+        chat_response = self._early_conversation_response(scrubbed_input, body, correlation_id)
+        if chat_response:
             append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
             return chat_response
         history = get_session_history(body.sessionId, correlation_id)
@@ -120,88 +107,22 @@ class AIOrchestrator:
         if not governance_decision.allowed:
             return self._governance_fallback(governance_decision, correlation_id, body.language)
 
-        intent = classify_intent(scrubbed_input, body.language)
-        if intent == "assistant_meta":
-            chat_response = self._static_assistant_response(body, correlation_id)
-            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
-            return chat_response
-
         cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
-        cache_started = perf_counter()
-        cached = get_cache_value(cache_key, correlation_id)
-        cached_usage = dict(cached.get("token_usage") or {}) if cached else {}
-        saved_input_tokens = int(cached_usage.get("inputTokens", cached_usage.get("input_tokens", 0)) or 0)
-        saved_output_tokens = int(cached_usage.get("outputTokens", cached_usage.get("output_tokens", 0)) or 0)
-        pipeline_trace_store.record(
-            correlation_id,
-            "cache_lookup",
-            success=True,
-            duration_ms=round((perf_counter() - cache_started) * 1000, 2),
-            metadata={
-                "service": "Amazon ElastiCache for Valkey",
-                "cacheHit": bool(cached),
-                "tokensSaved": saved_input_tokens + saved_output_tokens,
-                "inputTokensSaved": saved_input_tokens,
-                "outputTokensSaved": saved_output_tokens,
-            },
-        )
-        if cached:
-            chat_response = self._validate_response(
-                self.response_builder.from_cached(cached, correlation_id),
-                body,
-                correlation_id,
-            )
-            governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
-            if not governance_decision.allowed:
-                LOGGER.warning(
-                    "cached_response_governance_blocked",
-                    correlation_id=correlation_id,
-                    country=body.country,
-                    language=body.language,
-                    role=body.role,
-                )
-                return self._governance_fallback(governance_decision, correlation_id, body.language)
-            return chat_response
+        cached_response = self._cached_response(cache_key, body, correlation_id)
+        if cached_response:
+            return cached_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
-        client_action = str((retrieval_result.metadata or {}).get("client_action") or "")
-        if client_action == "open_support_form":
-            chat_response = self.response_builder.fallback(
-                localized_conversation_response("support_request", body.language)
-                or "Opening the support request form.",
-                correlation_id,
-                metadata={
-                    "fallback": False,
-                    "response_source": "client_action",
-                    "client_action": client_action,
-                },
-            )
-            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
+        chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
+            retrieval_query,
+            retrieval_result,
+            scrubbed_input,
+            body,
+            correlation_id,
+        )
+        if chat_response:
             return chat_response
-        evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
-        retrieval_result = with_approved_evidence(retrieval_result, evidence_decision)
-        if not evidence_decision.approved:
-            LOGGER.warning(
-                "evidence_decision_rejected",
-                correlation_id=correlation_id,
-                country=body.country,
-                language=body.language,
-                role=body.role,
-                **evidence_decision.to_metadata(),
-            )
-            return self._validate_response(
-                self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language),
-                    correlation_id,
-                    metadata={
-                        "failure_layer": "evidence_gate",
-                        "evidence_decision": evidence_decision.to_metadata(),
-                    },
-                ),
-                body,
-                correlation_id,
-                retrieval_result=retrieval_result,
-            )
+        assert evidence_decision is not None
         prompt_package = self.prompt_builder.build(
             user_question=scrubbed_input,
             conversation=history,
@@ -329,6 +250,50 @@ class AIOrchestrator:
                 reason="fallback_or_critical_validation",
             )
         return chat_response
+
+    def _cached_response(
+        self,
+        cache_key: str,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse | None:
+        """Read and revalidate a cached response before returning it."""
+        cache_started = perf_counter()
+        cached = get_cache_value(cache_key, correlation_id)
+        cached_usage = dict(cached.get("token_usage") or {}) if cached else {}
+        saved_input_tokens = int(cached_usage.get("inputTokens", cached_usage.get("input_tokens", 0)) or 0)
+        saved_output_tokens = int(cached_usage.get("outputTokens", cached_usage.get("output_tokens", 0)) or 0)
+        pipeline_trace_store.record(
+            correlation_id,
+            "cache_lookup",
+            success=True,
+            duration_ms=round((perf_counter() - cache_started) * 1000, 2),
+            metadata={
+                "service": "Amazon ElastiCache for Valkey",
+                "cacheHit": bool(cached),
+                "tokensSaved": saved_input_tokens + saved_output_tokens,
+                "inputTokensSaved": saved_input_tokens,
+                "outputTokensSaved": saved_output_tokens,
+            },
+        )
+        if cached:
+            chat_response = self._validate_response(
+                self.response_builder.from_cached(cached, correlation_id),
+                body,
+                correlation_id,
+            )
+            governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
+            if not governance_decision.allowed:
+                LOGGER.warning(
+                    "cached_response_governance_blocked",
+                    correlation_id=correlation_id,
+                    country=body.country,
+                    language=body.language,
+                    role=body.role,
+                )
+                return self._governance_fallback(governance_decision, correlation_id, body.language)
+            return chat_response
+        return None
 
     def _apply_evidence_contract(
         self,
@@ -547,6 +512,121 @@ class AIOrchestrator:
             correlation_id,
             metadata={"intent": "assistant_meta", "fallback": False, "response_source": "template"},
         )
+
+    def _early_conversation_response(
+        self,
+        scrubbed_input: str,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse | None:
+        """Handle privacy and exact zero-token conversation routes before retrieval."""
+        if contains_sensitive_pii_placeholder(scrubbed_input):
+            return self.response_builder.fallback(
+                localized_conversation_response("sensitive_pii", body.language)
+                or (
+                    "For your privacy, I removed sensitive personal information from your message. "
+                    "AskVera does not use or save government IDs, payment details, passwords, or other "
+                    "sensitive identifiers. Please ask again without personal details."
+                ),
+                correlation_id,
+                metadata={
+                    "fallback": False,
+                    "failure_layer": "sensitive_pii_input",
+                    "response_source": "privacy",
+                    "input_pii_scrubbed": True,
+                },
+            )
+        if classify_intent(scrubbed_input, body.language) == "assistant_meta":
+            return self._static_assistant_response(body, correlation_id)
+        return None
+
+    def _conversation_route_response(
+        self,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse | None:
+        """Convert a high-confidence semantic route into controlled response copy."""
+        metadata = retrieval_result.metadata or {}
+        client_action = str(metadata.get("client_action") or "")
+        intent = str(metadata.get("conversation_intent") or "knowledge")
+        subtype = str(metadata.get("conversation_subtype") or "")
+
+        if client_action == "open_support_form":
+            return self.response_builder.fallback(
+                localized_conversation_response("support_request", body.language)
+                or "Opening the support request form.",
+                correlation_id,
+                metadata={
+                    "fallback": False,
+                    "response_source": "client_action",
+                    "client_action": client_action,
+                    "intent": "support_request",
+                },
+            )
+
+        response_key = ""
+        if intent == "assistant_meta":
+            response_key = subtype if subtype in {"greeting", "capability", "thanks"} else "capability"
+        elif intent in {"medical_claim", "income_claim", "off_topic"}:
+            response_key = intent
+        if not response_key:
+            return None
+
+        answer = localized_conversation_response(response_key, body.language)
+        if not answer:
+            return None
+        return self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "intent": intent,
+                "fallback": False,
+                "response_source": "semantic_route",
+            },
+        )
+
+    def _route_or_approve_evidence(
+        self,
+        retrieval_query: str,
+        retrieval_result: RetrievalResult,
+        scrubbed_input: str,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> tuple[ChatResponse | None, RetrievalResult, EvidenceDecision | None]:
+        """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
+        routed_response = self._conversation_route_response(retrieval_result, body, correlation_id)
+        if routed_response:
+            append_session_turn(body.sessionId, scrubbed_input, routed_response.answer, correlation_id)
+            return routed_response, retrieval_result, None
+
+        evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
+        approved_result = with_approved_evidence(retrieval_result, evidence_decision)
+        if evidence_decision.approved:
+            return None, approved_result, evidence_decision
+
+        LOGGER.warning(
+            "evidence_decision_rejected",
+            correlation_id=correlation_id,
+            country=body.country,
+            language=body.language,
+            role=body.role,
+            **evidence_decision.to_metadata(),
+        )
+        fallback = self._validate_response(
+            self.response_builder.fallback(
+                self._insufficient_evidence_message(body.language),
+                correlation_id,
+                metadata={
+                    "failure_layer": "evidence_gate",
+                    "evidence_decision": evidence_decision.to_metadata(),
+                },
+            ),
+            body,
+            correlation_id,
+            retrieval_result=approved_result,
+        )
+        return fallback, approved_result, evidence_decision
 
     def _validate_response(
         self,

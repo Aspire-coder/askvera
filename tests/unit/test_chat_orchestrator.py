@@ -305,6 +305,75 @@ def test_explicit_support_action_bypasses_evidence_and_generation(monkeypatch) -
     router.generate.assert_not_called()
 
 
+def test_semantic_assistant_route_returns_controlled_capability_response(monkeypatch) -> None:
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=1.0,
+        metadata={
+            "conversation_intent": "assistant_meta",
+            "conversation_subtype": "capability",
+            "intent_confidence": 0.98,
+        },
+    )
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(message="What do you do?", sessionId="session-1", country="US", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert "approved knowledge assistant" in response.answer
+    assert response.metadata["response_source"] == "semantic_route"
+    router.generate.assert_not_called()
+
+
+def test_semantic_medical_route_never_opens_support_form(monkeypatch) -> None:
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=1.0,
+        metadata={"conversation_intent": "medical_claim", "intent_confidence": 0.98},
+    )
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(message="I am having fever.", sessionId="session-1", country="US", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert "medical advice" in response.answer
+    assert "client_action" not in response.metadata
+    assert response.metadata["intent"] == "medical_claim"
+    router.generate.assert_not_called()
+
+
 def test_bedrock_guardrail_copy_is_replaced_with_neutral_reviewed_message(monkeypatch) -> None:
     orchestrator = AIOrchestrator(
         retriever=_FakeRetriever(),

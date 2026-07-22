@@ -434,13 +434,25 @@ def test_query_planner_selects_document_scope_from_semantic_intent(monkeypatch) 
 
 def test_query_planner_routes_multilingual_explicit_handoff_as_client_action(monkeypatch) -> None:
     runtime = MagicMock()
-    runtime.converse.return_value = {
-        "output": {
-            "message": {
-                "content": [{"text": '{"queries":[],"document_scopes":[],"intent":"support_request"}'}]
+    runtime.converse.side_effect = [
+        {
+            "output": {
+                "message": {
+                    "content": [{
+                        "text": '{"queries":[],"document_scopes":[],"intent":"support_request",'
+                        '"intent_confidence":0.99,"explicit_support_request":true}'
+                    }]
+                }
             }
-        }
-    }
+        },
+        {
+            "output": {
+                "message": {
+                    "content": [{"text": '{"explicit_support_request":true}'}]
+                }
+            }
+        },
+    ]
     monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
     monkeypatch.setattr(
         retrieval_providers,
@@ -456,5 +468,95 @@ def test_query_planner_routes_multilingual_explicit_handoff_as_client_action(mon
     )
 
     assert plan.client_action == "open_support_form"
-    planner_prompt = runtime.converse.call_args.kwargs["system"][0]["text"]
+    assert plan.conversation_intent == "support_request"
+    assert runtime.converse.call_count == 2
+    planner_prompt = runtime.converse.call_args_list[0].kwargs["system"][0]["text"]
     assert "user's language" in planner_prompt
+
+
+def test_query_planner_routes_health_statement_without_opening_support(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"medical_claim",'
+                    '"intent_confidence":0.98,"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("I am having fever.", "US", "en", "medical-cid")
+
+    assert plan.conversation_intent == "medical_claim"
+    assert plan.client_action == ""
+    assert runtime.converse.call_count == 1
+
+
+def test_query_planner_routes_assistant_capability_without_document_search(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"assistant_meta",'
+                    '"intent_subtype":"capability","intent_confidence":0.97,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("What do you do?", "US", "en", "meta-cid")
+
+    assert plan.conversation_intent == "assistant_meta"
+    assert plan.conversation_subtype == "capability"
+    assert plan.client_action == ""
+
+
+def test_unverified_support_intent_fails_closed_to_knowledge(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        {
+            "output": {
+                "message": {
+                    "content": [{
+                        "text": '{"queries":["health statement"],"document_scopes":[],'
+                        '"intent":"support_request","intent_confidence":0.99,'
+                        '"explicit_support_request":true}'
+                    }]
+                }
+            }
+        },
+        {
+            "output": {
+                "message": {
+                    "content": [{"text": '{"explicit_support_request":false}'}]
+                }
+            }
+        },
+    ]
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("I am having fever.", "US", "en", "false-support-cid")
+
+    assert plan.conversation_intent == "knowledge"
+    assert plan.client_action == ""

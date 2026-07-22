@@ -103,6 +103,9 @@ class RetrievalQueryPlan:
     include_global_documents: bool = False
     prefer_outline: bool = False
     client_action: str = ""
+    conversation_intent: str = "knowledge"
+    conversation_subtype: str = ""
+    intent_confidence: float = 0.0
 
 
 def _metadata_value(metadata: dict[str, Any], *keys: str) -> str:
@@ -242,7 +245,7 @@ def _retrieval_queries(message: str) -> list[str]:
     return [message, *unique_additions[:4]]
 
 
-def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str]:
+def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool]:
     """Parse planner-generated queries and content scopes from compact JSON."""
     stripped = text.strip()
     json_match = re.search(r"\{.*\}", stripped, flags=re.S)
@@ -259,9 +262,67 @@ def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str]:
         if str(scope).strip()
     }
     answer_shape = str(payload.get("answer_shape", "content")).strip().lower()
+    allowed_intents = {
+        "knowledge",
+        "assistant_meta",
+        "medical_claim",
+        "income_claim",
+        "off_topic",
+        "support_request",
+    }
     intent = str(payload.get("intent", "knowledge")).strip().lower()
-    client_action = "open_support_form" if intent == "support_request" else ""
-    return parsed, "global_directory" in scopes, answer_shape == "document_structure", client_action
+    if intent not in allowed_intents:
+        intent = "knowledge"
+    allowed_subtypes = {"greeting", "capability", "thanks"}
+    subtype = str(payload.get("intent_subtype", "")).strip().lower()
+    if subtype not in allowed_subtypes:
+        subtype = ""
+    try:
+        confidence = min(max(float(payload.get("intent_confidence", 0.0)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    explicit_support = payload.get("explicit_support_request") is True
+    return (
+        parsed,
+        "global_directory" in scopes,
+        answer_shape == "document_structure",
+        intent,
+        subtype,
+        confidence,
+        explicit_support,
+    )
+
+
+def _verify_explicit_support_request(
+    message: str,
+    language: str,
+    correlation_id: str,
+    runtime: Any,
+) -> bool:
+    """Require an independent confirmation before opening the support form."""
+    system_prompt = (
+        "Classify whether the user directly asks the assistant to start, create, open, or submit a human "
+        "support request or help-desk ticket. Return false for symptoms or health statements, factual questions, "
+        "requests for contact information, complaints that do not request a ticket, and general requests for help. "
+        "Apply the same rule in every language. Do not answer the user. Return only JSON."
+    )
+    user_prompt = (
+        f"Requested language: {language}\nUser message:\n{message}\n\n"
+        'Return exactly: {"explicit_support_request":true} or {"explicit_support_request":false}.'
+    )
+    try:
+        response = runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        json_match = re.search(r"\{.*\}", text.strip(), flags=re.S)
+        payload = json.loads(json_match.group(0) if json_match else text)
+        return payload.get("explicit_support_request") is True
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("support_intent_verification_failed", correlation_id=correlation_id)
+        return False
 
 
 def _planned_retrieval_plan(
@@ -290,29 +351,58 @@ def _planned_retrieval_plan(
         "inside a policy question does not make it a directory question. Do not invent facts, numbers, percentages, "
         "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
-        "Set intent to support_request only when the user explicitly asks to create, open, or submit a support "
-        "request, help-desk ticket, or human handoff. Questions asking for support information or contact details "
-        "remain knowledge intent. This intent classification must work in the user's language. "
+        "Classify the conversation intent as knowledge, assistant_meta, medical_claim, income_claim, off_topic, "
+        "or support_request. assistant_meta covers social greetings, asking how the assistant is, who it is, or "
+        "what it can do; set intent_subtype to greeting, capability, or thanks. medical_claim covers symptoms, "
+        "illnesses, diagnosis, treatment, medical advice, and health-benefit claims. income_claim covers requests "
+        "for guaranteed or personalized earnings predictions, while factual compensation-plan questions remain "
+        "knowledge. Set support_request only when the user directly asks to create, open, or submit a support "
+        "request, help-desk ticket, or human handoff; then set explicit_support_request to true. A symptom, a need "
+        "for help, a complaint, or a request for support contact information is not an explicit support request. "
+        "Set intent_confidence from 0 to 1. Apply these rules in the user's language. "
         "Return only JSON."
     )
     user_prompt = (
         f"Market: {country}\nRequested language: {language}\nUser question:\n{message}\n\n"
         "Return JSON exactly like this: "
         "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"],"
-        "\"document_scopes\":[\"locale_policy\"],\"answer_shape\":\"content\",\"intent\":\"knowledge\"}. "
+        "\"document_scopes\":[\"locale_policy\"],\"answer_shape\":\"content\",\"intent\":\"knowledge\","
+        "\"intent_subtype\":\"\",\"intent_confidence\":0.99,\"explicit_support_request\":false}. "
         f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
     )
     try:
-        response = get_aws_clients().bedrock_runtime.converse(
+        runtime = get_aws_clients().bedrock_runtime
+        response = runtime.converse(
             modelId=settings.BEDROCK_MODEL_ARN,
             system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],
         )
         text = response["output"]["message"]["content"][0].get("text", "")
-        planned_queries, include_global_documents, prefer_outline, client_action = _parse_planned_query_plan(text)
+        (
+            planned_queries,
+            include_global_documents,
+            prefer_outline,
+            conversation_intent,
+            conversation_subtype,
+            intent_confidence,
+            explicit_support,
+        ) = _parse_planned_query_plan(text)
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
         return RetrievalQueryPlan(base_queries, include_global_documents=True)
+
+    client_action = ""
+    if (
+        conversation_intent == "support_request"
+        and explicit_support
+        and intent_confidence >= settings.BEDROCK_SUPPORT_ROUTE_MIN_CONFIDENCE
+        and _verify_explicit_support_request(message, language, correlation_id, runtime)
+    ):
+        client_action = "open_support_form"
+    elif conversation_intent == "support_request":
+        conversation_intent = "knowledge"
+        conversation_subtype = ""
+        intent_confidence = 0.0
 
     merged: list[str] = []
     for query in [message, *planned_queries, *base_queries[1:]]:
@@ -327,12 +417,17 @@ def _planned_retrieval_plan(
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,
         client_action=client_action,
+        conversation_intent=conversation_intent,
+        intent_confidence=intent_confidence,
     )
     return RetrievalQueryPlan(
         merged,
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,
         client_action=client_action,
+        conversation_intent=conversation_intent,
+        conversation_subtype=conversation_subtype,
+        intent_confidence=intent_confidence,
     )
 
 
