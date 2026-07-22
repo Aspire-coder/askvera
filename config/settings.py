@@ -72,7 +72,7 @@ KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-16-atomic-sections-v1")
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
-RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-localization-v1")
+RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-safety-v2")
 # Code-owned conversation-routing behavior version. Change this when routing
 # semantics change so stale cached answers cannot bypass the new router.
 CONVERSATION_ROUTING_VERSION = "2026-07-22-semantic-intent-v1"
