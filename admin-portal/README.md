@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-The portal opens at `http://127.0.0.1:5176`. Without an API key it deliberately uses presentation-ready demo data. Choose **Demo mode** in the sidebar to enter the separately managed `ADMIN_API_KEY`; the value is held only in the current tab's `sessionStorage`.
+The portal opens at `http://127.0.0.1:5176`. Local development can use presentation-ready demo data or an explicitly enabled development API key. Production uses Cognito authorization-code sign-in with PKCE; no shared administrator secret is placed in the browser bundle.
 
 ## Build
 
@@ -24,7 +24,26 @@ npm run typecheck
 npm run build
 ```
 
-Set `VITE_API_URL` to the HTTPS API origin before building for a separate static host. Never put the admin key in a Vite environment variable or in the generated bundle.
+Set the `VITE_API_URL` and `VITE_COGNITO_*` values before building for a separate static host. Never put an admin key in a Vite environment variable or in the generated bundle.
+
+## Deploy as a website
+
+The CloudFormation template at `deployment/admin-portal.yaml` creates a private encrypted S3 bucket, CloudFront distribution, Cognito user pool, administrator group, and hosted sign-in domain. Deploy and publish from PowerShell:
+
+```powershell
+cd admin-portal
+.\scripts\deploy-portal.ps1 `
+  -CognitoDomainPrefix "askvera-operations-ACCOUNT"
+```
+
+Without `-CertificateArn`, the first release uses the generated CloudFront HTTPS address. Pass an issued `us-east-1` certificate ARN to attach `operations.vera-api.xyz`.
+
+After deployment:
+
+1. Add the CloudFront output as the DNS CNAME for `operations.vera-api.xyz`.
+2. Create Cognito users and add approved users to `AskVeraAdmins`.
+3. Store the user-pool and client outputs in API SSM configuration.
+4. Add `https://operations.vera-api.xyz` to the API's exact CORS origins.
 
 ## Supported knowledge documents
 

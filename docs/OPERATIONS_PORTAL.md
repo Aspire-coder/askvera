@@ -8,7 +8,7 @@ This package gives stakeholders one simple interface for understanding how AskVe
 
 ```mermaid
 flowchart LR
-    Browser["Operations portal"] -->|"X-Admin-Key over HTTPS"| API["FastAPI admin endpoints"]
+    Browser["Operations portal"] -->|"Cognito access token over HTTPS"| API["FastAPI admin endpoints"]
     API --> Trace["Bounded live trace window"]
     API --> RDS["PostgreSQL analytics and jobs"]
     API --> S3["Approved source archive"]
@@ -22,7 +22,7 @@ The live flow uses the actual metrics emitted by request received, governance, r
 
 ## Admin API
 
-All routes require `X-Admin-Key` and return the normal AskVera success envelope.
+All routes require a Cognito access token from a member of the configured administrator group and return the normal AskVera success envelope. A separately managed API key can be enabled for local development or controlled break-glass access, but it is disabled in the production website configuration.
 
 | Route | Purpose |
 | --- | --- |
@@ -50,10 +50,11 @@ Country-scoped documents follow the chatbot's locale filter. Global documents ar
 
 ## Production checklist
 
-- Generate a long random `ADMIN_API_KEY`, store it in SSM, and rotate it independently from widget credentials.
+- Use Cognito authorization-code flow with PKCE and restrict access to `AskVeraAdmins`.
+- Keep `ADMIN_AUTH_ALLOW_API_KEY=false` in normal production operation.
 - Set `KNOWLEDGE_UPLOAD_BUCKET` to a private, encrypted, versioned S3 bucket with lifecycle and least-privilege IAM policies.
 - Add the operations portal HTTPS origin to `ALLOWED_ORIGINS`; do not use a wildcard.
-- Keep the portal behind company SSO or an identity-aware proxy. The API key is a second control, not a replacement for user identity.
+- Federate the Cognito user pool with company SSO when the identity team is ready; the built-in user pool supports the initial controlled launch.
 - Configure CloudFront security headers and no-store caching for the portal shell.
 - Confirm PostgreSQL backups and define retention for analytics, feedback, ingestion jobs, and document records.
 - Add OCR (for example an asynchronous Textract worker) before accepting image-only scanned PDFs.
@@ -62,4 +63,4 @@ Country-scoped documents follow the chatbot's locale filter. Global documents ar
 
 ## Deployment boundary
 
-The source is ready to build, but no production deployment is performed by this change. Deploy the API/database changes and the static portal together after the SSM values, S3 bucket, portal hostname, CORS origin, and SSO boundary are ready. This avoids shipping a visible interface before its security and storage dependencies exist.
+The portal is packaged for production deployment in `deployment/admin-portal.yaml`. The stack creates private S3 hosting, CloudFront, security headers, Cognito and the administrator group. DNS, the ACM certificate, initial administrator membership, API SSM values, and the exact CORS origin remain controlled deployment inputs.

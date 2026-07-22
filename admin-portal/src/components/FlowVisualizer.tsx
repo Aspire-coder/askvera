@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AdminApi, demo, withDemoFallback, type DataMode } from "../api";
+import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { CheckIcon, RefreshIcon } from "../icons";
 import type { PipelineTrace, TraceStage } from "../types";
 
@@ -46,7 +46,7 @@ const metadataNumber = (stages: Array<TraceStage | undefined>, ...keys: string[]
   return 0;
 };
 
-export function FlowVisualizer({ apiKey }: { apiKey: string }) {
+export function FlowVisualizer({ credentials }: { credentials: AdminCredentials }) {
   const [traces, setTraces] = useState<PipelineTrace[]>(demo.traces);
   const [selectedId, setSelectedId] = useState(demo.traces[0].correlation_id);
   const [selectedStage, setSelectedStage] = useState("request_received");
@@ -54,7 +54,7 @@ export function FlowVisualizer({ apiKey }: { apiKey: string }) {
   const [replayKey, setReplayKey] = useState(0);
 
   const refresh = async () => {
-    const result = await withDemoFallback(() => new AdminApi(apiKey).traces(), demo.traces);
+    const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
     setTraces(result.data.length ? result.data : demo.traces);
     setMode(result.mode);
     if (result.data.length && !result.data.some((trace) => trace.correlation_id === selectedId)) setSelectedId(result.data[0].correlation_id);
@@ -64,7 +64,7 @@ export function FlowVisualizer({ apiKey }: { apiKey: string }) {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 3000);
     return () => window.clearInterval(timer);
-  }, [apiKey]);
+  }, [credentials.accessToken, credentials.apiKey]);
 
   const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || demo.traces[0], [selectedId, traces]);
   const detail = stationById.get(selectedStage) || stations[0];

@@ -8,7 +8,11 @@ def _configure_valid_production(monkeypatch) -> None:
     for name in settings.REQUIRED_VALUES:
         monkeypatch.setattr(settings, name, "configured")
     monkeypatch.setattr(settings, "APP_ENV", "production")
-    monkeypatch.setattr(settings, "ADMIN_API_KEY", "production-admin-secret")
+    monkeypatch.setattr(settings, "ADMIN_AUTH_MODE", "cognito")
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ALLOW_API_KEY", False)
+    monkeypatch.setattr(settings, "ADMIN_COGNITO_USER_POOL_ID", "us-east-1_example")
+    monkeypatch.setattr(settings, "ADMIN_COGNITO_CLIENT_ID", "client-id")
+    monkeypatch.setattr(settings, "ADMIN_API_KEY", "")
     monkeypatch.setattr(settings, "WIDGET_JWT_SECRET", "production-widget-secret")
     monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", True)
     monkeypatch.setattr(settings, "WIDGET_ALLOW_LOCALHOST_ORIGINS", False)
@@ -36,6 +40,8 @@ def test_valid_production_configuration_passes(monkeypatch) -> None:
 
 def test_production_rejects_development_auth_and_missing_retrieval_config(monkeypatch) -> None:
     _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "ADMIN_AUTH_MODE", "api_key")
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ALLOW_API_KEY", True)
     monkeypatch.setattr(settings, "ADMIN_API_KEY", "dev-admin-key")
     monkeypatch.setattr(settings, "WIDGET_JWT_SECRET", "dev-only-change-before-production")
     monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", False)
@@ -47,6 +53,17 @@ def test_production_rejects_development_auth_and_missing_retrieval_config(monkey
     assert "WIDGET_JWT_SECRET (development value is not allowed)" in failures
     assert "WIDGET_AUTH_REQUIRED (must be true in production)" in failures
     assert "OPENSEARCH_ENDPOINT" in failures
+
+
+def test_cognito_production_requires_pool_and_client(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "ADMIN_COGNITO_USER_POOL_ID", "")
+    monkeypatch.setattr(settings, "ADMIN_COGNITO_CLIENT_ID", "")
+
+    failures = validate()
+
+    assert "ADMIN_COGNITO_USER_POOL_ID" in failures
+    assert "ADMIN_COGNITO_CLIENT_ID" in failures
 
 
 def test_support_email_requires_sender_and_routes_in_production(monkeypatch) -> None:

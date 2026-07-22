@@ -32,7 +32,6 @@ def validate() -> list[str]:
         return missing
 
     for name in (
-        "ADMIN_API_KEY",
         "WIDGET_JWT_SECRET",
         "BEDROCK_MODEL_ARN",
         "BEDROCK_GUARDRAIL_ID",
@@ -41,8 +40,17 @@ def validate() -> list[str]:
     ):
         _require(missing, name)
 
-    if settings.ADMIN_API_KEY in DEVELOPMENT_SECRETS:
-        missing.append("ADMIN_API_KEY (development value is not allowed)")
+    if settings.ADMIN_AUTH_MODE not in {"cognito", "api_key", "either"}:
+        missing.append("ADMIN_AUTH_MODE (must be cognito, api_key, or either)")
+    if settings.ADMIN_AUTH_MODE in {"cognito", "either"}:
+        for name in ("ADMIN_COGNITO_USER_POOL_ID", "ADMIN_COGNITO_CLIENT_ID"):
+            _require(missing, name)
+    if settings.ADMIN_AUTH_MODE in {"api_key", "either"}:
+        _require(missing, "ADMIN_API_KEY")
+        if settings.ADMIN_API_KEY in DEVELOPMENT_SECRETS:
+            missing.append("ADMIN_API_KEY (development value is not allowed)")
+    if settings.ADMIN_AUTH_MODE == "cognito" and settings.ADMIN_AUTH_ALLOW_API_KEY:
+        missing.append("ADMIN_AUTH_ALLOW_API_KEY (must be false for cognito-only production auth)")
     if settings.WIDGET_JWT_SECRET in DEVELOPMENT_SECRETS:
         missing.append("WIDGET_JWT_SECRET (development value is not allowed)")
     if not settings.WIDGET_AUTH_REQUIRED:

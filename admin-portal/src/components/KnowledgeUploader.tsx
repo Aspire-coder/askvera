@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AdminApi, demo, withDemoFallback, type DataMode } from "../api";
+import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
 import type { AdminConfig, IngestionJob } from "../types";
 
 const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
 
-export function KnowledgeUploader({ apiKey }: { apiKey: string }) {
+export function KnowledgeUploader({ credentials }: { credentials: AdminCredentials }) {
   const [config, setConfig] = useState<AdminConfig>(demo.config);
   const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
   const [mode, setMode] = useState<DataMode>("demo");
@@ -23,7 +23,7 @@ export function KnowledgeUploader({ apiKey }: { apiKey: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
-    const api = new AdminApi(apiKey);
+    const api = new AdminApi(credentials);
     const [configResult, jobsResult] = await Promise.all([
       withDemoFallback(() => api.config(), demo.config),
       withDemoFallback(() => api.ingestions(), demo.jobs)
@@ -37,7 +37,7 @@ export function KnowledgeUploader({ apiKey }: { apiKey: string }) {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 4000);
     return () => window.clearInterval(timer);
-  }, [apiKey]);
+  }, [credentials.accessToken, credentials.apiKey]);
 
   const selectedMarket = config.countries.find((market) => market.code === country) || config.countries[0];
   const languages = selectedMarket?.languages || [];
@@ -57,8 +57,8 @@ export function KnowledgeUploader({ apiKey }: { apiKey: string }) {
   };
 
   const upload = async () => {
-    if (!file || !apiKey) {
-      setNotice(!apiKey ? "Connect with an admin key before uploading." : "Choose a document first.");
+    if (!file || (!credentials.accessToken && !credentials.apiKey)) {
+      setNotice(!credentials.accessToken && !credentials.apiKey ? "Sign in before uploading." : "Choose a document first.");
       return;
     }
     const formData = new FormData();
@@ -72,7 +72,7 @@ export function KnowledgeUploader({ apiKey }: { apiKey: string }) {
     setSubmitting(true);
     setNotice("");
     try {
-      const result = await new AdminApi(apiKey).upload(formData);
+      const result = await new AdminApi(credentials).upload(formData);
       setNotice(`${result.filename} is queued for extraction and indexing.`);
       setFile(null);
       await refresh();

@@ -118,6 +118,12 @@ SHARED_SECURITY_STATE_PREFIX = _env_str("SHARED_SECURITY_STATE_PREFIX", "ask-ver
 MAX_REQUEST_BODY_BYTES = _env_int("MAX_REQUEST_BODY_BYTES", 32768)
 # Admin portal authentication and general knowledge ingestion.
 ADMIN_API_KEY = _env_str("ADMIN_API_KEY", "dev-admin-key" if APP_ENV != "production" else "")
+ADMIN_AUTH_MODE = _env_str("ADMIN_AUTH_MODE", "api_key" if APP_ENV != "production" else "cognito").lower()
+ADMIN_AUTH_ALLOW_API_KEY = _env_bool("ADMIN_AUTH_ALLOW_API_KEY", APP_ENV != "production")
+ADMIN_COGNITO_REGION = _env_str("ADMIN_COGNITO_REGION", AWS_REGION)
+ADMIN_COGNITO_USER_POOL_ID = _env_str("ADMIN_COGNITO_USER_POOL_ID", "")
+ADMIN_COGNITO_CLIENT_ID = _env_str("ADMIN_COGNITO_CLIENT_ID", "")
+ADMIN_COGNITO_REQUIRED_GROUP = _env_str("ADMIN_COGNITO_REQUIRED_GROUP", "AskVeraAdmins")
 ADMIN_UPLOAD_MAX_BYTES = _env_int("ADMIN_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
 KNOWLEDGE_UPLOAD_BUCKET = _env_str("KNOWLEDGE_UPLOAD_BUCKET", "")
 KNOWLEDGE_UPLOAD_PREFIX = _env_str("KNOWLEDGE_UPLOAD_PREFIX", "approved-knowledge")

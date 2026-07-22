@@ -2,17 +2,20 @@ import { demoCachedTrace, demoConfig, demoInteractions, demoJobs, demoOverview, 
 import type { AdminConfig, AnalyticsOverview, IngestionJob, Interaction, PipelineTrace } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
+const ALLOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEMO === "true";
 
 type Envelope<T> = { success: boolean; data?: T; error?: { message?: string } };
+export type AdminCredentials = { accessToken?: string; apiKey?: string };
 
 export class AdminApi {
-  constructor(private readonly apiKey: string) {}
+  constructor(private readonly credentials: AdminCredentials) {}
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`${API_BASE}${path}`, {
       ...init,
       headers: {
-        "X-Admin-Key": this.apiKey,
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {}),
         ...(init?.headers || {})
       }
     });
@@ -41,7 +44,8 @@ export type DataMode = "live" | "demo";
 export async function withDemoFallback<T>(live: () => Promise<T>, fallback: T): Promise<{ data: T; mode: DataMode }> {
   try {
     return { data: await live(), mode: "live" };
-  } catch {
+  } catch (error) {
+    if (!ALLOW_DEMO) throw error;
     return { data: fallback, mode: "demo" };
   }
 }

@@ -1,0 +1,265 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Secure static hosting and Cognito authentication for AskVera Operations.
+
+Parameters:
+  PortalDomainName:
+    Type: String
+    Default: operations.vera-api.xyz
+    AllowedPattern: "^[a-z0-9.-]+$"
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate ARN for the portal hostname in us-east-1.
+    AllowedPattern: "^$|^arn:aws:acm:us-east-1:[0-9]{12}:certificate/.+$"
+  ApiOrigin:
+    Type: String
+    Default: https://api.vera-api.xyz
+    AllowedPattern: "^https://.+$"
+  CognitoDomainPrefix:
+    Type: String
+    Description: Globally unique prefix used for the Cognito hosted sign-in domain.
+    AllowedPattern: "^[a-z0-9-]{3,63}$"
+
+Conditions:
+  UseCustomDomain: !Not [!Equals [!Ref CertificateArn, ""]]
+
+Resources:
+  PortalBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  PortalOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-portal-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  PortalCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${AWS::StackName}-no-cache"
+        DefaultTTL: 0
+        MaxTTL: 0
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  PortalResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-security-headers"
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: !Sub "default-src 'self'; connect-src 'self' ${ApiOrigin} https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Override: true
+          XSSProtection:
+            ModeBlock: true
+            Protection: true
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: no-store
+              Override: true
+            - Header: Permissions-Policy
+              Value: camera=(), microphone=(), geolocation=()
+              Override: true
+
+  AdminUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      UserPoolName: !Sub "${AWS::StackName}-administrators"
+      UserPoolTags:
+        Application: AskVera
+        DataClassification: Internal
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: Approved AskVera Operations administrators
+      GroupName: AskVeraAdmins
+      UserPoolId: !Ref AdminUserPool
+
+  AdminUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs:
+        - !If
+          - UseCustomDomain
+          - !Sub "https://${PortalDomainName}/"
+          - !Sub
+            - "https://${DistributionDomain}/"
+            - DistributionDomain: !GetAtt PortalDistribution.DomainName
+      LogoutURLs:
+        - !If
+          - UseCustomDomain
+          - !Sub "https://${PortalDomainName}/"
+          - !Sub
+            - "https://${DistributionDomain}/"
+            - DistributionDomain: !GetAtt PortalDistribution.DomainName
+      EnableTokenRevocation: true
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      RefreshTokenValidity: 1
+      SupportedIdentityProviders:
+        - COGNITO
+      UserPoolId: !Ref AdminUserPool
+
+  AdminUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref AdminUserPool
+
+  PortalDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases: !If
+          - UseCustomDomain
+          - - !Ref PortalDomainName
+          - !Ref AWS::NoValue
+        Comment: AskVera Operations portal
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: !Ref PortalCachePolicy
+          Compress: true
+          ResponseHeadersPolicyId: !Ref PortalResponseHeadersPolicy
+          TargetOriginId: portal-s3
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        Origins:
+          - DomainName: !GetAtt PortalBucket.RegionalDomainName
+            Id: portal-s3
+            OriginAccessControlId: !GetAtt PortalOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        PriceClass: PriceClass_100
+        ViewerCertificate: !If
+          - UseCustomDomain
+          - AcmCertificateArn: !Ref CertificateArn
+            MinimumProtocolVersion: TLSv1.2_2021
+            SslSupportMethod: sni-only
+          - CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: Application
+          Value: AskVera
+
+  PortalBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PortalBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${PortalBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${PortalDistribution}"
+
+Outputs:
+  PortalBucketName:
+    Description: Private S3 bucket receiving the built portal files.
+    Value: !Ref PortalBucket
+  PortalDistributionId:
+    Description: CloudFront distribution invalidated after each release.
+    Value: !Ref PortalDistribution
+  PortalCloudFrontDomain:
+    Description: Add this target to the external DNS CNAME for the portal hostname.
+    Value: !GetAtt PortalDistribution.DomainName
+  PortalUrl:
+    Description: Public HTTPS address for AskVera Operations.
+    Value: !If
+      - UseCustomDomain
+      - !Sub "https://${PortalDomainName}"
+      - !Sub
+        - "https://${DistributionDomain}"
+        - DistributionDomain: !GetAtt PortalDistribution.DomainName
+  CognitoDomain:
+    Description: Cognito hosted sign-in domain used by the portal build.
+    Value: !Sub "https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+  CognitoUserPoolId:
+    Description: Configure this value as ADMIN_COGNITO_USER_POOL_ID on the API.
+    Value: !Ref AdminUserPool
+  CognitoClientId:
+    Description: Configure this value in both the portal and API.
+    Value: !Ref AdminUserPoolClient

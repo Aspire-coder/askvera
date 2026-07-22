@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 
 from app.operations import pipeline_trace_store
 from config import settings
-from services.admin_auth import require_admin_key
+from services.admin_auth import require_admin_identity
 from services.analytics import analytics_overview, interaction_list
 from services.knowledge_ingestion import (
     ACCESS_SCOPES,
@@ -23,7 +23,7 @@ from services.knowledge_ingestion import (
 )
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 
-admin_router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin_key)])
+admin_router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin_identity)])
 
 
 def _payload(data: Any, request: Request) -> dict[str, Any]:

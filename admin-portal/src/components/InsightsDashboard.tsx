@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { AdminApi, demo, withDemoFallback, type DataMode } from "../api";
+import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
 import type { AnalyticsOverview, Interaction } from "../types";
 
@@ -35,7 +35,7 @@ function RankedBars({ data }: { data: Array<{ label: string; value: number }> })
   return <div className="ranked-bars">{data.map((item) => <div className="ranked-row" key={item.label}><div><span>{item.label}</span><strong>{compact.format(Number(item.value))}</strong></div><div className="bar-track"><i style={{ width: `${Number(item.value) / max * 100}%` }} /></div></div>)}</div>;
 }
 
-export function InsightsDashboard({ apiKey }: { apiKey: string }) {
+export function InsightsDashboard({ credentials }: { credentials: AdminCredentials }) {
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
   const [interactions, setInteractions] = useState<Interaction[]>(demo.interactions);
   const [mode, setMode] = useState<DataMode>("demo");
@@ -51,7 +51,7 @@ export function InsightsDashboard({ apiKey }: { apiKey: string }) {
     const interactionFilters = new URLSearchParams({ days, feedback, limit: "100" });
     if (country) { overviewFilters.set("country", country); interactionFilters.set("country", country); }
     if (language) { overviewFilters.set("language", language); interactionFilters.set("language", language); }
-    const api = new AdminApi(apiKey);
+    const api = new AdminApi(credentials);
     const [overviewResult, interactionResult] = await Promise.all([
       withDemoFallback(() => api.overview(overviewFilters), demo.overview),
       withDemoFallback(() => api.interactions(interactionFilters), demo.interactions)
@@ -61,7 +61,7 @@ export function InsightsDashboard({ apiKey }: { apiKey: string }) {
     setMode(overviewResult.mode === "live" && interactionResult.mode === "live" ? "live" : "demo");
   };
 
-  useEffect(() => { void refresh(); }, [apiKey, days, country, language, feedback]);
+  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, country, language, feedback]);
 
   const resetDashboard = () => {
     setDays("30");
