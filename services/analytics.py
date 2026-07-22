@@ -12,9 +12,16 @@ from app.response.models import ChatResponse
 from services.db import get_engine
 from utils.redaction import redact_common_pii
 from utils.logging import get_logger
-from utils.validators import ChatRequest, FeedbackRequest, SupportRequest
+from utils.validators import TRAFFIC_SOURCES, ChatRequest, FeedbackRequest, SupportRequest
 
 LOGGER = get_logger("services.analytics")
+
+
+def _normalize_traffic_source(value: str) -> str:
+    normalized = value.lower().strip()
+    if normalized and normalized not in TRAFFIC_SOURCES:
+        raise ValueError("Unsupported traffic source.")
+    return normalized
 
 
 def _analytics_window(
@@ -68,11 +75,11 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                     INSERT INTO chat_analytics (
                         correlation_id, session_id, country, language, question,
                         answer, topic, confidence, source_count, input_tokens,
-                        output_tokens, fallback, failure_layer, created_at
+                        output_tokens, fallback, failure_layer, traffic_source, created_at
                     ) VALUES (
                         :correlation_id, :session_id, :country, :language, :question,
                         :answer, :topic, :confidence, :source_count, :input_tokens,
-                        :output_tokens, :fallback, :failure_layer, now()
+                        :output_tokens, :fallback, :failure_layer, :traffic_source, now()
                     )
                     ON CONFLICT (correlation_id) DO UPDATE SET
                         answer = EXCLUDED.answer,
@@ -80,6 +87,7 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                         source_count = EXCLUDED.source_count,
                         input_tokens = EXCLUDED.input_tokens,
                         output_tokens = EXCLUDED.output_tokens,
+                        traffic_source = EXCLUDED.traffic_source,
                         fallback = EXCLUDED.fallback,
                         failure_layer = EXCLUDED.failure_layer
                     """
@@ -98,6 +106,7 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                     "output_tokens": output_tokens,
                     "fallback": bool(response.metadata.get("fallback")),
                     "failure_layer": str(response.metadata.get("failure_layer") or ""),
+                    "traffic_source": body.trafficSource,
                 },
             )
     except SQLAlchemyError:
@@ -181,6 +190,7 @@ def analytics_overview(
     days: int = 30,
     country: str = "",
     language: str = "",
+    traffic_source: str = "",
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
@@ -189,12 +199,16 @@ def analytics_overview(
     since, until = _analytics_window(days=days, start=start, end=end)
     filters = ["created_at >= :since", "created_at < :until"]
     parameters: dict[str, Any] = {"since": since, "until": until}
+    traffic_source = _normalize_traffic_source(traffic_source)
     if country:
         filters.append("country = :country")
         parameters["country"] = country.upper()
     if language:
         filters.append("language = :language")
         parameters["language"] = language.lower()
+    if traffic_source:
+        filters.append("traffic_source = :traffic_source")
+        parameters["traffic_source"] = traffic_source
     where = " AND ".join(filters)
 
     with get_engine().connect() as connection:
@@ -224,6 +238,7 @@ def analytics_overview(
                   AND COALESCE(c.created_at, f.created_at) < :until
                   {"AND c.country = :country" if country else ""}
                   {"AND c.language = :language" if language else ""}
+                  {"AND c.traffic_source = :traffic_source" if traffic_source else ""}
                 """
             ),
             parameters,
@@ -284,6 +299,7 @@ def interaction_list(
     days: int = 30,
     country: str = "",
     language: str = "",
+    traffic_source: str = "",
     feedback: str = "all",
     limit: int = 100,
     start: datetime | None = None,
@@ -297,12 +313,16 @@ def interaction_list(
         "until": until,
         "limit": max(1, min(int(limit), 500)),
     }
+    traffic_source = _normalize_traffic_source(traffic_source)
     if country:
         filters.append("c.country = :country")
         parameters["country"] = country.upper()
     if language:
         filters.append("c.language = :language")
         parameters["language"] = language.lower()
+    if traffic_source:
+        filters.append("c.traffic_source = :traffic_source")
+        parameters["traffic_source"] = traffic_source
     if feedback == "not_helpful":
         filters.append("f.rating < 0")
     elif feedback == "helpful":
@@ -315,7 +335,7 @@ def interaction_list(
                 SELECT c.correlation_id, c.session_id, c.country, c.language,
                        c.question, c.answer, c.topic, c.confidence, c.source_count,
                        c.input_tokens + c.output_tokens AS tokens, c.fallback,
-                       c.failure_layer, c.created_at, f.rating, f.comment
+                       c.failure_layer, c.traffic_source, c.created_at, f.rating, f.comment
                 FROM chat_analytics c
                 LEFT JOIN LATERAL (
                     SELECT rating, comment FROM feedback_events

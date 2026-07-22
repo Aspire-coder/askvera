@@ -1,6 +1,6 @@
 {
   "name": "@askvera/widget",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "type": "module",
   "private": true,
   "main": "./dist/widget.js",

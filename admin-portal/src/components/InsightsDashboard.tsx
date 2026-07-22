@@ -52,6 +52,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [endAt, setEndAt] = useState("");
   const [country, setCountry] = useState("");
   const [language, setLanguage] = useState("");
+  const [trafficSource, setTrafficSource] = useState("");
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Interaction | null>(null);
@@ -71,6 +72,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     }
     if (country) { overviewFilters.set("country", country); interactionFilters.set("country", country); }
     if (language) { overviewFilters.set("language", language); interactionFilters.set("language", language); }
+    if (trafficSource) { overviewFilters.set("traffic_source", trafficSource); interactionFilters.set("traffic_source", trafficSource); }
     const api = new AdminApi(credentials);
     const [overviewResult, interactionResult, configResult] = await Promise.all([
       withDemoFallback(() => api.overview(overviewFilters), demo.overview),
@@ -83,7 +85,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setMode(overviewResult.mode === "live" && interactionResult.mode === "live" && configResult.mode === "live" ? "live" : "demo");
   };
 
-  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, feedback]);
+  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback]);
 
   const resetDashboard = () => {
     setDays("30");
@@ -91,10 +93,11 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setEndAt("");
     setCountry("");
     setLanguage("");
+    setTrafficSource("");
     setFeedback("all");
     setQuery("");
     setSelected(null);
-    if (days === "30" && !startAt && !endAt && !country && !language && feedback === "all") void refresh();
+    if (days === "30" && !startAt && !endAt && !country && !language && !trafficSource && feedback === "all") void refresh();
   };
 
   const availableLanguages = useMemo(() => {
@@ -136,6 +139,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <label><span>To date and hour</span><input type="datetime-local" value={endAt} min={startAt || undefined} onChange={(event) => setEndAt(event.target.value)} /></label>
         <label><span>Country</span><select value={country} onChange={(event) => { setCountry(event.target.value); setLanguage(""); }}><option value="">All countries</option>{markets.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></label>
         <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option value="">All languages</option>{availableLanguages.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+        <label><span>Traffic source</span><select value={trafficSource} onChange={(event) => setTrafficSource(event.target.value)}><option value="">All traffic</option><option value="widget">Widget users</option><option value="evaluation">Evaluation runs</option><option value="backend_test">Backend tests</option><option value="admin_test">Admin tests</option></select></label>
         <button className="button primary" onClick={() => void refresh()}>Apply filters</button>
         <small className="filter-note">Date and hour use your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</small>
       </div>
@@ -173,7 +177,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <div className="review-list surface">
           {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelected(item)}>
             <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>
-            <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {interactionDateLabel(item.created_at)}</small></span>
+            <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {item.traffic_source.replaceAll("_", " ")} · {interactionDateLabel(item.created_at)}</small></span>
             <span className="confidence">{percent(item.confidence)}</span><ArrowIcon />
           </button>)}
           {!filteredInteractions.length ? <div className="empty-state">No answers match these filters.</div> : null}
@@ -183,7 +187,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}><aside className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">
         <button className="drawer-close" onClick={() => setSelected(null)} aria-label="Close review">×</button>
         <span className="eyebrow">Answer review</span><h2 id="review-title">{selected.question}</h2>
-        <div className="drawer-meta"><span>{selected.country}</span><span>{selected.language.toUpperCase()}</span><span>{percent(selected.confidence)} confidence</span><span>{selected.tokens} tokens</span></div>
+        <div className="drawer-meta"><span>{selected.country}</span><span>{selected.language.toUpperCase()}</span><span>{selected.traffic_source.replaceAll("_", " ")}</span><span>{percent(selected.confidence)} confidence</span><span>{selected.tokens} tokens</span></div>
         <section><h3>AskVera answered</h3><p>{selected.answer}</p></section>
         <section className="feedback-section"><h3>User feedback</h3><p>{selected.comment || "No written comment was provided."}</p></section>
         <section><h3>Diagnostic signal</h3><dl><div><dt>Topic</dt><dd>{selected.topic}</dd></div><div><dt>Sources</dt><dd>{selected.source_count}</dd></div><div><dt>Failure layer</dt><dd>{selected.failure_layer || "None"}</dd></div><div><dt>Fallback</dt><dd>{selected.fallback ? "Yes" : "No"}</dd></div></dl></section>

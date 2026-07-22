@@ -249,7 +249,7 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 .mini-progress i { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
 
 /* Dashboard */
-.filter-bar { display: grid; grid-template-columns: repeat(5, minmax(135px, 1fr)) auto; gap: 12px; align-items: end; padding: 14px 16px; margin-bottom: 18px; }
+.filter-bar { display: grid; grid-template-columns: repeat(6, minmax(125px, 1fr)) auto; gap: 12px; align-items: end; padding: 14px 16px; margin-bottom: 18px; }
 .filter-note { grid-column: 1 / -1; color: var(--tertiary); font-size: 9px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
 .metric-card { padding: 21px 22px; display: flex; flex-direction: column; min-height: 132px; }

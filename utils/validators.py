@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from config.vera_persona import ROLE_CONTENT_SCOPES
 from services.market_config import get_country_codes, get_language_codes_for_country
 
+TRAFFIC_SOURCES = {"widget", "evaluation", "backend_test", "admin_test"}
+
 
 def _country_codes() -> set[str]:
     return get_country_codes()
@@ -37,6 +39,7 @@ class ChatRequest(BaseModel):
     country: str = Field(min_length=2, max_length=64)
     language: str = Field(min_length=2, max_length=16)
     role: str = Field(default="new_prospect", max_length=64)
+    trafficSource: str = Field(default="widget", max_length=32)
 
     @field_validator("country")
     @classmethod
@@ -57,6 +60,14 @@ class ChatRequest(BaseModel):
         if value not in ROLE_CONTENT_SCOPES:
             raise ValueError("Unsupported role.")
         return value
+
+    @field_validator("trafficSource")
+    @classmethod
+    def validate_traffic_source(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in TRAFFIC_SOURCES:
+            raise ValueError("Unsupported traffic source.")
+        return normalized
 
     @model_validator(mode="after")
     def validate_locale_pair(self) -> "ChatRequest":

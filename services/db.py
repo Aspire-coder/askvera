@@ -104,6 +104,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                         output_tokens INTEGER NOT NULL DEFAULT 0,
                         fallback BOOLEAN NOT NULL DEFAULT false,
                         failure_layer TEXT NOT NULL DEFAULT '',
+                        traffic_source TEXT NOT NULL DEFAULT 'widget',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                     """
@@ -112,8 +113,25 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(
                 text(
                     """
-                    CREATE INDEX IF NOT EXISTS idx_chat_analytics_filters
-                    ON chat_analytics (created_at DESC, country, language)
+                    ALTER TABLE chat_analytics
+                    ADD COLUMN IF NOT EXISTS traffic_source TEXT NOT NULL DEFAULT 'widget'
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE chat_analytics
+                    SET traffic_source = 'evaluation'
+                    WHERE traffic_source = 'widget' AND session_id LIKE 'csv-%'
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_chat_analytics_source_filters
+                    ON chat_analytics (created_at DESC, country, language, traffic_source)
                     """
                 )
             )

@@ -570,7 +570,8 @@ export function WidgetRuntime({
       sessionId: payload.sessionId,
       country: payload.selectedCountry,
       language: payload.selectedLanguage,
-      role: "new_prospect"
+      role: "new_prospect",
+      trafficSource: "widget"
     }));
   };
 

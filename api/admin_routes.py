@@ -54,6 +54,7 @@ def overview(
     days: int = 30,
     country: str = "",
     language: str = "",
+    traffic_source: str = "",
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
@@ -62,6 +63,7 @@ def overview(
             days=days,
             country=country,
             language=language,
+            traffic_source=traffic_source,
             start=start,
             end=end,
         )
@@ -76,6 +78,7 @@ def interactions(
     days: int = 30,
     country: str = "",
     language: str = "",
+    traffic_source: str = "",
     feedback: str = "all",
     limit: int = 100,
     start: datetime | None = None,
@@ -88,6 +91,7 @@ def interactions(
             days=days,
             country=country,
             language=language,
+            traffic_source=traffic_source,
             feedback=feedback,
             limit=limit,
             start=start,

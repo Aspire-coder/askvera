@@ -79,6 +79,7 @@ export type Interaction = {
   tokens: number;
   fallback: boolean;
   failure_layer: string;
+  traffic_source: string;
   created_at: string;
   rating: number | null;
   comment: string | null;

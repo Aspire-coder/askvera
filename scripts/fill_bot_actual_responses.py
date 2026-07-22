@@ -129,6 +129,7 @@ def _ask_bot(
             "country": country,
             "language": language,
             "role": role,
+            "trafficSource": "evaluation",
         },
         {"Origin": origin, "Authorization": f"Bearer {token}"},
         timeout,

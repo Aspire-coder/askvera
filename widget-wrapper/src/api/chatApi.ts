@@ -6,6 +6,7 @@ export type ChatRequest = {
   country: string;
   language: string;
   role: string;
+  trafficSource: "widget";
 };
 
 export type ChatSource = {
