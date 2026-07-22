@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.metrics import STAGE_PROMPT_BUILD
 from app.metrics.pipeline import record_pipeline_metric
+from utils.directory_fields import format_directory_fields
 from config import settings
 from config.vera_persona import role_scope_for
 from utils.logging import get_logger
@@ -117,18 +118,26 @@ class PromptBuilder:
                 or document.metadata.get("section_id")
                 or ""
             ).strip()
+            directory_fields = format_directory_fields(
+                document.metadata.get("directory_fields", {})
+                if isinstance(document.metadata.get("directory_fields"), dict)
+                else {}
+            )
+            source_lines = [
+                f"[Source {index}] {document.title}",
+                f"Source ID: {document.id}",
+                f"Policy section: {section or 'not supplied'}",
+                f"Page: {document.page or 'not supplied'}",
+                f"URI: {document.source}",
+                f"Country: {document.country}",
+                f"Language: {document.language}",
+            ]
+            if directory_fields:
+                source_lines.extend(["Approved directory fields:", directory_fields])
+            source_lines.append(f"Content: {document.content or document.excerpt}")
             chunks.append(
                 "\n".join(
-                    [
-                        f"[Source {index}] {document.title}",
-                        f"Source ID: {document.id}",
-                        f"Policy section: {section or 'not supplied'}",
-                        f"Page: {document.page or 'not supplied'}",
-                        f"URI: {document.source}",
-                        f"Country: {document.country}",
-                        f"Language: {document.language}",
-                        f"Content: {document.content or document.excerpt}",
-                    ]
+                    source_lines
                 )
             )
         return "\n\n".join(chunks)

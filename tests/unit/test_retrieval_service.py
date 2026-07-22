@@ -430,3 +430,31 @@ def test_query_planner_selects_document_scope_from_semantic_intent(monkeypatch) 
     assert directory_plan.prefer_outline is False
     assert structure_plan.include_global_documents is False
     assert structure_plan.prefer_outline is True
+
+
+def test_query_planner_routes_multilingual_explicit_handoff_as_client_action(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{"text": '{"queries":[],"document_scopes":[],"intent":"support_request"}'}]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "Je souhaite créer une demande auprès du service d'assistance.",
+        "CA",
+        "fr",
+        "support-cid",
+    )
+
+    assert plan.client_action == "open_support_form"
+    planner_prompt = runtime.converse.call_args.kwargs["system"][0]["text"]
+    assert "user's language" in planner_prompt

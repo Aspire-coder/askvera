@@ -11,6 +11,8 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
+from utils.directory_fields import parse_directory_fields
+
 
 HEADER_RE = re.compile(r"^International Office Directory[^\n]*$", re.MULTILINE)
 PAGE_RE = re.compile(r"^Page \d+$", re.MULTILINE)
@@ -55,6 +57,7 @@ class DirectoryRecord:
             "metadata": {
                 "directory_section": self.record_type,
                 "record_country": self.record_country,
+                "directory_fields": parse_directory_fields(self.content),
             },
         }
 

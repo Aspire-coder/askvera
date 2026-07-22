@@ -55,6 +55,17 @@ def parse_evidence_contract(text: str, documents: list[RetrievedDocument]) -> Ev
         if not set(claim_evidence_ids).issubset(set(evidence_ids)):
             return EvidenceContractResult(False, reason="claim_uses_unlisted_evidence")
 
+    coverage = payload.get("coverage")
+    if not isinstance(coverage, dict):
+        return EvidenceContractResult(False, reason="missing_coverage_check")
+    omitted_material_facts = coverage.get("omitted_material_facts")
+    if coverage.get("complete") is not True:
+        return EvidenceContractResult(False, reason="incomplete_answer")
+    if not isinstance(omitted_material_facts, list):
+        return EvidenceContractResult(False, reason="invalid_coverage_check")
+    if any(str(item or "").strip() for item in omitted_material_facts):
+        return EvidenceContractResult(False, reason="incomplete_answer")
+
     return EvidenceContractResult(True, answer=answer, evidence_ids=tuple(evidence_ids))
 
 

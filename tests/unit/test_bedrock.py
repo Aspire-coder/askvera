@@ -73,6 +73,34 @@ def test_prompt_context_exposes_exact_evidence_identity_and_location() -> None:
     assert document.to_source()["sectionTitle"] == "Case Credits"
 
 
+def test_prompt_context_exposes_structured_directory_fields() -> None:
+    document = RetrievedDocument(
+        id="directory-mexico",
+        title="Global directory - Mexico",
+        content="Mexico office raw content",
+        source="s3://kb/global-directory.pdf",
+        metadata={
+            "directory_fields": {
+                "Physical Address": "Londres No. 61, Torre A",
+                "Office Phone 1": "52 55 3300 9400",
+            }
+        },
+    )
+
+    prompt = PromptBuilder().build(
+        user_question="Mexico office details",
+        conversation="",
+        country="CA",
+        language="en",
+        role="new_prospect",
+        retrieval_result=RetrievalResult(documents=[document], citations=[], confidence=0.9),
+    )
+
+    assert "Approved directory fields:" in prompt.retrieved_context
+    assert "Physical Address: Londres No. 61, Torre A" in prompt.retrieved_context
+    assert "Office Phone 1: 52 55 3300 9400" in prompt.retrieved_context
+
+
 def test_bedrock_provider_returns_sources() -> None:
     """Bedrock response is transformed into API data."""
     runtime = MagicMock()

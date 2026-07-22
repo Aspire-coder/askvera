@@ -590,6 +590,17 @@ export function WidgetRuntime({
       if (conversationGeneration !== conversationGenerationRef.current) return;
       const correlationId = envelope.data?.correlationId || envelope.correlationId;
       const localized = getWidgetCopy(payload.selectedLanguage);
+      if (envelope.data?.metadata?.clientAction === "open_support_form" && supportAvailable) {
+        await handleSupportRequest({
+          isOpen: true,
+          selectedCountry: config.countries.find((country) => country.code === payload.selectedCountry),
+          selectedLanguage: config.languages.find((language) => language.code === payload.selectedLanguage),
+          consentAccepted: true,
+          visitorId: payload.visitorId,
+          sessionId: payload.sessionId
+        }, undefined, payload.message);
+        return;
+      }
       const failedAnswer = Boolean(envelope.data?.metadata?.failureLayer);
       consecutiveFailureCountRef.current = failedAnswer ? consecutiveFailureCountRef.current + 1 : 0;
       const recommendationThreshold = Math.max(1, apiConfig?.supportRecommendationThreshold || 2);
@@ -680,7 +691,11 @@ export function WidgetRuntime({
     }
   };
 
-  const handleSupportRequest = async (state: GenericWidgetRenderState, message?: WidgetMessage) => {
+  async function handleSupportRequest(
+    state: GenericWidgetRenderState,
+    message?: WidgetMessage,
+    initialQuestion = ""
+  ) {
     const localized = getWidgetCopy(state.selectedLanguage?.code);
     const messageIndex = message ? messages.findIndex((item) => item.id === message.id) : -1;
     const relatedQuestion = messageIndex > 0
@@ -705,7 +720,7 @@ export function WidgetRuntime({
             privacy: localized.supportPrivacy,
             invalidEmail: localized.supportInvalidEmail
           }}
-          initialQuestion={typeof relatedQuestion?.content === "string" ? relatedQuestion.content : ""}
+          initialQuestion={initialQuestion || (typeof relatedQuestion?.content === "string" ? relatedQuestion.content : "")}
           onCancel={closeForm}
           onSubmit={async (values) => {
             try {
@@ -732,7 +747,7 @@ export function WidgetRuntime({
       metadata: { supportForm: true, copyText: "" }
     };
     setMessages((current) => [...current.filter((item) => !item.metadata?.supportForm), formMessage]);
-  };
+  }
 
   return (
     <GenericWidgetWrapper

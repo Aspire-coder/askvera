@@ -21,6 +21,7 @@ from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
+from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
@@ -326,8 +327,18 @@ class OpenSearchSectionProvider:
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
         try:
-            client = _client()
             search_plan = self._build_search_plan(message, country, language, correlation_id)
+            if search_plan.client_action:
+                return RetrievalResult(
+                    documents=[],
+                    citations=[],
+                    confidence=1.0,
+                    metadata={
+                        "provider": "opensearch_section",
+                        "client_action": search_plan.client_action,
+                    },
+                )
+            client = _client()
             search_messages = search_plan.queries
             global_search_message = ""
             text_hits: list[dict[str, Any]] = []
@@ -397,6 +408,7 @@ class OpenSearchSectionProvider:
                 "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
                 "global_documents_searched": search_plan.include_global_documents,
                 "outline_preferred": search_plan.prefer_outline,
+                "client_action": search_plan.client_action,
                 "global_query_translated": bool(global_search_message) and global_search_message != message,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
@@ -621,6 +633,9 @@ class OpenSearchSectionProvider:
             if row.get("section_title"):
                 title = f"{title}: {row['section_title']}"
         content = str(row.get("content") or "")
+        metadata = dict(row.get("metadata") or {})
+        if row.get("document_type") == "office_directory":
+            metadata["directory_fields"] = parse_directory_fields(content)
         return RetrievedDocument(
             id=str(row.get("id") or ""),
             title=title,
@@ -633,7 +648,7 @@ class OpenSearchSectionProvider:
             language=str(row.get("language") or ""),
             score=score,
             metadata={
-                **dict(row.get("metadata") or {}),
+                **metadata,
                 "section_id": row.get("section_id", ""),
                 "section_title": row.get("section_title", ""),
                 "parent_section_id": row.get("parent_section_id", ""),

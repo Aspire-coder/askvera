@@ -50,4 +50,6 @@ class ChatResponse:
             public["finishReason"] = metadata["finish_reason"]
         if metadata.get("validation"):
             public["validation"] = metadata["validation"]
+        if metadata.get("client_action"):
+            public["clientAction"] = metadata["client_action"]
         return public

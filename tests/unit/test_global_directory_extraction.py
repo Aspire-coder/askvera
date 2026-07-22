@@ -45,6 +45,7 @@ def test_office_records_are_global_and_keep_record_country_metadata() -> None:
     assert row["language"] == "en"
     assert row["metadata"]["record_country"] == "MEXICO"
     assert row["metadata"]["directory_section"] == "office"
+    assert row["metadata"]["directory_fields"]["Office Phone 1"] == "800 123 4567"
 
 
 def test_staff_cards_preserve_embedded_contact_details() -> None:
@@ -78,3 +79,19 @@ def test_clean_page_repairs_pdf_wrapped_email_addresses() -> None:
 
     assert "centrodeatencion@foreverliving.com.mx" in cleaned
     assert "regional.manager@example.com" in cleaned
+
+
+def test_directory_fields_preserve_multiline_address_and_skip_empty_values() -> None:
+    fields = extractor.parse_directory_fields(
+        "MEXICO - Forever Living Products Mexico\n"
+        "Country\nMEXICO\n"
+        "Physical Address\nLondres No. 61\nTorre A, Oficina 706-709\n"
+        "Office Phone 1\n52 55 3300 9400\n"
+        "Office Phone 2\n"
+        "General Mailbox\ncentrodeatencion@foreverliving.com.mx"
+    )
+
+    assert fields["Physical Address"] == "Londres No. 61 Torre A, Oficina 706-709"
+    assert fields["Office Phone 1"] == "52 55 3300 9400"
+    assert "Office Phone 2" not in fields
+    assert fields["General Mailbox"] == "centrodeatencion@foreverliving.com.mx"

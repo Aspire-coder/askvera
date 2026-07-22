@@ -102,6 +102,7 @@ class RetrievalQueryPlan:
     queries: list[str]
     include_global_documents: bool = False
     prefer_outline: bool = False
+    client_action: str = ""
 
 
 def _metadata_value(metadata: dict[str, Any], *keys: str) -> str:
@@ -241,7 +242,7 @@ def _retrieval_queries(message: str) -> list[str]:
     return [message, *unique_additions[:4]]
 
 
-def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool]:
+def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str]:
     """Parse planner-generated queries and content scopes from compact JSON."""
     stripped = text.strip()
     json_match = re.search(r"\{.*\}", stripped, flags=re.S)
@@ -258,7 +259,9 @@ def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool]:
         if str(scope).strip()
     }
     answer_shape = str(payload.get("answer_shape", "content")).strip().lower()
-    return parsed, "global_directory" in scopes, answer_shape == "document_structure"
+    intent = str(payload.get("intent", "knowledge")).strip().lower()
+    client_action = "open_support_form" if intent == "support_request" else ""
+    return parsed, "global_directory" in scopes, answer_shape == "document_structure", client_action
 
 
 def _planned_retrieval_plan(
@@ -287,13 +290,16 @@ def _planned_retrieval_plan(
         "inside a policy question does not make it a directory question. Do not invent facts, numbers, percentages, "
         "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
+        "Set intent to support_request only when the user explicitly asks to create, open, or submit a support "
+        "request, help-desk ticket, or human handoff. Questions asking for support information or contact details "
+        "remain knowledge intent. This intent classification must work in the user's language. "
         "Return only JSON."
     )
     user_prompt = (
         f"Market: {country}\nRequested language: {language}\nUser question:\n{message}\n\n"
         "Return JSON exactly like this: "
         "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"],"
-        "\"document_scopes\":[\"locale_policy\"],\"answer_shape\":\"content\"}. "
+        "\"document_scopes\":[\"locale_policy\"],\"answer_shape\":\"content\",\"intent\":\"knowledge\"}. "
         f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
     )
     try:
@@ -303,7 +309,7 @@ def _planned_retrieval_plan(
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],
         )
         text = response["output"]["message"]["content"][0].get("text", "")
-        planned_queries, include_global_documents, prefer_outline = _parse_planned_query_plan(text)
+        planned_queries, include_global_documents, prefer_outline, client_action = _parse_planned_query_plan(text)
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
         return RetrievalQueryPlan(base_queries, include_global_documents=True)
@@ -320,11 +326,13 @@ def _planned_retrieval_plan(
         query_count=len(merged),
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,
+        client_action=client_action,
     )
     return RetrievalQueryPlan(
         merged,
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,
+        client_action=client_action,
     )
 
 

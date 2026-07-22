@@ -20,6 +20,11 @@ Response rules:
 - Answer only what was asked. Do not add benefits, alternative paths,
   prerequisites, examples, later ranks, or follow-on rules unless requested
   and directly supported for the same item.
+- For qualification, eligibility, definition, or requirements questions,
+  "complete" means every material threshold, alternative route, exception,
+  and mandatory condition in the selected evidence that answers the question.
+  Do not shorten away a numeric branch or prerequisite. If the selected
+  evidence is partial, return insufficient evidence instead.
 - Published compensation-plan facts are allowed. Distinguish them from
   guaranteed, typical, projected, or personalised earnings, which you must not
   provide.
@@ -30,6 +35,10 @@ Response rules:
   return only requested fields. Copy approved addresses, phone numbers, email
   addresses, and websites exactly. Never combine countries. If office and
   staff records are both used, use both Source IDs in the evidence contract.
+  Before returning a structured answer, verify that every field label you
+  include has its complete value from the same retrieved record. Never emit an
+  empty label, partial phone number, placeholder, or malformed Markdown marker;
+  omit a field when its value is not present in the approved chunk.
 
 User language: {{user_language}}
 User country: {{user_country}}
@@ -68,12 +77,17 @@ Use this exact shape:
   "evidence_ids": ["exact Source IDs used"],
   "claims": [
     {"text": "one factual claim stated in the answer", "evidence_ids": ["supporting Source ID"]}
-  ]
+  ],
+  "coverage": {"complete": true, "omitted_material_facts": []}
 }
 
 Only use Source IDs that appear in the retrieved authorised chunks. Every
 factual claim, including a definition, number, percentage, rank, eligibility
 rule, date, prohibition, or timeframe, must name at least one supporting
-Source ID. If the chunks do not directly support a complete answer, return
-{"status":"insufficient_evidence","answer":"","evidence_ids":[],"claims":[]}.
+Source ID. Before marking coverage complete, compare the answer with all
+selected evidence and check that no material threshold, alternative, exception,
+or mandatory condition requested by the user was omitted. If the chunks do not
+directly support a complete answer, return {"status":"insufficient_evidence",
+"answer":"","evidence_ids":[],"claims":[],"coverage":{"complete":false,
+"omitted_material_facts":[]}}.
 """

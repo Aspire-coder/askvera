@@ -164,6 +164,20 @@ class AIOrchestrator:
             return chat_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        client_action = str((retrieval_result.metadata or {}).get("client_action") or "")
+        if client_action == "open_support_form":
+            chat_response = self.response_builder.fallback(
+                localized_conversation_response("support_request", body.language)
+                or "Opening the support request form.",
+                correlation_id,
+                metadata={
+                    "fallback": False,
+                    "response_source": "client_action",
+                    "client_action": client_action,
+                },
+            )
+            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
+            return chat_response
         evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
         retrieval_result = with_approved_evidence(retrieval_result, evidence_decision)
         if not evidence_decision.approved:
@@ -677,7 +691,7 @@ class AIOrchestrator:
 
         # Guardrail safety copy should be generated fresh and must never be
         # replayed as though it were a document-grounded policy response.
-        if metadata.get("failure_layer") or metadata.get("response_source") == "guardrail":
+        if metadata.get("failure_layer") or metadata.get("response_source") in {"guardrail", "client_action"}:
             return False
 
         validation = metadata.get("validation")

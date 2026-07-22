@@ -267,6 +267,44 @@ def test_sensitive_identifier_returns_privacy_response_before_retrieval(monkeypa
     router.generate.assert_not_called()
 
 
+def test_explicit_support_action_bypasses_evidence_and_generation(monkeypatch) -> None:
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=1.0,
+        metadata={"client_action": "open_support_form"},
+    )
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="Please create a support request for me.",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.metadata["client_action"] == "open_support_form"
+    assert response.to_api_result()["metadata"]["clientAction"] == "open_support_form"
+    assert orchestrator._should_cache_response(response) is False
+    router.generate.assert_not_called()
+
+
 def test_bedrock_guardrail_copy_is_replaced_with_neutral_reviewed_message(monkeypatch) -> None:
     orchestrator = AIOrchestrator(
         retriever=_FakeRetriever(),
