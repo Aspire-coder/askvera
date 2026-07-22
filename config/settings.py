@@ -70,6 +70,9 @@ KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
 RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-16-atomic-sections-v1")
+# Code-owned conversation-routing behavior version. Change this when routing
+# semantics change so stale cached answers cannot bypass the new router.
+CONVERSATION_ROUTING_VERSION = "2026-07-22-semantic-intent-v1"
 # RDS PostgreSQL database identifier. Found in RDS -> Databases -> database-1.
 RDS_DB_IDENTIFIER = "database-1"
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
