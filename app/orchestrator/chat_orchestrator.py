@@ -32,6 +32,7 @@ from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
+from utils.directory_fields import restore_missing_directory_contacts
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 
@@ -188,36 +189,12 @@ class AIOrchestrator:
                 "evidence_decision": evidence_decision.to_metadata(),
             },
         )
-        safe_answer = scrub_pii(
-            chat_response.answer,
-            correlation_id,
+        chat_response = self._secure_and_complete_response(
+            chat_response,
+            retrieval_result,
             body.language,
-            allowed_texts=[
-                *settings.PII_APPROVED_PUBLIC_TERMS,
-                *(document.content for document in retrieval_result.documents),
-            ],
+            correlation_id,
         )
-        if safe_answer != chat_response.answer:
-            chat_response = ChatResponse(
-                answer=safe_answer,
-                citations=chat_response.citations,
-                suggestions=chat_response.suggestions,
-                cards=chat_response.cards,
-                confidence=chat_response.confidence,
-                metadata={**chat_response.metadata, "response_pii_scrubbed": True},
-                correlation_id=chat_response.correlation_id,
-            )
-        cleaned_answer = remove_unresolved_pii_placeholders(chat_response.answer)
-        if cleaned_answer != chat_response.answer:
-            chat_response = ChatResponse(
-                answer=cleaned_answer,
-                citations=chat_response.citations,
-                suggestions=chat_response.suggestions,
-                cards=chat_response.cards,
-                confidence=chat_response.confidence,
-                metadata={**chat_response.metadata, "unresolved_pii_placeholders_removed": True},
-                correlation_id=chat_response.correlation_id,
-            )
         chat_response = self._validate_response(
             chat_response,
             body,
@@ -250,6 +227,67 @@ class AIOrchestrator:
                 reason="fallback_or_critical_validation",
             )
         return chat_response
+
+    def _secure_and_complete_response(
+        self,
+        chat_response: ChatResponse,
+        retrieval_result: RetrievalResult,
+        language: str,
+        correlation_id: str,
+    ) -> ChatResponse:
+        """Restore approved directory fields, then enforce outbound PII safety."""
+        completed_answer, restored_fields = restore_missing_directory_contacts(
+            chat_response.answer,
+            (
+                document.metadata.get("directory_fields", {})
+                for document in retrieval_result.documents
+                if isinstance(document.metadata.get("directory_fields"), dict)
+            ),
+        )
+        if restored_fields:
+            chat_response = self._replace_answer(
+                chat_response,
+                completed_answer,
+                {"directory_contacts_restored": restored_fields},
+            )
+
+        safe_answer = scrub_pii(
+            chat_response.answer,
+            correlation_id,
+            language,
+            allowed_texts=[
+                *settings.PII_APPROVED_PUBLIC_TERMS,
+                *(document.content for document in retrieval_result.documents),
+            ],
+        )
+        if safe_answer != chat_response.answer:
+            chat_response = self._replace_answer(chat_response, safe_answer, {"response_pii_scrubbed": True})
+
+        cleaned_answer = remove_unresolved_pii_placeholders(chat_response.answer)
+        if cleaned_answer != chat_response.answer:
+            chat_response = self._replace_answer(
+                chat_response,
+                cleaned_answer,
+                {"unresolved_pii_placeholders_removed": True},
+            )
+        return chat_response
+
+    @staticmethod
+    def _replace_answer(
+        chat_response: ChatResponse,
+        answer: str,
+        metadata: dict[str, object],
+    ) -> ChatResponse:
+        """Return a response with updated answer text and metadata."""
+        return ChatResponse(
+            answer=answer,
+            citations=chat_response.citations,
+            suggestions=chat_response.suggestions,
+            cards=chat_response.cards,
+            confidence=chat_response.confidence,
+            metadata={**chat_response.metadata, **metadata},
+            correlation_id=chat_response.correlation_id,
+        )
 
     def _cached_response(
         self,

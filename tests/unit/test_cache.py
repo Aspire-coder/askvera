@@ -38,6 +38,15 @@ def test_build_cache_key_rotates_with_fallback_model(monkeypatch) -> None:
     assert first != second
 
 
+def test_build_cache_key_rotates_with_response_pipeline(monkeypatch) -> None:
+    """Response fixes invalidate stale rendered answers without changing retrieval."""
+    monkeypatch.setattr(cache.settings, "RESPONSE_PIPELINE_VERSION", "response-v1")
+    first = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    monkeypatch.setattr(cache.settings, "RESPONSE_PIPELINE_VERSION", "response-v2")
+    second = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    assert first != second
+
+
 def test_get_and_set_cache_value(monkeypatch) -> None:
     """Cache values are JSON encoded and decoded."""
     client = MagicMock()

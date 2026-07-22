@@ -2,6 +2,7 @@
 
 from app.evidence import approve_evidence, assistant_meta_response, classify_intent, localized_conversation_response
 from app.retrieval.models import RetrievedDocument, RetrievalResult
+from services import controlled_copy
 
 
 def test_routes_configured_english_greeting_without_retrieval() -> None:
@@ -37,6 +38,34 @@ def test_fallback_explains_that_approved_documents_lack_enough_information() -> 
     fallback = localized_conversation_response("insufficient_evidence", "en") or ""
     assert "approved policy documents" in fallback
     assert "do not contain enough information" in fallback
+
+
+def test_unconfigured_language_localizes_reviewed_safety_copy(monkeypatch) -> None:
+    runtime = type("Runtime", (), {})()
+    runtime.converse = lambda **_kwargs: {
+        "output": {"message": {"content": [{"text": "Non posso prevedere o garantire guadagni."}]}}
+    }
+    clients = type("Clients", (), {"bedrock_runtime": runtime})()
+    monkeypatch.setattr(controlled_copy, "get_aws_clients", lambda: clients)
+    controlled_copy.localize_reviewed_copy.cache_clear()
+
+    response = localized_conversation_response("income_claim", "it-IT") or ""
+
+    assert response == "Non posso prevedere o garantire guadagni."
+
+
+def test_unconfigured_language_rejects_translation_that_adds_numbers(monkeypatch) -> None:
+    runtime = type("Runtime", (), {})()
+    runtime.converse = lambda **_kwargs: {
+        "output": {"message": {"content": [{"text": "Guaranteed earnings: 5000."}]}}
+    }
+    clients = type("Clients", (), {"bedrock_runtime": runtime})()
+    monkeypatch.setattr(controlled_copy, "get_aws_clients", lambda: clients)
+    controlled_copy.localize_reviewed_copy.cache_clear()
+
+    response = localized_conversation_response("income_claim", "sv-SE") or ""
+
+    assert response == localized_conversation_response("income_claim", "en")
 
 
 def test_global_document_is_valid_evidence_for_every_locale() -> None:

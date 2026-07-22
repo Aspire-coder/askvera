@@ -190,6 +190,71 @@ def test_guardrail_response_is_not_cacheable() -> None:
     assert orchestrator._should_cache_response(response) is False
 
 
+def test_response_completion_restores_only_approved_directory_contacts(monkeypatch) -> None:
+    """Directory answers regain omitted exact fields before outbound validation."""
+    orchestrator = AIOrchestrator()
+    response = ChatResponse(
+        answer="The approved office address is 10 Example Road.",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={},
+        correlation_id="cid",
+    )
+    document = RetrievedDocument(
+        id="directory-office",
+        title="Example office",
+        content="Office Address\n10 Example Road\nOffice Phone 1\n+99 123 456 7890",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        metadata={
+            "directory_fields": {
+                "Office Address": "10 Example Road",
+                "Office Phone 1": "+99 123 456 7890",
+            }
+        },
+    )
+    result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.8)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+
+    completed = orchestrator._secure_and_complete_response(response, result, "fr", "cid")
+
+    assert completed.answer.count("10 Example Road") == 1
+    assert "**Office Phone 1:** +99 123 456 7890" in completed.answer
+    assert completed.metadata["directory_contacts_restored"] == ["Office Phone 1"]
+
+
+def test_response_completion_does_not_change_policy_answers(monkeypatch) -> None:
+    """Policy answers remain byte-for-byte unchanged by directory completion."""
+    orchestrator = AIOrchestrator()
+    response = ChatResponse(
+        answer="A Recognized Manager must meet the approved policy requirements.",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={},
+        correlation_id="cid",
+    )
+    document = RetrievedDocument(
+        id="policy",
+        title="Policy",
+        content="Approved policy requirements.",
+        source="s3://approved/policy.pdf",
+        country="CA",
+        language="en",
+    )
+    result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.8)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+
+    completed = orchestrator._secure_and_complete_response(response, result, "en", "cid")
+
+    assert completed.answer == response.answer
+    assert "directory_contacts_restored" not in completed.metadata
+
+
 def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:
     """Accidentally spaced letters are reconstructed before retrieval."""
     orchestrator = AIOrchestrator()

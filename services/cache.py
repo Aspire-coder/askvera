@@ -124,6 +124,7 @@ def build_cache_key(message: str, country: str, language: str, role: str) -> str
             settings.KB_VERSION,
             settings.RETRIEVAL_PIPELINE_VERSION,
             settings.CONVERSATION_ROUTING_VERSION,
+            settings.RESPONSE_PIPELINE_VERSION,
             settings.PROMPT_VERSION,
             settings.BEDROCK_GUARDRAIL_VERSION,
             settings.BEDROCK_MODEL_ARN,

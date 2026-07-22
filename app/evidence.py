@@ -12,6 +12,7 @@ from typing import Any
 
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
+from services.controlled_copy import localize_reviewed_copy
 from services.market_config import get_document_country_codes
 
 
@@ -67,9 +68,17 @@ def assistant_meta_response(message: str, language: str = "") -> str | None:
 
 def localized_conversation_response(key: str, language: str = "") -> str | None:
     """Return controlled locale copy for a fallback or conversational response."""
-    routes = _conversation_routes().get(_locale_key(language)) or _conversation_routes().get("en", {})
-    response = (routes.get("responses", {}) or {}).get(key)
-    return str(response).strip() if response else None
+    locale = _locale_key(language)
+    routes = _conversation_routes()
+    locale_response = ((routes.get(locale, {}).get("responses", {}) or {}).get(key))
+    if locale_response:
+        return str(locale_response).strip()
+
+    english_response = ((routes.get("en", {}).get("responses", {}) or {}).get(key))
+    source = str(english_response).strip() if english_response else ""
+    if not source or locale == "en":
+        return source or None
+    return localize_reviewed_copy(source, locale, key) or source
 
 
 def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str, language: str) -> EvidenceDecision:
