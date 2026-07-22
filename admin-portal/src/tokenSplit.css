@@ -1,0 +1,10 @@
+.token-metric strong { margin-bottom: 9px; }
+.token-split { display: flex; width: 100%; height: 5px; overflow: hidden; border-radius: 5px; background: #e7e7ea; }
+.token-split > i { display: block; height: 100%; }
+.token-input { background: var(--blue); }
+.token-output { background: var(--green); }
+.token-split-labels { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 9px; }
+.token-split-labels > span { display: grid; grid-template-columns: 6px 1fr; column-gap: 6px; align-items: center; min-width: 0; color: var(--secondary); font-size: 9px; }
+.token-split-labels i { width: 6px; height: 6px; border-radius: 50%; grid-row: 1 / span 2; }
+.token-split-labels b { overflow: hidden; color: var(--ink); font-weight: 600; white-space: nowrap; }
+.token-split-labels small { margin: 2px 0 0; }

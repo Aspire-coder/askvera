@@ -51,6 +51,8 @@ export type AnalyticsOverview = {
   totals: {
     questions: number;
     users: number;
+    inputTokens: number;
+    outputTokens: number;
     tokens: number;
     averageConfidence: number;
     unanswered: number;

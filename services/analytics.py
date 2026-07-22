@@ -203,6 +203,8 @@ def analytics_overview(
                 f"""
                 SELECT COUNT(*) AS questions,
                        COUNT(DISTINCT session_id) AS users,
+                       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
                        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
                        COALESCE(AVG(confidence), 0) AS confidence,
                        COUNT(*) FILTER (WHERE fallback) AS unanswered
@@ -261,6 +263,8 @@ def analytics_overview(
         "totals": {
             "questions": int(totals["questions"] or 0),
             "users": int(totals["users"] or 0),
+            "inputTokens": int(totals["input_tokens"] or 0),
+            "outputTokens": int(totals["output_tokens"] or 0),
             "tokens": int(totals["tokens"] or 0),
             "averageConfidence": round(float(totals["confidence"] or 0.0), 3),
             "unanswered": int(totals["unanswered"] or 0),

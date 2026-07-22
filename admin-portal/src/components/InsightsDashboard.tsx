@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
 import type { AnalyticsOverview, Interaction, Market } from "../types";
+import "../tokenSplit.css";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const percent = (value: number) => `${Math.round(value * 100)}%`;
@@ -116,6 +117,11 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
 
   const feedbackTotal = overview.totals.helpful + overview.totals.notHelpful;
   const unansweredRate = overview.totals.questions ? overview.totals.unanswered / overview.totals.questions : 0;
+  const inputTokens = Number(overview.totals.inputTokens || 0);
+  const outputTokens = Number(overview.totals.outputTokens || 0);
+  const measuredTokens = inputTokens + outputTokens;
+  const inputTokenShare = measuredTokens ? inputTokens / measuredTokens : 0;
+  const outputTokenShare = measuredTokens ? outputTokens / measuredTokens : 0;
 
   return (
     <section className="page-section" aria-labelledby="insights-title">
@@ -138,7 +144,17 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <article className="metric-card surface"><span>Active users</span><strong>{compact.format(overview.totals.users)}</strong><small>Unique chat sessions</small></article>
         <article className="metric-card surface"><span>Questions asked</span><strong>{compact.format(overview.totals.questions)}</strong><small>{(overview.totals.questions / Math.max(overview.totals.users, 1)).toFixed(1)} per user</small></article>
         <article className="metric-card surface"><span>Helpful answers</span><strong>{percent(overview.totals.helpfulRate)}</strong><small>{compact.format(feedbackTotal)} rated answers</small></article>
-        <article className="metric-card surface"><span>AI tokens</span><strong>{compact.format(overview.totals.tokens)}</strong><small>Input and output combined</small></article>
+        <article className="metric-card token-metric surface">
+          <span>AI tokens</span><strong>{compact.format(overview.totals.tokens)}</strong>
+          <div className="token-split" role="img" aria-label={`Input tokens ${percent(inputTokenShare)}; output tokens ${percent(outputTokenShare)}`}>
+            <i className="token-input" style={{ width: `${inputTokenShare * 100}%` }} />
+            <i className="token-output" style={{ width: `${outputTokenShare * 100}%` }} />
+          </div>
+          <div className="token-split-labels">
+            <span><i className="token-input" /><b>Input {percent(inputTokenShare)}</b><small>{compact.format(inputTokens)}</small></span>
+            <span><i className="token-output" /><b>Output {percent(outputTokenShare)}</b><small>{compact.format(outputTokens)}</small></span>
+          </div>
+        </article>
       </div>
 
       <div className="dashboard-grid">
