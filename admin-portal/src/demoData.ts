@@ -62,7 +62,7 @@ export const demoJobs: IngestionJob[] = [
 const daily = [32, 45, 41, 58, 62, 55, 76, 81, 74, 93, 88, 106, 114, 121];
 export const demoOverview: AnalyticsOverview = {
   rangeDays: 30,
-  totals: { questions: 1842, users: 618, inputTokens: 2_050_000, outputTokens: 410_810, tokens: 2_460_810, averageConfidence: 0.87, unanswered: 94, helpful: 486, notHelpful: 42, helpfulRate: 0.92 },
+  totals: { questions: 1842, users: 618, liveSessions: 23, inputTokens: 2_050_000, outputTokens: 410_810, tokens: 2_460_810, averageConfidence: 0.87, unanswered: 94, helpful: 486, notHelpful: 42, helpfulRate: 0.92 },
   topics: [
     { label: "Rank qualification", value: 412 }, { label: "Product information", value: 361 },
     { label: "Ordering & returns", value: 288 }, { label: "Bonuses & Case Credits", value: 274 },

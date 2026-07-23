@@ -44,6 +44,32 @@ def _analytics_window(
     return window_start, window_end
 
 
+def _live_session_scope(*, country: str, language: str, traffic_source: str) -> tuple[str, dict[str, str]]:
+    """Build the lifecycle query scope independently of the reporting date range."""
+    filters = [
+        "s.ended_at IS NULL",
+        "s.expires_at > now()",
+        "s.consent_accepted = true",
+    ]
+    parameters: dict[str, str] = {}
+    if country or language:
+        consent_filters = ["cl.session_id = s.session_id", "cl.accepted = true"]
+        if country:
+            consent_filters.append("cl.country = :country")
+            parameters["country"] = country.upper()
+        if language:
+            consent_filters.append("cl.lang = :language")
+            parameters["language"] = language.lower()
+        filters.append(f"EXISTS (SELECT 1 FROM consent_log cl WHERE {' AND '.join(consent_filters)})")
+    if traffic_source:
+        filters.append(
+            "EXISTS (SELECT 1 FROM chat_analytics ca "
+            "WHERE ca.session_id = s.session_id AND ca.traffic_source = :traffic_source)"
+        )
+        parameters["traffic_source"] = traffic_source
+    return " AND ".join(filters), parameters
+
+
 def _token_counts(response: ChatResponse) -> tuple[int, int]:
     usage = response.metadata.get("token_usage") if response.metadata else None
     if not isinstance(usage, dict):
@@ -228,6 +254,15 @@ def analytics_overview(
             ),
             parameters,
         ).mappings().one()
+        live_session_scope, live_parameters = _live_session_scope(
+            country=country,
+            language=language,
+            traffic_source=traffic_source,
+        )
+        live_sessions = connection.execute(
+            text("SELECT COUNT(*) FROM chat_sessions s WHERE " + live_session_scope),
+            live_parameters,
+        ).scalar_one()
         feedback = connection.execute(
             text(
                 f"""
@@ -279,6 +314,7 @@ def analytics_overview(
         "totals": {
             "questions": int(totals["questions"] or 0),
             "users": int(totals["users"] or 0),
+            "liveSessions": int(live_sessions or 0),
             "inputTokens": int(totals["input_tokens"] or 0),
             "outputTokens": int(totals["output_tokens"] or 0),
             "tokens": int(totals["tokens"] or 0),

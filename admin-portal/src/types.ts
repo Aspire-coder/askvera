@@ -51,6 +51,7 @@ export type AnalyticsOverview = {
   totals: {
     questions: number;
     users: number;
+    liveSessions: number;
     inputTokens: number;
     outputTokens: number;
     tokens: number;

@@ -156,6 +156,14 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(
                 text(
                     """
+                    CREATE INDEX IF NOT EXISTS idx_chat_analytics_session_source
+                    ON chat_analytics (session_id, traffic_source)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS feedback_events (
                         event_id TEXT PRIMARY KEY,
                         correlation_id TEXT NOT NULL DEFAULT '',
@@ -249,6 +257,15 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(
                 text(
                     """
+                    CREATE INDEX IF NOT EXISTS idx_chat_sessions_live
+                    ON chat_sessions (expires_at)
+                    WHERE ended_at IS NULL AND consent_accepted = true
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS consent_log (
                         id BIGSERIAL PRIMARY KEY,
                         session_id TEXT NOT NULL,
@@ -265,6 +282,15 @@ def create_schema(correlation_id: str = "startup") -> None:
             )
             connection.execute(text("ALTER TABLE consent_log ADD COLUMN IF NOT EXISTS accepted BOOLEAN NOT NULL DEFAULT true"))
             connection.execute(text("ALTER TABLE consent_log ADD COLUMN IF NOT EXISTS correlation_id TEXT"))
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_consent_log_session_locale
+                    ON consent_log (session_id, country, lang)
+                    WHERE accepted = true
+                    """
+                )
+            )
             connection.execute(
                 text(
                     """

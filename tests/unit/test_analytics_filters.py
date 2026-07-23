@@ -4,7 +4,7 @@ import pytest
 
 from pydantic import ValidationError
 
-from services.analytics import _analytics_window, _normalize_traffic_source
+from services.analytics import _analytics_window, _live_session_scope, _normalize_traffic_source
 from utils.validators import ChatRequest
 
 
@@ -70,3 +70,20 @@ def test_traffic_source_rejects_unknown_categories() -> None:
 
     with pytest.raises(ValueError, match="Unsupported traffic source"):
         _normalize_traffic_source("unknown")
+
+
+def test_live_session_scope_excludes_ended_and_expired_sessions() -> None:
+    where, parameters = _live_session_scope(country="", language="", traffic_source="")
+
+    assert "s.ended_at IS NULL" in where
+    assert "s.expires_at > now()" in where
+    assert "s.consent_accepted = true" in where
+    assert parameters == {}
+
+
+def test_live_session_scope_applies_locale_and_traffic_filters() -> None:
+    where, parameters = _live_session_scope(country="us", language="EN", traffic_source="widget")
+
+    assert "consent_log" in where
+    assert "chat_analytics" in where
+    assert parameters == {"country": "US", "language": "en", "traffic_source": "widget"}
