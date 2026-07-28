@@ -9,11 +9,15 @@ import {
 } from "./demoData";
 import type {
   AdminConfig,
+  AdminAuditEvent,
+  AdminScope,
+  AdminUser,
   AnalyticsOverview,
   IngestionJob,
   Interaction,
   PipelineTrace,
-  ShadowReport
+  ShadowReport,
+  WidgetConfig
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
@@ -54,6 +58,45 @@ export class AdminApi {
       method: "POST",
       body: formData
     });
+  }
+  users() { return this.request<AdminUser[]>("/api/admin/users"); }
+  auditEvents() { return this.request<AdminAuditEvent[]>("/api/admin/audit-events"); }
+  createUser(body: { email: string; role: string; scopes: AdminScope[] }) {
+    return this.request<AdminUser>("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
+  updateUser(id: string, body: { role: string; scopes: AdminScope[] }) {
+    return this.request<AdminUser>(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
+  setUserEnabled(id: string, enabled: boolean) {
+    return this.request<AdminUser>(`/api/admin/users/${id}/${enabled ? "enable" : "disable"}`, { method: "POST" });
+  }
+  resendInvite(id: string) {
+    return this.request<AdminUser>(`/api/admin/users/${id}/resend-invite`, { method: "POST" });
+  }
+  widgetConfigs() { return this.request<WidgetConfig[]>("/api/admin/widget-configs"); }
+  createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
+    return this.request<WidgetConfig>("/api/admin/widget-configs", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  updateWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
+    return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  rotateWidgetKey(id: string) {
+    return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/rotate-key`, { method: "POST" });
+  }
+  disableWidgetConfig(id: string) {
+    return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/disable`, { method: "POST" });
   }
 }
 

@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
-import { type AdminCredentials } from "./api";
+import { AdminApi, demo, type AdminCredentials } from "./api";
 import { beginSignIn, cognitoConfigured, completeSignIn, demoAllowed, signOut, type AuthSession } from "./auth";
 import { ChartIcon, FlowIcon, KeyIcon, UploadIcon } from "./icons";
 import { FlowVisualizer } from "./components/FlowVisualizer";
 import { InsightsDashboard } from "./components/InsightsDashboard";
 import { KnowledgeUploader } from "./components/KnowledgeUploader";
-import type { View } from "./types";
+import { UsersManager } from "./components/UsersManager";
+import { WidgetManager } from "./components/WidgetManager";
+import type { AdminConfig, View } from "./types";
 
 const nav = [
   { id: "flow" as const, label: "Live flow", detail: "Follow an answer", icon: <FlowIcon /> },
   { id: "knowledge" as const, label: "Knowledge", detail: "Manage approved content", icon: <UploadIcon /> },
   { id: "insights" as const, label: "Insights", detail: "Measure and improve", icon: <ChartIcon /> },
+  { id: "users" as const, label: "Users", detail: "Manage access", icon: <KeyIcon /> },
+  { id: "widget" as const, label: "Widget", detail: "Configure customer embeds", icon: <UploadIcon /> },
 ];
 
 export function App() {
@@ -21,6 +25,7 @@ export function App() {
   const [apiKey, setApiKey] = useState(() => window.sessionStorage.getItem("askvera_admin_key") || "");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftKey, setDraftKey] = useState(apiKey);
+  const [adminConfig, setAdminConfig] = useState<AdminConfig>(demo.config);
 
   useEffect(() => {
     if (!cognitoConfigured) return;
@@ -38,6 +43,31 @@ export function App() {
     setSettingsOpen(false);
   };
 
+  const credentials: AdminCredentials = session ? { accessToken: session.accessToken } : { apiKey };
+  const canView = (section: View) => {
+    if (section === "users" && !adminConfig.userManagementEnabled) return false;
+    if (section === "widget" && !adminConfig.widgetConfigEnabled) return false;
+    if (!adminConfig.rbacEnabled || adminConfig.principal?.role === "super_admin") return true;
+    return Boolean(adminConfig.principal?.scopes.some((scope) => scope.section === section));
+  };
+  const visibleNav = nav.filter((item) => canView(item.id));
+  const connectionLabel = session ? session.username : apiKey ? "Admin connected" : "Demo mode";
+  const connectionDetail = session || apiKey ? "Live operational data" : "Presentation data";
+
+  useEffect(() => {
+    if (!session && !apiKey) return;
+    void new AdminApi(credentials).config()
+      .then((nextConfig) => {
+        setAdminConfig(nextConfig);
+      })
+      .catch(() => setAdminConfig(demo.config));
+  }, [session?.accessToken, apiKey]);
+  useEffect(() => {
+    if (visibleNav.length && !visibleNav.some((item) => item.id === view)) {
+      setView(visibleNav[0].id);
+    }
+  }, [adminConfig, view]);
+
   if (!authReady) {
     return <main className="auth-page"><section className="auth-card"><div className="brand-mark">V</div><span className="eyebrow">AskVera Operations</span><h1>Signing you in</h1><p>Verifying your administrator session.</p></section></main>;
   }
@@ -51,15 +81,11 @@ export function App() {
     </section></main>;
   }
 
-  const credentials: AdminCredentials = session ? { accessToken: session.accessToken } : { apiKey };
-  const connectionLabel = session ? session.username : apiKey ? "Admin connected" : "Demo mode";
-  const connectionDetail = session || apiKey ? "Live operational data" : "Presentation data";
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">V</div><div><strong>AskVera</strong><span>Operations</span></div></div>
-        <nav aria-label="Admin sections">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span><strong>{item.label}</strong><small>{item.detail}</small></span></button>)}</nav>
+        <nav aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span><strong>{item.label}</strong><small>{item.detail}</small></span></button>)}</nav>
         <div className="sidebar-bottom">
           <button className="connection-button" onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /><span><strong>{connectionLabel}</strong><small>{session ? "Select to sign out" : connectionDetail}</small></span><i className={session || apiKey ? "online" : ""} /></button>
           <div className="environment"><span>Production</span><strong>Operations</strong></div>
@@ -71,7 +97,10 @@ export function App() {
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
         {view === "insights" ? <InsightsDashboard credentials={credentials} /> : null}
-        <nav className="mobile-nav" aria-label="Admin sections">{nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+        {view === "users" ? <UsersManager credentials={credentials} config={adminConfig} /> : null}
+        {view === "widget" ? <WidgetManager credentials={credentials} config={adminConfig} /> : null}
+        {!visibleNav.length ? <section className="page-section"><div className="empty-state surface">Your account does not currently have access to an operations section.</div></section> : null}
+        <nav className="mobile-nav" aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
       </main>
 
       {settingsOpen && demoAllowed ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}><section className="connection-modal" role="dialog" aria-modal="true" aria-labelledby="connect-title">

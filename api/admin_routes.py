@@ -8,10 +8,25 @@ from tempfile import gettempdir
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from botocore.exceptions import BotoCoreError, ClientError
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.operations import pipeline_trace_store
 from config import settings
 from services.admin_auth import require_admin_identity
+from services.admin_users import (
+    ADMIN_ROLES,
+    ADMIN_SECTIONS,
+    accessible_markets,
+    create_admin_user,
+    list_admin_audit_events,
+    list_admin_users,
+    require_admin_access,
+    resend_admin_invite,
+    set_admin_user_enabled,
+    update_admin_user,
+)
 from services.analytics import analytics_overview, interaction_list, retrieval_shadow_report
 from services.knowledge_ingestion import (
     ACCESS_SCOPES,
@@ -23,8 +38,65 @@ from services.knowledge_ingestion import (
     validate_upload,
 )
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
+from services.widget_configs import (
+    create_widget_config,
+    disable_widget_config,
+    get_widget_config,
+    list_widget_configs,
+    rotate_widget_key,
+    update_widget_config,
+)
+from app.widget_registry.service import widget_registry_service
 
 admin_router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin_identity)])
+
+
+class AdminScopeInput(BaseModel):
+    market: str = Field(min_length=1, max_length=8)
+    section: str = Field(min_length=1, max_length=32)
+    permission: str = Field(min_length=1, max_length=32)
+
+
+class AdminUserCreateInput(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    role: str
+    scopes: list[AdminScopeInput] = Field(default_factory=list)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        if value not in ADMIN_ROLES:
+            raise ValueError("Unsupported administrator role.")
+        return value
+
+
+class AdminUserUpdateInput(BaseModel):
+    role: str
+    scopes: list[AdminScopeInput] = Field(default_factory=list)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        if value not in ADMIN_ROLES:
+            raise ValueError("Unsupported administrator role.")
+        return value
+
+
+class WidgetConfigInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    customer: str = Field(default="", max_length=160)
+    allowed_origins: list[str] = Field(min_length=1, max_length=100)
+    markets: list[str] = Field(min_length=1)
+    languages: list[str] = Field(min_length=1)
+    default_market: str
+    default_language: str
+    display_name: str = Field(default="AskVera", min_length=1, max_length=80)
+    greeting: str = Field(default="", max_length=500)
+    accent_color: str = Field(default="#2F7D4E", max_length=7)
+    position: str = Field(default="bottom-right")
+    legal_version: str = Field(default="", max_length=64)
+    rate_limit_tier: str = Field(default="standard", max_length=32)
+    usage_cap: int | None = Field(default=None, ge=1)
 
 
 def _payload(data: Any, request: Request) -> dict[str, Any]:
@@ -37,12 +109,31 @@ def _payload(data: Any, request: Request) -> dict[str, Any]:
 
 @admin_router.get("/config")
 def admin_config(request: Request) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    scopes = principal.get("scopes") or []
+    allowed_markets = {
+        scope["market"]
+        for scope in scopes
+        if scope.get("market") and scope.get("market") != "*"
+    }
+    countries = get_countries()
+    if settings.ADMIN_RBAC_ENABLED and principal.get("role") != "super_admin":
+        countries = [country for country in countries if country["code"] in allowed_markets]
     return _payload(
         {
-            "countries": get_countries(),
+            "countries": countries,
             "documentTypes": sorted(DOCUMENT_TYPES),
             "accessScopes": sorted(ACCESS_SCOPES),
             "maxUploadBytes": settings.ADMIN_UPLOAD_MAX_BYTES,
+            "rbacEnabled": settings.ADMIN_RBAC_ENABLED,
+            "userManagementEnabled": settings.ADMIN_USER_MANAGEMENT_ENABLED,
+            "widgetConfigEnabled": settings.WIDGET_CONFIG_ADMIN_ENABLED,
+            "principal": {
+                "role": principal.get("role", "super_admin"),
+                "status": principal.get("status", "active"),
+                "scopes": scopes,
+                "sections": sorted(ADMIN_SECTIONS),
+            },
         },
         request,
     )
@@ -58,12 +149,19 @@ def overview(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
     try:
         result = analytics_overview(
             days=days,
             country=country,
             language=language,
             traffic_source=traffic_source,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
             start=start,
             end=end,
         )
@@ -84,6 +182,12 @@ def interactions(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
     if feedback not in {"all", "helpful", "not_helpful"}:
         raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
     try:
@@ -92,6 +196,7 @@ def interactions(
             country=country,
             language=language,
             traffic_source=traffic_source,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
             feedback=feedback,
             limit=limit,
             start=start,
@@ -111,11 +216,18 @@ def retrieval_shadow(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
     try:
         result = retrieval_shadow_report(
             days=days,
             country=country,
             language=language,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
             start=start,
             end=end,
         )
@@ -126,7 +238,11 @@ def retrieval_shadow(
 
 @admin_router.get("/traces")
 def traces(request: Request, limit: int = 20) -> dict[str, Any]:
-    return _payload(pipeline_trace_store.latest(limit), request)
+    principal = require_admin_access(request, "flow", "view")
+    markets = accessible_markets(principal, "flow", "view")
+    recent = pipeline_trace_store.latest(pipeline_trace_store.capacity)
+    visible = [trace for trace in recent if str(trace.get("country") or "").upper() in markets]
+    return _payload(visible[: max(1, min(limit, pipeline_trace_store.capacity))], request)
 
 
 @admin_router.get("/traces/{correlation_id}")
@@ -134,12 +250,21 @@ def trace_detail(correlation_id: str, request: Request) -> dict[str, Any]:
     trace = pipeline_trace_store.get(correlation_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found in the recent in-process window.")
+    require_admin_access(request, "flow", "view", str(trace.get("country") or ""))
     return _payload(trace, request)
 
 
 @admin_router.get("/ingestions")
 def ingestions(request: Request, limit: int = 50) -> dict[str, Any]:
-    return _payload(list_ingestion_jobs(limit), request)
+    principal = require_admin_access(request, "knowledge", "view")
+    markets = accessible_markets(principal, "knowledge", "view")
+    jobs = list_ingestion_jobs(200)
+    visible = [
+        job
+        for job in jobs
+        if job.get("access_scope") == "global" or str(job.get("country") or "").upper() in markets
+    ]
+    return _payload(visible[: max(1, min(limit, 200))], request)
 
 
 @admin_router.post("/documents")
@@ -156,6 +281,7 @@ async def upload_document(
 ) -> dict[str, Any]:
     normalized_country = country.upper().strip()
     normalized_language = language.lower().strip()
+    require_admin_access(request, "knowledge", "stage", normalized_country)
     if normalized_country not in get_country_codes():
         raise HTTPException(status_code=400, detail="Unsupported country.")
     if normalized_language not in get_language_codes_for_country(normalized_country):
@@ -164,6 +290,9 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Unsupported document type.")
     if access_scope not in ACCESS_SCOPES:
         raise HTTPException(status_code=400, detail="Unsupported access scope.")
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if access_scope == "global" and principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can upload global content.")
 
     filename = safe_filename(file.filename or "document")
     content = await file.read(settings.ADMIN_UPLOAD_MAX_BYTES + 1)
@@ -205,3 +334,186 @@ async def upload_document(
         },
         request,
     )
+
+
+def _user_management_enabled() -> None:
+    if not settings.ADMIN_USER_MANAGEMENT_ENABLED:
+        raise HTTPException(status_code=404, detail="User management is not enabled.")
+
+
+def _actor(request: Request) -> str:
+    return str((getattr(request.state, "admin_identity", {}) or {}).get("sub") or "admin")
+
+
+@admin_router.get("/users")
+def admin_users_list(request: Request) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "users", "view")
+    return _payload(list_admin_users(), request)
+
+
+@admin_router.get("/audit-events")
+def admin_audit_events(request: Request, limit: int = 100) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "audit", "view")
+    return _payload(list_admin_audit_events(limit), request)
+
+
+@admin_router.post("/users")
+def admin_user_create(body: AdminUserCreateInput, request: Request) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "users", "manage")
+    try:
+        user = create_admin_user(
+            email=body.email,
+            role=body.role,
+            scopes=[scope.model_dump() for scope in body.scopes],
+            actor_sub=_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="Cognito could not create the administrator.") from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="The administrator profile could not be saved.") from exc
+    return _payload(user, request)
+
+
+@admin_router.patch("/users/{user_id}")
+def admin_user_update(user_id: str, body: AdminUserUpdateInput, request: Request) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "users", "manage")
+    try:
+        user = update_admin_user(
+            user_id,
+            role=body.role,
+            scopes=[scope.model_dump() for scope in body.scopes],
+            actor_sub=_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Administrator not found.") from exc
+    return _payload(user, request)
+
+
+def _set_user_enabled(user_id: str, request: Request, enabled: bool) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "users", "manage")
+    try:
+        return _payload(set_admin_user_enabled(user_id, enabled, _actor(request)), request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Administrator not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="Cognito could not update access.") from exc
+
+
+@admin_router.post("/users/{user_id}/disable")
+def admin_user_disable(user_id: str, request: Request) -> dict[str, Any]:
+    return _set_user_enabled(user_id, request, False)
+
+
+@admin_router.post("/users/{user_id}/enable")
+def admin_user_enable(user_id: str, request: Request) -> dict[str, Any]:
+    return _set_user_enabled(user_id, request, True)
+
+
+@admin_router.post("/users/{user_id}/resend-invite")
+def admin_user_resend_invite(user_id: str, request: Request) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "users", "manage")
+    try:
+        return _payload(resend_admin_invite(user_id, _actor(request)), request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Administrator not found.") from exc
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="Cognito could not resend the invitation.") from exc
+
+
+def _widget_management_enabled() -> None:
+    if not settings.WIDGET_CONFIG_ADMIN_ENABLED:
+        raise HTTPException(status_code=404, detail="Widget configuration is not enabled.")
+
+
+def _require_widget_markets(request: Request, permission: str, markets: list[str]) -> None:
+    if not markets:
+        raise HTTPException(status_code=400, detail="A widget instance must have at least one market.")
+    for market in markets:
+        require_admin_access(request, "widget", permission, market)
+
+
+@admin_router.get("/widget-configs")
+def widget_configs_list(request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    markets = accessible_markets(principal, "widget", "view")
+    if not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to widget configuration.")
+    configs = [
+        config
+        for config in list_widget_configs()
+        if set(config.get("markets") or []).issubset(markets)
+    ]
+    return _payload(configs, request)
+
+
+@admin_router.post("/widget-configs")
+def widget_config_create(body: WidgetConfigInput, request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    _require_widget_markets(request, "manage", body.markets)
+    try:
+        result = create_widget_config(body.model_dump(), _actor(request))
+        widget_registry_service.invalidate()
+        return _payload(result, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.patch("/widget-configs/{widget_id}")
+def widget_config_update(widget_id: str, body: WidgetConfigInput, request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    try:
+        current = get_widget_config(widget_id)
+        if not current:
+            raise KeyError(widget_id)
+        _require_widget_markets(request, "manage", current.get("markets") or [])
+        _require_widget_markets(request, "manage", body.markets)
+        result = update_widget_config(widget_id, body.model_dump(), _actor(request))
+        widget_registry_service.invalidate()
+        return _payload(result, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Widget instance not found.") from exc
+
+
+@admin_router.post("/widget-configs/{widget_id}/rotate-key")
+def widget_config_rotate(widget_id: str, request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    try:
+        current = get_widget_config(widget_id)
+        if not current:
+            raise KeyError(widget_id)
+        _require_widget_markets(request, "manage", current.get("markets") or [])
+        result = rotate_widget_key(widget_id, _actor(request))
+        widget_registry_service.invalidate()
+        return _payload(result, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Widget instance not found.") from exc
+
+
+@admin_router.post("/widget-configs/{widget_id}/disable")
+def widget_config_disable(widget_id: str, request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    try:
+        current = get_widget_config(widget_id)
+        if not current:
+            raise KeyError(widget_id)
+        _require_widget_markets(request, "manage", current.get("markets") or [])
+        result = disable_widget_config(widget_id, _actor(request))
+        widget_registry_service.invalidate()
+        return _payload(result, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Widget instance not found.") from exc

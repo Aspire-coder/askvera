@@ -32,6 +32,7 @@ def test_bearer_token_uses_cognito_validation(monkeypatch) -> None:
     monkeypatch.setattr(settings, "ADMIN_AUTH_MODE", "cognito")
     monkeypatch.setattr(settings, "ADMIN_AUTH_ALLOW_API_KEY", False)
     monkeypatch.setattr(admin_auth, "_decode_cognito_access_token", lambda token: {"sub": token})
+    monkeypatch.setattr(admin_auth, "build_principal", lambda claims: claims)
 
     principal = admin_auth.require_admin_identity(authorization="Bearer signed-token", x_admin_key="")
 

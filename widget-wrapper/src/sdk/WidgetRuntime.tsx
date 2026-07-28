@@ -34,6 +34,7 @@ type WidgetRuntimeProps = {
   apiBaseUrl: string;
   widgetId?: string;
   authToken?: string;
+  onPositionChange?: (position: "bottom-right" | "bottom-left") => void;
   openSignal?: number;
   closeSignal?: number;
   resetSignal?: number;
@@ -133,25 +134,33 @@ function sessionIdFromToken(token?: string): string | undefined {
   }
 }
 
-function storedLocale(widgetId?: string, expectedSessionId?: string): LocalePreference {
-  if (typeof window === "undefined") return { country: "US", language: "en" };
+type InitialLocale = {
+  preference: LocalePreference;
+  explicit: boolean;
+};
+
+function storedLocale(widgetId?: string, expectedSessionId?: string): InitialLocale {
+  if (typeof window === "undefined") {
+    return { preference: { country: "US", language: "en" }, explicit: false };
+  }
   try {
     const rawMetadata = window.localStorage.getItem("askvera_session_metadata");
     if (rawMetadata) {
       const metadata = JSON.parse(rawMetadata) as Record<string, string>;
       if (!expectedSessionId || metadata.sessionId === expectedSessionId) {
-        return { country: metadata.country || "US", language: metadata.language || "en" };
+        return {
+          preference: { country: metadata.country || "US", language: metadata.language || "en" },
+          explicit: Boolean(metadata.country && metadata.language)
+        };
       }
     }
     if (!expectedSessionId) {
       const preference = readLocalePreference(window.localStorage, widgetId);
-      if (preference) return preference;
+      if (preference) return { preference, explicit: true };
     }
-    const migrated = { country: "US", language: "en" };
-    writeLocalePreference(window.localStorage, migrated, widgetId);
-    return migrated;
+    return { preference: { country: "US", language: "en" }, explicit: false };
   } catch {
-    return { country: "US", language: "en" };
+    return { preference: { country: "US", language: "en" }, explicit: false };
   }
 }
 
@@ -281,14 +290,16 @@ export function WidgetRuntime({
   apiBaseUrl,
   widgetId,
   authToken,
+  onPositionChange,
   openSignal = 0,
   closeSignal = 0,
   resetSignal = 0,
   clearConversationSignal = 0,
   sdkMessage
 }: WidgetRuntimeProps) {
+  const [initialLocale] = useState<InitialLocale>(() => storedLocale(widgetId, sessionIdFromToken(authToken)));
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
-  const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(() => storedLocale(widgetId, sessionIdFromToken(authToken)));
+  const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(initialLocale.preference);
   const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken)));
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
@@ -302,8 +313,10 @@ export function WidgetRuntime({
   const conversationGenerationRef = useRef(0);
   const configRequestGenerationRef = useRef(0);
   const consecutiveFailureCountRef = useRef(0);
+  const localePreferenceResolvedRef = useRef(initialLocale.explicit);
 
   const selectLocale = useCallback((locale: LocalePreference) => {
+    localePreferenceResolvedRef.current = true;
     const currentLocale = selectedLocaleRef.current;
     if (currentLocale.country === locale.country && currentLocale.language === locale.language) {
       return;
@@ -375,7 +388,7 @@ export function WidgetRuntime({
         assistantName: "AskVera",
         assistantSubtitle: localized.assistantSubtitle,
         launcherTitle: localized.openAssistant,
-        welcomeText: localized.welcomeBody,
+        welcomeText: apiConfig?.greeting || localized.welcomeBody,
         footerText: localized.footer,
         loadingText: localized.thinking,
         loadingMessages: {
@@ -389,7 +402,7 @@ export function WidgetRuntime({
         onboarding: {
           eyebrow: localized.welcomeEyebrow,
           title: localized.welcomeTitle,
-          body: localized.welcomeBody,
+          body: apiConfig?.greeting || localized.welcomeBody,
           next: localized.welcomeNext
         },
         statusLabels: { online: localized.online, offline: localized.offline, reconnecting: localized.reconnecting },
@@ -398,6 +411,16 @@ export function WidgetRuntime({
           copied: localized.copied,
           helpful: localized.helpful,
           notHelpful: localized.notHelpful
+        },
+        feedbackFollowUp: {
+          enabled: Boolean(apiConfig?.feedbackExpectedAnswerEnabled),
+          label: "Tell us how we could improve this answer (optional)",
+          privacyNote: "Your feedback helps AskVera get better - please don't include any personal info.",
+          placeholder: "e.g. I was hoping for the specific discount amount",
+          send: "Send feedback",
+          skip: "Skip",
+          sent: "Thanks so much - this really helps us improve.",
+          error: "We could not save that yet. Please try again."
         },
         citationLabels: {
           references: localized.references,
@@ -529,16 +552,23 @@ export function WidgetRuntime({
         if (!active || requestGeneration !== configRequestGenerationRef.current) return;
         widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, {});
         setApiConfig(loadedConfig);
-        const firstCountry = loadedConfig.countries[0];
-        const firstLanguage = firstCountry?.languages[0];
+        onPositionChange?.(loadedConfig.position || "bottom-right");
+        const configuredCountry = loadedConfig.countries.find(
+          (country) => country.code === loadedConfig.defaultCountry
+        );
+        const fallbackCountry = configuredCountry || loadedConfig.countries[0];
+        const configuredLanguage = fallbackCountry?.languages.find(
+          (language) => language.code === loadedConfig.defaultLanguage
+        );
+        const fallbackLanguage = configuredLanguage || fallbackCountry?.languages[0];
         const selectedCountryConfig = loadedConfig.countries.find((country) => country.code === selectedLocale.country);
         const selectedLanguageConfig = selectedCountryConfig?.languages.find((language) => language.code === selectedLocale.language);
-        if (!selectedCountryConfig && firstCountry && firstLanguage) {
-          selectLocale({ country: firstCountry.code, language: firstLanguage.code });
+        if ((!localePreferenceResolvedRef.current || !selectedCountryConfig) && fallbackCountry && fallbackLanguage) {
+          selectLocale({ country: fallbackCountry.code, language: fallbackLanguage.code });
         } else if (selectedCountryConfig && !selectedLanguageConfig) {
-          const fallbackLanguage = selectedCountryConfig.languages[0];
-          if (fallbackLanguage) {
-            selectLocale({ country: selectedCountryConfig.code, language: fallbackLanguage.code });
+          const selectedCountryFallback = selectedCountryConfig.languages[0];
+          if (selectedCountryFallback) {
+            selectLocale({ country: selectedCountryConfig.code, language: selectedCountryFallback.code });
           }
         }
       } catch (error) {
@@ -557,7 +587,7 @@ export function WidgetRuntime({
       active = false;
       if (retryTimer) window.clearTimeout(retryTimer);
     };
-  }, [selectLocale, selectedLocale.country, selectedLocale.language, upsertMessage, withWidgetAuthRetry]);
+  }, [onPositionChange, selectLocale, selectedLocale.country, selectedLocale.language, upsertMessage, withWidgetAuthRetry]);
 
   useEffect(() => {
     if (!clearConversationSignal) return;
@@ -665,7 +695,11 @@ export function WidgetRuntime({
     }));
     setMessages((current) => current.filter((message) => !isConsentInstructionMessage(message)));
     setMessages((current) => current.length ? current : [
-      { id: buildId("greeting"), role: "assistant", content: getWidgetCopy(payload.selectedLanguage).greeting }
+      {
+        id: buildId("greeting"),
+        role: "assistant",
+        content: apiConfig?.greeting || getWidgetCopy(payload.selectedLanguage).greeting
+      }
     ]);
     if (pendingMessage) {
       const retryPayload = { ...pendingMessage, sessionId: payload.sessionId };
@@ -674,12 +708,18 @@ export function WidgetRuntime({
     }
   };
 
-  const handleMessageFeedback = async (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => {
+  const handleMessageFeedback = async (
+    message: WidgetMessage,
+    rating: number,
+    state: GenericWidgetRenderState,
+    expectedAnswer?: string
+  ) => {
     try {
       await withWidgetAuthRetry((client) => submitFeedback(client, {
         sessionId: state.sessionId,
         messageId: message.id,
         rating,
+        expected_answer: expectedAnswer,
         metadata: {
           country: state.selectedCountry?.code,
           language: state.selectedLanguage?.code,
@@ -689,6 +729,7 @@ export function WidgetRuntime({
       }));
     } catch (error) {
       widgetEventBus.emit(widgetEventTypes.API_ERROR, { visitorId: state.visitorId, sessionId: state.sessionId, error: describeApiError(error) });
+      throw error;
     }
   };
 

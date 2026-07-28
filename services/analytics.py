@@ -44,19 +44,54 @@ def _analytics_window(
     return window_start, window_end
 
 
-def _live_session_scope(*, country: str, language: str, traffic_source: str) -> tuple[str, dict[str, str]]:
+def _market_scope(
+    *,
+    column: str,
+    country: str,
+    allowed_countries: set[str] | None,
+    parameters: dict[str, Any],
+) -> str:
+    """Build a concrete country predicate without interpolating user input."""
+    if country:
+        parameters["country"] = country.upper()
+        return f"{column} = :country"
+    if allowed_countries is None:
+        return ""
+    normalized = sorted(value.upper() for value in allowed_countries)
+    if not normalized:
+        return "1 = 0"
+    placeholders: list[str] = []
+    for index, value in enumerate(normalized):
+        key = f"scope_country_{index}"
+        parameters[key] = value
+        placeholders.append(f":{key}")
+    return f"{column} IN ({', '.join(placeholders)})"
+
+
+def _live_session_scope(
+    *,
+    country: str,
+    language: str,
+    traffic_source: str,
+    allowed_countries: set[str] | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Build the lifecycle query scope independently of the reporting date range."""
     filters = [
         "s.ended_at IS NULL",
         "s.expires_at > now()",
         "s.consent_accepted = true",
     ]
-    parameters: dict[str, str] = {}
-    if country or language:
+    parameters: dict[str, Any] = {}
+    market_filter = _market_scope(
+        column="cl.country",
+        country=country,
+        allowed_countries=allowed_countries,
+        parameters=parameters,
+    )
+    if market_filter or language:
         consent_filters = ["cl.session_id = s.session_id", "cl.accepted = true"]
-        if country:
-            consent_filters.append("cl.country = :country")
-            parameters["country"] = country.upper()
+        if market_filter:
+            consent_filters.append(market_filter)
         if language:
             consent_filters.append("cl.lang = :language")
             parameters["language"] = language.lower()
@@ -151,10 +186,12 @@ def record_feedback_event(feedback: FeedbackRequest, correlation_id: str) -> Non
                     """
                     INSERT INTO feedback_events (
                         event_id, correlation_id, session_id, message_id, rating,
-                        comment, request_type, country, language, created_at
+                        comment, expected_answer, expected_answer_present,
+                        request_type, country, language, created_at
                     ) VALUES (
                         :event_id, :correlation_id, :session_id, :message_id, :rating,
-                        :comment, :request_type, :country, :language, now()
+                        :comment, :expected_answer, :expected_answer_present,
+                        :request_type, :country, :language, now()
                     )
                     ON CONFLICT (event_id) DO NOTHING
                     """
@@ -166,6 +203,8 @@ def record_feedback_event(feedback: FeedbackRequest, correlation_id: str) -> Non
                     "message_id": feedback.messageId,
                     "rating": feedback.rating,
                     "comment": feedback.comment,
+                    "expected_answer": feedback.expected_answer,
+                    "expected_answer_present": bool(feedback.expected_answer),
                     "request_type": feedback.requestType,
                     "country": str(metadata.get("country") or ""),
                     "language": str(metadata.get("language") or ""),
@@ -262,6 +301,7 @@ def analytics_overview(
     country: str = "",
     language: str = "",
     traffic_source: str = "",
+    allowed_countries: set[str] | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
@@ -271,9 +311,14 @@ def analytics_overview(
     filters = ["created_at >= :since", "created_at < :until"]
     parameters: dict[str, Any] = {"since": since, "until": until}
     traffic_source = _normalize_traffic_source(traffic_source)
-    if country:
-        filters.append("country = :country")
-        parameters["country"] = country.upper()
+    market_filter = _market_scope(
+        column="country",
+        country=country,
+        allowed_countries=allowed_countries,
+        parameters=parameters,
+    )
+    if market_filter:
+        filters.append(market_filter)
     if language:
         filters.append("language = :language")
         parameters["language"] = language.lower()
@@ -302,6 +347,13 @@ def analytics_overview(
             country=country,
             language=language,
             traffic_source=traffic_source,
+            allowed_countries=allowed_countries,
+        )
+        feedback_market_filter = _market_scope(
+            column="c.country",
+            country=country,
+            allowed_countries=allowed_countries,
+            parameters=parameters,
         )
         live_sessions = connection.execute(
             text("SELECT COUNT(*) FROM chat_sessions s WHERE " + live_session_scope),
@@ -316,7 +368,7 @@ def analytics_overview(
                 LEFT JOIN chat_analytics c ON c.correlation_id = f.correlation_id
                 WHERE COALESCE(c.created_at, f.created_at) >= :since
                   AND COALESCE(c.created_at, f.created_at) < :until
-                  {"AND c.country = :country" if country else ""}
+                  {f"AND {feedback_market_filter}" if feedback_market_filter else ""}
                   {"AND c.language = :language" if language else ""}
                   {"AND c.traffic_source = :traffic_source" if traffic_source else ""}
                 """
@@ -380,6 +432,7 @@ def retrieval_shadow_report(
     days: int = 30,
     country: str = "",
     language: str = "",
+    allowed_countries: set[str] | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> dict[str, Any]:
@@ -388,9 +441,14 @@ def retrieval_shadow_report(
     since, until = _analytics_window(days=days, start=start, end=end)
     filters = ["created_at >= :since", "created_at < :until"]
     parameters: dict[str, Any] = {"since": since, "until": until}
-    if country:
-        filters.append("country = :country")
-        parameters["country"] = country.upper()
+    market_filter = _market_scope(
+        column="country",
+        country=country,
+        allowed_countries=allowed_countries,
+        parameters=parameters,
+    )
+    if market_filter:
+        filters.append(market_filter)
     if language:
         filters.append("language = :language")
         parameters["language"] = language.lower()
@@ -530,6 +588,7 @@ def interaction_list(
     country: str = "",
     language: str = "",
     traffic_source: str = "",
+    allowed_countries: set[str] | None = None,
     feedback: str = "all",
     limit: int = 100,
     start: datetime | None = None,
@@ -544,9 +603,14 @@ def interaction_list(
         "limit": max(1, min(int(limit), 500)),
     }
     traffic_source = _normalize_traffic_source(traffic_source)
-    if country:
-        filters.append("c.country = :country")
-        parameters["country"] = country.upper()
+    market_filter = _market_scope(
+        column="c.country",
+        country=country,
+        allowed_countries=allowed_countries,
+        parameters=parameters,
+    )
+    if market_filter:
+        filters.append(market_filter)
     if language:
         filters.append("c.language = :language")
         parameters["language"] = language.lower()
@@ -565,10 +629,12 @@ def interaction_list(
                 SELECT c.correlation_id, c.session_id, c.country, c.language,
                        c.question, c.answer, c.topic, c.confidence, c.source_count,
                        c.input_tokens + c.output_tokens AS tokens, c.fallback,
-                       c.failure_layer, c.traffic_source, c.created_at, f.rating, f.comment
+                       c.failure_layer, c.traffic_source, c.created_at, f.rating, f.comment,
+                       f.expected_answer, f.expected_answer_present
                 FROM chat_analytics c
                 LEFT JOIN LATERAL (
-                    SELECT rating, comment FROM feedback_events
+                    SELECT rating, comment, expected_answer, expected_answer_present
+                    FROM feedback_events
                     WHERE correlation_id = c.correlation_id
                     ORDER BY created_at DESC LIMIT 1
                 ) f ON true

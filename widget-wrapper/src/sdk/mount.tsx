@@ -26,6 +26,11 @@ const createMountElement = (target?: string | HTMLElement) => {
 export function mountWidget(config: AskVeraRuntimeConfig, state: SdkRenderState): MountedWidget {
   const element = createMountElement(config.mountTarget);
   const root = createRoot(element);
+  const applyPosition = (position: "bottom-right" | "bottom-left") => {
+    element.classList.toggle("askvera-widget-position-bottom-left", position === "bottom-left");
+    element.classList.toggle("askvera-widget-position-bottom-right", position !== "bottom-left");
+  };
+  applyPosition(config.launcherPosition || "bottom-right");
 
   const render = (nextState: SdkRenderState) => {
     root.render(
@@ -34,6 +39,7 @@ export function mountWidget(config: AskVeraRuntimeConfig, state: SdkRenderState)
           apiBaseUrl={nextState.config.apiUrl}
           widgetId={nextState.config.widgetId}
           authToken={nextState.config.widgetAuthToken}
+          onPositionChange={applyPosition}
           openSignal={nextState.openSignal}
           closeSignal={nextState.closeSignal}
           resetSignal={nextState.resetSignal}

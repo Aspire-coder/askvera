@@ -19,6 +19,11 @@ class AwsClients:
         self.bedrock_agent_runtime = boto3.client("bedrock-agent-runtime", region_name=settings.AWS_REGION, config=client_config)
         self.bedrock_runtime = boto3.client("bedrock-runtime", region_name=settings.AWS_REGION, config=client_config)
         self.comprehend = boto3.client("comprehend", region_name=settings.AWS_REGION, config=client_config)
+        self.cognito_idp = boto3.client(
+            "cognito-idp",
+            region_name=settings.ADMIN_COGNITO_REGION or settings.AWS_REGION,
+            config=client_config,
+        )
         self.firehose = boto3.client("firehose", region_name=settings.AWS_REGION, config=client_config)
         self.secretsmanager = boto3.client("secretsmanager", region_name=settings.AWS_REGION, config=client_config)
         self.s3 = boto3.client("s3", region_name=settings.AWS_REGION, config=client_config)

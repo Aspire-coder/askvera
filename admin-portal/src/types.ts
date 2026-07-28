@@ -1,4 +1,4 @@
-export type View = "flow" | "knowledge" | "insights";
+export type View = "flow" | "knowledge" | "insights" | "users" | "widget";
 
 export type TraceStage = {
   stage: string;
@@ -27,6 +27,61 @@ export type AdminConfig = {
   documentTypes: string[];
   accessScopes: string[];
   maxUploadBytes: number;
+  rbacEnabled?: boolean;
+  userManagementEnabled?: boolean;
+  widgetConfigEnabled?: boolean;
+  principal?: {
+    role: string;
+    status: string;
+    scopes: AdminScope[];
+    sections: string[];
+  };
+};
+
+export type AdminScope = { market: string; section: string; permission: string };
+
+export type AdminUser = {
+  id: string;
+  email: string;
+  role: string;
+  status: "invited" | "active" | "disabled";
+  last_login: string | null;
+  created_at: string;
+  updated_at: string;
+  scopes: AdminScope[];
+};
+
+export type AdminAuditEvent = {
+  event_id: string;
+  actor_sub: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  created_at: string;
+};
+
+export type WidgetConfig = {
+  id: string;
+  name: string;
+  customer: string;
+  allowed_origins: string[];
+  markets: string[];
+  languages: string[];
+  default_market: string;
+  default_language: string;
+  display_name: string;
+  greeting: string;
+  accent_color: string;
+  position: "bottom-right" | "bottom-left";
+  legal_version: string;
+  rate_limit_tier: string;
+  usage_cap: number | null;
+  public_key: string;
+  key_version: number;
+  status: "active" | "disabled";
+  embed_code: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type IngestionJob = {
@@ -84,6 +139,8 @@ export type Interaction = {
   created_at: string;
   rating: number | null;
   comment: string | null;
+  expected_answer?: string | null;
+  expected_answer_present?: boolean;
 };
 
 export type ShadowDisagreement = {

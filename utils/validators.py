@@ -136,8 +136,17 @@ class FeedbackRequest(BaseModel):
     messageId: str
     rating: int = Field(ge=-1, le=1)
     comment: str = Field(default="", max_length=2000)
+    expected_answer: str | None = None
     requestType: str = Field(default="feedback", pattern="^(feedback|support)$")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("expected_answer")
+    @classmethod
+    def truncate_expected_answer(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized[:2000] or None
 
 
 class SupportRequest(BaseModel):

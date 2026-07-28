@@ -18,7 +18,7 @@ from app.middleware.correlation import CorrelationIdMiddleware
 from app.monitoring.initializer import initialize_monitoring
 from app.widget_auth.cors import DynamicWidgetCorsMiddleware
 from app.widget_auth.middleware import WidgetAuthMiddleware
-from app.widget_auth import widget_auth_service
+from app.widget_auth.service import widget_auth_service
 from config import settings
 from scripts.validate_config import validate
 from services.aws_clients import init_aws_clients

@@ -4,11 +4,12 @@ from hmac import compare_digest
 from typing import Any
 
 import jwt
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWTError
 
 from config import settings
+from services.admin_users import build_principal
 
 _jwks_clients: dict[str, PyJWKClient] = {}
 
@@ -67,6 +68,7 @@ def _decode_cognito_access_token(token: str) -> dict[str, Any]:
 
 
 def require_admin_identity(
+    request: Request = None,
     authorization: str = Header(default=""),
     x_admin_key: str = Header(default=""),
 ) -> dict[str, Any]:
@@ -78,11 +80,17 @@ def require_admin_identity(
     if mode in {"cognito", "either"} and authorization.startswith("Bearer "):
         token = authorization.removeprefix("Bearer ").strip()
         if token:
-            return _decode_cognito_access_token(token)
+            principal = build_principal(_decode_cognito_access_token(token))
+            if request is not None:
+                request.state.admin_identity = principal
+            return principal
 
     configured = str(settings.ADMIN_API_KEY or "")
     key_allowed = mode in {"api_key", "either"} and bool(settings.ADMIN_AUTH_ALLOW_API_KEY)
     if key_allowed and configured and x_admin_key and compare_digest(configured, x_admin_key):
-        return {"sub": "api-key-operator", "auth_method": "api_key"}
+        principal = build_principal({"sub": "api-key-operator", "auth_method": "api_key"})
+        if request is not None:
+            request.state.admin_identity = principal
+        return principal
 
     raise _unauthorized()

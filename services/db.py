@@ -71,6 +71,89 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(
                 text(
                     """
+                    CREATE TABLE IF NOT EXISTS admin_users (
+                        id TEXT PRIMARY KEY,
+                        cognito_sub TEXT UNIQUE,
+                        email TEXT NOT NULL UNIQUE,
+                        role TEXT NOT NULL DEFAULT 'section_scoped',
+                        status TEXT NOT NULL DEFAULT 'invited',
+                        last_login TIMESTAMPTZ,
+                        created_by TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS admin_user_scopes (
+                        user_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+                        market TEXT NOT NULL,
+                        section TEXT NOT NULL,
+                        permission TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        PRIMARY KEY (user_id, market, section, permission)
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS admin_audit_log (
+                        event_id TEXT PRIMARY KEY,
+                        actor_sub TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        target_type TEXT NOT NULL,
+                        target_id TEXT NOT NULL,
+                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_admin_users_status
+                    ON admin_users (status, role, updated_at DESC)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS widget_configs (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        customer TEXT NOT NULL DEFAULT '',
+                        allowed_origins JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        markets JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        languages JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        default_market TEXT NOT NULL DEFAULT '',
+                        default_language TEXT NOT NULL DEFAULT '',
+                        display_name TEXT NOT NULL DEFAULT 'AskVera',
+                        greeting TEXT NOT NULL DEFAULT '',
+                        accent_color TEXT NOT NULL DEFAULT '#2F7D4E',
+                        position TEXT NOT NULL DEFAULT 'bottom-right',
+                        legal_version TEXT NOT NULL DEFAULT '',
+                        rate_limit_tier TEXT NOT NULL DEFAULT 'standard',
+                        usage_cap INTEGER,
+                        public_key TEXT NOT NULL UNIQUE,
+                        key_version INTEGER NOT NULL DEFAULT 1,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        created_by TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS chat_sessions (
                         session_id TEXT PRIMARY KEY,
                         messages JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -171,11 +254,22 @@ def create_schema(correlation_id: str = "startup") -> None:
                         message_id TEXT NOT NULL,
                         rating INTEGER NOT NULL,
                         comment TEXT NOT NULL DEFAULT '',
+                        expected_answer TEXT,
+                        expected_answer_present BOOLEAN NOT NULL DEFAULT false,
                         request_type TEXT NOT NULL DEFAULT 'feedback',
                         country TEXT NOT NULL DEFAULT '',
                         language TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
+                    """
+                )
+            )
+            connection.execute(text("ALTER TABLE feedback_events ADD COLUMN IF NOT EXISTS expected_answer TEXT"))
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE feedback_events
+                    ADD COLUMN IF NOT EXISTS expected_answer_present BOOLEAN NOT NULL DEFAULT false
                     """
                 )
             )

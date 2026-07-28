@@ -17,6 +17,10 @@ export type ConfigResponseData = {
   logo?: string;
   theme?: "light" | "dark" | "custom" | string;
   primaryColor?: string;
+  defaultCountry?: string;
+  defaultLanguage?: string;
+  greeting?: string;
+  position?: "bottom-right" | "bottom-left";
   sdkVersion?: string;
   countries: ApiCountry[];
   privacyVersion: string;
@@ -36,6 +40,7 @@ export type ConfigResponseData = {
   contextualTopics?: Array<{ id: string; label: string; prompt?: string; metadata?: Record<string, unknown> }>;
   supportCountries?: string[];
   supportRecommendationThreshold?: number;
+  feedbackExpectedAnswerEnabled?: boolean;
   copy?: Record<string, string>;
 };
 

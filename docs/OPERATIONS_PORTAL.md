@@ -33,8 +33,22 @@ All routes require a Cognito access token from a member of the configured admini
 | `GET /api/admin/analytics/interactions` | Answer-level quality review |
 | `GET /api/admin/ingestions` | Recent document jobs and status |
 | `POST /api/admin/documents` | Validate and queue an approved document |
+| `GET/POST/PATCH /api/admin/users` | Feature-gated administrator lifecycle and scopes |
+| `POST /api/admin/users/{id}/enable` | Re-enable a disabled administrator |
+| `POST /api/admin/users/{id}/disable` | Immediately block an administrator |
+| `POST /api/admin/users/{id}/resend-invite` | Ask Cognito to send a new invitation |
+| `GET /api/admin/audit-events` | Recent administrator changes |
+| `GET/POST/PATCH /api/admin/widgets` | Feature-gated widget instance management |
+| `POST /api/admin/widgets/{id}/rotate-key` | Rotate the public widget identifier |
+| `POST /api/admin/widgets/{id}/disable` | Disable a widget instance |
 
 Analytics are captured from the existing chat and feedback routes. The question text is locally redacted for common email and phone patterns, answers have already passed output PII controls, and session IDs are used only for distinct-user aggregation. Apply the organization's retention policy to `chat_analytics` and `feedback_events` before production launch.
+
+When RBAC is enabled, every portal route enforces section permission and
+market scope on the server. An unfiltered Insights request from a country
+administrator is aggregated only across that administrator's assigned
+markets. Browser-side hiding is a usability aid and is never the security
+boundary.
 
 ## Knowledge ingestion
 
@@ -52,6 +66,14 @@ Country-scoped documents follow the chatbot's locale filter. Global documents ar
 
 - Use Cognito authorization-code flow with PKCE and restrict access to `AskVeraAdmins`.
 - Keep `ADMIN_AUTH_ALLOW_API_KEY=false` in normal production operation.
+- Set `ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL` to the approved initial administrator
+  before enabling RBAC. Do not use a shared mailbox for this role.
+- Grant the API instance role the scoped Cognito actions needed for user
+  lifecycle management, including `AdminAddUserToGroup`. New and re-invited
+  portal users are added to the configured required group automatically.
+- Keep at least two individually assigned Super Admins after initial setup.
+  AskVera prevents self-disable, self-demotion, and removal of the last active
+  Super Admin.
 - Set `KNOWLEDGE_UPLOAD_BUCKET` to a private, encrypted, versioned S3 bucket with lifecycle and least-privilege IAM policies.
 - Add the operations portal HTTPS origin to `ALLOWED_ORIGINS`; do not use a wildcard.
 - Federate the Cognito user pool with company SSO when the identity team is ready; the built-in user pool supports the initial controlled launch.
@@ -59,7 +81,14 @@ Country-scoped documents follow the chatbot's locale filter. Global documents ar
 - Confirm PostgreSQL backups and define retention for analytics, feedback, ingestion jobs, and document records.
 - Add OCR (for example an asynchronous Textract worker) before accepting image-only scanned PDFs.
 - For multiple API workers, move the short live-trace window to shared Redis or an event stream so every portal poll sees the same active request.
+- Managed widget edits use Valkey to invalidate authorization and origin caches
+  across API workers. Monitor `widget_registry_invalidation_*` log events; the
+  local authorization cache is capped at 30 seconds as a fallback.
 - Run unit tests, build the portal, perform a real upload in a non-production index, and verify a chat retrieves the new content before production deployment.
+- Apply the three `20260728_*` additive migrations before enabling the related
+  flags.
+- Keep all optional enhancement flags disabled until the corresponding UAT
+  acceptance test has passed.
 
 ## Deployment boundary
 

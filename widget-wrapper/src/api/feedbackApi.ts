@@ -5,6 +5,7 @@ export type FeedbackRequest = {
   messageId?: string;
   rating?: number;
   comment?: string;
+  expected_answer?: string;
   requestType?: "feedback" | "support";
   metadata?: Record<string, unknown>;
 };

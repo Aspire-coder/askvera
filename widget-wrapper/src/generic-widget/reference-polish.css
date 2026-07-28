@@ -454,6 +454,20 @@ button.askvera-sdk-launcher {
     background-color 180ms ease !important;
 }
 
+button.askvera-sdk-launcher-bottom-left {
+  right: auto !important;
+  left: max(20px, env(safe-area-inset-left)) !important;
+}
+
+.askvera-widget-position-bottom-left .gw-root {
+  right: auto;
+  left: var(--gw-space-5);
+}
+
+.askvera-widget-position-bottom-left .gw-panel {
+  transform-origin: bottom left;
+}
+
 button.askvera-sdk-launcher::before {
   width: 10px;
   height: 10px;
@@ -486,6 +500,16 @@ button.askvera-sdk-launcher:active {
     height: 50px !important;
     min-height: 50px !important;
     padding: 0 16px !important;
+  }
+
+  button.askvera-sdk-launcher-bottom-left {
+    right: auto !important;
+    left: max(12px, env(safe-area-inset-left)) !important;
+  }
+
+  .askvera-widget-position-bottom-left .gw-root {
+    right: auto;
+    left: 0;
   }
 
   .gw-panel {

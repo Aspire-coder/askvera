@@ -283,6 +283,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
           {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelected(item)}>
             <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>
             <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {item.traffic_source.replaceAll("_", " ")} · {interactionDateLabel(item.created_at)}</small></span>
+            {item.expected_answer_present ? <span className="suggestion-badge">Suggestion</span> : null}
             <span className="confidence">{percent(item.confidence)}</span><ArrowIcon />
           </button>)}
           {!filteredInteractions.length ? <div className="empty-state">No answers match these filters.</div> : null}
@@ -295,6 +296,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <div className="drawer-meta"><span>{selected.country}</span><span>{selected.language.toUpperCase()}</span><span>{selected.traffic_source.replaceAll("_", " ")}</span><span>{percent(selected.confidence)} confidence</span><span>{selected.tokens} tokens</span></div>
         <section><h3>AskVera answered</h3><p>{selected.answer}</p></section>
         <section className="feedback-section"><h3>User feedback</h3><p>{selected.comment || "No written comment was provided."}</p></section>
+        {selected.expected_answer_present ? <section className="feedback-section"><h3>User suggestion</h3><p>{selected.expected_answer}</p></section> : null}
         <section><h3>Diagnostic signal</h3><dl><div><dt>Topic</dt><dd>{selected.topic}</dd></div><div><dt>Sources</dt><dd>{selected.source_count}</dd></div><div><dt>Failure layer</dt><dd>{selected.failure_layer || "None"}</dd></div><div><dt>Fallback</dt><dd>{selected.fallback ? "Yes" : "No"}</dd></div></dl></section>
         <div className="recommended-action"><strong>Recommended next step</strong><p>{selected.failure_layer.includes("retrieval") || selected.source_count === 0 ? "Check whether the answer exists in the approved source, then review its chunking and index metadata." : "Compare the answer with its cited passage and add the missed exception or wording to the evaluation set."}</p></div>
       </aside></div> : null}

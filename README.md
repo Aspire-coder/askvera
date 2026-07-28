@@ -66,6 +66,19 @@ Production can override `config/settings.py` with SSM parameters under `/askvera
 - `FIREHOSE_STREAM_NAME`
 - `SQS_FEEDBACK_QUEUE_URL`
 - `S3_BUCKET`
+- `FEEDBACK_EXPECTED_ANSWER_ENABLED` (default `false`)
+- `ADMIN_RBAC_ENABLED` (default `false`)
+- `ADMIN_USER_MANAGEMENT_ENABLED` (default `false`)
+- `ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL` (required before enabling RBAC/user management in production)
+- `WIDGET_CONFIG_ADMIN_ENABLED` (default `false`)
+- `WIDGET_CONFIG_RUNTIME_ENABLED` (default `false`)
+- `WIDGET_LOADER_URL`
+- `WIDGET_STYLES_URL`
+
+The optional enhancement flags are deliberately independent. Apply the
+additive database migrations first, then enable and validate one capability at
+a time. With every flag left at its default, the existing UAT feedback,
+administrator authorization, and static widget registry behavior is preserved.
 
 Production SSM path:
 

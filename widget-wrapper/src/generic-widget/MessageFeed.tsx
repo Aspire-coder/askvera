@@ -60,13 +60,18 @@ function MessageActions({
   config: GenericWidgetConfig;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
-  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState, expectedAnswer?: string) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const [copied, setCopied] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const [supportRequested, setSupportRequested] = useState(false);
   const [supportPending, setSupportPending] = useState(false);
+  const [showExpectedAnswer, setShowExpectedAnswer] = useState(false);
+  const [expectedAnswer, setExpectedAnswer] = useState("");
+  const [expectedAnswerPending, setExpectedAnswerPending] = useState(false);
+  const [expectedAnswerSent, setExpectedAnswerSent] = useState(false);
+  const [expectedAnswerError, setExpectedAnswerError] = useState("");
   const copyText = messageCopyText(message);
 
   const handleCopy = async () => {
@@ -80,6 +85,27 @@ function MessageActions({
   const handleFeedback = async (nextRating: number) => {
     setRating(nextRating);
     await onMessageFeedback?.(message, nextRating, state);
+    if (nextRating < 0 && config.feedbackFollowUp?.enabled) {
+      setShowExpectedAnswer(true);
+    } else {
+      setShowExpectedAnswer(false);
+    }
+  };
+
+  const handleExpectedAnswer = async () => {
+    const value = expectedAnswer.trim();
+    if (!value || expectedAnswerPending) return;
+    setExpectedAnswerPending(true);
+    setExpectedAnswerError("");
+    try {
+      await onMessageFeedback?.(message, -1, state, value);
+      setExpectedAnswerSent(true);
+      setShowExpectedAnswer(false);
+    } catch {
+      setExpectedAnswerError(config.feedbackFollowUp?.error || "We could not save that yet. Please try again.");
+    } finally {
+      setExpectedAnswerPending(false);
+    }
   };
 
   const handleSupport = async () => {
@@ -113,6 +139,8 @@ function MessageActions({
         onClick={() => void handleFeedback(-1)}
         aria-label={config.labels.markNotHelpfulLabel || "Mark response as not helpful"}
         aria-pressed={rating === -1}
+        aria-expanded={showExpectedAnswer}
+        aria-controls={config.feedbackFollowUp?.enabled ? `feedback-follow-up-${message.id}` : undefined}
       >
         {(message.metadata?.actionNotHelpfulLabel as string) || "Not helpful"}
       </button>
@@ -126,6 +154,41 @@ function MessageActions({
         </button>
       ) : null}
       {copied ? <span className="gw-sr-only" role="status">{config.labels.responseCopiedLabel || "Response copied."}</span> : null}
+      {showExpectedAnswer && config.feedbackFollowUp?.enabled ? (
+        <div
+          className="gw-feedback-follow-up"
+          id={`feedback-follow-up-${message.id}`}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setShowExpectedAnswer(false);
+          }}
+        >
+          <label htmlFor={`expected-answer-${message.id}`}>{config.feedbackFollowUp.label}</label>
+          <p>{config.feedbackFollowUp.privacyNote}</p>
+          <textarea
+            id={`expected-answer-${message.id}`}
+            value={expectedAnswer}
+            maxLength={2000}
+            placeholder={config.feedbackFollowUp.placeholder}
+            onChange={(event) => setExpectedAnswer(event.target.value)}
+            autoFocus
+          />
+          {expectedAnswerError ? <p className="gw-feedback-follow-up-error" role="alert">{expectedAnswerError}</p> : null}
+          <div>
+            <button type="button" className="gw-message-action" onClick={() => setShowExpectedAnswer(false)}>
+              {config.feedbackFollowUp.skip}
+            </button>
+            <button
+              type="button"
+              className="gw-message-action gw-message-action-primary"
+              onClick={() => void handleExpectedAnswer()}
+              disabled={!expectedAnswer.trim() || expectedAnswerPending}
+            >
+              {expectedAnswerPending ? "..." : config.feedbackFollowUp.send}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {expectedAnswerSent ? <span className="gw-feedback-confirmation" role="status">{config.feedbackFollowUp?.sent}</span> : null}
     </div>
   );
 }
@@ -142,7 +205,7 @@ function MessageCard({
   config: GenericWidgetConfig;
   state: GenericWidgetRenderState;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
-  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState, expectedAnswer?: string) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const isAssistant = message.role === "assistant";
@@ -233,7 +296,7 @@ export function MessageFeed({
   loadingState?: LoadingDisplayState;
   loadingLabel?: ReactNode;
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
-  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState, expectedAnswer?: string) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const endRef = useRef<HTMLDivElement>(null);

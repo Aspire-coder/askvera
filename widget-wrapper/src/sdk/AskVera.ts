@@ -12,6 +12,7 @@ export type AskVeraRuntimeConfig = RuntimeConfig & {
 export type AskVeraInitConfig = {
   widgetId: string;
   apiUrl: string;
+  position?: "bottom-right" | "bottom-left";
 };
 
 export type SdkRenderState = {
@@ -53,7 +54,8 @@ class AskVeraSdkImpl implements AskVeraSdk {
     const nextConfig = {
       ...this.state.config,
       widgetId: config.widgetId,
-      apiUrl: config.apiUrl
+      apiUrl: config.apiUrl,
+      launcherPosition: config.position || this.state.config.launcherPosition
     };
     const auth = await authenticateWidget(nextConfig);
     this.state = {
@@ -84,7 +86,7 @@ class AskVeraSdkImpl implements AskVeraSdk {
     if (this.launcher) return;
     const launcher = document.createElement("button");
     launcher.type = "button";
-    launcher.className = "askvera-sdk-launcher";
+    launcher.className = `askvera-sdk-launcher askvera-sdk-launcher-${this.state.config.launcherPosition}`;
     launcher.setAttribute("aria-label", "Open AskVera chat");
     launcher.textContent = "AskVera";
     launcher.addEventListener("click", () => {

@@ -12,6 +12,10 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "ADMIN_AUTH_ALLOW_API_KEY", False)
     monkeypatch.setattr(settings, "ADMIN_COGNITO_USER_POOL_ID", "us-east-1_example")
     monkeypatch.setattr(settings, "ADMIN_COGNITO_CLIENT_ID", "client-id")
+    monkeypatch.setattr(settings, "ADMIN_COGNITO_REQUIRED_GROUP", "AskVeraAdmins")
+    monkeypatch.setattr(settings, "ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setattr(settings, "ADMIN_RBAC_ENABLED", False)
+    monkeypatch.setattr(settings, "ADMIN_USER_MANAGEMENT_ENABLED", False)
     monkeypatch.setattr(settings, "ADMIN_API_KEY", "")
     monkeypatch.setattr(settings, "WIDGET_JWT_SECRET", "production-widget-secret")
     monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", True)
@@ -51,6 +55,8 @@ def test_production_rejects_development_auth_and_missing_retrieval_config(monkey
     failures = validate()
 
     assert "ADMIN_API_KEY (development value is not allowed)" in failures
+    assert "ADMIN_AUTH_MODE (must be cognito in production)" in failures
+    assert "ADMIN_AUTH_ALLOW_API_KEY (must be false in production)" in failures
     assert "WIDGET_JWT_SECRET (development value is not allowed)" in failures
     assert "WIDGET_AUTH_REQUIRED (must be true in production)" in failures
     assert "OPENSEARCH_ENDPOINT" in failures
@@ -65,6 +71,19 @@ def test_cognito_production_requires_pool_and_client(monkeypatch) -> None:
 
     assert "ADMIN_COGNITO_USER_POOL_ID" in failures
     assert "ADMIN_COGNITO_CLIENT_ID" in failures
+
+
+def test_rbac_production_requires_explicit_bootstrap_identity(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "ADMIN_RBAC_ENABLED", True)
+    monkeypatch.setattr(settings, "ADMIN_USER_MANAGEMENT_ENABLED", True)
+    monkeypatch.setattr(settings, "ADMIN_COGNITO_REQUIRED_GROUP", "")
+    monkeypatch.setattr(settings, "ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL", "")
+
+    failures = validate()
+
+    assert "ADMIN_COGNITO_REQUIRED_GROUP" in failures
+    assert "ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL" in failures
 
 
 def test_support_email_requires_sender_and_routes_in_production(monkeypatch) -> None:

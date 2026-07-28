@@ -124,7 +124,14 @@ ADMIN_COGNITO_REGION = _env_str("ADMIN_COGNITO_REGION", AWS_REGION)
 ADMIN_COGNITO_USER_POOL_ID = _env_str("ADMIN_COGNITO_USER_POOL_ID", "")
 ADMIN_COGNITO_CLIENT_ID = _env_str("ADMIN_COGNITO_CLIENT_ID", "")
 ADMIN_COGNITO_REQUIRED_GROUP = _env_str("ADMIN_COGNITO_REQUIRED_GROUP", "AskVeraAdmins")
+ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL = _env_str("ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL", "").lower()
 ADMIN_UPLOAD_MAX_BYTES = _env_int("ADMIN_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
+ADMIN_RBAC_ENABLED = _env_bool("ADMIN_RBAC_ENABLED", False)
+ADMIN_USER_MANAGEMENT_ENABLED = _env_bool("ADMIN_USER_MANAGEMENT_ENABLED", False)
+WIDGET_CONFIG_ADMIN_ENABLED = _env_bool("WIDGET_CONFIG_ADMIN_ENABLED", False)
+WIDGET_CONFIG_RUNTIME_ENABLED = _env_bool("WIDGET_CONFIG_RUNTIME_ENABLED", False)
+WIDGET_LOADER_URL = _env_str("WIDGET_LOADER_URL", "https://d1wzljafbhsv7.cloudfront.net/widget/latest/widget.js")
+WIDGET_STYLES_URL = _env_str("WIDGET_STYLES_URL", "https://d1wzljafbhsv7.cloudfront.net/widget/latest/widget.css")
 KNOWLEDGE_UPLOAD_BUCKET = _env_str("KNOWLEDGE_UPLOAD_BUCKET", "")
 KNOWLEDGE_UPLOAD_PREFIX = _env_str("KNOWLEDGE_UPLOAD_PREFIX", "approved-knowledge")
 # Widget authentication. Keep disabled by default for local/dev until production
@@ -354,6 +361,7 @@ ENABLE_OK_NOTIFICATIONS = _env_bool("ENABLE_OK_NOTIFICATIONS", True)
 ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS = _env_bool("ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS", False)
 # SQS feedback queue URL. Found in SQS -> Queues -> your feedback queue -> URL.
 SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askverachat-feedback"
+FEEDBACK_EXPECTED_ANSWER_ENABLED = _env_bool("FEEDBACK_EXPECTED_ANSWER_ENABLED", False)
 # Support requests are delivered through Amazon SES. Recipient routing remains
 # server-side so internal addresses are never exposed in the public widget.
 SUPPORT_EMAIL_ENABLED = _env_bool("SUPPORT_EMAIL_ENABLED", False)

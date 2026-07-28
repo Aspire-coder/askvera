@@ -183,6 +183,16 @@ export type GenericWidgetConfig = {
     helpful: string;
     notHelpful: string;
   };
+  feedbackFollowUp?: {
+    enabled: boolean;
+    label: string;
+    privacyNote: string;
+    placeholder: string;
+    send: string;
+    skip: string;
+    sent: string;
+    error: string;
+  };
   citationLabels?: WidgetCitationLabels;
   composerStatus?: {
     consentRequired: string;
@@ -286,7 +296,12 @@ export type GenericWidgetWrapperProps = {
   onLanguageChange?: (payload: LocaleChangePayload) => void;
   onSendMessage?: (payload: MessageEventPayload) => void;
   onMessageCopied?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
-  onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState) => void | Promise<void>;
+  onMessageFeedback?: (
+    message: WidgetMessage,
+    rating: number,
+    state: GenericWidgetRenderState,
+    expectedAnswer?: string
+  ) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onEscalate?: (payload: LocaleChangePayload) => void;
   onNewChat?: (payload: LocaleChangePayload, reason?: SessionResetReason) => SessionResetResult | Promise<SessionResetResult>;

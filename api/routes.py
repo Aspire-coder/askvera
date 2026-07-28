@@ -10,7 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.orchestrator import ConsentRequiredError, ai_orchestrator
 from app.response import ChatResponse
-from app.widget_auth import WidgetInitRequest, WidgetRefreshRequest, widget_auth_service
+from app.widget_auth import WidgetInitRequest, WidgetRefreshRequest
+from app.widget_auth.service import widget_auth_service
 from app.widget_auth.jwt import WidgetTokenError
 from app.widget_auth.service import WidgetAuthError
 from config import settings
@@ -23,6 +24,7 @@ from services.analytics import record_chat_interaction, record_feedback_event, r
 from app.operations import pipeline_trace_store
 from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
+from services.pii import scrub_pii
 from services.support import send_support_request, support_country_codes
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
@@ -146,6 +148,23 @@ def widget_config(request: Request) -> Envelope | JSONResponse:
 
     metadata = registration.metadata or {}
     documents = get_legal_documents()
+    allowed_markets = {str(value).upper() for value in metadata.get("markets", [])}
+    allowed_languages = {str(value).lower() for value in metadata.get("languages", [])}
+    countries = get_countries()
+    if allowed_markets:
+        countries = [country for country in countries if country["code"] in allowed_markets]
+    if allowed_languages:
+        countries = [
+            {
+                **country,
+                "languages": [
+                    language for language in country["languages"]
+                    if language["code"] in allowed_languages
+                ],
+            }
+            for country in countries
+        ]
+        countries = [country for country in countries if country["languages"]]
     return success(
         {
             "widgetId": registration.widgetId,
@@ -154,13 +173,18 @@ def widget_config(request: Request) -> Envelope | JSONResponse:
             "theme": str(metadata.get("theme") or "light"),
             "primaryColor": str(metadata.get("primaryColor") or "#2D7FF9"),
             "sdkVersion": str(metadata.get("sdkVersion") or "1.0.0"),
-            "countries": get_countries(),
-            "privacyVersion": documents["version"],
+            "countries": countries,
+            "defaultCountry": str(metadata.get("defaultMarket") or ""),
+            "defaultLanguage": str(metadata.get("defaultLanguage") or ""),
+            "greeting": str(metadata.get("greeting") or ""),
+            "position": str(metadata.get("position") or "bottom-right"),
+            "privacyVersion": registration.legalVersion or documents["version"],
             "legalDocs": documents["documents"],
             "starterTopics": metadata.get("starterTopics"),
             "contextualTopics": metadata.get("contextualTopics"),
             "supportCountries": support_country_codes(),
             "supportRecommendationThreshold": max(1, settings.SUPPORT_RECOMMEND_AFTER_FAILURES),
+            "feedbackExpectedAnswerEnabled": settings.FEEDBACK_EXPECTED_ANSWER_ENABLED,
         },
         correlation_id,
     )
@@ -170,12 +194,27 @@ def _valid_language_codes(country_code: str) -> set[str]:
     return get_language_codes_for_country(country_code)
 
 
+def _widget_locale_allowed(request: Request, country: str, language: str) -> bool:
+    if not settings.WIDGET_AUTH_REQUIRED:
+        return True
+    claims = getattr(request.state, "widget_auth", {}) or {}
+    registration = widget_auth_service.get_registration(str(claims.get("widgetId", "")))
+    if registration is None:
+        return False
+    metadata = registration.metadata or {}
+    markets = {str(value).upper() for value in metadata.get("markets", [])}
+    languages = {str(value).lower() for value in metadata.get("languages", [])}
+    return (not markets or country.upper() in markets) and (not languages or language.lower() in languages)
+
+
 @router.post("/api/chat", response_model=None)
 def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
     """Answer a user message using RAG-only ASK Vera flow."""
     correlation_id = _correlation_id(request)
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
+    if not _widget_locale_allowed(request, body.country, body.language):
+        return error_response(WidgetAuthError("This market or language is not enabled for this widget."), correlation_id)
     pipeline_trace_store.start(
         correlation_id,
         country=body.country,
@@ -226,6 +265,7 @@ def config(request: Request) -> Envelope:
             "privacyVersion": settings.PRIVACY_VERSION,
             "supportCountries": support_country_codes(),
             "supportRecommendationThreshold": max(1, settings.SUPPORT_RECOMMEND_AFTER_FAILURES),
+            "feedbackExpectedAnswerEnabled": settings.FEEDBACK_EXPECTED_ANSWER_ENABLED,
         },
         correlation_id,
     )
@@ -237,6 +277,8 @@ def privacy(request: Request, country: str | None = None, lang: str | None = Non
     correlation_id = _correlation_id(request)
     normalized_country = country.upper() if country else None
     normalized_lang = lang.lower() if lang else None
+    if normalized_country and normalized_lang and not _widget_locale_allowed(request, normalized_country, normalized_lang):
+        return error_response(WidgetAuthError("This market or language is not enabled for this widget."), correlation_id)
     if normalized_country and normalized_country not in get_country_codes():
         envelope = Envelope(success=False, error={"code": "UNSUPPORTED_COUNTRY", "message": "Unsupported country."}, correlationId=correlation_id)
         return JSONResponse(status_code=400, content=envelope.model_dump())
@@ -254,6 +296,8 @@ def consent(body: ConsentRequest, request: Request) -> Envelope | JSONResponse:
     correlation_id = _correlation_id(request)
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
+    if not _widget_locale_allowed(request, body.country, body.lang):
+        return error_response(WidgetAuthError("This market or language is not enabled for this widget."), correlation_id)
     try:
         record_consent(body, correlation_id)
         return success({"recorded": True, "legalVersion": settings.LEGAL_VERSION}, correlation_id)
@@ -281,8 +325,20 @@ def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
     try:
-        record_feedback_event(body, correlation_id)
-        enqueue_feedback(body, correlation_id)
+        safe_body = body.model_copy(update={"expected_answer": None})
+        if settings.FEEDBACK_EXPECTED_ANSWER_ENABLED and body.rating < 0 and body.expected_answer:
+            language = str((body.metadata or {}).get("language") or "")
+            safe_body = body.model_copy(
+                update={
+                    "expected_answer": scrub_pii(
+                        body.expected_answer.strip(),
+                        correlation_id,
+                        language,
+                    )
+                }
+            )
+        record_feedback_event(safe_body, correlation_id)
+        enqueue_feedback(safe_body, correlation_id)
         return success(
             {
                 "queued": True,
@@ -301,6 +357,8 @@ def support(body: SupportRequest, request: Request) -> Envelope | JSONResponse:
     correlation_id = _correlation_id(request)
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
+    if not _widget_locale_allowed(request, body.country, body.language):
+        return error_response(WidgetAuthError("This market or language is not enabled for this widget."), correlation_id)
     try:
         if not has_valid_consent(body.sessionId, correlation_id):
             return consent_required_response(correlation_id)
