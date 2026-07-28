@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from app.operations import pipeline_trace_store
 from config import settings
 from services.admin_auth import require_admin_identity
-from services.analytics import analytics_overview, interaction_list
+from services.analytics import analytics_overview, interaction_list, retrieval_shadow_report
 from services.knowledge_ingestion import (
     ACCESS_SCOPES,
     DOCUMENT_TYPES,
@@ -94,6 +94,28 @@ def interactions(
             traffic_source=traffic_source,
             feedback=feedback,
             limit=limit,
+            start=start,
+            end=end,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _payload(result, request)
+
+
+@admin_router.get("/analytics/retrieval-shadow")
+def retrieval_shadow(
+    request: Request,
+    days: int = 30,
+    country: str = "",
+    language: str = "",
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict[str, Any]:
+    try:
+        result = retrieval_shadow_report(
+            days=days,
+            country=country,
+            language=language,
             start=start,
             end=end,
         )

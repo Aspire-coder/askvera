@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.retrieval import service as retrieval_service_module
 from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
@@ -17,6 +19,12 @@ from app.retrieval.providers import (
     confidence_from_sources,
 )
 from config import settings
+
+
+@pytest.fixture(autouse=True)
+def disable_shadow_analytics(monkeypatch):
+    """Retrieval unit tests must not connect to operational analytics storage."""
+    monkeypatch.setattr(retrieval_service_module, "record_retrieval_shadow_comparison", MagicMock())
 
 
 class _StaticProvider:
@@ -103,6 +111,11 @@ def test_shadow_retrieval_never_replaces_primary_result(monkeypatch) -> None:
 
     assert result.documents[0].id == "primary-document"
     assert shadow.calls == [("question", "cid-shadow")]
+    comparison = retrieval_service_module.record_retrieval_shadow_comparison.call_args.args[0]
+    assert comparison["primary_top_id"] == "primary-document"
+    assert comparison["vnext_top_id"] == "shadow-document"
+    assert comparison["top_result_matches"] is False
+    assert "message" not in comparison
 
 
 def test_shadow_failure_cannot_fail_primary_retrieval(monkeypatch) -> None:

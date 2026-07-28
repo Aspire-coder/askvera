@@ -207,6 +207,42 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(
                 text(
                     """
+                    CREATE TABLE IF NOT EXISTS retrieval_shadow_comparisons (
+                        correlation_id TEXT PRIMARY KEY,
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        primary_provider TEXT NOT NULL,
+                        primary_index TEXT NOT NULL,
+                        primary_pipeline_version TEXT NOT NULL,
+                        primary_count INTEGER NOT NULL,
+                        primary_confidence DOUBLE PRECISION NOT NULL,
+                        primary_top_id TEXT NOT NULL DEFAULT '',
+                        vnext_provider TEXT NOT NULL,
+                        vnext_index TEXT NOT NULL,
+                        vnext_pipeline_version TEXT NOT NULL,
+                        vnext_count INTEGER NOT NULL,
+                        vnext_confidence DOUBLE PRECISION NOT NULL,
+                        vnext_top_id TEXT NOT NULL DEFAULT '',
+                        top_result_matches BOOLEAN NOT NULL,
+                        shared_result_count INTEGER NOT NULL,
+                        result_overlap DOUBLE PRECISION NOT NULL,
+                        duration_ms DOUBLE PRECISION NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_retrieval_shadow_filters
+                    ON retrieval_shadow_comparisons (created_at DESC, country, language)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS ingestion_jobs (
                         job_id TEXT PRIMARY KEY,
                         filename TEXT NOT NULL,

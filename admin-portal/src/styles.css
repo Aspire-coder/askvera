@@ -283,6 +283,34 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 .ranked-row strong { font-size: 10px; }
 .bar-track { height: 5px; background: #e7e7ea; border-radius: 4px; overflow: hidden; }
 .bar-track i { display: block; height: 100%; background: #1d1d1f; border-radius: inherit; }
+.shadow-section { margin-top: 42px; }
+.shadow-sample-note { padding: 8px 12px; border-radius: 999px; background: rgba(22,130,93,.09); color: var(--green); font-size: 9px; font-weight: 650; }
+.shadow-metrics { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+.shadow-metric { min-height: 118px; padding: 18px; display: flex; flex-direction: column; }
+.shadow-metric > span { color: var(--secondary); font-size: 9px; }
+.shadow-metric > strong { margin: 13px 0 6px; font-size: 27px; letter-spacing: -.04em; font-weight: 620; }
+.shadow-metric > small { margin-top: auto; color: var(--tertiary); font-size: 8px; line-height: 1.4; }
+.shadow-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 12px; }
+.shadow-locale-card, .shadow-disagreements { padding: 20px; }
+.shadow-locale-list { display: grid; gap: 13px; }
+.shadow-locale-list > div { display: grid; grid-template-columns: 38px minmax(90px,1fr) 38px 28px; gap: 9px; align-items: center; }
+.shadow-locale-list span, .shadow-locale-list strong, .shadow-locale-list small { font-size: 9px; }
+.shadow-locale-list strong { text-align: right; }
+.shadow-locale-list small { color: var(--tertiary); text-align: right; }
+.shadow-locale-list i { display: block; height: 5px; border-radius: 4px; overflow: hidden; background: #e7e7ea; }
+.shadow-locale-list b { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+.shadow-disagreements { margin-top: 12px; }
+.shadow-difference { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 18px; padding: 14px 0; border-top: 1px solid var(--line); }
+.shadow-difference:first-of-type { border-top: 0; }
+.shadow-difference > div { display: flex; flex-direction: column; gap: 5px; }
+.shadow-difference > div strong { font-size: 10px; }
+.shadow-difference > div small { color: var(--tertiary); font-size: 8px; }
+.shadow-difference dl { display: grid; gap: 7px; margin: 0; min-width: 0; }
+.shadow-difference dl div { display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 8px; }
+.shadow-difference dt { color: var(--tertiary); font-size: 8px; }
+.shadow-difference dd { margin: 0; font: 9px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.shadow-empty { margin: 0; padding: 18px 0; color: var(--tertiary); font-size: 10px; }
+.shadow-empty.success { padding: 28px 0; text-align: center; color: var(--green); border-top: 1px solid var(--line); }
 .review-controls { display: flex; gap: 9px; }
 .review-controls select { width: 130px; }
 .search-field { position: relative; display: flex; align-items: center; }
@@ -336,6 +364,7 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   .processing-card .supported-note { grid-column: 1 / -1; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .dashboard-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .shadow-metrics { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .journey-metrics { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .diagnostic-panel dl { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .quality-card { grid-row: span 1; }
@@ -388,6 +417,8 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   .table-row { min-width: 760px; }
   .metric-grid, .dashboard-grid { grid-template-columns: 1fr; }
   .dashboard-grid .span-2 { grid-column: auto; }
+  .shadow-metrics, .shadow-detail-grid { grid-template-columns: 1fr; }
+  .shadow-difference { grid-template-columns: 1fr; }
   .section-heading { align-items: stretch; flex-direction: column; }
   .review-controls { flex-direction: column; }
   .search-field input, .review-controls select { width: 100%; }

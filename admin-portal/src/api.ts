@@ -1,5 +1,20 @@
-import { demoCachedTrace, demoConfig, demoInteractions, demoJobs, demoOverview, demoTrace } from "./demoData";
-import type { AdminConfig, AnalyticsOverview, IngestionJob, Interaction, PipelineTrace } from "./types";
+import {
+  demoCachedTrace,
+  demoConfig,
+  demoInteractions,
+  demoJobs,
+  demoOverview,
+  demoShadowReport,
+  demoTrace
+} from "./demoData";
+import type {
+  AdminConfig,
+  AnalyticsOverview,
+  IngestionJob,
+  Interaction,
+  PipelineTrace,
+  ShadowReport
+} from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
 const ALLOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEMO === "true";
@@ -30,6 +45,9 @@ export class AdminApi {
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
   interactions(filters: URLSearchParams) { return this.request<Interaction[]>(`/api/admin/analytics/interactions?${filters}`); }
+  retrievalShadow(filters: URLSearchParams) {
+    return this.request<ShadowReport>(`/api/admin/analytics/retrieval-shadow?${filters}`);
+  }
   ingestions() { return this.request<IngestionJob[]>("/api/admin/ingestions?limit=50"); }
   upload(formData: FormData) {
     return this.request<{ jobId: string; filename: string; status: string; message: string }>("/api/admin/documents", {
@@ -54,6 +72,7 @@ export const demo = {
   config: demoConfig,
   traces: [demoTrace, demoCachedTrace],
   overview: demoOverview,
+  shadowReport: demoShadowReport,
   interactions: demoInteractions,
   jobs: demoJobs
 };

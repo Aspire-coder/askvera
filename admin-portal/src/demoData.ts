@@ -1,4 +1,11 @@
-import type { AdminConfig, AnalyticsOverview, IngestionJob, Interaction, PipelineTrace } from "./types";
+import type {
+  AdminConfig,
+  AnalyticsOverview,
+  IngestionJob,
+  Interaction,
+  PipelineTrace,
+  ShadowReport
+} from "./types";
 
 const now = new Date();
 const iso = (offsetSeconds: number) => new Date(now.getTime() - offsetSeconds * 1000).toISOString();
@@ -74,6 +81,48 @@ export const demoOverview: AnalyticsOverview = {
     const date = new Date(now.getTime() - (daily.length - index - 1) * 86400000).toISOString().slice(0, 10);
     return { date, questions, users: Math.round(questions * 0.39), tokens: questions * 1320 };
   })
+};
+
+export const demoShadowReport: ShadowReport = {
+  rangeDays: 30,
+  totals: {
+    comparisons: 96,
+    topMatches: 82,
+    topMatchRate: 0.8542,
+    averageOverlap: 0.713,
+    vnextConfidenceWins: 57,
+    vnextConfidenceWinRate: 0.5938,
+    primaryConfidence: 0.742,
+    vnextConfidence: 0.781,
+    averageDurationMs: 684.2
+  },
+  countries: [
+    { label: "BE", comparisons: 31, matchRate: 0.8387 },
+    { label: "CA", comparisons: 28, matchRate: 0.8929 },
+    { label: "US", comparisons: 22, matchRate: 0.8636 },
+    { label: "DE", comparisons: 15, matchRate: 0.8 }
+  ],
+  languages: [
+    { label: "en", comparisons: 44, matchRate: 0.8864 },
+    { label: "nl", comparisons: 21, matchRate: 0.8095 },
+    { label: "fr", comparisons: 18, matchRate: 0.8333 },
+    { label: "de", comparisons: 13, matchRate: 0.8462 }
+  ],
+  trend: [],
+  disagreements: [
+    {
+      correlation_id: "shadow-demo-1",
+      country: "BE",
+      language: "fr",
+      primary_top_id: "BE|fr|Company-Policy.pdf|5.01",
+      vnext_top_id: "BE|fr|Company-Policy.pdf|5.02",
+      primary_confidence: 0.68,
+      vnext_confidence: 0.76,
+      result_overlap: 0.43,
+      duration_ms: 721,
+      created_at: iso(900)
+    }
+  ]
 };
 
 export const demoInteractions: Interaction[] = [

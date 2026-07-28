@@ -85,3 +85,35 @@ export type Interaction = {
   rating: number | null;
   comment: string | null;
 };
+
+export type ShadowDisagreement = {
+  correlation_id: string;
+  country: string;
+  language: string;
+  primary_top_id: string;
+  vnext_top_id: string;
+  primary_confidence: number;
+  vnext_confidence: number;
+  result_overlap: number;
+  duration_ms: number;
+  created_at: string;
+};
+
+export type ShadowReport = {
+  rangeDays: number;
+  totals: {
+    comparisons: number;
+    topMatches: number;
+    topMatchRate: number;
+    averageOverlap: number;
+    vnextConfidenceWins: number;
+    vnextConfidenceWinRate: number;
+    primaryConfidence: number;
+    vnextConfidence: number;
+    averageDurationMs: number;
+  };
+  countries: Array<{ label: string; comparisons: number; matchRate: number }>;
+  languages: Array<{ label: string; comparisons: number; matchRate: number }>;
+  trend: Array<{ date: string; comparisons: number; topMatches: number; averageOverlap: number }>;
+  disagreements: ShadowDisagreement[];
+};

@@ -7,6 +7,7 @@ from time import perf_counter
 from app.metrics import STAGE_RETRIEVAL
 from app.metrics.pipeline import record_pipeline_metric
 from config import settings
+from services.analytics import record_retrieval_shadow_comparison
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
@@ -200,28 +201,32 @@ class RetrievalService:
         shadow_keys = {_document_key(document) for document in shadow_result.documents}
         shared_keys = primary_keys & shadow_keys
         union_keys = primary_keys | shadow_keys
-        LOGGER.info(
-            "retrieval_shadow_comparison",
-            correlation_id=correlation_id,
-            country=country,
-            language=language,
-            primary_provider=primary_result.metadata.get("provider", settings.RETRIEVAL_PROVIDER),
-            primary_index=settings.OPENSEARCH_INDEX,
-            primary_pipeline_version=settings.RETRIEVAL_PIPELINE_VERSION,
-            primary_count=len(primary_result.documents),
-            primary_confidence=round(float(primary_result.confidence), 4),
-            primary_top_id=_top_document_key(primary_result),
-            vnext_provider=shadow_result.metadata.get("provider", settings.RETRIEVAL_VNEXT_PROVIDER),
-            vnext_index=settings.OPENSEARCH_VNEXT_INDEX,
-            vnext_pipeline_version=settings.RETRIEVAL_VNEXT_PIPELINE_VERSION,
-            vnext_count=len(shadow_result.documents),
-            vnext_confidence=round(float(shadow_result.confidence), 4),
-            vnext_top_id=_top_document_key(shadow_result),
-            top_result_matches=_top_document_key(primary_result) == _top_document_key(shadow_result),
-            shared_result_count=len(shared_keys),
-            result_overlap=round(len(shared_keys) / len(union_keys), 4) if union_keys else 1.0,
-            duration_ms=round((perf_counter() - started) * 1000, 2),
-        )
+        comparison = {
+            "correlation_id": correlation_id,
+            "country": country,
+            "language": language,
+            "primary_provider": primary_result.metadata.get("provider", settings.RETRIEVAL_PROVIDER),
+            "primary_index": settings.OPENSEARCH_INDEX,
+            "primary_pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
+            "primary_count": len(primary_result.documents),
+            "primary_confidence": round(float(primary_result.confidence), 4),
+            "primary_top_id": _top_document_key(primary_result),
+            "vnext_provider": shadow_result.metadata.get("provider", settings.RETRIEVAL_VNEXT_PROVIDER),
+            "vnext_index": settings.OPENSEARCH_VNEXT_INDEX,
+            "vnext_pipeline_version": settings.RETRIEVAL_VNEXT_PIPELINE_VERSION,
+            "vnext_count": len(shadow_result.documents),
+            "vnext_confidence": round(float(shadow_result.confidence), 4),
+            "vnext_top_id": _top_document_key(shadow_result),
+            "top_result_matches": _top_document_key(primary_result) == _top_document_key(shadow_result),
+            "shared_result_count": len(shared_keys),
+            "result_overlap": round(len(shared_keys) / len(union_keys), 4) if union_keys else 1.0,
+            "duration_ms": round((perf_counter() - started) * 1000, 2),
+        }
+        LOGGER.info("retrieval_shadow_comparison", **comparison)
+        try:
+            record_retrieval_shadow_comparison(comparison)
+        except Exception:  # noqa: BLE001 - telemetry must never affect retrieval
+            LOGGER.exception("retrieval_shadow_analytics_failed", correlation_id=correlation_id)
 
 
 def _document_key(document: RetrievedDocument) -> str:
