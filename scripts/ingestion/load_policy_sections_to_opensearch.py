@@ -70,6 +70,7 @@ def _index_body() -> dict[str, Any]:
                 "effective_date": {"type": "date", "ignore_malformed": True},
                 "chunk_type": {"type": "keyword"},
                 "parent_section_id": {"type": "keyword"},
+                "chunk_profile": {"type": "keyword"},
                 "start_page": {"type": "integer"},
                 "end_page": {"type": "integer"},
                 "content": {"type": "text"},
@@ -157,6 +158,7 @@ def _document(
         "effective_date": section.get("effective_date", ""),
         "chunk_type": section.get("chunk_type", "section"),
         "parent_section_id": section.get("parent_section_id", ""),
+        "chunk_profile": section.get("chunk_profile", "current"),
     }
     return {
         "id": _section_id(section),
@@ -171,6 +173,7 @@ def _document(
         "effective_date": section.get("effective_date", ""),
         "chunk_type": section.get("chunk_type", "section"),
         "parent_section_id": section.get("parent_section_id", ""),
+        "chunk_profile": section.get("chunk_profile", "current"),
         "section_id": section["section_id"],
         "section_title": section["title"],
         "start_page": section["start_page"],
@@ -289,6 +292,18 @@ def _source_identity(sections: list[dict[str, Any]]) -> tuple[str, str, str]:
     return identity
 
 
+def _validate_chunk_profile_target(sections: list[dict[str, Any]], index: str) -> None:
+    """Keep experimental chunks out of the current retrieval index."""
+    profiles = {
+        str(section.get("chunk_profile") or section.get("metadata", {}).get("chunk_profile") or "current")
+        for section in sections
+    }
+    if "vnext" in profiles and index == settings.OPENSEARCH_INDEX:
+        raise ValueError(
+            "vNext chunks require a separate --index and cannot be loaded into OPENSEARCH_INDEX."
+        )
+
+
 def _older_source_actions(
     client: OpenSearch,
     *,
@@ -325,15 +340,17 @@ def _older_source_actions(
 def main() -> int:
     args = parse_args()
     index = args.index or settings.OPENSEARCH_INDEX
+    sections = _load_sections(args.jsonl)
+    if not sections:
+        raise ValueError(f"No sections found in {args.jsonl}")
+    _validate_chunk_profile_target(sections, index)
+
     client = _client()
     if args.recreate_index and client.indices.exists(index=index):
         client.indices.delete(index=index)
     if not client.indices.exists(index=index):
         client.indices.create(index=index, body=_index_body())
 
-    sections = _load_sections(args.jsonl)
-    if not sections:
-        raise ValueError(f"No sections found in {args.jsonl}")
     if args.replace_source and args.status != "active":
         raise ValueError("--replace-source is only valid with --status active.")
     if args.publish_kb_version and (args.status != "active" or not args.replace_source):

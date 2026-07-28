@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from app.retrieval import service as retrieval_service_module
 from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
@@ -31,6 +32,32 @@ class _StaticProvider:
         )
 
 
+class _RecordingProvider:
+    def __init__(self, provider_name: str, document_id: str, *, fail: bool = False) -> None:
+        self.provider_name = provider_name
+        self.document_id = document_id
+        self.fail = fail
+        self.calls: list[tuple[str, str]] = []
+
+    def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
+        self.calls.append((message, correlation_id))
+        if self.fail:
+            raise RuntimeError("shadow failed")
+        document = RetrievedDocument(
+            id=self.document_id,
+            title=f"{self.document_id}.pdf",
+            content="approved content",
+            source=f"s3://kb/{self.document_id}.pdf",
+            score=0.8,
+        )
+        return RetrievalResult(
+            documents=[document],
+            citations=[document.to_source()],
+            confidence=0.8,
+            metadata={"provider": self.provider_name},
+        )
+
+
 def test_retrieval_service_refreshes_provider_after_config_load(monkeypatch) -> None:
     """The singleton must pick up SSM-loaded retrieval config after import time."""
     monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "bedrock")
@@ -42,6 +69,96 @@ def test_retrieval_service_refreshes_provider_after_config_load(monkeypatch) -> 
     result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
 
     assert result.metadata["provider"] == "opensearch_section"
+
+
+def test_shadow_retrieval_is_inert_by_default(monkeypatch) -> None:
+    primary = _RecordingProvider("primary", "primary-document")
+    shadow = _RecordingProvider("shadow", "shadow-document")
+    service = RetrievalService(provider=primary, shadow_provider=shadow)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", False)
+    monkeypatch.setattr(
+        retrieval_service_module,
+        "_submit_shadow_task",
+        lambda task: (_ for _ in ()).throw(AssertionError("shadow task must not run")),
+    )
+
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert result.documents[0].id == "primary-document"
+    assert shadow.calls == []
+
+
+def test_shadow_retrieval_never_replaces_primary_result(monkeypatch) -> None:
+    primary = _RecordingProvider("primary", "primary-document")
+    shadow = _RecordingProvider("shadow", "shadow-document")
+    service = RetrievalService(provider=primary, shadow_provider=shadow)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 1.0)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
+    monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "uat-index")
+    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "vnext-index")
+    monkeypatch.setattr(retrieval_service_module, "_submit_shadow_task", lambda task: task())
+
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert result.documents[0].id == "primary-document"
+    assert shadow.calls == [("question", "cid-shadow")]
+
+
+def test_shadow_failure_cannot_fail_primary_retrieval(monkeypatch) -> None:
+    primary = _RecordingProvider("primary", "primary-document")
+    shadow = _RecordingProvider("shadow", "shadow-document", fail=True)
+    service = RetrievalService(provider=primary, shadow_provider=shadow)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 1.0)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
+    monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "uat-index")
+    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "vnext-index")
+    monkeypatch.setattr(retrieval_service_module, "_submit_shadow_task", lambda task: task())
+
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert result.documents[0].id == "primary-document"
+    assert shadow.calls == [("question", "cid-shadow")]
+
+
+def test_shadow_orchestration_failure_cannot_fail_primary_retrieval(monkeypatch) -> None:
+    primary = _RecordingProvider("primary", "primary-document")
+    service = RetrievalService(provider=primary)
+    monkeypatch.setattr(
+        service,
+        "_submit_shadow_comparison",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("shadow orchestration failed")),
+    )
+
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert result.documents[0].id == "primary-document"
+    assert primary.calls == [("question", "cid")]
+
+
+def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> None:
+    created: list[tuple[str, str | None, bool]] = []
+
+    def recording_factory(provider_name, *, index_name=None, enable_bedrock_rerank=False):
+        created.append((provider_name, index_name, enable_bedrock_rerank))
+        return _RecordingProvider(provider_name, f"document-{len(created)}")
+
+    monkeypatch.setattr(RetrievalService, "_provider_for_name", staticmethod(recording_factory))
+    monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "opensearch_section")
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 1.0)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
+    monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "uat-index")
+    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "vnext-index")
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_ENABLED", True)
+    monkeypatch.setattr(retrieval_service_module, "_submit_shadow_task", lambda task: task())
+
+    service = RetrievalService()
+    service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert created[0] == ("opensearch_section", None, False)
+    assert created[1] == ("opensearch_section", "vnext-index", True)
 
 
 def test_provider_result_extracts_api_sources() -> None:

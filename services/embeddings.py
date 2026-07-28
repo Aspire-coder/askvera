@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from functools import lru_cache
 
 from botocore.exceptions import BotoCoreError, ClientError
+import redis
 
 from config import settings
 from services.aws_clients import get_aws_clients
+from services.cache import get_cache_client
 from utils.exceptions import AwsServiceError
 from utils.logging import get_logger
 
@@ -27,6 +30,11 @@ def embed_text(text: str) -> list[float]:
     if not normalized:
         return []
 
+    shared_key = _shared_embedding_key(normalized)
+    shared_embedding = _get_shared_embedding(shared_key)
+    if shared_embedding is not None:
+        return shared_embedding
+
     payload = {"inputText": normalized}
     try:
         response = get_aws_clients().bedrock_runtime.invoke_model(
@@ -43,4 +51,47 @@ def embed_text(text: str) -> list[float]:
     embedding = body.get("embedding")
     if not isinstance(embedding, list):
         raise AwsServiceError("Embedding response did not include an embedding.")
-    return [float(value) for value in embedding]
+    normalized_embedding = [float(value) for value in embedding]
+    _set_shared_embedding(shared_key, normalized_embedding)
+    return normalized_embedding
+
+
+def _shared_embedding_key(normalized_text: str) -> str:
+    digest = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+    model_digest = hashlib.sha256(settings.BEDROCK_EMBED_MODEL_ID.encode("utf-8")).hexdigest()[:16]
+    return f"{settings.EMBEDDING_SHARED_CACHE_PREFIX}:{model_digest}:{digest}"
+
+
+def _get_shared_embedding(key: str) -> list[float] | None:
+    if not settings.EMBEDDING_SHARED_CACHE_ENABLED:
+        return None
+    client = get_cache_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(key)
+        if not raw:
+            return None
+        value = json.loads(raw)
+        if not isinstance(value, list):
+            return None
+        return [float(item) for item in value]
+    except (redis.RedisError, json.JSONDecodeError, TypeError, ValueError):
+        LOGGER.exception("shared_embedding_cache_read_failed")
+        return None
+
+
+def _set_shared_embedding(key: str, embedding: list[float]) -> None:
+    if not settings.EMBEDDING_SHARED_CACHE_ENABLED:
+        return
+    client = get_cache_client()
+    if client is None:
+        return
+    try:
+        client.setex(
+            key,
+            settings.EMBEDDING_SHARED_CACHE_TTL_SECONDS,
+            json.dumps(embedding, separators=(",", ":")),
+        )
+    except redis.RedisError:
+        LOGGER.exception("shared_embedding_cache_write_failed")

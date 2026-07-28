@@ -1,9 +1,11 @@
 """Bedrock Claude model provider."""
 
+import hashlib
 from threading import Lock
 from time import monotonic, perf_counter
 
 from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
+import redis
 
 from app.prompts import PromptPackage
 from app.response.normalizer import response_normalizer
@@ -11,6 +13,7 @@ from app.retrieval import RetrievalResult, score_summary, source_log_summary
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.aws_clients import get_aws_clients
+from services.cache import get_cache_client
 from utils.exceptions import (
     BedrockServiceError,
     BedrockTimeoutError,
@@ -43,11 +46,13 @@ def _reset_circuit_breaker() -> None:
     with _CIRCUIT_LOCK:
         _PRIMARY_FAILURES = 0
         _PRIMARY_OPEN_UNTIL = 0.0
+    _reset_shared_circuit_breaker()
 
 
 def _primary_circuit_open() -> bool:
+    shared_open = _shared_circuit_open()
     with _CIRCUIT_LOCK:
-        return monotonic() < _PRIMARY_OPEN_UNTIL
+        return shared_open or monotonic() < _PRIMARY_OPEN_UNTIL
 
 
 def _record_primary_success() -> None:
@@ -61,6 +66,61 @@ def _record_primary_failure() -> None:
         _PRIMARY_FAILURES += 1
         if _PRIMARY_FAILURES >= threshold:
             _PRIMARY_OPEN_UNTIL = monotonic() + max(1, int(settings.BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS))
+    _record_shared_primary_failure(threshold)
+
+
+def _shared_circuit_keys() -> tuple[str, str]:
+    model = hashlib.sha256(settings.BEDROCK_MODEL_ARN.encode("utf-8")).hexdigest()[:16]
+    prefix = settings.BEDROCK_SHARED_CIRCUIT_BREAKER_PREFIX
+    return f"{prefix}:{model}:failures", f"{prefix}:{model}:open"
+
+
+def _shared_circuit_client():
+    if not settings.BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED:
+        return None
+    return get_cache_client()
+
+
+def _reset_shared_circuit_breaker() -> None:
+    client = _shared_circuit_client()
+    if client is None:
+        return
+    failures_key, open_key = _shared_circuit_keys()
+    try:
+        client.delete(failures_key, open_key)
+    except redis.RedisError:
+        LOGGER.exception("shared_model_circuit_reset_failed")
+
+
+def _shared_circuit_open() -> bool:
+    client = _shared_circuit_client()
+    if client is None:
+        return False
+    _failures_key, open_key = _shared_circuit_keys()
+    try:
+        return bool(client.exists(open_key))
+    except redis.RedisError:
+        LOGGER.exception("shared_model_circuit_read_failed")
+        return False
+
+
+def _record_shared_primary_failure(threshold: int) -> None:
+    client = _shared_circuit_client()
+    if client is None:
+        return
+    failures_key, open_key = _shared_circuit_keys()
+    reset_seconds = max(1, int(settings.BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS))
+    try:
+        pipeline = client.pipeline()
+        pipeline.incr(failures_key)
+        pipeline.expire(failures_key, reset_seconds)
+        result = pipeline.execute()
+        failures = int(result[0])
+        if failures >= threshold:
+            client.setex(open_key, reset_seconds, "1")
+            client.delete(failures_key)
+    except (redis.RedisError, TypeError, ValueError):
+        LOGGER.exception("shared_model_circuit_write_failed")
 
 
 def _is_transient_bedrock_error(exc: BaseException) -> bool:

@@ -6,6 +6,7 @@ import pytest
 
 from services.knowledge_ingestion import (
     MAX_CHUNK_CHARS,
+    VNEXT_MAX_CHUNK_CHARS,
     ExtractedPage,
     build_sections,
     extract_pages,
@@ -57,3 +58,31 @@ def test_long_sections_have_bounded_overlapping_chunks() -> None:
     assert len(sections) > 1
     assert all(len(section["content"]) <= MAX_CHUNK_CHARS for section in sections)
     assert all(section["start_page"] == 3 for section in sections)
+
+
+def test_vnext_generic_chunks_are_smaller_and_explicitly_tagged() -> None:
+    content = "PRODUCT DETAILS\n" + "Useful product information. " * 500
+    sections = build_sections(
+        [ExtractedPage(3, content)],
+        filename="facts.txt",
+        country="GLOBAL",
+        language="en",
+        document_type="product_information",
+        chunk_profile="vnext",
+    )
+
+    assert len(sections) > 1
+    assert all(len(section["content"]) <= VNEXT_MAX_CHUNK_CHARS for section in sections)
+    assert all(section["metadata"]["chunk_profile"] == "vnext" for section in sections)
+
+
+def test_current_generic_chunk_profile_remains_the_default() -> None:
+    sections = build_sections(
+        [ExtractedPage(1, "OVERVIEW\nApproved information.")],
+        filename="facts.txt",
+        country="CA",
+        language="en",
+        document_type="product_information",
+    )
+
+    assert sections[0]["metadata"]["chunk_profile"] == "current"

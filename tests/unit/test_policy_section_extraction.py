@@ -157,6 +157,47 @@ def test_oversized_sections_are_split_into_bounded_parts() -> None:
     assert sections[0].section_id == "1-part-1"
 
 
+def test_vnext_policy_chunks_are_smaller_with_parent_provenance() -> None:
+    content = "1 General\n" + ("Approved policy sentence. " * 500)
+
+    sections = extractor._split_oversized_section(
+        source_file="policy.pdf",
+        country="DE",
+        language="de",
+        section_id="1",
+        title="General",
+        content=content,
+        content_offset=0,
+        page_offsets=[(1, 0, len(content) + 1)],
+        chunk_profile="vnext",
+    )
+
+    assert len(sections) > 1
+    assert all(
+        len(section.content) <= extractor.VNEXT_MAX_SECTION_CHARS
+        for section in sections
+    )
+    assert all(section.parent_section_id == "1" for section in sections)
+    assert all(section.chunk_profile == "vnext" for section in sections)
+    assert all(section.metadata["chunk_profile"] == "vnext" for section in sections)
+
+
+def test_current_policy_chunk_profile_remains_the_default() -> None:
+    section = extractor.PolicySection(
+        "policy.pdf",
+        "CA",
+        "en",
+        "1",
+        "General",
+        1,
+        1,
+        "Approved policy content.",
+    )
+
+    assert section.chunk_profile == "current"
+    assert section.metadata["chunk_profile"] == "current"
+
+
 def test_numeric_table_rows_become_country_agnostic_atomic_facts() -> None:
     parent = extractor.PolicySection(
         source_file="policy.pdf",
@@ -207,6 +248,38 @@ def test_definition_entries_inside_large_section_parts_become_atomic_chunks() ->
     assert all(chunk.parent_section_id == "2" for chunk in definitions)
 
 
+def test_vnext_section_parts_keep_atomic_list_and_numeric_facts() -> None:
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="CA",
+        language="fr",
+        section_id="4.01-part-1",
+        title="Niveaux de vente (part 1)",
+        start_page=8,
+        end_page=9,
+        content=(
+            "4.01 Niveaux de vente\n"
+            "(a) Assistant Supervisor exige 2 Case Credits.\n"
+            "(b) Supervisor exige 10 Case Credits.\n"
+            "Manager 120 Case Credits en deux mois\n"
+            "Manager 150 Case Credits en quatre mois"
+        ),
+        chunk_type="section_part",
+        parent_section_id="4.01",
+        chunk_profile="vnext",
+    )
+
+    chunks = extractor._expand_structured_chunks([parent])
+
+    assert any(chunk.chunk_type == "list_item" for chunk in chunks)
+    assert any(chunk.chunk_type == "numeric_fact" for chunk in chunks)
+    assert all(
+        chunk.parent_section_id == "4.01-part-1"
+        for chunk in chunks
+        if chunk.chunk_type in {"list_item", "numeric_fact"}
+    )
+
+
 def test_contents_pages_are_preserved_as_document_outline_chunks() -> None:
     pages = [
         (
@@ -239,3 +312,58 @@ def test_contents_pages_are_preserved_as_document_outline_chunks() -> None:
     assert outlines[0].section_id == "outline-page-1"
     assert outlines[0].chunk_type == "document_outline"
     assert "6 Leadership Bonus" in outlines[0].content
+
+
+def test_vnext_contents_pages_are_split_with_stable_parent_provenance() -> None:
+    contents = "\n".join(
+        f"{number} Policy heading with approved descriptive text"
+        for number in range(1, 120)
+    )
+
+    outlines = extractor._outline_chunks(
+        [(1, contents)],
+        source_file="policy.pdf",
+        country="CA",
+        language="en",
+        document_version="",
+        effective_date="",
+        status="active",
+        chunk_profile="vnext",
+    )
+
+    assert len(outlines) > 1
+    assert all(
+        len(outline.content) <= extractor.VNEXT_MAX_SECTION_CHARS
+        for outline in outlines
+    )
+    assert all(outline.parent_section_id == "outline-page-1" for outline in outlines)
+    assert [outline.section_id for outline in outlines] == [
+        f"outline-page-1-part-{number}"
+        for number in range(1, len(outlines) + 1)
+    ]
+
+
+def test_vnext_contextual_children_are_bounded_after_expansion() -> None:
+    child = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="RS",
+        language="sr",
+        section_id="1.02-definition-1",
+        title="Definition",
+        start_page=3,
+        end_page=4,
+        content="Section 1.02: Definition\n" + ("Approved policy text. " * 150),
+        chunk_type="definition",
+        parent_section_id="1.02",
+        chunk_profile="vnext",
+    )
+
+    bounded = extractor._bound_vnext_chunks([child])
+
+    assert len(bounded) > 1
+    assert all(
+        len(section.content) <= extractor.VNEXT_MAX_SECTION_CHARS
+        for section in bounded
+    )
+    assert all(section.parent_section_id == "1.02" for section in bounded)
+    assert bounded[0].section_id == "1.02-definition-1-part-1"

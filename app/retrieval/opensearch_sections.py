@@ -324,6 +324,15 @@ def _parse_selector_ranks(text: str) -> list[int]:
 class OpenSearchSectionProvider:
     """Retrieve approved document sections from an OpenSearch section index."""
 
+    def __init__(
+        self,
+        index_name: str | None = None,
+        *,
+        enable_bedrock_rerank: bool = False,
+    ) -> None:
+        self.index_name = index_name or settings.OPENSEARCH_INDEX
+        self.enable_bedrock_rerank = enable_bedrock_rerank
+
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
         try:
@@ -363,11 +372,11 @@ class OpenSearchSectionProvider:
             for index, search_message in enumerate(search_messages):
                 weight = 1.0 if index == 0 else 0.88
                 text_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
+                    index=self.index_name,
                     body=_text_query(search_message, country, language, scope="locale"),
                 )
                 vector_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
+                    index=self.index_name,
                     body=_vector_query(search_message, country, language, scope="locale"),
                 )
                 text_hits.extend(
@@ -381,7 +390,7 @@ class OpenSearchSectionProvider:
 
             if search_plan.prefer_outline:
                 outline_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
+                    index=self.index_name,
                     body=_outline_text_query(message, country, language),
                 )
                 text_hits.extend(outline_response.get("hits", {}).get("hits", []))
@@ -389,11 +398,11 @@ class OpenSearchSectionProvider:
             if search_plan.include_global_documents:
                 global_search_message = self._global_search_query(message, language, correlation_id)
                 global_text_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
+                    index=self.index_name,
                     body=_directory_text_query(global_search_message),
                 )
                 global_vector_response = client.search(
-                    index=settings.OPENSEARCH_INDEX,
+                    index=self.index_name,
                     body=_vector_query(global_search_message, country, language, scope="global"),
                 )
                 text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
@@ -408,6 +417,10 @@ class OpenSearchSectionProvider:
             message,
             prefer_outline=search_plan.prefer_outline,
         )
+        if self.enable_bedrock_rerank:
+            from .bedrock_reranker import rerank_rows
+
+            rows = rerank_rows(message, rows, correlation_id=correlation_id)
         rows = self._select_evidence_rows(message, rows, correlation_id)
 
         documents = [

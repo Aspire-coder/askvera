@@ -10,11 +10,18 @@ import argparse
 import csv
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
 from pypdf import PdfReader
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from services.document_preflight import extract_pdf_page_text, is_table_like_layout  # noqa: E402
 
 
 # Policies commonly use a mix of top-level headings ("1 Introduction"),
@@ -44,6 +51,12 @@ PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
 SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 MAX_SECTION_CHARS = 8_000
+VNEXT_MAX_SECTION_CHARS = 2_000
+VNEXT_SECTION_OVERLAP_CHARS = 200
+CHUNK_PROFILES = {
+    "current": (MAX_SECTION_CHARS, 0),
+    "vnext": (VNEXT_MAX_SECTION_CHARS, VNEXT_SECTION_OVERLAP_CHARS),
+}
 TEXT_REPLACEMENTS = {
     "â€™": "'",
     "â€œ": '"',
@@ -68,6 +81,7 @@ class PolicySection:
     status: str = "active"
     chunk_type: str = "section"
     parent_section_id: str = ""
+    chunk_profile: str = "current"
 
     @property
     def metadata(self) -> dict[str, str | int]:
@@ -87,6 +101,7 @@ class PolicySection:
             "access_scope": "country",
             "chunk_type": self.chunk_type,
             "parent_section_id": self.parent_section_id,
+            "chunk_profile": self.chunk_profile,
         }
 
 
@@ -122,22 +137,31 @@ def _split_inline_section_headings(line: str) -> list[str]:
     ]
 
 
-def _read_pdf_pages(pdf_path: Path) -> list[tuple[int, str]]:
+def _read_pdf_pages(
+    pdf_path: Path,
+    *,
+    chunk_profile: str = "current",
+) -> list[tuple[int, str]]:
     """Read and clean every text-bearing PDF page."""
     reader = PdfReader(str(pdf_path))
     pages: list[tuple[int, str]] = []
     for index, page in enumerate(reader.pages, start=1):
-        text = _clean_page_text(page.extract_text() or "")
+        raw_text = extract_pdf_page_text(page)
+        if chunk_profile == "vnext":
+            layout_text = extract_pdf_page_text(page, preserve_layout=True)
+            if is_table_like_layout(layout_text):
+                raw_text = layout_text
+        text = _clean_page_text(raw_text)
         if text:
             pages.append((index, text))
     return pages
 
 
-def _read_pages(pdf_path: Path) -> list[tuple[int, str]]:
+def _read_pages(pdf_path: Path, *, chunk_profile: str = "current") -> list[tuple[int, str]]:
     """Read policy-body pages while keeping outlines out of section parsing."""
     return [
         (page_number, text)
-        for page_number, text in _read_pdf_pages(pdf_path)
+        for page_number, text in _read_pdf_pages(pdf_path, chunk_profile=chunk_profile)
         if not _looks_like_contents_page(text)
     ]
 
@@ -191,8 +215,12 @@ def extract_sections(
     document_version: str = "",
     effective_date: str = "",
     status: str = "active",
+    chunk_profile: str = "current",
 ) -> list[PolicySection]:
-    all_pages = _read_pdf_pages(pdf_path)
+    if chunk_profile not in CHUNK_PROFILES:
+        raise ValueError(f"Unknown chunk profile: {chunk_profile}")
+
+    all_pages = _read_pdf_pages(pdf_path, chunk_profile=chunk_profile)
     pages = [
         (page_number, text)
         for page_number, text in all_pages
@@ -224,8 +252,6 @@ def extract_sections(
         if len(body) < min_chars:
             continue
 
-        start_page = _page_for_offset(page_offsets, start)
-        end_page = _page_for_offset(page_offsets, max(start, end - 1))
         title = _normalize_title(match.group("title"))
 
         sections.extend(
@@ -241,6 +267,7 @@ def extract_sections(
                 document_version=document_version,
                 effective_date=effective_date,
                 status=status,
+                chunk_profile=chunk_profile,
             )
         )
 
@@ -252,6 +279,7 @@ def extract_sections(
         document_version=document_version,
         effective_date=effective_date,
         status=status,
+        chunk_profile=chunk_profile,
     )
     front_matter = _front_matter_chunks(
         all_pages,
@@ -261,8 +289,10 @@ def extract_sections(
         document_version=document_version,
         effective_date=effective_date,
         status=status,
+        chunk_profile=chunk_profile,
     )
-    return _ensure_unique_section_ids([*front_matter, *outlines, *_expand_structured_chunks(sections)])
+    expanded = [*front_matter, *outlines, *_expand_structured_chunks(sections)]
+    return _ensure_unique_section_ids(_bound_vnext_chunks(expanded))
 
 
 def _front_matter_chunks(
@@ -274,6 +304,7 @@ def _front_matter_chunks(
     document_version: str,
     effective_date: str,
     status: str,
+    chunk_profile: str = "current",
 ) -> list[PolicySection]:
     """Preserve cover-page metadata independently from a long contents page."""
     if not pages:
@@ -296,6 +327,7 @@ def _front_matter_chunks(
             effective_date=effective_date,
             status=status,
             chunk_type="document_front_matter",
+            chunk_profile=chunk_profile,
         )
     ]
 
@@ -309,26 +341,98 @@ def _outline_chunks(
     document_version: str,
     effective_date: str,
     status: str,
+    chunk_profile: str = "current",
 ) -> list[PolicySection]:
     """Preserve table-of-contents pages for section-location questions."""
-    return [
-        PolicySection(
-            source_file=source_file,
-            country=country,
-            language=language,
-            section_id=f"outline-page-{page_number}",
-            title="Policy document outline",
-            start_page=page_number,
-            end_page=page_number,
-            content=text,
-            document_version=document_version,
-            effective_date=effective_date,
-            status=status,
-            chunk_type="document_outline",
+    chunks: list[PolicySection] = []
+    for page_number, text in pages:
+        if not _looks_like_contents_page(text):
+            continue
+
+        if chunk_profile == "current" or len(text) <= VNEXT_MAX_SECTION_CHARS:
+            page_parts = [text]
+        else:
+            page_parts = _split_vnext_text(text)
+
+        for part_number, content in enumerate(page_parts, start=1):
+            base_id = f"outline-page-{page_number}"
+            is_split = len(page_parts) > 1
+            chunks.append(
+                PolicySection(
+                    source_file=source_file,
+                    country=country,
+                    language=language,
+                    section_id=f"{base_id}-part-{part_number}" if is_split else base_id,
+                    title="Policy document outline",
+                    start_page=page_number,
+                    end_page=page_number,
+                    content=content,
+                    document_version=document_version,
+                    effective_date=effective_date,
+                    status=status,
+                    chunk_type="document_outline",
+                    parent_section_id=base_id if is_split else "",
+                    chunk_profile=chunk_profile,
+                )
+            )
+    return chunks
+
+
+def _split_vnext_text(content: str) -> list[str]:
+    """Split auxiliary policy text with the vNext structural boundaries."""
+    chunks: list[str] = []
+    start = 0
+    while start < len(content):
+        end = min(start + VNEXT_MAX_SECTION_CHARS, len(content))
+        if end < len(content):
+            boundaries = [
+                (content.rfind("\n\n", start, end), 0),
+                (content.rfind("\n", start, end), 0),
+                (content.rfind(". ", start, end), 2),
+            ]
+            boundary, suffix_length = max(boundaries)
+            if boundary > start + VNEXT_MAX_SECTION_CHARS // 2:
+                end = boundary + suffix_length
+
+        chunk = content[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(content):
+            break
+
+        start = max(end - VNEXT_SECTION_OVERLAP_CHARS, start + 1)
+        while start < end and not content[start].isspace():
+            start += 1
+        while start < len(content) and content[start].isspace():
+            start += 1
+    return chunks
+
+
+def _bound_vnext_chunks(sections: list[PolicySection]) -> list[PolicySection]:
+    """Apply the vNext size ceiling after contextual child chunks are added."""
+    bounded: list[PolicySection] = []
+    for section in sections:
+        if (
+            section.chunk_profile != "vnext"
+            or len(section.content) <= VNEXT_MAX_SECTION_CHARS
+        ):
+            bounded.append(section)
+            continue
+
+        parent_section_id = section.parent_section_id or section.section_id
+        bounded.extend(
+            replace(
+                section,
+                section_id=f"{section.section_id}-part-{part_number}",
+                content=content,
+                parent_section_id=parent_section_id,
+            )
+            for part_number, content in enumerate(
+                _split_vnext_text(section.content),
+                start=1,
+            )
         )
-        for page_number, text in pages
-        if _looks_like_contents_page(text)
-    ]
+    return bounded
 
 
 def _ensure_unique_section_ids(sections: list[PolicySection]) -> list[PolicySection]:
@@ -376,8 +480,14 @@ def _split_oversized_section(
     document_version: str = "",
     effective_date: str = "",
     status: str = "active",
+    chunk_profile: str = "current",
 ) -> list[PolicySection]:
-    if len(content) <= MAX_SECTION_CHARS:
+    try:
+        max_chars, overlap_chars = CHUNK_PROFILES[chunk_profile]
+    except KeyError as exc:
+        raise ValueError(f"Unknown chunk profile: {chunk_profile}") from exc
+
+    if len(content) <= max_chars:
         return [
             PolicySection(
                 source_file=source_file,
@@ -391,19 +501,34 @@ def _split_oversized_section(
                 document_version=document_version,
                 effective_date=effective_date,
                 status=status,
+                chunk_profile=chunk_profile,
             )
         ]
 
     chunks: list[tuple[int, str]] = []
     start = 0
     while start < len(content):
-        end = min(start + MAX_SECTION_CHARS, len(content))
+        end = min(start + max_chars, len(content))
         if end < len(content):
-            boundary = content.rfind("\n", start, end)
-            if boundary > start:
-                end = boundary
+            if chunk_profile == "current":
+                boundary = content.rfind("\n", start, end)
+                if boundary > start:
+                    end = boundary
+            else:
+                boundaries = [
+                    (content.rfind("\n\n", start, end), 0),
+                    (content.rfind("\n", start, end), 0),
+                    (content.rfind(". ", start, end), 2),
+                ]
+                boundary, suffix_length = max(boundaries)
+                if boundary > start + max_chars // 2:
+                    end = boundary + suffix_length
         chunks.append((start, content[start:end].strip()))
-        start = end
+        if end >= len(content):
+            break
+        start = max(end - overlap_chars, start + 1)
+        while start < end and not content[start].isspace():
+            start += 1
         while start < len(content) and content[start].isspace():
             start += 1
 
@@ -425,6 +550,7 @@ def _split_oversized_section(
             status=status,
             chunk_type="section_part",
             parent_section_id=section_id,
+            chunk_profile=chunk_profile,
         )
         for part_number, (chunk_start, chunk) in enumerate(chunks, start=1)
         if chunk
@@ -480,6 +606,7 @@ def _definition_chunks(section: PolicySection) -> list[PolicySection]:
                 status=section.status,
                 chunk_type="definition",
                 parent_section_id=parent_section_id,
+                chunk_profile=section.chunk_profile,
             )
         )
     return chunks
@@ -497,7 +624,7 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
     for section in sections:
         expanded.append(section)
         expanded.extend(_definition_chunks(section))
-        if section.chunk_type == "section_part":
+        if section.chunk_type == "section_part" and section.chunk_profile == "current":
             continue
         matches = list(LIST_ITEM_RE.finditer(section.content))
 
@@ -523,6 +650,7 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
                     status=section.status,
                     chunk_type="list_item",
                     parent_section_id=section.section_id,
+                    chunk_profile=section.chunk_profile,
                 )
             )
 
@@ -550,6 +678,7 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
                     status=section.status,
                     chunk_type="numeric_fact",
                     parent_section_id=section.section_id,
+                    chunk_profile=section.chunk_profile,
                 )
             )
     return expanded
@@ -583,6 +712,7 @@ def write_csv(sections: list[PolicySection], path: Path) -> None:
                 "access_scope",
                 "chunk_type",
                 "parent_section_id",
+                "chunk_profile",
                 "content_length",
                 "preview",
             ],
@@ -606,6 +736,7 @@ def write_csv(sections: list[PolicySection], path: Path) -> None:
                     "access_scope": "country",
                     "chunk_type": section.chunk_type,
                     "parent_section_id": section.parent_section_id,
+                    "chunk_profile": section.chunk_profile,
                     "content_length": len(section.content),
                     "preview": section.content[:300],
                 }
@@ -703,6 +834,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--effective-date", default="")
     parser.add_argument("--status", default="active", choices=["active", "inactive"])
     parser.add_argument(
+        "--chunk-profile",
+        default="current",
+        choices=sorted(CHUNK_PROFILES),
+        help="Use 'vnext' only for an isolated comparison package and index.",
+    )
+    parser.add_argument(
         "--bedrock-dir",
         type=Path,
         help="Optional folder for one-file-per-section Bedrock test ingestion output.",
@@ -720,6 +857,7 @@ def main() -> int:
         document_version=args.document_version,
         effective_date=args.effective_date,
         status=args.status,
+        chunk_profile=args.chunk_profile,
     )
 
     stem = args.pdf.stem
@@ -734,6 +872,7 @@ def main() -> int:
     print("----------------------------------")
     print(f"PDF: {args.pdf}")
     print(f"Sections: {len(sections)}")
+    print(f"Chunk profile: {args.chunk_profile}")
     print(f"JSONL: {jsonl_path}")
     print(f"CSV: {csv_path}")
     if args.bedrock_dir:

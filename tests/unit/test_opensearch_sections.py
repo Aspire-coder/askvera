@@ -36,6 +36,13 @@ def test_language_key_normalizes_regional_language_tags() -> None:
     assert _language_key("PT-br") == "pt"
 
 
+def test_provider_can_target_an_isolated_vnext_index(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "uat-index")
+
+    assert OpenSearchSectionProvider().index_name == "uat-index"
+    assert OpenSearchSectionProvider(index_name="vnext-index").index_name == "vnext-index"
+
+
 def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_ALLOW_ENGLISH_FALLBACK", False)
     assert _scope_filter("CA", "fr", "locale")["bool"]["filter"] == [
@@ -53,7 +60,6 @@ def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch)
             ]
         }
     }
-
 
 
 def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:

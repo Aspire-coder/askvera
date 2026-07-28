@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import settings
+from config import settings  # noqa: E402
 
 PLACEHOLDER_PREFIX = "REPLACE_WITH"
 DEVELOPMENT_SECRETS = {"dev-admin-key", "dev-only-change-before-production"}
@@ -22,15 +22,26 @@ def _require(missing: list[str], name: str) -> None:
         missing.append(name)
 
 
-def validate() -> list[str]:
-    """Return missing or placeholder required setting names."""
-    missing: list[str] = []
-    for name in settings.REQUIRED_VALUES:
-        _require(missing, name)
+def _validate_shadow_retrieval(missing: list[str]) -> None:
+    if not settings.RETRIEVAL_SHADOW_ENABLED:
+        return
+    if settings.RETRIEVAL_VNEXT_PROVIDER != "opensearch_section":
+        missing.append("RETRIEVAL_VNEXT_PROVIDER (must be opensearch_section for isolated shadow testing)")
+    _require(missing, "OPENSEARCH_VNEXT_INDEX")
+    if settings.OPENSEARCH_VNEXT_INDEX == settings.OPENSEARCH_INDEX:
+        missing.append("OPENSEARCH_VNEXT_INDEX (must differ from OPENSEARCH_INDEX)")
+    if not 0.0 < settings.RETRIEVAL_SHADOW_SAMPLE_RATE <= 1.0:
+        missing.append("RETRIEVAL_SHADOW_SAMPLE_RATE (must be greater than 0 and at most 1)")
+    if settings.RETRIEVAL_VNEXT_RERANK_ENABLED:
+        _require(missing, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN")
+        if settings.RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT < settings.OPENSEARCH_RESULT_COUNT:
+            missing.append(
+                "RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT "
+                "(must be at least OPENSEARCH_RESULT_COUNT)"
+            )
 
-    if settings.APP_ENV != "production":
-        return missing
 
+def _validate_production_auth(missing: list[str]) -> None:
     for name in (
         "WIDGET_JWT_SECRET",
         "BEDROCK_MODEL_ARN",
@@ -62,6 +73,8 @@ def validate() -> list[str]:
     if not settings.SHARED_SECURITY_STATE_ENABLED or not settings.SHARED_SECURITY_STATE_REQUIRED:
         missing.append("SHARED_SECURITY_STATE_REQUIRED (must be enabled in production)")
 
+
+def _validate_production_integrations(missing: list[str]) -> None:
     if settings.RETRIEVAL_PROVIDER == "opensearch_section":
         _require(missing, "OPENSEARCH_ENDPOINT")
         _require(missing, "OPENSEARCH_INDEX")
@@ -81,6 +94,18 @@ def validate() -> list[str]:
         )
         if not has_market_routes and not has_default_route:
             missing.append("SUPPORT_ROUTES_JSON or SUPPORT_DEFAULT_ROUTE_JSON")
+
+
+def validate() -> list[str]:
+    """Return missing or placeholder required setting names."""
+    missing: list[str] = []
+    for name in settings.REQUIRED_VALUES:
+        _require(missing, name)
+
+    _validate_shadow_retrieval(missing)
+    if settings.APP_ENV == "production":
+        _validate_production_auth(missing)
+        _validate_production_integrations(missing)
     return missing
 
 

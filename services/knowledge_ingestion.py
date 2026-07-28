@@ -26,6 +26,7 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
     _older_source_actions,
 )
 from services.aws_clients import get_aws_clients
+from services.document_preflight import analyze_pdf, extract_pdf_page_text, is_table_like_layout
 from services.db import get_engine
 from utils.logging import get_logger
 
@@ -47,6 +48,12 @@ HEADING_RE = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?\s+)?[^.!?]{3,120}$")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 MAX_CHUNK_CHARS = 4_500
 CHUNK_OVERLAP_CHARS = 450
+VNEXT_MAX_CHUNK_CHARS = 2_000
+VNEXT_CHUNK_OVERLAP_CHARS = 200
+CHUNK_PROFILES = {
+    "current": (MAX_CHUNK_CHARS, CHUNK_OVERLAP_CHARS),
+    "vnext": (VNEXT_MAX_CHUNK_CHARS, VNEXT_CHUNK_OVERLAP_CHARS),
+}
 
 
 @dataclass(frozen=True)
@@ -125,7 +132,14 @@ def process_ingestion_job(
     path = Path(local_path)
     try:
         _update_job(job_id, status="extracting", progress=15)
-        pages = extract_pages(path)
+        chunk_profile = settings.ADMIN_INGESTION_CHUNK_PROFILE
+        if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
+            preflight = analyze_pdf(path)
+            if preflight.requires_ocr:
+                raise ValueError(
+                    "This PDF appears to be scanned or image-only and requires OCR before publication."
+                )
+        pages = extract_pages(path, chunk_profile=chunk_profile)
         sections = build_sections(
             pages,
             filename=filename,
@@ -134,6 +148,7 @@ def process_ingestion_job(
             document_type=document_type,
             version=version,
             effective_date=effective_date,
+            chunk_profile=chunk_profile,
         )
         if not sections:
             raise ValueError("No readable text was found in the document.")
@@ -172,13 +187,18 @@ def process_ingestion_job(
             pass
 
 
-def extract_pages(path: Path) -> list[ExtractedPage]:
+def extract_pages(path: Path, *, chunk_profile: str = "current") -> list[ExtractedPage]:
     extension = path.suffix.lower()
     if extension == ".pdf":
         reader = PdfReader(str(path))
         pages: list[ExtractedPage] = []
         for index, page in enumerate(reader.pages, start=1):
-            content = _clean_text(page.extract_text() or "")
+            raw_text = extract_pdf_page_text(page)
+            if chunk_profile == "vnext":
+                layout_text = extract_pdf_page_text(page, preserve_layout=True)
+                if is_table_like_layout(layout_text):
+                    raw_text = layout_text
+            content = _clean_text(raw_text)
             if content:
                 pages.append(ExtractedPage(index, content))
         return pages
@@ -224,14 +244,27 @@ def build_sections(
     document_type: str,
     version: str = "",
     effective_date: str = "",
+    chunk_profile: str = "current",
 ) -> list[dict[str, Any]]:
     """Create retrieval-sized chunks for policies, product sheets, FAQs, and training material."""
+    try:
+        max_chars, overlap_chars = CHUNK_PROFILES[chunk_profile]
+    except KeyError as exc:
+        raise ValueError(f"Unknown chunk profile: {chunk_profile}") from exc
+
     sections: list[dict[str, Any]] = []
     section_number = 0
     for page in pages:
         blocks = _page_blocks(page.text)
         for block_title, block_text in blocks:
-            for part, chunk in enumerate(_chunk_text(block_text), start=1):
+            for part, chunk in enumerate(
+                _chunk_text(
+                    block_text,
+                    max_chars=max_chars,
+                    overlap_chars=overlap_chars,
+                ),
+                start=1,
+            ):
                 section_number += 1
                 section_id = f"doc-{section_number:04d}"
                 title = block_title or f"{Path(filename).stem} — page {page.number}"
@@ -252,7 +285,10 @@ def build_sections(
                         "status": "active",
                         "chunk_type": "document_section",
                         "parent_section_id": "",
-                        "metadata": {"document_type": document_type},
+                        "metadata": {
+                            "document_type": document_type,
+                            "chunk_profile": chunk_profile,
+                        },
                     }
                 )
     return sections
@@ -286,23 +322,32 @@ def _page_blocks(text_value: str) -> list[tuple[str, str]]:
     return [(title, "\n".join(content)) for title, content in blocks if content]
 
 
-def _chunk_text(text_value: str) -> list[str]:
-    if len(text_value) <= MAX_CHUNK_CHARS:
+def _chunk_text(
+    text_value: str,
+    *,
+    max_chars: int = MAX_CHUNK_CHARS,
+    overlap_chars: int = CHUNK_OVERLAP_CHARS,
+) -> list[str]:
+    if max_chars < 200:
+        raise ValueError("max_chars must be at least 200")
+    if overlap_chars < 0 or overlap_chars >= max_chars // 2:
+        raise ValueError("overlap_chars must be non-negative and less than half of max_chars")
+    if len(text_value) <= max_chars:
         return [text_value]
     chunks: list[str] = []
     start = 0
     while start < len(text_value):
-        end = min(start + MAX_CHUNK_CHARS, len(text_value))
+        end = min(start + max_chars, len(text_value))
         if end < len(text_value):
             boundary = max(text_value.rfind("\n", start, end), text_value.rfind(". ", start, end))
-            if boundary > start + MAX_CHUNK_CHARS // 2:
+            if boundary > start + max_chars // 2:
                 end = boundary + 1
         chunk = text_value[start:end].strip()
         if chunk:
             chunks.append(chunk)
         if end >= len(text_value):
             break
-        start = max(end - CHUNK_OVERLAP_CHARS, start + 1)
+        start = max(end - overlap_chars, start + 1)
     return chunks
 
 

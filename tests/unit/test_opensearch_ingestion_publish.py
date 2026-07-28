@@ -1,5 +1,8 @@
 """Tests for safe cache-version rotation after knowledge publication."""
 
+import pytest
+
+from config import settings
 from scripts.ingestion import load_policy_sections_to_opensearch as loader
 
 
@@ -27,3 +30,22 @@ def test_publish_kb_version_updates_only_the_named_parameter(monkeypatch) -> Non
             "Overwrite": True,
         }
     ]
+
+
+def test_vnext_chunks_cannot_target_current_index(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "askvera-current")
+
+    with pytest.raises(ValueError, match="require a separate --index"):
+        loader._validate_chunk_profile_target(
+            [{"chunk_profile": "vnext"}],
+            "askvera-current",
+        )
+
+
+def test_vnext_chunks_can_target_isolated_index(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "askvera-current")
+
+    loader._validate_chunk_profile_target(
+        [{"chunk_profile": "vnext"}],
+        "askvera-vnext",
+    )
