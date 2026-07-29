@@ -12,7 +12,7 @@ from app.validation.models import ValidationContext, ValidationIssue, Validation
 # Numbers are universal. The validator deliberately does not enumerate English
 # units such as "months" or document-specific terms such as "Case Credits".
 NUMERIC_CLAIM_PATTERN = re.compile(
-    r"(?<![\w.])(?P<number>\d+(?:[.,]\d+)?(?:\s*(?:-|–|—)\s*\d+(?:[.,]\d+)?)?)(?![\w.])",
+    r"(?<![\w.])(?P<number>\d+(?:[.,]\d+)?(?:\s*(?:-|\u2013|\u2014)\s*\d+(?:[.,]\d+)?)?)(?![\w.])",
     re.UNICODE,
 )
 
@@ -33,7 +33,7 @@ def _normalize(text: str) -> str:
     """Normalize text for tolerant, Unicode-safe source matching."""
     normalized = unicodedata.normalize("NFKC", text or "").casefold()
     normalized = re.sub(r"\s+", " ", normalized)
-    normalized = re.sub(r"\s*(?:-|–|—)\s*", "-", normalized)
+    normalized = re.sub(r"\s*(?:-|\u2013|\u2014)\s*", "-", normalized)
     return normalized.strip()
 
 
@@ -99,13 +99,14 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
     pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?![\d.])")
     for match in pattern.finditer(source_text):
         index = match.start()
-        left_boundary = max(source_text.rfind(delimiter, 0, index) for delimiter in (".", ";", "\n"))
+        # PDF extraction inserts line breaks for visual wrapping and numbered
+        # lists. Keep those lines attached to the heading that names the rule.
+        left_boundary = max(source_text.rfind(delimiter, 0, index) for delimiter in (".", ";"))
         right_candidates = [
             position
             for position in (
                 source_text.find(".", match.end()),
                 source_text.find(";", match.end()),
-                source_text.find("\n", match.end()),
             )
             if position != -1
         ]

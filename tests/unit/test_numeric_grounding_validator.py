@@ -206,6 +206,57 @@ def test_numeric_grounding_allows_french_numeric_rule_without_english_unit_terms
     assert not result.has_critical()
 
 
+def test_numeric_grounding_keeps_russian_list_rule_attached_to_heading() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            (
+                "Чтобы стать Признанным Менеджером, выполните требование:\n"
+                "1. Объём продаж:\n"
+                "- 120 Личных и Неменеджерских КБ в течение двух месяцев."
+            ),
+            (
+                "Непризнанный менеджер может квалифицироваться на статус Признанного Менеджера, "
+                "выполнив следующие требования:\n"
+                "1) Выполнение объема в 120 Личных и Неменеджерских КБ в течение двух месяцев."
+            ),
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
+def test_numeric_grounding_blocks_russian_number_for_wrong_rank() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Ассистент Менеджера должен выполнить 120 КБ в течение двух месяцев.",
+            (
+                "Ассистент Менеджера должен выполнить 75 КБ в течение двух месяцев. "
+                "Признанный Менеджер должен выполнить 120 КБ в течение двух месяцев."
+            ),
+        ),
+        result,
+    )
+
+    assert result.has_critical()
+    assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
+
+
+def test_numeric_grounding_normalizes_unicode_range_dashes() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "Признанный Менеджер должен выполнить 120 КБ в течение 1–2 месяцев.",
+            "Признанный Менеджер должен выполнить 120 КБ в течение 1-2 месяцев.",
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
+
+
 def test_numeric_grounding_does_not_match_number_inside_larger_number() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(
