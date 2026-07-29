@@ -240,14 +240,16 @@ class AIOrchestrator:
         user_question: str,
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
-        completed_answer, restored_fields = restore_missing_directory_contacts(
-            chat_response.answer,
-            (
-                document.metadata.get("directory_fields", {})
-                for document in retrieval_result.documents
-                if isinstance(document.metadata.get("directory_fields"), dict)
-            ),
-        )
+        completed_answer, restored_fields = chat_response.answer, []
+        if chat_response.citations:
+            completed_answer, restored_fields = restore_missing_directory_contacts(
+                chat_response.answer,
+                (
+                    document.metadata.get("directory_fields", {})
+                    for document in retrieval_result.documents
+                    if isinstance(document.metadata.get("directory_fields"), dict)
+                ),
+            )
         if restored_fields:
             chat_response = self._replace_answer(
                 chat_response,

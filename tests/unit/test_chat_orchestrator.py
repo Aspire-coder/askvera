@@ -194,15 +194,6 @@ def test_guardrail_response_is_not_cacheable() -> None:
 def test_response_completion_restores_only_approved_directory_contacts(monkeypatch) -> None:
     """Directory answers regain omitted exact fields before outbound validation."""
     orchestrator = AIOrchestrator()
-    response = ChatResponse(
-        answer="The approved office address is 10 Example Road.",
-        citations=[],
-        suggestions=[],
-        cards=[],
-        confidence=0.8,
-        metadata={},
-        correlation_id="cid",
-    )
     document = RetrievedDocument(
         id="directory-office",
         title="Example office",
@@ -216,6 +207,15 @@ def test_response_completion_restores_only_approved_directory_contacts(monkeypat
                 "Office Phone 1": "+99 123 456 7890",
             }
         },
+    )
+    response = ChatResponse(
+        answer="The approved office address is 10 Example Road.",
+        citations=[document.to_source()],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={},
+        correlation_id="cid",
     )
     result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.8)
     monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
@@ -262,6 +262,42 @@ def test_response_completion_does_not_change_policy_answers(monkeypatch) -> None
         "en",
         "cid",
         user_question="What are the requirements?",
+    )
+
+    assert completed.answer == response.answer
+    assert "directory_contacts_restored" not in completed.metadata
+
+
+def test_response_completion_does_not_append_contacts_without_a_citation(monkeypatch) -> None:
+    """A no-match answer must not inherit contacts from an unused candidate."""
+    orchestrator = AIOrchestrator()
+    document = RetrievedDocument(
+        id="unmatched-directory-office",
+        title="Another office",
+        content="Office Email\nother@example.test",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        metadata={"directory_fields": {"Office Email": "other@example.test"}},
+    )
+    response = ChatResponse(
+        answer="I don't have information about Dejan.",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.4,
+        metadata={},
+        correlation_id="cid",
+    )
+    result = RetrievalResult(documents=[document], citations=[], confidence=0.4)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+
+    completed = orchestrator._secure_and_complete_response(
+        response,
+        result,
+        "en",
+        "cid",
+        user_question="Who is Dejan?",
     )
 
     assert completed.answer == response.answer
