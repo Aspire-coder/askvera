@@ -14,11 +14,17 @@ def _request() -> Request:
     return request
 
 
-def _body(*, rating: int = -1, expected_answer: str | None = None) -> FeedbackRequest:
+def _body(
+    *,
+    rating: int = -1,
+    comment: str = "",
+    expected_answer: str | None = None,
+) -> FeedbackRequest:
     return FeedbackRequest(
         sessionId="session-1",
         messageId="message-1",
         rating=rating,
+        comment=comment,
         expected_answer=expected_answer,
         metadata={"language": "en", "correlationId": "answer-1"},
     )
@@ -68,6 +74,31 @@ def test_negative_feedback_scrubs_expected_answer_before_delivery(monkeypatch) -
     assert scrub_calls == [("Use private@example.com instead.", "feedback-event", "en")]
     assert recorded[0].expected_answer == "Use [EMAIL] instead."
     assert queued[0].expected_answer == "Use [EMAIL] instead."
+
+
+def test_written_feedback_is_scrubbed_and_persisted_as_comment(monkeypatch) -> None:
+    recorded: list[FeedbackRequest] = []
+    queued: list[FeedbackRequest] = []
+    scrub_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(settings, "FEEDBACK_EXPECTED_ANSWER_ENABLED", True)
+    monkeypatch.setattr(routes, "_session_matches_widget_token", lambda *_: True)
+    monkeypatch.setattr(
+        routes,
+        "scrub_pii",
+        lambda text, correlation_id, language: (
+            scrub_calls.append((text, correlation_id, language)) or "Please use [EMAIL]."
+        ),
+    )
+    monkeypatch.setattr(routes, "record_feedback_event", lambda body, *_: recorded.append(body))
+    monkeypatch.setattr(routes, "enqueue_feedback", lambda body, *_: queued.append(body))
+
+    response = routes.feedback(_body(comment="  Please use private@example.com.  "), _request())
+
+    assert response.success is True
+    assert scrub_calls == [("Please use private@example.com.", "feedback-event", "en")]
+    assert recorded[0].comment == "Please use [EMAIL]."
+    assert recorded[0].expected_answer is None
+    assert queued[0].comment == "Please use [EMAIL]."
 
 
 def test_helpful_feedback_never_persists_expected_answer(monkeypatch) -> None:

@@ -419,7 +419,7 @@ export function WidgetRuntime({
           placeholder: "e.g. I was hoping for the specific discount amount",
           send: "Send feedback",
           skip: "Skip",
-          sent: "Thanks so much - this really helps us improve.",
+          sent: "Feedback submitted. Thank you for helping us improve AskVera.",
           error: "We could not save that yet. Please try again."
         },
         citationLabels: {
@@ -551,8 +551,6 @@ export function WidgetRuntime({
         const loadedConfig = await withWidgetAuthRetry((client) => loadCompleteWidgetConfig(client, selectedLocale.country, selectedLocale.language));
         if (!active || requestGeneration !== configRequestGenerationRef.current) return;
         widgetEventBus.emit(widgetEventTypes.BACKEND_CONNECTED, {});
-        setApiConfig(loadedConfig);
-        onPositionChange?.(loadedConfig.position || "bottom-right");
         const configuredCountry = loadedConfig.countries.find(
           (country) => country.code === loadedConfig.defaultCountry
         );
@@ -563,14 +561,28 @@ export function WidgetRuntime({
         const fallbackLanguage = configuredLanguage || fallbackCountry?.languages[0];
         const selectedCountryConfig = loadedConfig.countries.find((country) => country.code === selectedLocale.country);
         const selectedLanguageConfig = selectedCountryConfig?.languages.find((language) => language.code === selectedLocale.language);
+        let resolvedLocale: LocalePreference | undefined;
         if ((!localePreferenceResolvedRef.current || !selectedCountryConfig) && fallbackCountry && fallbackLanguage) {
-          selectLocale({ country: fallbackCountry.code, language: fallbackLanguage.code });
+          resolvedLocale = { country: fallbackCountry.code, language: fallbackLanguage.code };
         } else if (selectedCountryConfig && !selectedLanguageConfig) {
           const selectedCountryFallback = selectedCountryConfig.languages[0];
           if (selectedCountryFallback) {
-            selectLocale({ country: selectedCountryConfig.code, language: selectedCountryFallback.code });
+            resolvedLocale = { country: selectedCountryConfig.code, language: selectedCountryFallback.code };
           }
         }
+        if (
+          resolvedLocale
+          && (
+            resolvedLocale.country !== selectedLocale.country
+            || resolvedLocale.language !== selectedLocale.language
+          )
+        ) {
+          selectLocale(resolvedLocale);
+          return;
+        }
+        localePreferenceResolvedRef.current = true;
+        setApiConfig(loadedConfig);
+        onPositionChange?.(loadedConfig.position || "bottom-right");
       } catch (error) {
         if (!active || requestGeneration !== configRequestGenerationRef.current) return;
         if (attempt < 2) {
@@ -719,7 +731,7 @@ export function WidgetRuntime({
         sessionId: state.sessionId,
         messageId: message.id,
         rating,
-        expected_answer: expectedAnswer,
+        comment: expectedAnswer,
         metadata: {
           country: state.selectedCountry?.code,
           language: state.selectedLanguage?.code,
@@ -793,7 +805,7 @@ export function WidgetRuntime({
 
   return (
     <GenericWidgetWrapper
-      key={apiConfig ? "configured" : "loading"}
+      key={`${apiConfig ? "configured" : "loading"}:${activeAuthSessionId || "session"}:${selectedLocale.country}:${selectedLocale.language}`}
       config={config}
       messages={messages}
       loading={loading}

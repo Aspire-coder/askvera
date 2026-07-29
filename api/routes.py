@@ -325,18 +325,18 @@ def feedback(body: FeedbackRequest, request: Request) -> Envelope | JSONResponse
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
     try:
-        safe_body = body.model_copy(update={"expected_answer": None})
+        language = str((body.metadata or {}).get("language") or "")
+        updates = {
+            "comment": scrub_pii(body.comment.strip(), correlation_id, language) if body.comment else "",
+            "expected_answer": None,
+        }
         if settings.FEEDBACK_EXPECTED_ANSWER_ENABLED and body.rating < 0 and body.expected_answer:
-            language = str((body.metadata or {}).get("language") or "")
-            safe_body = body.model_copy(
-                update={
-                    "expected_answer": scrub_pii(
-                        body.expected_answer.strip(),
-                        correlation_id,
-                        language,
-                    )
-                }
+            updates["expected_answer"] = scrub_pii(
+                body.expected_answer.strip(),
+                correlation_id,
+                language,
             )
+        safe_body = body.model_copy(update=updates)
         record_feedback_event(safe_body, correlation_id)
         enqueue_feedback(safe_body, correlation_id)
         return success(

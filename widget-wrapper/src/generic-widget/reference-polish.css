@@ -542,3 +542,29 @@ button.askvera-sdk-launcher:active {
     animation-duration: 1ms;
   }
 }
+
+/* Avoid grid min-content sizing that can collapse user bubbles on mobile. */
+.gw-message-user {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  max-width: 100%;
+}
+
+.gw-message-user .gw-message-card {
+  box-sizing: border-box;
+  width: auto;
+  min-width: min(160px, 100%);
+  max-width: min(86%, 520px);
+}
+
+@media (max-width: 820px) {
+  .gw-message-user {
+    width: 100%;
+  }
+
+  .gw-message-user .gw-message-card {
+    min-width: min(156px, 100%);
+    max-width: 88%;
+  }
+}
