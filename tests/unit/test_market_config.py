@@ -109,6 +109,7 @@ def test_public_markets_are_limited_to_published_policy_locales() -> None:
         "FI",
         "GB",
         "IT",
+        "KG",
         "LU",
         "NL",
         "NO",
