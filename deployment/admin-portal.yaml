@@ -17,7 +17,7 @@ Parameters:
     AllowedPattern: "^https://.+$"
   WidgetAssetOrigin:
     Type: String
-    Default: https://d1wzljafbhsv7.cloudfront.net
+    Default: https://d1wzljalfbhsv7.cloudfront.net
     Description: HTTPS origin used for administrator-uploaded widget logos.
     AllowedPattern: "^https://[^/]+$"
   CognitoDomainPrefix:
