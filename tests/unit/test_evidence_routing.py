@@ -12,6 +12,11 @@ from services.market_config import load_policy_locales
 
 def test_routes_configured_english_greeting_without_retrieval() -> None:
     assert classify_intent("Hello!", "en") == "assistant_meta"
+    greeting = assistant_meta_response("Hello!", "en") or ""
+    assert "company policies" in greeting
+    assert "global office directory" in greeting
+    assert "products" not in greeting
+    assert "ordering" not in greeting
 
 
 def test_routes_configured_french_greeting_without_retrieval() -> None:
@@ -31,6 +36,11 @@ def test_routes_launched_language_greetings_without_model_tokens() -> None:
     assert classify_intent("Hola", "es-US") == "assistant_meta"
     assert classify_intent("Hoi", "nl-BE") == "assistant_meta"
     assert "AskVera" in (assistant_meta_response("Hola", "es") or "")
+    capability = assistant_meta_response("what can you help with", "en") or ""
+    assert "company policies" in capability
+    assert "global office directory" in capability
+    assert "products" not in capability
+    assert "ordering" not in capability
 
 
 def test_localized_fallback_uses_selected_language() -> None:
@@ -90,6 +100,10 @@ def test_every_published_language_has_reviewed_warm_off_topic_copy() -> None:
     english = routes["en"]["responses"]["off_topic"]
     assert "I'm sorry" in english
     assert "can't help with that question" in english
+    assert "company policies" in english
+    assert "global office directory" in english
+    assert "products" not in english
+    assert "ordering" not in english
 
 
 def test_global_document_is_valid_evidence_for_every_locale() -> None:

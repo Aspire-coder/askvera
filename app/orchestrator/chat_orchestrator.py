@@ -534,7 +534,10 @@ class AIOrchestrator:
             return localized_conversation_response("off_topic", language) or FALLBACK_RESPONSES["off_topic"]
         return (
             decision.reason
-            or "I can't help with that request, but I'm happy to help with Forever Living products, policies, ordering, or business support."
+            or (
+                "I'm sorry, but I can't help with that question. AskVera can help with approved "
+                "Forever Living company policies and information from the global office directory."
+            )
         )
 
     def _insufficient_evidence_message(self, language: str = "en") -> str:

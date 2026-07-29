@@ -40,8 +40,8 @@ FALLBACK_RESPONSES = {
         "base. Mind trying again in a moment?"
     ),
     "off_topic": (
-        "That's a bit outside my lane. I'm here to help with Forever Living products, "
-        "ordering, policies, and business support - happy to dig into any of those with you."
+        "I'm sorry, but I can't help with that question. AskVera can help with approved "
+        "Forever Living company policies and information from the global office directory."
     ),
 }
 
