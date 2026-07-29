@@ -101,7 +101,7 @@ def source_link(body: SourceLinkRequest, request: Request) -> Envelope | JSONRes
     correlation_id = _correlation_id(request)
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
-    if not has_valid_consent(body.sessionId, body.country, body.language):
+    if not has_valid_consent(body.sessionId, correlation_id):
         return consent_required_response(correlation_id)
 
     prefix = f"s3://{settings.S3_BUCKET}/approved/"

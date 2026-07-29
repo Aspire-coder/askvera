@@ -833,7 +833,15 @@ export function WidgetRuntime({
       }) : undefined}
       onRequestSupport={supportAvailable ? (message, state) => handleSupportRequest(state, message) : undefined}
       onOpenSource={async (uri, page, state) => {
-        const opened = window.open("", "_blank", "noopener,noreferrer");
+        // Keep the tab opened by the user gesture so the later signed-URL
+        // navigation is not treated as a new popup by the browser.
+        const sourceLabel = config.citationLabels?.openSource || "View exact source";
+        const opened = window.open("about:blank", "_blank");
+        if (opened) {
+          opened.opener = null;
+          opened.document.title = sourceLabel;
+          opened.document.body.textContent = `${sourceLabel}...`;
+        }
         try {
           const envelope = await withWidgetAuthRetry((client) => createSourceLink(client, {
             sessionId: state.sessionId,
@@ -843,7 +851,7 @@ export function WidgetRuntime({
             page
           }));
           if (envelope.data?.url) {
-            if (opened) opened.location.href = envelope.data.url;
+            if (opened && !opened.closed) opened.location.replace(envelope.data.url);
             else window.open(envelope.data.url, "_blank", "noopener,noreferrer");
           } else {
             opened?.close();

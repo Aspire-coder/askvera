@@ -82,7 +82,7 @@ def test_source_link_is_widget_authenticated_and_rate_limited() -> None:
 
 def test_source_link_rejects_unapproved_or_wrong_locale_source(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", True)
-    monkeypatch.setattr(routes, "has_valid_consent", lambda *_args: True)
+    monkeypatch.setattr(routes, "has_valid_consent", lambda _session_id, _correlation_id: True)
     monkeypatch.setattr(routes, "get_engine", lambda: Engine(False))
 
     response = routes.source_link(_body(), _request())
@@ -93,7 +93,13 @@ def test_source_link_rejects_unapproved_or_wrong_locale_source(monkeypatch) -> N
 def test_source_link_presigns_approved_s3_object_and_opens_exact_page(monkeypatch) -> None:
     s3 = S3()
     monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", True)
-    monkeypatch.setattr(routes, "has_valid_consent", lambda *_args: True)
+    consent_checks: list[tuple[str, str]] = []
+
+    def valid_consent(session_id: str, correlation_id: str) -> bool:
+        consent_checks.append((session_id, correlation_id))
+        return True
+
+    monkeypatch.setattr(routes, "has_valid_consent", valid_consent)
     monkeypatch.setattr(routes, "get_engine", lambda: Engine(True))
     monkeypatch.setattr(
         routes,
@@ -105,6 +111,7 @@ def test_source_link_presigns_approved_s3_object_and_opens_exact_page(monkeypatc
 
     assert response.success is True
     assert response.data["url"].endswith("#page=12")
+    assert consent_checks == [("session-1", "source-test")]
     assert s3.calls[0]["Params"] == {
         "Bucket": settings.S3_BUCKET,
         "Key": "approved/Canada_en/policies/policy.pdf",
