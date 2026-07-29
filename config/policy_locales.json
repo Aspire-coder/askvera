@@ -10,6 +10,7 @@
     { "market": "DK", "languages": ["da", "en"] },
     { "market": "FI", "languages": ["fi", "en"] },
     { "market": "IT", "languages": ["it"] },
+    { "market": "KG", "languages": ["ru"] },
     { "market": "LU", "languages": ["fr", "en"] },
     { "market": "NL", "languages": ["nl", "en"] },
     { "market": "NO", "languages": ["no", "en"] },

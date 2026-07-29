@@ -148,6 +148,21 @@ def test_widget_provisioning_includes_turkey_without_publishing_it() -> None:
     assert widget_countries["TR"]["provisioningOnly"] is True
 
 
+def test_kyrgyzstan_is_published_in_russian_only() -> None:
+    """Kyrgyzstan must not advertise source languages without approved policies."""
+    market_config.load_market_config.cache_clear()
+    market_config.load_policy_locales.cache_clear()
+
+    countries = {
+        country["code"]: country for country in market_config.get_countries()
+    }
+
+    assert countries["KG"]["defaultLanguage"] == "ru"
+    assert countries["KG"]["languages"] == [
+        {"code": "ru", "name": "Russian"},
+    ]
+
+
 def test_chat_request_accepts_published_sweden_languages() -> None:
     """Sweden accepts only the two company-policy languages being published."""
     market_config.load_market_config.cache_clear()

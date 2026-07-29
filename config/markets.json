@@ -822,17 +822,17 @@
       "enabled": true,
       "region": "Europe",
       "displayOrder": 125,
-      "defaultLanguage": "en",
+      "defaultLanguage": "ru",
       "languages": [
         {
           "code": "en",
           "name": "English",
-          "enabled": true
+          "enabled": false
         },
         {
           "code": "ky",
           "name": "Kyrgyz",
-          "enabled": true
+          "enabled": false
         },
         {
           "code": "ru",
