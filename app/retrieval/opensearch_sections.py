@@ -92,6 +92,61 @@ def _scope_filter(country: str, language: str, scope: str) -> dict[str, Any]:
     }
 
 
+def is_approved_source(uri: str, country: str, language: str, correlation_id: str = "system") -> bool:
+    """Confirm that a citation source is active and available to the requested locale."""
+    normalized_language = _language_key(language)
+    allowed_languages = [normalized_language]
+    if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK and normalized_language != "en":
+        allowed_languages.append("en")
+    country_codes = sorted(get_document_country_codes(country))
+    query = {
+        "size": 5,
+        "_source": ["source_uri", "country", "language", "access_scope", "status"],
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"source_uri": uri}},
+                    {"term": {"status": "active"}},
+                ],
+                "should": [
+                    {"term": {"access_scope": "global"}},
+                    {
+                        "bool": {
+                            "filter": [
+                                {"terms": {"country": country_codes}},
+                                {"terms": {"language": allowed_languages}},
+                            ]
+                        }
+                    },
+                ],
+                "minimum_should_match": 1,
+            }
+        },
+    }
+    try:
+        response = _client().search(index=settings.OPENSEARCH_INDEX, body=query)
+    except Exception:
+        LOGGER.exception(
+            "source_authorization_failed",
+            correlation_id=correlation_id,
+            source_uri=uri,
+        )
+        return False
+
+    for hit in response.get("hits", {}).get("hits", []):
+        source = hit.get("_source", {})
+        if source.get("source_uri") != uri or source.get("status") != "active":
+            continue
+        if source.get("access_scope") == "global":
+            return True
+        if (
+            str(source.get("country") or "").upper() in country_codes
+            and _language_key(str(source.get("language") or "")) in allowed_languages
+        ):
+            return True
+    return False
+
+
 def _text_query(message: str, country: str, language: str, *, scope: str = "locale") -> dict[str, Any]:
     """Build a metadata-filtered BM25 query."""
     return {

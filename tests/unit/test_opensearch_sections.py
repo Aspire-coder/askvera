@@ -5,6 +5,7 @@ from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
     _directory_text_query,
+    is_approved_source,
     _language_key,
     _outline_text_query,
     _selector_candidates,
@@ -34,6 +35,68 @@ def _hit(identifier: str, title: str, score: float) -> dict[str, object]:
 def test_language_key_normalizes_regional_language_tags() -> None:
     assert _language_key("fr-CA") == "fr"
     assert _language_key("PT-br") == "pt"
+
+
+class SourceClient:
+    def __init__(self, sources: list[dict[str, str]] | None = None, error: Exception | None = None) -> None:
+        self.sources = sources or []
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def search(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return {"hits": {"hits": [{"_source": source} for source in self.sources]}}
+
+
+def test_source_authorization_accepts_active_exact_locale_source(monkeypatch) -> None:
+    uri = "s3://approved/Canada_en/policy.pdf"
+    client = SourceClient(
+        [{"source_uri": uri, "country": "CA", "language": "en", "access_scope": "country", "status": "active"}]
+    )
+    monkeypatch.setattr(opensearch_sections, "_client", lambda: client)
+
+    assert is_approved_source(uri, "CA", "en", "cid") is True
+    filters = client.calls[0]["body"]["query"]["bool"]["filter"]
+    assert {"term": {"source_uri": uri}} in filters
+    assert {"term": {"status": "active"}} in filters
+
+
+def test_source_authorization_rejects_wrong_locale(monkeypatch) -> None:
+    uri = "s3://approved/UnitedStates_en/policy.pdf"
+    client = SourceClient(
+        [{"source_uri": uri, "country": "US", "language": "en", "access_scope": "country", "status": "active"}]
+    )
+    monkeypatch.setattr(opensearch_sections, "_client", lambda: client)
+
+    assert is_approved_source(uri, "CA", "en", "cid") is False
+
+
+def test_source_authorization_accepts_global_source_for_any_locale(monkeypatch) -> None:
+    uri = "s3://approved/Global_en/directory.pdf"
+    client = SourceClient(
+        [{"source_uri": uri, "country": "GLOBAL", "language": "en", "access_scope": "global", "status": "active"}]
+    )
+    monkeypatch.setattr(opensearch_sections, "_client", lambda: client)
+
+    assert is_approved_source(uri, "DE", "de", "cid") is True
+
+
+def test_source_authorization_rejects_inactive_source(monkeypatch) -> None:
+    uri = "s3://approved/Canada_en/policy.pdf"
+    client = SourceClient(
+        [{"source_uri": uri, "country": "CA", "language": "en", "access_scope": "country", "status": "staging"}]
+    )
+    monkeypatch.setattr(opensearch_sections, "_client", lambda: client)
+
+    assert is_approved_source(uri, "CA", "en", "cid") is False
+
+
+def test_source_authorization_fails_closed_when_search_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(opensearch_sections, "_client", lambda: SourceClient(error=RuntimeError("unavailable")))
+
+    assert is_approved_source("s3://approved/policy.pdf", "CA", "en", "cid") is False
 
 
 def test_provider_can_target_an_isolated_vnext_index(monkeypatch) -> None:

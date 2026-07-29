@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.orchestrator import ConsentRequiredError, ai_orchestrator
+from app.retrieval.opensearch_sections import is_approved_source
 from app.response import ChatResponse
 from app.widget_auth import WidgetInitRequest, WidgetRefreshRequest
 from app.widget_auth.service import widget_auth_service
@@ -115,30 +116,7 @@ def source_link(body: SourceLinkRequest, request: Request) -> Envelope | JSONRes
             ).model_dump(),
         )
 
-    with get_engine().connect() as connection:
-        approved = connection.execute(
-            text(
-                """
-                SELECT 1
-                FROM (
-                    SELECT source_uri, country, language, access_scope, status
-                    FROM knowledge_documents
-                    UNION ALL
-                    SELECT source_uri, country, language, access_scope, status
-                    FROM policy_sections
-                ) sources
-                WHERE source_uri = :uri
-                  AND status = 'active'
-                  AND (
-                    access_scope = 'global'
-                    OR (country = :country AND language = :language)
-                  )
-                LIMIT 1
-                """
-            ),
-            {"uri": body.uri, "country": body.country.upper(), "language": body.language.lower()},
-        ).first()
-    if not approved:
+    if not is_approved_source(body.uri, body.country, body.language, correlation_id):
         return JSONResponse(
             status_code=404,
             content=Envelope(

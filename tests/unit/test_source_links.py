@@ -6,36 +6,6 @@ from api import routes
 from config import settings
 
 
-class Result:
-    def __init__(self, approved: bool) -> None:
-        self.approved = approved
-
-    def first(self):
-        return (1,) if self.approved else None
-
-
-class Connection:
-    def __init__(self, approved: bool) -> None:
-        self.approved = approved
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return None
-
-    def execute(self, *_args, **_kwargs):
-        return Result(self.approved)
-
-
-class Engine:
-    def __init__(self, approved: bool) -> None:
-        self.approved = approved
-
-    def connect(self):
-        return Connection(self.approved)
-
-
 class S3:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -83,7 +53,7 @@ def test_source_link_is_widget_authenticated_and_rate_limited() -> None:
 def test_source_link_rejects_unapproved_or_wrong_locale_source(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", True)
     monkeypatch.setattr(routes, "has_valid_consent", lambda _session_id, _correlation_id: True)
-    monkeypatch.setattr(routes, "get_engine", lambda: Engine(False))
+    monkeypatch.setattr(routes, "is_approved_source", lambda *_args: False)
 
     response = routes.source_link(_body(), _request())
 
@@ -100,7 +70,13 @@ def test_source_link_presigns_approved_s3_object_and_opens_exact_page(monkeypatc
         return True
 
     monkeypatch.setattr(routes, "has_valid_consent", valid_consent)
-    monkeypatch.setattr(routes, "get_engine", lambda: Engine(True))
+    source_checks: list[tuple[str, str, str, str]] = []
+
+    def approved_source(uri: str, country: str, language: str, correlation_id: str) -> bool:
+        source_checks.append((uri, country, language, correlation_id))
+        return True
+
+    monkeypatch.setattr(routes, "is_approved_source", approved_source)
     monkeypatch.setattr(
         routes,
         "get_aws_clients",
@@ -112,6 +88,14 @@ def test_source_link_presigns_approved_s3_object_and_opens_exact_page(monkeypatc
     assert response.success is True
     assert response.data["url"].endswith("#page=12")
     assert consent_checks == [("session-1", "source-test")]
+    assert source_checks == [
+        (
+            f"s3://{settings.S3_BUCKET}/approved/Canada_en/policies/policy.pdf",
+            "CA",
+            "en",
+            "source-test",
+        )
+    ]
     assert s3.calls[0]["Params"] == {
         "Bucket": settings.S3_BUCKET,
         "Key": "approved/Canada_en/policies/policy.pdf",
