@@ -47,6 +47,32 @@ def _word_tokens(text: str) -> set[str]:
     return set(re.findall(r"[^\W\d_]{2,}", _normalize(text), flags=re.UNICODE))
 
 
+def _tokens_match(subject_token: str, source_token: str) -> bool:
+    """Match exact words or conservative grammatical variants."""
+    if subject_token == source_token:
+        return True
+
+    shorter_length = min(len(subject_token), len(source_token))
+    if shorter_length < 6:
+        return False
+
+    common_prefix_length = 0
+    for subject_character, source_character in zip(subject_token, source_token):
+        if subject_character != source_character:
+            break
+        common_prefix_length += 1
+
+    return common_prefix_length >= max(6, int(shorter_length * 0.7))
+
+
+def _subject_matches_window(subject_tokens: set[str], window_tokens: set[str]) -> bool:
+    """Return true when every subject word has an exact or inflected match."""
+    return all(
+        any(_tokens_match(subject_token, window_token) for window_token in window_tokens)
+        for subject_token in subject_tokens
+    )
+
+
 def _sentence_for_claim(answer: str, start: int, end: int) -> str:
     """Return the sentence-like local answer window around a numeric claim."""
     left = max(answer.rfind(".", 0, start), answer.rfind("\n", 0, start), answer.rfind(":", 0, start))
@@ -123,7 +149,9 @@ def _claim_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
     for number in _number_variants(claim.number):
         for window in _source_windows(source_text, number):
             window_tokens = _word_tokens(window)
-            if subject_token_sets and any(subject_tokens.issubset(window_tokens) for subject_tokens in subject_token_sets):
+            if subject_token_sets and any(
+                _subject_matches_window(subject_tokens, window_tokens) for subject_tokens in subject_token_sets
+            ):
                 return True
 
             # Some scripts do not capitalize names. In that case, retain a modest
