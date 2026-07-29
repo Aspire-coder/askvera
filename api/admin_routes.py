@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from botocore.exceptions import BotoCoreError, ClientError
@@ -38,6 +39,8 @@ from services.knowledge_ingestion import (
     validate_upload,
 )
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
+from services.support_routes import list_support_routes, upsert_support_route
+from services.aws_clients import get_aws_clients
 from services.widget_configs import (
     create_widget_config,
     disable_widget_config,
@@ -92,11 +95,18 @@ class WidgetConfigInput(BaseModel):
     default_language: str
     display_name: str = Field(default="AskVera", min_length=1, max_length=80)
     greeting: str = Field(default="", max_length=500)
+    logo_url: str = Field(default="", max_length=2048)
     accent_color: str = Field(default="#2F7D4E", max_length=7)
     position: str = Field(default="bottom-right")
     legal_version: str = Field(default="", max_length=64)
     rate_limit_tier: str = Field(default="standard", max_length=32)
     usage_cap: int | None = Field(default=None, ge=1)
+
+
+class SupportRouteInput(BaseModel):
+    department: str = Field(min_length=1, max_length=160)
+    email: str = Field(min_length=3, max_length=254)
+    enabled: bool = True
 
 
 def _payload(data: Any, request: Request) -> dict[str, Any]:
@@ -432,6 +442,30 @@ def admin_user_resend_invite(user_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="Cognito could not resend the invitation.") from exc
 
 
+@admin_router.get("/support-routes")
+def support_routes_list(request: Request) -> dict[str, Any]:
+    require_admin_access(request, "support", "view")
+    return _payload(list_support_routes(), request)
+
+
+@admin_router.put("/support-routes/{country}")
+def support_route_update(country: str, body: SupportRouteInput, request: Request) -> dict[str, Any]:
+    require_admin_access(request, "support", "manage", country)
+    try:
+        return _payload(
+            upsert_support_route(
+                country,
+                department=body.department,
+                email=body.email,
+                enabled=body.enabled,
+                actor_sub=_actor(request),
+            ),
+            request,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _widget_management_enabled() -> None:
     if not settings.WIDGET_CONFIG_ADMIN_ENABLED:
         raise HTTPException(status_code=404, detail="Widget configuration is not enabled.")
@@ -442,6 +476,52 @@ def _require_widget_markets(request: Request, permission: str, markets: list[str
         raise HTTPException(status_code=400, detail="A widget instance must have at least one market.")
     for market in markets:
         require_admin_access(request, "widget", permission, market)
+
+
+@admin_router.post("/widget-assets")
+async def widget_asset_upload(
+    request: Request,
+    file: Annotated[UploadFile, File(...)],
+) -> dict[str, Any]:
+    """Store a validated public widget logo without proxying arbitrary files."""
+    _widget_management_enabled()
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if not accessible_markets(principal, "widget", "manage"):
+        raise HTTPException(status_code=403, detail="You do not have permission to manage widget assets.")
+    if not settings.WIDGET_ASSET_BUCKET or not settings.WIDGET_ASSET_PUBLIC_BASE_URL:
+        raise HTTPException(status_code=503, detail="Widget asset storage is not configured.")
+
+    content = await file.read(settings.WIDGET_LOGO_MAX_BYTES + 1)
+    await file.close()
+    if len(content) > settings.WIDGET_LOGO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Logo must be 1 MB or smaller.")
+    signatures = {
+        b"\x89PNG\r\n\x1a\n": ("png", "image/png"),
+        b"\xff\xd8\xff": ("jpg", "image/jpeg"),
+        b"RIFF": ("webp", "image/webp"),
+    }
+    detected = next((value for signature, value in signatures.items() if content.startswith(signature)), None)
+    if detected and detected[0] == "webp" and content[8:12] != b"WEBP":
+        detected = None
+    if not detected:
+        raise HTTPException(status_code=400, detail="Upload a PNG, JPEG or WebP image.")
+
+    extension, content_type = detected
+    key = f"widget/assets/logos/{uuid4().hex}.{extension}"
+    try:
+        get_aws_clients().s3.put_object(
+            Bucket=settings.WIDGET_ASSET_BUCKET,
+            Key=key,
+            Body=content,
+            ContentType=content_type,
+            CacheControl="public,max-age=31536000,immutable",
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="The logo could not be stored.") from exc
+    return _payload(
+        {"url": f"{settings.WIDGET_ASSET_PUBLIC_BASE_URL.rstrip('/')}/{key}"},
+        request,
+    )
 
 
 @admin_router.get("/widget-configs")

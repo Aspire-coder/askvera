@@ -17,6 +17,7 @@ import type {
   Interaction,
   PipelineTrace,
   ShadowReport,
+  SupportRoute,
   WidgetConfig
 } from "./types";
 
@@ -81,6 +82,12 @@ export class AdminApi {
   resendInvite(id: string) {
     return this.request<AdminUser>(`/api/admin/users/${id}/resend-invite`, { method: "POST" });
   }
+  supportRoutes() { return this.request<SupportRoute[]>("/api/admin/support-routes"); }
+  updateSupportRoute(country: string, body: { department: string; email: string; enabled: boolean }) {
+    return this.request<SupportRoute>(`/api/admin/support-routes/${country}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
   widgetConfigs() { return this.request<WidgetConfig[]>("/api/admin/widget-configs"); }
   createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
     return this.request<WidgetConfig>("/api/admin/widget-configs", {
@@ -97,6 +104,11 @@ export class AdminApi {
   }
   disableWidgetConfig(id: string) {
     return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/disable`, { method: "POST" });
+  }
+  uploadWidgetLogo(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return this.request<{ url: string }>("/api/admin/widget-assets", { method: "POST", body: form });
   }
 }
 

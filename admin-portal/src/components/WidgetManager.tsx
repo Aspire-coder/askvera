@@ -6,7 +6,7 @@ type Draft = Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" |
 const blank = (): Draft => ({
   name: "", customer: "", allowed_origins: [], markets: [], languages: [],
   default_market: "", default_language: "", display_name: "AskVera",
-  greeting: "Hello. How can I help?", accent_color: "#2F7D4E",
+  greeting: "Hello. How can I help?", logo_url: "", accent_color: "#2F7D4E",
   position: "bottom-right", legal_version: "2026.1", rate_limit_tier: "standard", usage_cap: null
 });
 
@@ -73,7 +73,7 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
       name: item.name, customer: item.customer, allowed_origins: item.allowed_origins,
       markets: item.markets, languages: item.languages, default_market: item.default_market,
       default_language: item.default_language, display_name: item.display_name, greeting: item.greeting,
-      accent_color: item.accent_color, position: item.position, legal_version: item.legal_version,
+      logo_url: item.logo_url, accent_color: item.accent_color, position: item.position, legal_version: item.legal_version,
       rate_limit_tier: item.rate_limit_tier, usage_cap: item.usage_cap
     } : blank();
     setDraft(next);
@@ -107,6 +107,20 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     }
   };
 
+  const uploadLogo = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 1024 * 1024) { setError("Logo must be 1 MB or smaller."); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const result = await api.uploadWidgetLogo(file);
+      setDraft((current) => ({ ...current, logo_url: result.url }));
+      setNotice("Logo uploaded. Save the widget to publish it.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "The logo could not be uploaded.");
+    } finally { setSaving(false); }
+  };
+
   return <section className="page-section">
     <div className="page-heading"><div><span className="eyebrow">Plug-and-play delivery</span><h1>Widget</h1><p>Configure approved markets and websites, then hand the customer a ready-to-paste installation snippet.</p></div><button className="button primary" onClick={() => openEdit()}>Create widget</button></div>
     {notice ? <div className="admin-toast success" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">x</button></div> : null}
@@ -116,7 +130,7 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
         <div><span className={`status-pill ${item.status}`}>{item.status}</span><h2>{item.name}</h2><p>{item.customer || "No customer label"}</p></div>
         <dl><div><dt>Websites</dt><dd>{item.allowed_origins.join(", ")}</dd></div><div><dt>Markets</dt><dd>{item.markets.join(", ")}</dd></div><div><dt>Languages</dt><dd>{item.languages.join(", ")}</dd></div><div><dt>Public instance ID</dt><dd><code>{item.public_key}</code></dd></div></dl>
         <div className="card-actions"><button className="button secondary" onClick={() => openEdit(item)}>Edit</button><button className="button secondary" onClick={() => void copy(item)}>Copy embed code</button><button className="button secondary" onClick={() => { if (window.confirm("Rotate this public instance ID? Existing embeds will stop working until their snippet is updated.")) void api.rotateWidgetKey(item.id).then(() => { setNotice("Public instance ID rotated."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The key could not be rotated.")); }}>Rotate ID</button>{item.status === "active" ? <button className="button secondary" onClick={() => { if (window.confirm("Disable this widget? Existing embeds will stop working immediately.")) void api.disableWidgetConfig(item.id).then(() => { setNotice("Widget disabled."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The widget could not be disabled.")); }}>Disable</button> : null}</div>
-        <details><summary>How to install</summary><p>Paste this snippet before the closing body tag on an approved website.</p><pre>{item.embed_code}</pre></details>
+        <details className="install-details"><summary>How to install</summary><p>Paste this snippet before the closing body tag on an approved website.</p><pre>{item.embed_code}</pre><button className="button secondary" onClick={() => void copy(item)}>Copy code</button></details>
       </article>)}
       {!loading && !items.length ? <div className="empty-state surface">No widget instances yet. Create one when a customer site is ready.</div> : null}
     </div>
@@ -128,9 +142,10 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
       <fieldset><legend>Languages</legend><div className="choice-grid">{allowedLanguages.map((language) => <label key={language.code}><input type="checkbox" checked={draft.languages.includes(language.code)} onChange={() => setDraft({ ...draft, languages: draft.languages.includes(language.code) ? draft.languages.filter((item) => item !== language.code) : [...draft.languages, language.code] })} />{language.name}</label>)}</div></fieldset>
       <div className="form-grid"><label><span>Default market</span><select value={draft.default_market} onChange={(event) => setDraft({ ...draft, default_market: event.target.value })}><option value="">Select</option>{draft.markets.map((market) => <option key={market}>{market}</option>)}</select></label><label><span>Default language</span><select value={draft.default_language} onChange={(event) => setDraft({ ...draft, default_language: event.target.value })}><option value="">Select</option>{draft.languages.map((language) => <option key={language}>{language}</option>)}</select></label></div>
       <div className="form-grid"><label><span>Display name</span><input value={draft.display_name} onChange={(event) => setDraft({ ...draft, display_name: event.target.value })} /></label><label><span>Accent</span><input type="color" value={draft.accent_color} onChange={(event) => setDraft({ ...draft, accent_color: event.target.value })} /></label></div>
+      <label className="logo-upload"><span>Widget logo</span><div>{draft.logo_url ? <img src={draft.logo_url} alt="Current widget logo preview" /> : <span className="logo-placeholder">No logo</span>}<div><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadLogo(event.target.files?.[0])} /><small>PNG, JPEG or WebP. Maximum 1 MB.</small>{draft.logo_url ? <button type="button" className="text-button" onClick={() => setDraft({ ...draft, logo_url: "" })}>Remove logo</button> : null}</div></div></label>
       <label><span>Greeting</span><textarea value={draft.greeting} onChange={(event) => setDraft({ ...draft, greeting: event.target.value })} /></label>
       <div className="form-grid"><label><span>Position</span><select value={draft.position} onChange={(event) => setDraft({ ...draft, position: event.target.value as Draft["position"] })}><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option></select></label><label><span>Legal version</span><input value={draft.legal_version} onChange={(event) => setDraft({ ...draft, legal_version: event.target.value })} /></label><label><span>Rate-limit tier</span><select value={draft.rate_limit_tier} onChange={(event) => setDraft({ ...draft, rate_limit_tier: event.target.value })}><option>standard</option><option>low</option><option>high</option></select></label><label><span>Monthly usage cap</span><input type="number" min="1" value={draft.usage_cap || ""} onChange={(event) => setDraft({ ...draft, usage_cap: event.target.value ? Number(event.target.value) : null })} /></label></div>
-      <div className={`widget-mini-preview ${draft.position}`} style={{ borderColor: draft.accent_color }}><strong>{draft.display_name || "AskVera"}</strong><p>{draft.greeting || "Hello. How can I help?"}</p><span style={{ background: draft.accent_color }}>Ask a question</span></div>
+      <div className={`widget-mini-preview ${draft.position}`} style={{ borderColor: draft.accent_color }}>{draft.logo_url ? <img src={draft.logo_url} alt="" /> : null}<strong>{draft.display_name || "AskVera"}</strong><p>{draft.greeting || "Hello. How can I help?"}</p><span style={{ background: draft.accent_color }}>Ask a question</span></div>
       <div className="modal-actions"><button className="button secondary" onClick={close}>Cancel</button><button className="button primary" disabled={saving || Boolean(originIssue)} onClick={() => void save()}>{saving ? "Saving..." : editing ? "Save widget" : "Create widget"}</button></div>
     </section></div> : null}
   </section>;

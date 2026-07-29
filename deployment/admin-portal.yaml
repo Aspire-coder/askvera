@@ -15,6 +15,11 @@ Parameters:
     Type: String
     Default: https://api.vera-api.xyz
     AllowedPattern: "^https://.+$"
+  WidgetAssetOrigin:
+    Type: String
+    Default: https://d1wzljafbhsv7.cloudfront.net
+    Description: HTTPS origin used for administrator-uploaded widget logos.
+    AllowedPattern: "^https://[^/]+$"
   CognitoDomainPrefix:
     Type: String
     Description: Globally unique prefix used for the Cognito hosted sign-in domain.
@@ -75,7 +80,7 @@ Resources:
         Name: !Sub "${AWS::StackName}-security-headers"
         SecurityHeadersConfig:
           ContentSecurityPolicy:
-            ContentSecurityPolicy: !Sub "default-src 'self'; connect-src 'self' ${ApiOrigin} https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+            ContentSecurityPolicy: !Sub "default-src 'self'; connect-src 'self' ${ApiOrigin} https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com; img-src 'self' data: ${WidgetAssetOrigin}; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
             Override: true
           ContentTypeOptions:
             Override: true
@@ -109,6 +114,9 @@ Resources:
     Properties:
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailSubject: "Your AskVera Operations invitation"
+          EmailMessage: "<p>You have been invited to AskVera Operations.</p><p>Username: <strong>{username}</strong></p><p>Temporary password:</p><p><strong>{####}</strong></p><p>Sign in and choose a new password when prompted.</p>"
       AutoVerifiedAttributes:
         - email
       MfaConfiguration: OPTIONAL

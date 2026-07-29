@@ -155,6 +155,7 @@ export type WidgetCitationLabels = {
   supportingSource: string;
   source: string;
   section: string;
+  openSource: string;
 };
 
 export type GenericWidgetConfig = {
@@ -303,6 +304,7 @@ export type GenericWidgetWrapperProps = {
     expectedAnswer?: string
   ) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
+  onOpenSource?: (uri: string, page: string | undefined, state: GenericWidgetRenderState) => void | Promise<void>;
   onEscalate?: (payload: LocaleChangePayload) => void;
   onNewChat?: (payload: LocaleChangePayload, reason?: SessionResetReason) => SessionResetResult | Promise<SessionResetResult>;
 };

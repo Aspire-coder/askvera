@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -26,12 +27,23 @@ from services.legal_service import get_legal_documents
 from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
 from services.pii import scrub_pii
 from services.support import send_support_request, support_country_codes
+from services.aws_clients import get_aws_clients
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
 from utils.validators import ChatRequest, ConsentRequest, EndSessionRequest, Envelope, FeedbackRequest, SupportRequest
 
 router = APIRouter()
 LOGGER = get_logger("api.routes")
+
+
+class SourceLinkRequest(BaseModel):
+    """Request a short-lived link to an approved citation source."""
+
+    sessionId: str = Field(min_length=1, max_length=160)
+    country: str = Field(min_length=2, max_length=16)
+    language: str = Field(min_length=2, max_length=16)
+    uri: str = Field(min_length=8, max_length=2048)
+    page: str = Field(default="", max_length=32)
 
 
 def _correlation_id(request: Request) -> str:
@@ -81,6 +93,71 @@ def _session_mismatch_response(correlation_id: str) -> JSONResponse:
         correlationId=correlation_id,
     )
     return JSONResponse(status_code=403, content=envelope.model_dump())
+
+
+@router.post("/api/source-link", response_model=None)
+def source_link(body: SourceLinkRequest, request: Request) -> Envelope | JSONResponse:
+    """Create a short-lived download link only for an approved locale source."""
+    correlation_id = _correlation_id(request)
+    if not _session_matches_widget_token(request, body.sessionId):
+        return _session_mismatch_response(correlation_id)
+    if not has_valid_consent(body.sessionId, body.country, body.language):
+        return consent_required_response(correlation_id)
+
+    prefix = f"s3://{settings.S3_BUCKET}/approved/"
+    if not body.uri.startswith(prefix):
+        return JSONResponse(
+            status_code=404,
+            content=Envelope(
+                success=False,
+                error={"code": "SOURCE_NOT_AVAILABLE", "message": "The cited source is not available."},
+                correlationId=correlation_id,
+            ).model_dump(),
+        )
+
+    with get_engine().connect() as connection:
+        approved = connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM (
+                    SELECT source_uri, country, language, access_scope, status
+                    FROM knowledge_documents
+                    UNION ALL
+                    SELECT source_uri, country, language, access_scope, status
+                    FROM policy_sections
+                ) sources
+                WHERE source_uri = :uri
+                  AND status = 'active'
+                  AND (
+                    access_scope = 'global'
+                    OR (country = :country AND language = :language)
+                  )
+                LIMIT 1
+                """
+            ),
+            {"uri": body.uri, "country": body.country.upper(), "language": body.language.lower()},
+        ).first()
+    if not approved:
+        return JSONResponse(
+            status_code=404,
+            content=Envelope(
+                success=False,
+                error={"code": "SOURCE_NOT_AVAILABLE", "message": "The cited source is not available for this market."},
+                correlationId=correlation_id,
+            ).model_dump(),
+        )
+
+    key = body.uri[len(prefix):]
+    url = get_aws_clients().s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.S3_BUCKET, "Key": f"approved/{key}"},
+        ExpiresIn=300,
+    )
+    page_number = "".join(character for character in body.page.split("-", 1)[0] if character.isdigit())
+    if page_number:
+        url = f"{url}#page={page_number}"
+    return success({"url": url, "expiresIn": 300}, correlation_id)
 
 
 @router.post("/api/widget/init", response_model=None)

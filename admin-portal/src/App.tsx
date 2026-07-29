@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { AdminApi, demo, type AdminCredentials } from "./api";
 import { beginSignIn, cognitoConfigured, completeSignIn, demoAllowed, signOut, type AuthSession } from "./auth";
-import { ChartIcon, FlowIcon, KeyIcon, UploadIcon } from "./icons";
+import { AskVeraMark, ChartIcon, FlowIcon, KeyIcon, UploadIcon } from "./icons";
 import { FlowVisualizer } from "./components/FlowVisualizer";
 import { InsightsDashboard } from "./components/InsightsDashboard";
 import { KnowledgeUploader } from "./components/KnowledgeUploader";
+import { SupportRoutesManager } from "./components/SupportRoutesManager";
 import { UsersManager } from "./components/UsersManager";
 import { WidgetManager } from "./components/WidgetManager";
 import type { AdminConfig, View } from "./types";
@@ -13,6 +14,7 @@ const nav = [
   { id: "flow" as const, label: "Live flow", detail: "Follow an answer", icon: <FlowIcon /> },
   { id: "knowledge" as const, label: "Knowledge", detail: "Manage approved content", icon: <UploadIcon /> },
   { id: "insights" as const, label: "Insights", detail: "Measure and improve", icon: <ChartIcon /> },
+  { id: "support" as const, label: "Support", detail: "Route customer requests", icon: <FlowIcon /> },
   { id: "users" as const, label: "Users", detail: "Manage access", icon: <KeyIcon /> },
   { id: "widget" as const, label: "Widget", detail: "Configure customer embeds", icon: <UploadIcon /> },
 ];
@@ -69,12 +71,12 @@ export function App() {
   }, [adminConfig, view]);
 
   if (!authReady) {
-    return <main className="auth-page"><section className="auth-card"><div className="brand-mark">V</div><span className="eyebrow">AskVera Operations</span><h1>Signing you in</h1><p>Verifying your administrator session.</p></section></main>;
+    return <main className="auth-page"><section className="auth-card"><div className="brand-mark"><AskVeraMark /></div><span className="eyebrow">AskVera Operations</span><h1>Signing you in</h1><p>Verifying your administrator session.</p></section></main>;
   }
 
   if (cognitoConfigured && !session) {
     return <main className="auth-page"><section className="auth-card">
-      <div className="brand-mark">V</div><span className="eyebrow">AskVera Operations</span><h1>Operational clarity, in one place.</h1><p>Review answer quality, follow live requests, and manage approved knowledge through your company account.</p>
+      <div className="brand-mark"><AskVeraMark /></div><span className="eyebrow">AskVera Operations</span><h1>Operational clarity, in one place.</h1><p>Review answer quality, follow live requests, and manage approved knowledge through your company account.</p>
       {authError ? <div className="auth-error" role="alert">{authError}</div> : null}
       <button className="button primary auth-button" onClick={() => void beginSignIn()}>Sign in securely</button>
       <small>Access is limited to approved AskVera administrators.</small>
@@ -84,7 +86,7 @@ export function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">V</div><div><strong>AskVera</strong><span>Operations</span></div></div>
+        <div className="brand"><div className="brand-mark"><AskVeraMark /></div><div><strong>AskVera</strong><span>Operations</span></div></div>
         <nav aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span><strong>{item.label}</strong><small>{item.detail}</small></span></button>)}</nav>
         <div className="sidebar-bottom">
           <button className="connection-button" onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /><span><strong>{connectionLabel}</strong><small>{session ? "Select to sign out" : connectionDetail}</small></span><i className={session || apiKey ? "online" : ""} /></button>
@@ -93,10 +95,11 @@ export function App() {
       </aside>
 
       <main className="main-content">
-        <header className="mobile-header"><div className="brand"><div className="brand-mark">V</div><strong>AskVera Operations</strong></div><button onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /></button></header>
+        <header className="mobile-header"><div className="brand"><div className="brand-mark"><AskVeraMark /></div><strong>AskVera Operations</strong></div><button onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /></button></header>
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
         {view === "insights" ? <InsightsDashboard credentials={credentials} /> : null}
+        {view === "support" ? <SupportRoutesManager credentials={credentials} config={adminConfig} /> : null}
         {view === "users" ? <UsersManager credentials={credentials} config={adminConfig} /> : null}
         {view === "widget" ? <WidgetManager credentials={credentials} config={adminConfig} /> : null}
         {!visibleNav.length ? <section className="page-section"><div className="empty-state surface">Your account does not currently have access to an operations section.</div></section> : null}

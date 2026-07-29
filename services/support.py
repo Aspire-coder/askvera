@@ -12,6 +12,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import get_country_codes
+from services.session import get_session_history
+from services.support_routes import get_active_support_route, list_support_routes
 from utils.exceptions import SupportRouteUnavailableError, SupportUnavailableError
 from utils.logging import get_logger
 from utils.validators import SupportRequest
@@ -44,7 +46,12 @@ def _valid_route(route: object) -> bool:
 
 def support_country_codes() -> list[str]:
     """Return configured support markets without exposing route destinations."""
-    if not settings.SUPPORT_EMAIL_ENABLED or not isinstance(settings.SUPPORT_ROUTES_JSON, dict):
+    if not settings.SUPPORT_EMAIL_ENABLED:
+        return []
+    managed = [str(route["country"]) for route in list_support_routes() if route.get("enabled")]
+    if managed:
+        return sorted(set(managed))
+    if not isinstance(settings.SUPPORT_ROUTES_JSON, dict):
         return []
     if _valid_route(settings.SUPPORT_DEFAULT_ROUTE_JSON):
         return sorted(get_country_codes())
@@ -56,7 +63,10 @@ def support_country_codes() -> list[str]:
 
 
 def _route_for(country: str) -> tuple[str, str]:
-    route: Any = _routes().get(country.upper())
+    route: Any = get_active_support_route(country)
+    if route:
+        return str(route["department"]), str(route["email"])
+    route = _routes().get(country.upper())
     if not _valid_route(route):
         route = settings.SUPPORT_DEFAULT_ROUTE_JSON
     if not _valid_route(route):
@@ -82,11 +92,20 @@ def send_support_request(body: SupportRequest, correlation_id: str) -> SupportDe
     department, recipient = _route_for(body.country)
     ticket_id = _ticket_id(correlation_id)
     subject = f"{settings.SUPPORT_EMAIL_SUBJECT_PREFIX} [{ticket_id}] - {body.country}"
+    transcript = get_session_history(body.sessionId, correlation_id).strip()
+    question_count = sum(1 for line in transcript.splitlines() if line.lower().startswith("user:"))
+    summary = (
+        f"The customer asked {question_count} question{'s' if question_count != 1 else ''} in this chat. "
+        f"The support request is: {body.question}"
+    )
+    transcript_text = transcript or "No earlier chat transcript was available."
     plain_text = (
         f"AskVera support request\n\n"
         f"Reference: {ticket_id}\nDepartment: {department}\nMarket: {body.country}\n"
         f"Language: {body.language}\nFirst name: {body.firstName}\nEmail: {body.email}\n\n"
+        f"Quick summary:\n{summary}\n\n"
         f"Question or issue:\n{body.question}\n\n"
+        f"Recent AskVera conversation:\n{transcript_text}\n\n"
         f"AskVera session: {body.sessionId}\nSource message: {body.messageId or 'Not linked'}\n"
     )
     html_body = (
@@ -97,7 +116,10 @@ def send_support_request(body: SupportRequest, correlation_id: str) -> SupportDe
         f"<strong>Language:</strong> {escape(body.language)}<br>"
         f"<strong>First name:</strong> {escape(body.firstName)}<br>"
         f"<strong>Email:</strong> {escape(body.email)}</p>"
+        f"<h3>Quick summary</h3><p>{escape(summary)}</p>"
         f"<h3>Question or issue</h3><p>{escape(body.question).replace(chr(10), '<br>')}</p>"
+        f"<h3>Recent AskVera conversation</h3>"
+        f"<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif\">{escape(transcript_text)}</pre>"
         f"<p><small>AskVera session: {escape(body.sessionId)}<br>"
         f"Source message: {escape(body.messageId or 'Not linked')}</small></p>"
     )

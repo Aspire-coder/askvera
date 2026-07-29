@@ -22,6 +22,7 @@ def _config(**updates) -> dict:
         "default_language": "en",
         "display_name": "AskVera",
         "greeting": "How can I help?",
+        "logo_url": "",
         "accent_color": "#2F7D4E",
         "position": "bottom-right",
         "legal_version": "2026.1",
@@ -37,6 +38,24 @@ def test_widget_config_accepts_exact_https_origin() -> None:
 
     assert clean["allowed_origins"] == ["https://portal.example.com"]
     assert clean["default_market"] == "US"
+
+
+def test_widget_config_accepts_only_uploaded_logo_assets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "WIDGET_ASSET_PUBLIC_BASE_URL",
+        "https://cdn.example.com",
+    )
+
+    clean = widget_configs.validate_widget_config(
+        _config(logo_url="https://cdn.example.com/widget/assets/logos/logo.png")
+    )
+    assert clean["logo_url"].endswith("/widget/assets/logos/logo.png")
+
+    with pytest.raises(ValueError, match="uploaded AskVera asset"):
+        widget_configs.validate_widget_config(
+            _config(logo_url="https://untrusted.example/logo.png")
+        )
 
 
 def test_widget_config_rejects_undeployed_legal_version(monkeypatch) -> None:
@@ -187,6 +206,7 @@ def test_forward_only_migrations_define_required_schema() -> None:
     feedback = (migrations / "20260728_01_feedback_expected_answer.sql").read_text(encoding="utf-8")
     admin = (migrations / "20260728_02_admin_rbac.sql").read_text(encoding="utf-8")
     widgets = (migrations / "20260728_03_widget_configs.sql").read_text(encoding="utf-8")
+    operations = (migrations / "20260729_01_operations_admin.sql").read_text(encoding="utf-8")
 
     assert "expected_answer_present BOOLEAN NOT NULL DEFAULT false" in feedback
     assert "CREATE TABLE IF NOT EXISTS admin_users" in admin
@@ -194,3 +214,6 @@ def test_forward_only_migrations_define_required_schema() -> None:
     assert "CREATE TABLE IF NOT EXISTS admin_audit_log" in admin
     assert "CREATE TABLE IF NOT EXISTS widget_configs" in widgets
     assert "public_key TEXT NOT NULL UNIQUE" in widgets
+    assert "disabled_at TIMESTAMPTZ" in operations
+    assert "logo_url TEXT NOT NULL DEFAULT ''" in operations
+    assert "CREATE TABLE IF NOT EXISTS support_routes" in operations

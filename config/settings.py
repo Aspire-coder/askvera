@@ -99,12 +99,13 @@ AWS_MAX_ATTEMPTS = 3
 # so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_REQUESTS = 30
-RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support"]
+RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support", "/api/source-link"]
 RATE_LIMIT_POLICIES = {
     "/api/chat": _env_int("RATE_LIMIT_CHAT_PER_MINUTE", 30),
     "/api/consent": _env_int("RATE_LIMIT_CONSENT_PER_MINUTE", 20),
     "/api/feedback": _env_int("RATE_LIMIT_FEEDBACK_PER_MINUTE", 15),
     "/api/support": _env_int("RATE_LIMIT_SUPPORT_PER_MINUTE", 5),
+    "/api/source-link": _env_int("RATE_LIMIT_SOURCE_LINK_PER_MINUTE", 30),
     "/api/privacy": _env_int("RATE_LIMIT_PRIVACY_PER_MINUTE", 120),
     "/api/config": _env_int("RATE_LIMIT_CONFIG_PER_MINUTE", 120),
     "/api/widget/init": _env_int("RATE_LIMIT_WIDGET_INIT_PER_MINUTE", 10),
@@ -132,6 +133,9 @@ WIDGET_CONFIG_ADMIN_ENABLED = _env_bool("WIDGET_CONFIG_ADMIN_ENABLED", False)
 WIDGET_CONFIG_RUNTIME_ENABLED = _env_bool("WIDGET_CONFIG_RUNTIME_ENABLED", False)
 WIDGET_LOADER_URL = _env_str("WIDGET_LOADER_URL", "https://d1wzljafbhsv7.cloudfront.net/widget/latest/widget.js")
 WIDGET_STYLES_URL = _env_str("WIDGET_STYLES_URL", "https://d1wzljafbhsv7.cloudfront.net/widget/latest/widget.css")
+WIDGET_ASSET_BUCKET = _env_str("WIDGET_ASSET_BUCKET", "")
+WIDGET_ASSET_PUBLIC_BASE_URL = _env_str("WIDGET_ASSET_PUBLIC_BASE_URL", "")
+WIDGET_LOGO_MAX_BYTES = _env_int("WIDGET_LOGO_MAX_BYTES", 1024 * 1024)
 KNOWLEDGE_UPLOAD_BUCKET = _env_str("KNOWLEDGE_UPLOAD_BUCKET", "")
 KNOWLEDGE_UPLOAD_PREFIX = _env_str("KNOWLEDGE_UPLOAD_PREFIX", "approved-knowledge")
 # Widget authentication. Keep disabled by default for local/dev until production
@@ -142,7 +146,17 @@ WIDGET_JWT_TTL_SECONDS = _env_int("WIDGET_JWT_TTL_SECONDS", 900)
 WIDGET_JWT_ISSUER = _env_str("WIDGET_JWT_ISSUER", "ask-vera")
 WIDGET_JWT_AUDIENCE = _env_str("WIDGET_JWT_AUDIENCE", "widget-api")
 WIDGET_JWT_CLOCK_SKEW_SECONDS = _env_int("WIDGET_JWT_CLOCK_SKEW_SECONDS", 60)
-WIDGET_AUTH_PROTECTED_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support", "/api/session/end", "/api/privacy", "/api/config", "/api/widget/config"]
+WIDGET_AUTH_PROTECTED_PATHS = [
+    "/api/chat",
+    "/api/consent",
+    "/api/feedback",
+    "/api/support",
+    "/api/source-link",
+    "/api/session/end",
+    "/api/privacy",
+    "/api/config",
+    "/api/widget/config",
+]
 WIDGET_ALLOW_LOCALHOST_ORIGINS = _env_bool("WIDGET_ALLOW_LOCALHOST_ORIGINS", APP_ENV != "production")
 WIDGET_REGISTRY_PROVIDER = _env_str("WIDGET_REGISTRY_PROVIDER", "json")
 WIDGET_REGISTRY_TABLE = _env_str("WIDGET_REGISTRY_TABLE", "AskVeraWidgets")

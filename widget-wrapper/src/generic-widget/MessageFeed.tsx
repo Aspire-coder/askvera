@@ -199,7 +199,8 @@ function MessageCard({
   state,
   onCopyMessage,
   onMessageFeedback,
-  onRequestSupport
+  onRequestSupport,
+  onOpenSource
 }: {
   message: WidgetMessage;
   config: GenericWidgetConfig;
@@ -207,6 +208,11 @@ function MessageCard({
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState, expectedAnswer?: string) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
+  onOpenSource?: (
+    uri: string,
+    page: string | undefined,
+    state: GenericWidgetRenderState
+  ) => void | Promise<void>;
 }) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -226,7 +232,7 @@ function MessageCard({
           <span className="gw-message-author">{label}</span>
         </header>
         <div className="gw-message-body">{content}</div>
-        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} labels={config.citationLabels} /> : null}
+        {isAssistant ? <CitationRenderer sources={message.metadata?.sources} labels={config.citationLabels} onOpenSource={onOpenSource ? (uri, page) => onOpenSource(uri, page, state) : undefined} /> : null}
         {isAssistant ? (
           <MessageActions
             message={message}
@@ -287,7 +293,8 @@ export function MessageFeed({
   loadingLabel,
   onCopyMessage,
   onMessageFeedback,
-  onRequestSupport
+  onRequestSupport,
+  onOpenSource
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
@@ -298,6 +305,7 @@ export function MessageFeed({
   onCopyMessage?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState, expectedAnswer?: string) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
+  onOpenSource?: (uri: string, page: string | undefined, state: GenericWidgetRenderState) => void | Promise<void>;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const previousLoadingState = useRef(loadingState);
@@ -324,6 +332,7 @@ export function MessageFeed({
           onCopyMessage={onCopyMessage}
           onMessageFeedback={onMessageFeedback}
           onRequestSupport={onRequestSupport}
+          onOpenSource={onOpenSource}
         />
       ))}
       {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}

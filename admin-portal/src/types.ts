@@ -1,4 +1,4 @@
-export type View = "flow" | "knowledge" | "insights" | "users" | "widget";
+export type View = "flow" | "knowledge" | "insights" | "support" | "users" | "widget";
 
 export type TraceStage = {
   stage: string;
@@ -48,7 +48,18 @@ export type AdminUser = {
   last_login: string | null;
   created_at: string;
   updated_at: string;
+  disabled_at: string | null;
   scopes: AdminScope[];
+};
+
+export type SupportRoute = {
+  country: string;
+  country_name: string;
+  department: string;
+  email: string;
+  enabled: boolean;
+  updated_at: string | null;
+  updated_by: string;
 };
 
 export type AdminAuditEvent = {
@@ -72,6 +83,7 @@ export type WidgetConfig = {
   display_name: string;
   greeting: string;
   accent_color: string;
+  logo_url: string;
   position: "bottom-right" | "bottom-left";
   legal_version: string;
   rate_limit_tier: string;

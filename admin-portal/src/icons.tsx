@@ -13,4 +13,9 @@ export const SearchIcon = () => <Icon><circle cx="11" cy="11" r="7"/><path d="m1
 export const FileIcon = () => <Icon><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6m-6 4h6"/></Icon>;
 export const CheckIcon = () => <Icon size={16}><path d="m5 12 4 4L19 6"/></Icon>;
 export const ArrowIcon = () => <Icon size={16}><path d="m9 18 6-6-6-6"/></Icon>;
+export const AskVeraMark = () => <svg className="askvera-mark" viewBox="0 0 40 40" aria-hidden="true">
+  <circle cx="20" cy="20" r="18" fill="#eff7e8" stroke="#bfd49f" />
+  <path d="M12 24c7 1 13-3 16-11 1 9-3 16-11 18-2-2-4-4-5-7Z" fill="#4f7d2b" />
+  <path d="M15 27c4-4 8-7 13-10" fill="none" stroke="#2f5d24" strokeWidth="1.8" strokeLinecap="round" />
+</svg>;
 export const RefreshIcon = () => <Icon size={16}><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></Icon>;

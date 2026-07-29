@@ -37,10 +37,39 @@ All routes require a Cognito access token from a member of the configured admini
 | `POST /api/admin/users/{id}/enable` | Re-enable a disabled administrator |
 | `POST /api/admin/users/{id}/disable` | Immediately block an administrator |
 | `POST /api/admin/users/{id}/resend-invite` | Ask Cognito to send a new invitation |
+| `GET/PUT /api/admin/support-routes` | View or update country-specific support destinations |
 | `GET /api/admin/audit-events` | Recent administrator changes |
 | `GET/POST/PATCH /api/admin/widgets` | Feature-gated widget instance management |
+| `POST /api/admin/widget-assets` | Validate and upload a widget logo |
 | `POST /api/admin/widgets/{id}/rotate-key` | Rotate the public widget identifier |
 | `POST /api/admin/widgets/{id}/disable` | Disable a widget instance |
+
+The Users view is paginated and can be filtered by status. Disabled accounts
+show when they were disabled. Country administrators may only view or update
+support destinations for their assigned markets; Super Admins can manage every
+market. Support submissions use a managed database route when one exists and
+fall back to the existing SSM configuration until routes are migrated.
+
+Widget logos are limited to PNG, JPEG, and WebP files up to 1 MB. The API
+validates the file signature, stores the object under the configured widget
+asset prefix, and only accepts saved logo URLs from that configured public
+origin.
+
+## Source links
+
+The public widget never receives a permanent S3 URL. When a user selects
+`View exact source`, it requests `POST /api/source-link` with the current
+session, market, language, source URI, and page. The API verifies:
+
+1. The widget token belongs to the same session.
+2. The session has valid consent.
+3. The source is active and approved in the retrieval database.
+4. A country document matches the selected market and language, or the source
+   is explicitly global.
+5. The S3 object is under the approved knowledge bucket.
+
+Only then does the API return a five-minute presigned URL. A PDF page fragment
+is added when the citation contains a page number.
 
 Analytics are captured from the existing chat and feedback routes. The question text is locally redacted for common email and phone patterns, answers have already passed output PII controls, and session IDs are used only for distinct-user aggregation. Apply the organization's retention policy to `chat_analytics` and `feedback_events` before production launch.
 
@@ -75,6 +104,10 @@ Country-scoped documents follow the chatbot's locale filter. Global documents ar
   AskVera prevents self-disable, self-demotion, and removal of the last active
   Super Admin.
 - Set `KNOWLEDGE_UPLOAD_BUCKET` to a private, encrypted, versioned S3 bucket with lifecycle and least-privilege IAM policies.
+- Set `WIDGET_ASSET_BUCKET` and `WIDGET_ASSET_PUBLIC_BASE_URL`, and grant only
+  `s3:PutObject` for the `widget/assets/logos/` prefix to the API role.
+- Add the widget asset origin to the admin portal CloudFront content-security
+  policy so uploaded-logo previews can render.
 - Add the operations portal HTTPS origin to `ALLOWED_ORIGINS`; do not use a wildcard.
 - Federate the Cognito user pool with company SSO when the identity team is ready; the built-in user pool supports the initial controlled launch.
 - Configure CloudFront security headers and no-store caching for the portal shell.
@@ -85,6 +118,12 @@ Country-scoped documents follow the chatbot's locale filter. Global documents ar
   across API workers. Monitor `widget_registry_invalidation_*` log events; the
   local authorization cache is capped at 30 seconds as a fallback.
 - Run unit tests, build the portal, perform a real upload in a non-production index, and verify a chat retrieves the new content before production deployment.
+- Apply `migrations/20260729_01_operations_admin.sql` before enabling support
+  route management or widget logo persistence.
+- Seed and verify each market's support route before treating managed routing
+  as authoritative. Keep the SSM routes in place during the transition.
+- Confirm `POST /api/source-link` is protected by widget authentication,
+  consent, and the configured per-minute rate limit.
 - Apply the three `20260728_*` additive migrations before enabling the related
   flags.
 - Keep all optional enhancement flags disabled until the corresponding UAT

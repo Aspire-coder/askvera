@@ -115,6 +115,12 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
         <div className="trace-context"><span>{trace.country || "-"}</span><span>{trace.language?.toUpperCase() || "-"}</span><span>{displayTime(trace.started_at)}</span></div>
         <button className="button primary" onClick={replay}>Replay journey</button>
       </div>
+      <div className={`path-summary ${cacheHit ? "cache" : "generated"}`} role="status">
+        <strong>{cacheHit ? "Validated cache path used" : "Grounded generation path used"}</strong>
+        <span>{cacheHit
+          ? "The approved cached answer was revalidated and returned without a model call."
+          : "The request passed safety checks, retrieved approved evidence, generated an answer, and validated it before delivery."}</span>
+      </div>
 
       <div className="journey-metrics">
         <article className="journey-metric surface"><span>End-to-end work</span><strong>{integer.format(Math.round(totalDuration))}<small> ms</small></strong><p>{slowestStage ? `${titleCase(slowestStage.stage)} was the longest stop` : "Waiting for the journey"}</p></article>

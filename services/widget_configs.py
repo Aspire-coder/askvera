@@ -74,6 +74,11 @@ def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
     legal_version = str(values.get("legal_version") or settings.LEGAL_VERSION).strip()
     if legal_version != settings.LEGAL_VERSION:
         raise ValueError("Legal version must match the currently deployed consent version.")
+    logo_url = str(values.get("logo_url") or "").strip()
+    if logo_url:
+        asset_base = settings.WIDGET_ASSET_PUBLIC_BASE_URL.rstrip("/")
+        if not asset_base or not logo_url.startswith(f"{asset_base}/"):
+            raise ValueError("Widget logo must be an uploaded AskVera asset.")
     return {
         **values,
         "allowed_origins": origins,
@@ -86,6 +91,7 @@ def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
         "legal_version": legal_version,
         "rate_limit_tier": tier,
         "usage_cap": int(usage_cap) if usage_cap is not None else None,
+        "logo_url": logo_url,
     }
 
 
@@ -160,14 +166,14 @@ def create_widget_config(values: dict[str, Any], actor_sub: str) -> dict[str, An
                 INSERT INTO widget_configs (
                     id, name, customer, allowed_origins, markets, languages,
                     default_market, default_language, display_name, greeting,
-                    accent_color, position, legal_version, rate_limit_tier,
+                    logo_url, accent_color, position, legal_version, rate_limit_tier,
                     usage_cap, public_key, key_version, status, created_by,
                     created_at, updated_at
                 ) VALUES (
                     :id, :name, :customer, CAST(:allowed_origins AS jsonb),
                     CAST(:markets AS jsonb), CAST(:languages AS jsonb),
                     :default_market, :default_language, :display_name, :greeting,
-                    :accent_color, :position, :legal_version, :rate_limit_tier,
+                    :logo_url, :accent_color, :position, :legal_version, :rate_limit_tier,
                     :usage_cap, :public_key, 1, 'active', :created_by, now(), now()
                 )
                 """
@@ -207,7 +213,7 @@ def update_widget_config(widget_id: str, values: dict[str, Any], actor_sub: str)
                     languages = CAST(:languages AS jsonb),
                     default_market = :default_market,
                     default_language = :default_language,
-                    display_name = :display_name, greeting = :greeting,
+                    display_name = :display_name, greeting = :greeting, logo_url = :logo_url,
                     accent_color = :accent_color, position = :position,
                     legal_version = :legal_version, rate_limit_tier = :rate_limit_tier,
                     usage_cap = :usage_cap, updated_at = now()

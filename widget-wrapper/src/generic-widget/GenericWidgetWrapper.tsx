@@ -70,6 +70,7 @@ export function GenericWidgetWrapper({
   onMessageCopied,
   onMessageFeedback,
   onRequestSupport,
+  onOpenSource,
   onEscalate,
   onNewChat
 }: GenericWidgetWrapperProps) {
@@ -644,6 +645,13 @@ export function GenericWidgetWrapper({
           aria-modal="false"
           aria-label={config.labels.panelAriaLabel || `${config.brandName} assistant widget`}
           tabIndex={-1}
+          onPointerDownCapture={(event) => {
+            if (!menuOpen) return;
+            const target = event.target as HTMLElement;
+            if (!target.closest(".gw-menu") && !target.closest(".gw-header-actions")) {
+              dispatch({ type: "SET_MENU_OPEN", open: false });
+            }
+          }}
           onKeyDown={(event) => {
             if (event.key === "Escape") closeWidget();
           }}
@@ -724,6 +732,7 @@ export function GenericWidgetWrapper({
                 onCopyMessage={handleMessageCopied}
                 onMessageFeedback={handleMessageFeedback}
                 onRequestSupport={onRequestSupport}
+                onOpenSource={onOpenSource}
               />
             ) : null}
             {chatContentVisible && suggestedTopics.length ? (
@@ -744,9 +753,6 @@ export function GenericWidgetWrapper({
           <form className={`gw-composer ${composerDisabled ? "gw-composer-disabled" : ""}`} onSubmit={handleSubmit}>
             <label className="gw-sr-only" htmlFor="gw-message-input">{config.labels.messageInputLabel}</label>
             <div className="gw-composer-shell">
-              <button type="button" className="gw-composer-tool" aria-label={config.labels.attachFileLabel || "Attach a file"} disabled>
-                <span aria-hidden="true">+</span>
-              </button>
               <textarea
                 ref={composerTextareaRef}
                 id="gw-message-input"

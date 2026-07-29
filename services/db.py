@@ -85,6 +85,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ"))
             connection.execute(
                 text(
                     """
@@ -136,6 +137,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                         default_language TEXT NOT NULL DEFAULT '',
                         display_name TEXT NOT NULL DEFAULT 'AskVera',
                         greeting TEXT NOT NULL DEFAULT '',
+                        logo_url TEXT NOT NULL DEFAULT '',
                         accent_color TEXT NOT NULL DEFAULT '#2F7D4E',
                         position TEXT NOT NULL DEFAULT 'bottom-right',
                         legal_version TEXT NOT NULL DEFAULT '',
@@ -148,6 +150,30 @@ def create_schema(correlation_id: str = "startup") -> None:
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
+                    """
+                )
+            )
+            connection.execute(text("ALTER TABLE widget_configs ADD COLUMN IF NOT EXISTS logo_url TEXT NOT NULL DEFAULT ''"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS support_routes (
+                        country TEXT PRIMARY KEY,
+                        department TEXT NOT NULL,
+                        email TEXT NOT NULL,
+                        enabled BOOLEAN NOT NULL DEFAULT true,
+                        updated_by TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_support_routes_enabled
+                    ON support_routes (enabled, country)
                     """
                 )
             )

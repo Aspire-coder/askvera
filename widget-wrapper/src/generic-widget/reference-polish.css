@@ -351,6 +351,30 @@
   box-shadow: none;
 }
 
+.gw-composer-shell {
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.gw-citation-open {
+  align-self: flex-start;
+  margin-top: 4px;
+  border: 1px solid rgba(39, 95, 66, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #275f42;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 7px 11px;
+}
+
+.gw-citation-open:hover,
+.gw-citation-open:focus-visible {
+  background: #fff;
+  border-color: #275f42;
+}
+
 .gw-composer:focus-within .gw-composer-shell {
   border-color: #c9a93e;
   box-shadow: 0 0 0 4px rgba(232, 183, 0, 0.14);

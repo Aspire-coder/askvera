@@ -130,6 +130,46 @@ def test_insights_rejects_unassigned_market() -> None:
     assert exc_info.value.status_code == 403
 
 
+def test_country_admin_can_update_only_assigned_support_route(monkeypatch) -> None:
+    principal = _principal(
+        {"market": "GB", "section": "support", "permission": "manage"}
+    )
+    request = _request(principal)
+    captured: dict = {}
+
+    def update_stub(country, **values):
+        captured.update({"country": country, **values})
+        return {"country": country, **values}
+
+    monkeypatch.setattr(admin_routes, "upsert_support_route", update_stub)
+
+    response = admin_routes.support_route_update(
+        "GB",
+        admin_routes.SupportRouteInput(
+            department="Customer Service",
+            email="support@example.com",
+            enabled=True,
+        ),
+        request,
+    )
+
+    assert response["data"]["country"] == "GB"
+    assert captured["actor_sub"] == ""
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.support_route_update(
+            "DE",
+            admin_routes.SupportRouteInput(
+                department="Customer Service",
+                email="support@example.com",
+                enabled=True,
+            ),
+            request,
+        )
+
+    assert exc_info.value.status_code == 403
+
+
 def test_country_admin_cannot_receive_global_admin_sections() -> None:
     with pytest.raises(ValueError, match="Country Admin"):
         admin_users._validate_role_scopes(

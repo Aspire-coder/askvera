@@ -13,7 +13,9 @@ venv/
 dist/
 .pytest_cache/
 .pytest-*/
-.tmp-vnext-test-deps/
+.tmp-*/
+.ssm-*.json
+.iam-*.json
 .coverage
 htmlcov/
 tmp/

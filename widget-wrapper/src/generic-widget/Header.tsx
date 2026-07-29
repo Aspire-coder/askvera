@@ -1,7 +1,7 @@
 import type { WidgetState } from "../state";
 import type { GenericWidgetConfig, WidgetCountryOption } from "./types";
 
-type HeaderIconName = "menu" | "close";
+type HeaderIconName = "menu" | "minimize";
 
 function HeaderIcon({ name }: { name: HeaderIconName }) {
   const commonProps = {
@@ -26,12 +26,7 @@ function HeaderIcon({ name }: { name: HeaderIconName }) {
     );
   }
 
-  return (
-    <svg {...commonProps}>
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  );
+  return <svg {...commonProps}><path d="M6 12h12" /></svg>;
 }
 
 export function Header({
@@ -81,7 +76,7 @@ export function Header({
           <HeaderIcon name="menu" />
         </button>
         <button type="button" className="gw-icon-button" onClick={onClose} aria-label={config.labels.closeAriaLabel}>
-          <HeaderIcon name="close" />
+          <HeaderIcon name="minimize" />
         </button>
       </div>
     </header>

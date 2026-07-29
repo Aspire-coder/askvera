@@ -32,6 +32,7 @@ class RdsWidgetRegistryProvider:
             metadata={
                 "primaryColor": config["accent_color"],
                 "greeting": config["greeting"],
+                "logo": config.get("logo_url", ""),
                 "position": config["position"],
                 "markets": config["markets"],
                 "languages": config["languages"],

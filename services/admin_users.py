@@ -19,7 +19,7 @@ from utils.logging import get_logger
 
 LOGGER = get_logger("services.admin_users")
 
-ADMIN_SECTIONS = {"flow", "knowledge", "insights", "users", "widget", "audit"}
+ADMIN_SECTIONS = {"flow", "knowledge", "insights", "users", "widget", "support", "audit"}
 ADMIN_PERMISSIONS = {"view", "stage", "publish", "manage"}
 ADMIN_ROLES = {"super_admin", "country_admin", "section_scoped", "auditor"}
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -75,6 +75,7 @@ def _serialize(row: dict[str, Any], scopes: list[dict[str, str]]) -> dict[str, A
     return {
         **row,
         "last_login": row["last_login"].isoformat() if row.get("last_login") else None,
+        "disabled_at": row["disabled_at"].isoformat() if row.get("disabled_at") else None,
         "created_at": row["created_at"].isoformat() if row.get("created_at") else "",
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
         "scopes": scopes,
@@ -428,7 +429,7 @@ def set_admin_user_enabled(user_id: str, enabled: bool, actor_sub: str) -> dict[
         )
         with get_engine().begin() as connection:
             connection.execute(
-                text("UPDATE admin_users SET status = 'active', updated_at = now() WHERE id = :id"),
+                text("UPDATE admin_users SET status = 'active', disabled_at = NULL, updated_at = now() WHERE id = :id"),
                 {"id": user_id},
             )
             _write_audit(connection, actor_sub, "admin_user.enabled", user_id)
@@ -451,7 +452,7 @@ def set_admin_user_enabled(user_id: str, enabled: bool, actor_sub: str) -> dict[
         ):
             raise ValueError("At least one active Super Admin must remain.")
         connection.execute(
-            text("UPDATE admin_users SET status = 'disabled', updated_at = now() WHERE id = :id"),
+            text("UPDATE admin_users SET status = 'disabled', disabled_at = now(), updated_at = now() WHERE id = :id"),
             {"id": user_id},
         )
         _write_audit(connection, actor_sub, "admin_user.disable_requested", user_id)

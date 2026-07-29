@@ -44,17 +44,19 @@ function formatPage(page?: string): string | null {
 
 export function CitationRenderer({
   sources,
-  labels
+  labels,
+  onOpenSource
 }: {
   sources: unknown;
   labels?: WidgetCitationLabels;
+  onOpenSource?: (uri: string, page?: string) => void | Promise<void>;
 }) {
   const normalized = normalizeSources(sources);
   if (!normalized.length) return null;
   const copy = labels || {
     references: "References", sourcesUsed: "Sources used for this answer",
     primarySource: "Primary source", supportingSource: "Supporting source",
-    source: "Source", section: "Section"
+    source: "Source", section: "Section", openSource: "View exact source"
   };
 
   return (
@@ -76,6 +78,11 @@ export function CitationRenderer({
               </div>
               {source.sectionTitle ? <p>{source.sectionTitle}</p> : null}
               {source.excerpt ? <p>{source.excerpt}</p> : null}
+              {source.uri && onOpenSource ? (
+                <button type="button" className="gw-citation-open" onClick={() => void onOpenSource(source.uri!, source.page)}>
+                  {copy.openSource}
+                </button>
+              ) : null}
             </article>
           );
         })}

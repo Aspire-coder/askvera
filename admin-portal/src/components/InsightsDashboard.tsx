@@ -56,7 +56,10 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [trafficSource, setTrafficSource] = useState("");
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Interaction | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedId
+    ? interactions.find((item) => item.correlation_id === selectedId) || null
+    : null;
 
   const refresh = async () => {
     const overviewFilters = new URLSearchParams({ days });
@@ -117,7 +120,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setTrafficSource("");
     setFeedback("all");
     setQuery("");
-    setSelected(null);
+    setSelectedId(null);
     if (days === "30" && !startAt && !endAt && !country && !language && !trafficSource && feedback === "all") void refresh();
   };
 
@@ -280,18 +283,18 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       <div className="review-section">
         <div className="section-heading"><div><h2>Answer review</h2><p>Open low-rated answers to see where retrieval or content can improve.</p></div><div className="review-controls"><label className="search-field"><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions" /></label><select value={feedback} onChange={(event) => setFeedback(event.target.value)}><option value="not_helpful">Not helpful</option><option value="helpful">Helpful</option><option value="all">All answers</option></select></div></div>
         <div className="review-list surface">
-          {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelected(item)}>
+          {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelectedId(item.correlation_id)}>
             <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>
             <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {item.traffic_source.replaceAll("_", " ")} · {interactionDateLabel(item.created_at)}</small></span>
             {item.expected_answer_present ? <span className="suggestion-badge">Suggestion</span> : null}
-            <span className="confidence">{percent(item.confidence)}</span><ArrowIcon />
+            <span className="confidence">{percent(item.confidence)}</span>{item.rating === -1 ? <ArrowIcon /> : <span className="review-label">Review</span>}
           </button>)}
           {!filteredInteractions.length ? <div className="empty-state">No answers match these filters.</div> : null}
         </div>
       </div>
 
-      {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}><aside className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">
-        <button className="drawer-close" onClick={() => setSelected(null)} aria-label="Close review">×</button>
+      {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}><aside className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">
+        <button className="drawer-close" onClick={() => setSelectedId(null)} aria-label="Close review">x</button>
         <span className="eyebrow">Answer review</span><h2 id="review-title">{selected.question}</h2>
         <div className="drawer-meta"><span>{selected.country}</span><span>{selected.language.toUpperCase()}</span><span>{selected.traffic_source.replaceAll("_", " ")}</span><span>{percent(selected.confidence)} confidence</span><span>{selected.tokens} tokens</span></div>
         <section><h3>AskVera answered</h3><p>{selected.answer}</p></section>
