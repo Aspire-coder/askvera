@@ -1,8 +1,13 @@
 """Tests for locale-aware non-document routing and generic evidence approval."""
 
+import json
+from pathlib import Path
+
 from app.evidence import approve_evidence, assistant_meta_response, classify_intent, localized_conversation_response
 from app.retrieval.models import RetrievedDocument, RetrievalResult
+from config import settings
 from services import controlled_copy
+from services.market_config import load_policy_locales
 
 
 def test_routes_configured_english_greeting_without_retrieval() -> None:
@@ -66,6 +71,25 @@ def test_unconfigured_language_rejects_translation_that_adds_numbers(monkeypatch
     response = localized_conversation_response("income_claim", "sv-SE") or ""
 
     assert response == localized_conversation_response("income_claim", "en")
+
+
+def test_every_published_language_has_reviewed_warm_off_topic_copy() -> None:
+    routes = json.loads(Path(settings.CONVERSATION_ROUTES_PATH).read_text(encoding="utf-8"))["locales"]
+    published_languages = {
+        language
+        for locale in load_policy_locales().values()
+        for language in locale["languages"]
+    }
+
+    assert published_languages <= routes.keys()
+    for language in published_languages:
+        response = routes[language]["responses"].get("off_topic", "")
+        assert response
+        assert "AskVera" in response
+
+    english = routes["en"]["responses"]["off_topic"]
+    assert "I'm sorry" in english
+    assert "can't help with that question" in english
 
 
 def test_global_document_is_valid_evidence_for_every_locale() -> None:
