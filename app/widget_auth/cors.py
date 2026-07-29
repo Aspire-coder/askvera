@@ -12,6 +12,7 @@ from utils.logging import get_logger
 from .origin_validator import is_origin_allowed, normalize_origin
 
 LOGGER = get_logger("app.widget_auth.cors")
+ALLOWED_METHODS = "GET, POST, PUT, PATCH, OPTIONS"
 
 
 class DynamicWidgetCorsMiddleware(BaseHTTPMiddleware):
@@ -47,7 +48,7 @@ class DynamicWidgetCorsMiddleware(BaseHTTPMiddleware):
     def _set_cors_headers(self, request: Request, response: Response, origin: str) -> None:
         requested_headers = request.headers.get("access-control-request-headers")
         response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = ALLOWED_METHODS
         response.headers["Access-Control-Allow-Headers"] = requested_headers or "*"
         response.headers["Access-Control-Max-Age"] = "600"
         response.headers["Vary"] = "Origin"

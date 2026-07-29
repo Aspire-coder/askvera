@@ -76,6 +76,36 @@ def test_private_street_address_is_still_scrubbed() -> None:
     assert answer == "Send it to [ADDRESS]"
 
 
+def test_person_name_is_preserved_for_retrieval_input() -> None:
+    text = "Who is Dejan?"
+    start = text.index("Dejan")
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [{"BeginOffset": start, "EndOffset": start + len("Dejan"), "Type": "NAME"}]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(text, "cid", "en", preserve_person_names=True)
+
+    assert answer == text
+
+
+def test_person_name_is_scrubbed_by_default() -> None:
+    text = "My name is Dejan"
+    start = text.index("Dejan")
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [{"BeginOffset": start, "EndOffset": start + len("Dejan"), "Type": "NAME"}]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(text, "cid", "en")
+
+    assert answer == "My name is [NAME]"
+
+
 def test_grounded_address_with_formatting_variation_is_preserved() -> None:
     text = "Office: 35 Homer Road, Solihull, West Midlands, UK"
     evidence = "Physical Address 35 Homer Road Solihull West Midlands B91 3QJ United Kingdom"

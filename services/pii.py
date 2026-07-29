@@ -122,6 +122,7 @@ def scrub_pii(
     *,
     allowed_texts: Iterable[str] = (),
     preserve_location_names: bool = False,
+    preserve_person_names: bool = False,
 ) -> str:
     """Mask PII entities using Amazon Comprehend."""
     if not text:
@@ -154,6 +155,8 @@ def scrub_pii(
         if _approved_entity(entity_text, approved):
             continue
         if preserve_location_names and entity_type in {"ADDRESS", "LOCATION"} and _looks_like_location_name(entity_text):
+            continue
+        if preserve_person_names and entity_type == "NAME":
             continue
         scrubbed = f"{scrubbed[:start]}[{entity_type}]{scrubbed[end:]}"
     scrubbed = _scrub_pattern_pii(scrubbed, approved)

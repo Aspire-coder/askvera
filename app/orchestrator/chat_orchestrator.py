@@ -97,6 +97,7 @@ class AIOrchestrator:
             correlation_id,
             body.language,
             preserve_location_names=True,
+            preserve_person_names=True,
         )
         chat_response = self._early_conversation_response(scrubbed_input, body, correlation_id)
         if chat_response:
