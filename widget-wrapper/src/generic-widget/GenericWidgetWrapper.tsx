@@ -581,7 +581,12 @@ export function GenericWidgetWrapper({
     await onMessageCopied?.(message, renderState);
   };
 
-  const handleMessageFeedback = async (message: WidgetMessage, rating: number, renderState: GenericWidgetRenderState) => {
+  const handleMessageFeedback = async (
+    message: WidgetMessage,
+    rating: number,
+    renderState: GenericWidgetRenderState,
+    expectedAnswer?: string
+  ) => {
     const eventType = rating > 0 ? widgetEventTypes.MESSAGE_HELPFUL : widgetEventTypes.MESSAGE_NOT_HELPFUL;
     events.emit(eventType, {
       visitorId,
@@ -591,7 +596,7 @@ export function GenericWidgetWrapper({
       rating,
       metadata: { messageId: message.id }
     });
-    await onMessageFeedback?.(message, rating, renderState);
+    await onMessageFeedback?.(message, rating, renderState, expectedAnswer);
   };
 
   useEffect(() => {
