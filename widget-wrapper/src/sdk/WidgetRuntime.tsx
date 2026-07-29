@@ -140,7 +140,7 @@ type InitialLocale = {
   explicit: boolean;
 };
 
-function storedLocale(widgetId?: string, expectedSessionId?: string): InitialLocale {
+function storedLocale(widgetId?: string): InitialLocale {
   if (typeof window === "undefined") {
     return { preference: { country: "US", language: "en" }, explicit: false };
   }
@@ -148,17 +148,15 @@ function storedLocale(widgetId?: string, expectedSessionId?: string): InitialLoc
     const rawMetadata = window.localStorage.getItem("askvera_session_metadata");
     if (rawMetadata) {
       const metadata = JSON.parse(rawMetadata) as Record<string, string>;
-      if (!expectedSessionId || metadata.sessionId === expectedSessionId) {
+      if (metadata.country && metadata.language) {
         return {
-          preference: { country: metadata.country || "US", language: metadata.language || "en" },
-          explicit: Boolean(metadata.country && metadata.language)
+          preference: { country: metadata.country, language: metadata.language },
+          explicit: true
         };
       }
     }
-    if (!expectedSessionId) {
-      const preference = readLocalePreference(window.localStorage, widgetId);
-      if (preference) return { preference, explicit: true };
-    }
+    const preference = readLocalePreference(window.localStorage, widgetId);
+    if (preference) return { preference, explicit: true };
     return { preference: { country: "US", language: "en" }, explicit: false };
   } catch {
     return { preference: { country: "US", language: "en" }, explicit: false };
@@ -298,7 +296,7 @@ export function WidgetRuntime({
   clearConversationSignal = 0,
   sdkMessage
 }: WidgetRuntimeProps) {
-  const [initialLocale] = useState<InitialLocale>(() => storedLocale(widgetId, sessionIdFromToken(authToken)));
+  const [initialLocale] = useState<InitialLocale>(() => storedLocale(widgetId));
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(initialLocale.preference);
   const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken)));
@@ -389,7 +387,7 @@ export function WidgetRuntime({
         assistantName: "AskVera",
         assistantSubtitle: localized.assistantSubtitle,
         launcherTitle: localized.openAssistant,
-        welcomeText: apiConfig?.greeting || localized.welcomeBody,
+        welcomeText: localized.welcomeBody,
         footerText: localized.footer,
         loadingText: localized.thinking,
         loadingMessages: {
@@ -403,7 +401,7 @@ export function WidgetRuntime({
         onboarding: {
           eyebrow: localized.welcomeEyebrow,
           title: localized.welcomeTitle,
-          body: apiConfig?.greeting || localized.welcomeBody,
+          body: localized.welcomeBody,
           next: localized.welcomeNext
         },
         statusLabels: { online: localized.online, offline: localized.offline, reconnecting: localized.reconnecting },
@@ -415,13 +413,13 @@ export function WidgetRuntime({
         },
         feedbackFollowUp: {
           enabled: Boolean(apiConfig?.feedbackExpectedAnswerEnabled),
-          label: "Tell us how we could improve this answer (optional)",
-          privacyNote: "Your feedback helps AskVera get better - please don't include any personal info.",
-          placeholder: "e.g. I was hoping for the specific discount amount",
-          send: "Send feedback",
-          skip: "Skip",
-          sent: "Feedback submitted. Thank you for helping us improve AskVera.",
-          error: "We could not save that yet. Please try again."
+          label: localized.feedbackLabel,
+          privacyNote: localized.feedbackPrivacyNote,
+          placeholder: localized.feedbackPlaceholder,
+          send: localized.feedbackSend,
+          skip: localized.feedbackSkip,
+          sent: localized.feedbackSent,
+          error: localized.feedbackError
         },
         citationLabels: {
           references: localized.references,
@@ -712,7 +710,7 @@ export function WidgetRuntime({
       {
         id: buildId("greeting"),
         role: "assistant",
-        content: apiConfig?.greeting || getWidgetCopy(payload.selectedLanguage).greeting
+        content: getWidgetCopy(payload.selectedLanguage).greeting
       }
     ]);
     if (pendingMessage) {
@@ -817,6 +815,7 @@ export function WidgetRuntime({
       resetSignal={resetSignal + lifecycleResetSignal}
       sessionId={activeAuthSessionId}
       outboundMessage={sdkMessage}
+      preferConfiguredLocale
       consentRequiredSignal={consentRequiredSignal}
       onHealthCheck={checkBackendHealth}
       onAcceptConsent={handleConsent}

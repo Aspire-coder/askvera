@@ -43,6 +43,13 @@ export type WidgetCopy = {
   copied: string;
   helpful: string;
   notHelpful: string;
+  feedbackLabel: string;
+  feedbackPrivacyNote: string;
+  feedbackPlaceholder: string;
+  feedbackSend: string;
+  feedbackSkip: string;
+  feedbackSent: string;
+  feedbackError: string;
   privacyEyebrow: string;
   reviewDocuments: string;
   privacyLoading: string;
@@ -224,6 +231,119 @@ const copy: Record<string, Partial<WidgetCopy>> = {
   }
 };
 
+type FeedbackCopy = Pick<
+  WidgetCopy,
+  | "feedbackLabel"
+  | "feedbackPrivacyNote"
+  | "feedbackPlaceholder"
+  | "feedbackSend"
+  | "feedbackSkip"
+  | "feedbackSent"
+  | "feedbackError"
+>;
+
+const feedbackCopy: Record<string, FeedbackCopy> = {
+  en: {
+    feedbackLabel: "Tell us how we could improve this answer (optional)",
+    feedbackPrivacyNote: "Your feedback helps AskVera improve. Please do not include personal information.",
+    feedbackPlaceholder: "For example: I was looking for the specific discount amount",
+    feedbackSend: "Send feedback",
+    feedbackSkip: "Skip",
+    feedbackSent: "Feedback submitted. Thank you for helping us improve AskVera.",
+    feedbackError: "We could not save your feedback. Please try again."
+  },
+  fr: {
+    feedbackLabel: "Dites-nous comment améliorer cette réponse (facultatif)",
+    feedbackPrivacyNote: "Vos commentaires aident AskVera à s'améliorer. N'incluez aucune information personnelle.",
+    feedbackPlaceholder: "Par exemple : je cherchais le montant exact de la remise",
+    feedbackSend: "Envoyer le commentaire",
+    feedbackSkip: "Ignorer",
+    feedbackSent: "Commentaire envoyé. Merci de nous aider à améliorer AskVera.",
+    feedbackError: "Nous n'avons pas pu enregistrer votre commentaire. Veuillez réessayer."
+  },
+  es: {
+    feedbackLabel: "Cuéntanos cómo podríamos mejorar esta respuesta (opcional)",
+    feedbackPrivacyNote: "Tus comentarios ayudan a mejorar AskVera. No incluyas información personal.",
+    feedbackPlaceholder: "Por ejemplo: buscaba el importe exacto del descuento",
+    feedbackSend: "Enviar comentarios",
+    feedbackSkip: "Omitir",
+    feedbackSent: "Comentarios enviados. Gracias por ayudarnos a mejorar AskVera.",
+    feedbackError: "No pudimos guardar tus comentarios. Inténtalo de nuevo."
+  },
+  de: {
+    feedbackLabel: "Wie können wir diese Antwort verbessern? (optional)",
+    feedbackPrivacyNote: "Ihr Feedback hilft AskVera, besser zu werden. Geben Sie keine persönlichen Daten an.",
+    feedbackPlaceholder: "Zum Beispiel: Ich suchte nach dem genauen Rabattbetrag",
+    feedbackSend: "Feedback senden",
+    feedbackSkip: "Überspringen",
+    feedbackSent: "Feedback gesendet. Vielen Dank, dass Sie uns helfen, AskVera zu verbessern.",
+    feedbackError: "Ihr Feedback konnte nicht gespeichert werden. Bitte versuchen Sie es erneut."
+  },
+  nl: {
+    feedbackLabel: "Vertel ons hoe we dit antwoord kunnen verbeteren (optioneel)",
+    feedbackPrivacyNote: "Uw feedback helpt AskVera te verbeteren. Vermeld geen persoonlijke gegevens.",
+    feedbackPlaceholder: "Bijvoorbeeld: ik zocht het exacte kortingsbedrag",
+    feedbackSend: "Feedback verzenden",
+    feedbackSkip: "Overslaan",
+    feedbackSent: "Feedback verzonden. Bedankt dat u ons helpt AskVera te verbeteren.",
+    feedbackError: "Uw feedback kon niet worden opgeslagen. Probeer het opnieuw."
+  },
+  it: {
+    feedbackLabel: "Dicci come potremmo migliorare questa risposta (facoltativo)",
+    feedbackPrivacyNote: "Il tuo feedback aiuta AskVera a migliorare. Non includere informazioni personali.",
+    feedbackPlaceholder: "Ad esempio: cercavo l'importo esatto dello sconto",
+    feedbackSend: "Invia feedback",
+    feedbackSkip: "Salta",
+    feedbackSent: "Feedback inviato. Grazie per aiutarci a migliorare AskVera.",
+    feedbackError: "Non è stato possibile salvare il feedback. Riprova."
+  },
+  da: {
+    feedbackLabel: "Fortæl os, hvordan vi kan forbedre dette svar (valgfrit)",
+    feedbackPrivacyNote: "Din feedback hjælper AskVera med at blive bedre. Medtag ikke personlige oplysninger.",
+    feedbackPlaceholder: "For eksempel: Jeg søgte efter det præcise rabatbeløb",
+    feedbackSend: "Send feedback",
+    feedbackSkip: "Spring over",
+    feedbackSent: "Feedback sendt. Tak, fordi du hjælper os med at forbedre AskVera.",
+    feedbackError: "Vi kunne ikke gemme din feedback. Prøv igen."
+  },
+  fi: {
+    feedbackLabel: "Kerro, miten voisimme parantaa tätä vastausta (valinnainen)",
+    feedbackPrivacyNote: "Palautteesi auttaa parantamaan AskVeraa. Älä lisää henkilötietoja.",
+    feedbackPlaceholder: "Esimerkiksi: etsin tarkkaa alennuksen määrää",
+    feedbackSend: "Lähetä palaute",
+    feedbackSkip: "Ohita",
+    feedbackSent: "Palaute lähetetty. Kiitos, että autat meitä parantamaan AskVeraa.",
+    feedbackError: "Palautetta ei voitu tallentaa. Yritä uudelleen."
+  },
+  no: {
+    feedbackLabel: "Fortell oss hvordan vi kan forbedre dette svaret (valgfritt)",
+    feedbackPrivacyNote: "Tilbakemeldingen din hjelper AskVera med å bli bedre. Ikke ta med personopplysninger.",
+    feedbackPlaceholder: "For eksempel: Jeg lette etter det nøyaktige rabattbeløpet",
+    feedbackSend: "Send tilbakemelding",
+    feedbackSkip: "Hopp over",
+    feedbackSent: "Tilbakemelding sendt. Takk for at du hjelper oss med å forbedre AskVera.",
+    feedbackError: "Vi kunne ikke lagre tilbakemeldingen. Prøv igjen."
+  },
+  sr: {
+    feedbackLabel: "Recite nam kako možemo da poboljšamo ovaj odgovor (opciono)",
+    feedbackPrivacyNote: "Vaše povratne informacije pomažu da AskVera bude bolja. Ne unosite lične podatke.",
+    feedbackPlaceholder: "Na primer: tražio/la sam tačan iznos popusta",
+    feedbackSend: "Pošalji povratne informacije",
+    feedbackSkip: "Preskoči",
+    feedbackSent: "Povratne informacije su poslate. Hvala što nam pomažete da poboljšamo AskVera.",
+    feedbackError: "Nismo mogli da sačuvamo povratne informacije. Pokušajte ponovo."
+  },
+  sv: {
+    feedbackLabel: "Berätta hur vi kan förbättra det här svaret (valfritt)",
+    feedbackPrivacyNote: "Din feedback hjälper AskVera att bli bättre. Ta inte med personuppgifter.",
+    feedbackPlaceholder: "Till exempel: Jag letade efter det exakta rabattbeloppet",
+    feedbackSend: "Skicka feedback",
+    feedbackSkip: "Hoppa över",
+    feedbackSent: "Feedback skickad. Tack för att du hjälper oss att förbättra AskVera.",
+    feedbackError: "Vi kunde inte spara din feedback. Försök igen."
+  }
+};
+
 export function getWidgetCopy(language?: string): WidgetCopy {
   const english = copy.en as WidgetCopy;
   const languageCode = (language || "en").split("-", 1)[0].toLowerCase();
@@ -231,5 +351,11 @@ export function getWidgetCopy(language?: string): WidgetCopy {
     da: "Prøv igen", de: "Erneut versuchen", es: "Reintentar", fi: "Yritä uudelleen",
     fr: "Réessayer", it: "Riprova", nl: "Opnieuw proberen", no: "Prøv igjen", sv: "Försök igen"
   }[languageCode];
-  return { ...english, ...(copy[languageCode] || {}), ...(retry ? { retry } : {}) };
+  return {
+    ...english,
+    ...feedbackCopy.en,
+    ...(copy[languageCode] || {}),
+    ...(feedbackCopy[languageCode] || {}),
+    ...(retry ? { retry } : {})
+  };
 }

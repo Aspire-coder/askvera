@@ -281,6 +281,7 @@ export type GenericWidgetWrapperProps = {
   resetSignal?: number;
   outboundMessage?: { id: string; text: string };
   showLocaleSelector?: boolean;
+  preferConfiguredLocale?: boolean;
   visitorId?: string;
   sessionId?: string;
   className?: string;

@@ -52,6 +52,7 @@ export function GenericWidgetWrapper({
   resetSignal = 0,
   outboundMessage,
   showLocaleSelector = true,
+  preferConfiguredLocale = false,
   visitorId: providedVisitorId,
   sessionId: providedSessionId,
   className = "",
@@ -140,8 +141,12 @@ export function GenericWidgetWrapper({
         sessionId: initialSessionId,
         sessionCreatedAt,
         policyVersion: config.consent.policyVersion,
-        selectedCountry: storedLocale?.country || initialLocale.country,
-        selectedLanguage: storedLocale?.language || initialLocale.language,
+        selectedCountry: preferConfiguredLocale
+          ? initialLocale.country
+          : storedLocale?.country || initialLocale.country,
+        selectedLanguage: preferConfiguredLocale
+          ? initialLocale.language
+          : storedLocale?.language || initialLocale.language,
         messages
       }),
     [
@@ -152,6 +157,7 @@ export function GenericWidgetWrapper({
       loading,
       messages,
       openByDefault,
+      preferConfiguredLocale,
       sessionCreatedAt,
       initialSessionId,
       storedLocale?.country,
