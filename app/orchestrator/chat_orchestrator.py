@@ -195,6 +195,7 @@ class AIOrchestrator:
             retrieval_result,
             body.language,
             correlation_id,
+            user_question=body.message,
         )
         chat_response = self._validate_response(
             chat_response,
@@ -235,6 +236,8 @@ class AIOrchestrator:
         retrieval_result: RetrievalResult,
         language: str,
         correlation_id: str,
+        *,
+        user_question: str,
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
         completed_answer, restored_fields = restore_missing_directory_contacts(
@@ -260,6 +263,7 @@ class AIOrchestrator:
                 *settings.PII_APPROVED_PUBLIC_TERMS,
                 *(document.content for document in retrieval_result.documents),
             ],
+            allowed_name_texts=[user_question],
         )
         if safe_answer != chat_response.answer:
             chat_response = self._replace_answer(chat_response, safe_answer, {"response_pii_scrubbed": True})

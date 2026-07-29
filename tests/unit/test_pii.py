@@ -106,6 +106,25 @@ def test_person_name_is_scrubbed_by_default() -> None:
     assert answer == "My name is [NAME]"
 
 
+def test_user_supplied_name_can_be_echoed_without_allowing_other_names() -> None:
+    text = "I don't have information about Dejan, but contact Alice."
+    dejan_start = text.index("Dejan")
+    alice_start = text.index("Alice")
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.return_value = {
+        "Entities": [
+            {"BeginOffset": dejan_start, "EndOffset": dejan_start + len("Dejan"), "Type": "NAME"},
+            {"BeginOffset": alice_start, "EndOffset": alice_start + len("Alice"), "Type": "NAME"},
+        ]
+    }
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        answer = scrub_pii(text, "cid", "en", allowed_name_texts=["Who is Dejan?"])
+
+    assert answer == "I don't have information about Dejan, but contact [NAME]."
+
+
 def test_grounded_address_with_formatting_variation_is_preserved() -> None:
     text = "Office: 35 Homer Road, Solihull, West Midlands, UK"
     evidence = "Physical Address 35 Homer Road Solihull West Midlands B91 3QJ United Kingdom"

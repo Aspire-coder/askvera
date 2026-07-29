@@ -220,7 +220,13 @@ def test_response_completion_restores_only_approved_directory_contacts(monkeypat
     result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.8)
     monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
 
-    completed = orchestrator._secure_and_complete_response(response, result, "fr", "cid")
+    completed = orchestrator._secure_and_complete_response(
+        response,
+        result,
+        "fr",
+        "cid",
+        user_question="Where is the office?",
+    )
 
     assert completed.answer.count("10 Example Road") == 1
     assert "Office Phone 1: +99 123 456 7890" in completed.answer
@@ -250,7 +256,13 @@ def test_response_completion_does_not_change_policy_answers(monkeypatch) -> None
     result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.8)
     monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
 
-    completed = orchestrator._secure_and_complete_response(response, result, "en", "cid")
+    completed = orchestrator._secure_and_complete_response(
+        response,
+        result,
+        "en",
+        "cid",
+        user_question="What are the requirements?",
+    )
 
     assert completed.answer == response.answer
     assert "directory_contacts_restored" not in completed.metadata

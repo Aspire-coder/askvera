@@ -121,6 +121,7 @@ def scrub_pii(
     language: str | None = None,
     *,
     allowed_texts: Iterable[str] = (),
+    allowed_name_texts: Iterable[str] = (),
     preserve_location_names: bool = False,
     preserve_person_names: bool = False,
 ) -> str:
@@ -129,6 +130,7 @@ def scrub_pii(
         return text
     language_code = _pii_language_code(language or settings.COMPREHEND_PII_LANGUAGE_CODE)
     approved = tuple(allowed_texts)
+    approved_names = tuple(allowed_name_texts)
     if language_code is None:
         scrubbed = _scrub_pattern_pii(text, approved)
         LOGGER.info(
@@ -153,6 +155,8 @@ def scrub_pii(
         entity_text = text[start:end]
         entity_type = str(entity.get("Type") or "PII").upper()
         if _approved_entity(entity_text, approved):
+            continue
+        if entity_type == "NAME" and _approved_entity(entity_text, approved_names):
             continue
         if preserve_location_names and entity_type in {"ADDRESS", "LOCATION"} and _looks_like_location_name(entity_text):
             continue
