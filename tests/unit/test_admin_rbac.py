@@ -154,7 +154,7 @@ def test_country_admin_can_update_only_assigned_support_route(monkeypatch) -> No
     )
 
     assert response["data"]["country"] == "GB"
-    assert captured["actor_sub"] == ""
+    assert captured["actor_sub"] == "admin"
 
     with pytest.raises(HTTPException) as exc_info:
         admin_routes.support_route_update(

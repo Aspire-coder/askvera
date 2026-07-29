@@ -77,7 +77,7 @@ def test_source_link_requires_matching_widget_session(monkeypatch) -> None:
 def test_source_link_is_widget_authenticated_and_rate_limited() -> None:
     assert "/api/source-link" in settings.WIDGET_AUTH_PROTECTED_PATHS
     assert "/api/source-link" in settings.RATE_LIMIT_PATHS
-    assert settings.RATE_LIMITS["/api/source-link"] > 0
+    assert settings.RATE_LIMIT_POLICIES["/api/source-link"] > 0
 
 
 def test_source_link_rejects_unapproved_or_wrong_locale_source(monkeypatch) -> None:

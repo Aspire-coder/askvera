@@ -126,6 +126,11 @@ def test_default_route_supports_every_published_market(monkeypatch):
     )
     monkeypatch.setattr(support, "get_country_codes", lambda: {"CA", "GB", "US"})
     monkeypatch.setattr(support, "get_aws_clients", lambda: SimpleNamespace(ses=ses))
+    monkeypatch.setattr(
+        support,
+        "get_session_history",
+        lambda *_args: "User: Please help\nAssistant: I can create a support request.",
+    )
 
     assert support.support_country_codes() == ["CA", "GB", "US"]
     delivery = support.send_support_request(request(), "cid")

@@ -21,10 +21,8 @@ POSITIONS = {"bottom-right", "bottom-left"}
 RATE_LIMIT_TIERS = {"standard", "low", "high"}
 
 
-def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
-    if not str(values.get("name") or "").strip():
-        raise ValueError("Widget name is required.")
-    origins = []
+def _validated_origins(values: dict[str, Any]) -> list[str]:
+    origins: list[str] = []
     for origin in values.get("allowed_origins") or []:
         raw_origin = str(origin).strip()
         parsed = urlparse(raw_origin)
@@ -44,7 +42,10 @@ def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Allowed origins must be unique.")
     if not origins:
         raise ValueError("Add at least one allowed origin.")
+    return origins
 
+
+def _validated_locale(values: dict[str, Any]) -> tuple[list[str], list[str], str, str]:
     known_markets = get_country_codes()
     markets = sorted({str(value).upper() for value in values.get("markets") or []})
     if not markets or any(market not in known_markets for market in markets):
@@ -59,12 +60,30 @@ def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Default market must be in the allowed market list.")
     if default_language not in languages or default_language not in get_language_codes_for_country(default_market):
         raise ValueError("Default language must be valid for the default market.")
+    return markets, languages, default_market, default_language
+
+
+def _validated_presentation(values: dict[str, Any]) -> tuple[str, str, str]:
     accent_color = str(values.get("accent_color") or "#2F7D4E")
     if not HEX_COLOR_RE.fullmatch(accent_color):
         raise ValueError("Accent color must be a six-digit hex color.")
     position = str(values.get("position") or "bottom-right")
     if position not in POSITIONS:
         raise ValueError("Unsupported widget position.")
+    logo_url = str(values.get("logo_url") or "").strip()
+    if logo_url:
+        asset_base = settings.WIDGET_ASSET_PUBLIC_BASE_URL.rstrip("/")
+        if not asset_base or not logo_url.startswith(f"{asset_base}/"):
+            raise ValueError("Widget logo must be an uploaded AskVera asset.")
+    return accent_color, position, logo_url
+
+
+def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
+    if not str(values.get("name") or "").strip():
+        raise ValueError("Widget name is required.")
+    origins = _validated_origins(values)
+    markets, languages, default_market, default_language = _validated_locale(values)
+    accent_color, position, logo_url = _validated_presentation(values)
     tier = str(values.get("rate_limit_tier") or "standard")
     if tier not in RATE_LIMIT_TIERS:
         raise ValueError("Unsupported rate-limit tier.")
@@ -74,11 +93,6 @@ def validate_widget_config(values: dict[str, Any]) -> dict[str, Any]:
     legal_version = str(values.get("legal_version") or settings.LEGAL_VERSION).strip()
     if legal_version != settings.LEGAL_VERSION:
         raise ValueError("Legal version must match the currently deployed consent version.")
-    logo_url = str(values.get("logo_url") or "").strip()
-    if logo_url:
-        asset_base = settings.WIDGET_ASSET_PUBLIC_BASE_URL.rstrip("/")
-        if not asset_base or not logo_url.startswith(f"{asset_base}/"):
-            raise ValueError("Widget logo must be an uploaded AskVera asset.")
     return {
         **values,
         "allowed_origins": origins,
