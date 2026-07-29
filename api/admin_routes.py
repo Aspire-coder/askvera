@@ -38,7 +38,13 @@ from services.knowledge_ingestion import (
     safe_filename,
     validate_upload,
 )
-from services.market_config import get_countries, get_country_codes, get_language_codes_for_country
+from services.market_config import (
+    get_countries,
+    get_country_codes,
+    get_language_codes_for_country,
+    get_widget_countries,
+    get_widget_country_codes,
+)
 from services.support_routes import list_support_routes, upsert_support_route
 from services.aws_clients import get_aws_clients
 from services.widget_configs import (
@@ -127,11 +133,16 @@ def admin_config(request: Request) -> dict[str, Any]:
         if scope.get("market") and scope.get("market") != "*"
     }
     countries = get_countries()
+    widget_countries = get_widget_countries()
     if settings.ADMIN_RBAC_ENABLED and principal.get("role") != "super_admin":
         countries = [country for country in countries if country["code"] in allowed_markets]
+        widget_countries = [
+            country for country in widget_countries if country["code"] in allowed_markets
+        ]
     return _payload(
         {
             "countries": countries,
+            "widgetCountries": widget_countries,
             "documentTypes": sorted(DOCUMENT_TYPES),
             "accessScopes": sorted(ACCESS_SCOPES),
             "maxUploadBytes": settings.ADMIN_UPLOAD_MAX_BYTES,
@@ -478,6 +489,12 @@ def _require_widget_markets(request: Request, permission: str, markets: list[str
         require_admin_access(request, "widget", permission, market)
 
 
+def _widget_accessible_markets(principal: dict[str, Any], permission: str) -> set[str]:
+    if principal.get("role") == "super_admin":
+        return get_widget_country_codes()
+    return accessible_markets(principal, "widget", permission)
+
+
 @admin_router.post("/widget-assets")
 async def widget_asset_upload(
     request: Request,
@@ -528,7 +545,7 @@ async def widget_asset_upload(
 def widget_configs_list(request: Request) -> dict[str, Any]:
     _widget_management_enabled()
     principal = getattr(request.state, "admin_identity", {}) or {}
-    markets = accessible_markets(principal, "widget", "view")
+    markets = _widget_accessible_markets(principal, "view")
     if not markets:
         raise HTTPException(status_code=403, detail="You do not have access to widget configuration.")
     configs = [

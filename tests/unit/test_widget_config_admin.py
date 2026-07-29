@@ -40,6 +40,21 @@ def test_widget_config_accepts_exact_https_origin() -> None:
     assert clean["default_market"] == "US"
 
 
+def test_widget_config_accepts_provisioning_only_turkey_market() -> None:
+    clean = widget_configs.validate_widget_config(
+        _config(
+            markets=["TR"],
+            languages=["en", "tr"],
+            default_market="TR",
+            default_language="tr",
+        )
+    )
+
+    assert clean["markets"] == ["TR"]
+    assert clean["languages"] == ["en", "tr"]
+    assert clean["default_language"] == "tr"
+
+
 def test_widget_config_accepts_only_uploaded_logo_assets(monkeypatch) -> None:
     monkeypatch.setattr(
         settings,

@@ -1234,6 +1234,7 @@
       "code": "TR",
       "name": "Turkey",
       "enabled": true,
+      "widgetProvisioningEnabled": true,
       "region": "Europe",
       "displayOrder": 144,
       "defaultLanguage": "en",

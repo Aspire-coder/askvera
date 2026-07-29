@@ -14,7 +14,10 @@ from sqlalchemy import text
 from app.widget_auth.origin_validator import normalize_origin
 from config import settings
 from services.db import get_engine
-from services.market_config import get_country_codes, get_language_codes_for_country
+from services.market_config import (
+    get_widget_country_codes,
+    get_widget_language_codes_for_country,
+)
 
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 POSITIONS = {"bottom-right", "bottom-left"}
@@ -46,19 +49,22 @@ def _validated_origins(values: dict[str, Any]) -> list[str]:
 
 
 def _validated_locale(values: dict[str, Any]) -> tuple[list[str], list[str], str, str]:
-    known_markets = get_country_codes()
+    known_markets = get_widget_country_codes()
     markets = sorted({str(value).upper() for value in values.get("markets") or []})
     if not markets or any(market not in known_markets for market in markets):
         raise ValueError("Choose one or more supported markets.")
     languages = sorted({str(value).lower() for value in values.get("languages") or []})
-    valid_languages = set().union(*(get_language_codes_for_country(market) for market in markets))
+    valid_languages = set().union(*(get_widget_language_codes_for_country(market) for market in markets))
     if not languages or any(language not in valid_languages for language in languages):
         raise ValueError("Choose languages supported by the selected markets.")
     default_market = str(values.get("default_market") or "").upper()
     default_language = str(values.get("default_language") or "").lower()
     if default_market not in markets:
         raise ValueError("Default market must be in the allowed market list.")
-    if default_language not in languages or default_language not in get_language_codes_for_country(default_market):
+    if (
+        default_language not in languages
+        or default_language not in get_widget_language_codes_for_country(default_market)
+    ):
         raise ValueError("Default language must be valid for the default market.")
     return markets, languages, default_market, default_language
 

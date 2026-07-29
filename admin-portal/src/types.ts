@@ -24,6 +24,7 @@ export type Market = { code: string; name: string; languages: MarketLanguage[] }
 
 export type AdminConfig = {
   countries: Market[];
+  widgetCountries?: Market[];
   documentTypes: string[];
   accessScopes: string[];
   maxUploadBytes: number;

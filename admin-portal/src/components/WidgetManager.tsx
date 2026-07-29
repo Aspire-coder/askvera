@@ -62,10 +62,11 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [showForm]);
 
+  const widgetCountries = config.widgetCountries || config.countries;
   const allowedLanguages = useMemo(() => {
-    const selected = config.countries.filter((country) => draft.markets.includes(country.code));
+    const selected = widgetCountries.filter((country) => draft.markets.includes(country.code));
     return [...new Map(selected.flatMap((country) => country.languages).map((language) => [language.code, language])).values()];
-  }, [config.countries, draft.markets]);
+  }, [widgetCountries, draft.markets]);
 
   const openEdit = (item?: WidgetConfig) => {
     setEditing(item || null);
@@ -138,7 +139,7 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
       <button className="drawer-close" onClick={close} aria-label="Close">x</button><span className="eyebrow">{editing ? "Edit instance" : "New instance"}</span><h2 id="widget-form-title">{editing ? editing.name : "Create a widget"}</h2>
       <div className="form-grid"><label><span>Name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} autoFocus /></label><label><span>Customer</span><input value={draft.customer} onChange={(event) => setDraft({ ...draft, customer: event.target.value })} /></label></div>
       <label><span>Approved website origins</span><textarea aria-describedby="origin-help origin-error" aria-invalid={Boolean(originIssue)} value={originText} onChange={(event) => setOriginText(event.target.value)} placeholder={"https://www.example.com\nhttps://portal.example.com"} /><small id="origin-help">One exact http or https origin per line. Paths are not accepted.</small>{originIssue ? <small id="origin-error" className="inline-error" role="alert">{originIssue}</small> : null}</label>
-      <fieldset><legend>Markets</legend><div className="choice-grid">{config.countries.map((market) => <label key={market.code}><input type="checkbox" checked={draft.markets.includes(market.code)} onChange={() => setDraft({ ...draft, markets: draft.markets.includes(market.code) ? draft.markets.filter((item) => item !== market.code) : [...draft.markets, market.code] })} />{market.name}</label>)}</div></fieldset>
+      <fieldset><legend>Markets</legend><div className="choice-grid">{widgetCountries.map((market) => <label key={market.code}><input type="checkbox" checked={draft.markets.includes(market.code)} onChange={() => setDraft({ ...draft, markets: draft.markets.includes(market.code) ? draft.markets.filter((item) => item !== market.code) : [...draft.markets, market.code] })} />{market.name}</label>)}</div></fieldset>
       <fieldset><legend>Languages</legend><div className="choice-grid">{allowedLanguages.map((language) => <label key={language.code}><input type="checkbox" checked={draft.languages.includes(language.code)} onChange={() => setDraft({ ...draft, languages: draft.languages.includes(language.code) ? draft.languages.filter((item) => item !== language.code) : [...draft.languages, language.code] })} />{language.name}</label>)}</div></fieldset>
       <div className="form-grid"><label><span>Default market</span><select value={draft.default_market} onChange={(event) => setDraft({ ...draft, default_market: event.target.value })}><option value="">Select</option>{draft.markets.map((market) => <option key={market}>{market}</option>)}</select></label><label><span>Default language</span><select value={draft.default_language} onChange={(event) => setDraft({ ...draft, default_language: event.target.value })}><option value="">Select</option>{draft.languages.map((language) => <option key={language}>{language}</option>)}</select></label></div>
       <div className="form-grid"><label><span>Display name</span><input value={draft.display_name} onChange={(event) => setDraft({ ...draft, display_name: event.target.value })} /></label><label><span>Accent</span><input type="color" value={draft.accent_color} onChange={(event) => setDraft({ ...draft, accent_color: event.target.value })} /></label></div>

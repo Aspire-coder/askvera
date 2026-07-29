@@ -175,15 +175,63 @@ def get_countries() -> list[dict[str, Any]]:
     return countries
 
 
+def get_widget_countries() -> list[dict[str, Any]]:
+    """Return markets that can be configured before their policy content is live."""
+    public_countries = {country["code"]: country for country in get_countries()}
+    countries = list(public_countries.values())
+
+    for market in load_market_config()["markets"]:
+        code = str(market.get("code") or "").upper()
+        if (
+            not market.get("enabled", True)
+            or not market.get("widgetProvisioningEnabled", False)
+            or code in public_countries
+        ):
+            continue
+        languages = [
+            {"code": language["code"], "name": language["name"]}
+            for language in market.get("languages", [])
+            if language.get("enabled", True)
+        ]
+        if languages:
+            countries.append(
+                {
+                    "code": code,
+                    "name": market["name"],
+                    "defaultLanguage": market["defaultLanguage"],
+                    "privacyVersion": market["privacyVersion"],
+                    "displayOrder": market["displayOrder"],
+                    "languages": languages,
+                    "provisioningOnly": True,
+                }
+            )
+
+    return sorted(countries, key=lambda country: (country["displayOrder"], country["name"]))
+
+
 def get_country_codes() -> set[str]:
     """Return enabled market codes."""
     return {country["code"] for country in get_countries()}
+
+
+def get_widget_country_codes() -> set[str]:
+    """Return markets accepted by managed widget configuration."""
+    return {country["code"] for country in get_widget_countries()}
 
 
 def get_language_codes_for_country(country_code: str) -> set[str]:
     """Return enabled language codes for a specific market."""
     normalized_code = country_code.upper()
     for country in get_countries():
+        if country["code"] == normalized_code:
+            return {language["code"] for language in country["languages"]}
+    return set()
+
+
+def get_widget_language_codes_for_country(country_code: str) -> set[str]:
+    """Return languages accepted for a provisioned widget market."""
+    normalized_code = country_code.upper()
+    for country in get_widget_countries():
         if country["code"] == normalized_code:
             return {language["code"] for language in country["languages"]}
     return set()

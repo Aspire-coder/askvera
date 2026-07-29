@@ -126,6 +126,26 @@ def test_public_markets_are_limited_to_published_policy_locales() -> None:
     assert countries["RS"]["languages"] == [{"code": "sr", "name": "Serbian"}]
     assert countries["RS"]["defaultLanguage"] == "sr"
     assert market_config.get_document_country_codes("GB") == {"GB", "UK"}
+    assert "TR" not in countries
+
+
+def test_widget_provisioning_includes_turkey_without_publishing_it() -> None:
+    """Turkey can be configured in advance without entering the public picker."""
+    market_config.load_market_config.cache_clear()
+    market_config.load_policy_locales.cache_clear()
+
+    public_codes = market_config.get_country_codes()
+    widget_countries = {
+        country["code"]: country for country in market_config.get_widget_countries()
+    }
+
+    assert "TR" not in public_codes
+    assert widget_countries["TR"]["defaultLanguage"] == "en"
+    assert widget_countries["TR"]["languages"] == [
+        {"code": "en", "name": "English"},
+        {"code": "tr", "name": "Turkish"},
+    ]
+    assert widget_countries["TR"]["provisioningOnly"] is True
 
 
 def test_chat_request_accepts_published_sweden_languages() -> None:
