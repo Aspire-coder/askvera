@@ -352,8 +352,10 @@ def _planned_retrieval_plan(
         "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
         "Classify the conversation intent as knowledge, assistant_meta, medical_claim, income_claim, off_topic, "
-        "or support_request. assistant_meta covers social greetings, asking how the assistant is, who it is, or "
-        "what it can do; set intent_subtype to greeting, capability, or thanks. medical_claim covers symptoms, "
+        "or support_request. assistant_meta covers social greetings, thanking AskVera, asking how AskVera is, "
+        "asking who AskVera is, or asking what AskVera can do. Questions about any other person, family member, "
+        "relationship, or identity are not assistant_meta; use knowledge when the approved directory may answer "
+        "them and off_topic otherwise. Set intent_subtype to greeting, capability, or thanks. medical_claim covers symptoms, "
         "illnesses, diagnosis, treatment, medical advice, and health-benefit claims. income_claim covers requests "
         "for guaranteed or personalized earnings predictions, while factual compensation-plan questions remain "
         "knowledge. Set support_request only when the user directly asks to create, open, or submit a support "
@@ -390,6 +392,15 @@ def _planned_retrieval_plan(
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
         return RetrievalQueryPlan(base_queries, include_global_documents=True)
+
+    if conversation_intent == "assistant_meta":
+        # Exact, reviewed phrases are already handled before retrieval. Do not let
+        # a broad semantic "who" classification impersonate that trusted route.
+        from app.evidence import classify_intent
+
+        if classify_intent(message, language) != "assistant_meta":
+            conversation_intent = "knowledge" if include_global_documents else "off_topic"
+            conversation_subtype = ""
 
     client_action = ""
     if (

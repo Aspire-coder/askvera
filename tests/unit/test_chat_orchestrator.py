@@ -448,7 +448,7 @@ def test_explicit_support_action_bypasses_evidence_and_generation(monkeypatch) -
     router.generate.assert_not_called()
 
 
-def test_semantic_assistant_route_returns_controlled_capability_response(monkeypatch) -> None:
+def test_exact_assistant_capability_returns_controlled_response_before_retrieval(monkeypatch) -> None:
     retriever = MagicMock()
     retriever.retrieve.return_value = RetrievalResult(
         documents=[],
@@ -480,7 +480,46 @@ def test_semantic_assistant_route_returns_controlled_capability_response(monkeyp
     response = orchestrator.handle_chat(body, "cid")
 
     assert "approved knowledge assistant" in response.answer
-    assert response.metadata["response_source"] == "semantic_route"
+    assert response.metadata["response_source"] == "template"
+    retriever.retrieve.assert_not_called()
+    router.generate.assert_not_called()
+
+
+def test_semantic_assistant_route_cannot_turn_unrelated_question_into_greeting(monkeypatch) -> None:
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=1.0,
+        metadata={
+            "conversation_intent": "assistant_meta",
+            "conversation_subtype": "greeting",
+            "intent_confidence": 0.98,
+        },
+    )
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(message="Who is your daddy?", sessionId="session-1", country="US", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.answer.startswith("I'm sorry")
+    assert "company policies" in response.answer
+    assert "global office directory" in response.answer
+    assert response.metadata["intent"] == "off_topic"
     router.generate.assert_not_called()
 
 

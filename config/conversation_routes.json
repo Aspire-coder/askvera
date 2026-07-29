@@ -3,7 +3,7 @@
   "description": "Controlled zero-token conversation copy by language.",
   "locales": {
     "en": {
-      "patterns": {"greeting": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"], "thanks": ["thanks", "thank you"], "capability": ["who are you", "what can you help with", "help"]},
+      "patterns": {"greeting": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"], "thanks": ["thanks", "thank you"], "capability": ["who are you", "what do you do", "what can you help with", "help"]},
       "responses": {
         "greeting": "Hello, I'm AskVera. How can I help with approved Forever Living company policies or information from the global office directory?",
         "thanks": "You're welcome. I'm here whenever you need another approved Forever Living answer.",

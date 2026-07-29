@@ -657,6 +657,60 @@ def test_query_planner_routes_assistant_capability_without_document_search(monke
     assert plan.client_action == ""
 
 
+def test_query_planner_rejects_broad_assistant_meta_for_unrelated_personal_question(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"assistant_meta",'
+                    '"intent_subtype":"greeting","intent_confidence":0.98,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Who is your daddy?", "US", "en", "off-topic-cid")
+
+    assert plan.conversation_intent == "off_topic"
+    assert plan.conversation_subtype == ""
+
+
+def test_query_planner_preserves_directory_lookup_when_assistant_meta_is_overbroad(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["Dejan staff contact"],'
+                    '"document_scopes":["global_directory"],"intent":"assistant_meta",'
+                    '"intent_subtype":"capability","intent_confidence":0.98,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Who is Dejan?", "US", "en", "directory-cid")
+
+    assert plan.conversation_intent == "knowledge"
+    assert plan.include_global_documents is True
+    assert plan.conversation_subtype == ""
+
+
 def test_unverified_support_intent_fails_closed_to_knowledge(monkeypatch) -> None:
     runtime = MagicMock()
     runtime.converse.side_effect = [
