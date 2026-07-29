@@ -62,6 +62,14 @@ def restore_missing_directory_contacts(
     seen_values: set[str] = set()
 
     primary_fields = next((fields for fields in field_sets if fields), {})
+    approved_contacts = [
+        str(value).strip()
+        for label, value in primary_fields.items()
+        if _CONTACT_FIELD_RE.search(str(label).strip()) and str(value).strip()
+    ]
+    if not any(_value_is_present(original, value) for value in approved_contacts):
+        return original, []
+
     for raw_label, raw_value in primary_fields.items():
         label = str(raw_label).strip()
         value = str(raw_value).strip()

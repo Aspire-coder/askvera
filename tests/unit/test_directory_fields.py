@@ -40,6 +40,20 @@ def test_ignores_non_contact_directory_metadata() -> None:
     assert restored == []
 
 
+def test_does_not_append_contacts_to_a_no_match_answer() -> None:
+    answer = "I don't have information about Dejan in the approved directory."
+    fields = {
+        "Country": "Exampleland",
+        "Office Phone": "+99 123 456 7890",
+        "Office Email": "other@example.test",
+    }
+
+    completed, restored = restore_missing_directory_contacts(answer, [fields])
+
+    assert completed == answer
+    assert restored == []
+
+
 def test_never_mixes_contacts_from_secondary_directory_records() -> None:
     answer = "Italy office\nAddress: Via Example 10, Rome"
     italy = {
