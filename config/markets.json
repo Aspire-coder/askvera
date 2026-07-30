@@ -943,6 +943,11 @@
           "code": "en",
           "name": "English",
           "enabled": true
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "enabled": true
         }
       ],
       "privacyVersion": "2026.1"

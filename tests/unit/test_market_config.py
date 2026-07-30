@@ -125,9 +125,9 @@ def test_public_markets_are_limited_to_published_policy_locales() -> None:
     ]
     assert countries["SE"]["defaultLanguage"] == "en"
     assert countries["NL"]["languages"] == [
+        {"code": "nl", "name": "Dutch"},
         {"code": "en", "name": "English"},
         {"code": "fr", "name": "French"},
-        {"code": "nl", "name": "Dutch"},
     ]
     assert countries["NL"]["defaultLanguage"] == "nl"
     assert countries["RS"]["languages"] == [{"code": "sr", "name": "Serbian"}]
