@@ -259,7 +259,7 @@ def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, st
         raise ValueError("Planner queries must be a JSON array.")
     parsed: list[str] = []
     query_limit = max(1, min(int(settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT), 10))
-    max_query_chars = max(50, min(int(settings.BEDROCK_QUERY_PLANNER_MAX_QUERY_CHARS), 2000))
+    max_query_chars = max(1, min(int(settings.BEDROCK_QUERY_PLANNER_MAX_QUERY_CHARS), 2000))
     for query in queries[:query_limit]:
         if not isinstance(query, str):
             continue

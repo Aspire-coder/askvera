@@ -255,6 +255,7 @@ def test_bedrock_provider_uses_configured_fallback_for_transient_failure(monkeyp
         {"output": {"message": {"content": [{"text": "Fallback answer"}]}}},
     ]
     monkeypatch.setattr("app.models.bedrock_provider.get_aws_clients", lambda: SimpleNamespace(bedrock_runtime=runtime))
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_MODEL_ARN", "primary-model")
     monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_FALLBACK_MODEL_ARN", "fallback-model")
     retrieval_result = RetrievalResult(
         documents=[RetrievedDocument(id="doc", title="doc", content="evidence", source="s3://kb/doc", score=0.9)],
@@ -272,7 +273,7 @@ def test_bedrock_provider_uses_configured_fallback_for_transient_failure(monkeyp
     assert result.model_name == "fallback-model"
     assert result.metadata["model_fallback_used"] is True
     assert [call.kwargs["modelId"] for call in runtime.converse.call_args_list] == [
-        "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "primary-model",
         "fallback-model",
     ]
 

@@ -30,6 +30,7 @@ def _service(monkeypatch, status: str = "active") -> WidgetAuthService:
     monkeypatch.setattr(service_module.settings, "WIDGET_REGISTRY_JSON", _registry(status))
     monkeypatch.setattr(service_module.settings, "WIDGET_JWT_SECRET", "test-secret")
     monkeypatch.setattr(service_module.settings, "WIDGET_JWT_TTL_SECONDS", 900)
+    monkeypatch.setattr(service_module, "register_widget_session", lambda *_args, **_kwargs: None)
     return WidgetAuthService()
 
 

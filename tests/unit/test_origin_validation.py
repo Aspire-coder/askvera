@@ -106,6 +106,7 @@ def test_service_accepts_wildcard_origin(monkeypatch) -> None:
 
     monkeypatch.setattr(service_module.settings, "WIDGET_REGISTRY_JSON", _registry(["*.company.com"]))
     monkeypatch.setattr(service_module.settings, "WIDGET_JWT_SECRET", "test-secret")
+    monkeypatch.setattr(service_module, "register_widget_session", lambda *_args, **_kwargs: None)
     service = WidgetAuthService()
 
     response = service.initialize(
