@@ -9,6 +9,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
+from services.html_sanitizer import sanitize_legal_html
 from utils.exceptions import ConfigurationError
 from utils.logging import get_logger
 
@@ -47,7 +48,13 @@ def _read_s3_text(bucket: str, key: str, title: str, filename: str) -> str:
     """Read one legal document from S3 as UTF-8 HTML."""
     try:
         response = get_aws_clients().s3.get_object(Bucket=bucket, Key=key)
-        body = response["Body"].read()
+        stream = response["Body"]
+        try:
+            body = stream.read()
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
         html = body.decode("utf-8") if isinstance(body, bytes) else str(body)
     except (BotoCoreError, ClientError, KeyError, UnicodeDecodeError) as exc:
         LOGGER.error("legal_document_missing", document_title=title, filename=filename, bucket=bucket, key=key)
@@ -56,7 +63,11 @@ def _read_s3_text(bucket: str, key: str, title: str, filename: str) -> str:
     if not html.strip():
         LOGGER.error("legal_document_empty", document_title=title, filename=filename, bucket=bucket, key=key)
         raise ConfigurationError(f"{key} is empty in S3 bucket {bucket}.")
-    return html
+    sanitized = sanitize_legal_html(html)
+    if not sanitized.strip():
+        LOGGER.error("legal_document_unsafe_or_empty", document_title=title, filename=filename, key=key)
+        raise ConfigurationError(f"{key} has no safe legal content.")
+    return sanitized
 
 
 @lru_cache(maxsize=1)

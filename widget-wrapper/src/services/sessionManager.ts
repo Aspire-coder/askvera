@@ -1,4 +1,4 @@
-import { createLocalStorageAdapter, type StorageAdapter } from "../storage";
+import { createSessionStorageAdapter, type StorageAdapter } from "../storage";
 
 const SESSION_SCHEMA_VERSION = 1;
 
@@ -55,7 +55,7 @@ export class SessionManager {
   private now: () => Date;
 
   constructor(options: SessionManagerOptions = {}) {
-    this.storage = options.storage || createLocalStorageAdapter();
+    this.storage = options.storage || createSessionStorageAdapter();
     this.keys = options.keys || {};
     this.now = options.now || (() => new Date());
   }

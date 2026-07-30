@@ -64,8 +64,7 @@ def encode_widget_token(claims: dict[str, Any]) -> str:
     return f"{signing_input}.{_sign(signing_input)}"
 
 
-def decode_widget_token(token: str) -> dict[str, Any]:
-    """Decode and validate a compact HS256 JWT."""
+def _decode_signed_token(token: str) -> dict[str, Any]:
     try:
         encoded_header, encoded_payload, signature = token.split(".", 2)
     except ValueError as exc:
@@ -91,12 +90,6 @@ def decode_widget_token(token: str) -> dict[str, Any]:
     if payload.get("aud") != settings.WIDGET_JWT_AUDIENCE:
         raise WidgetTokenError("Widget token audience is invalid.")
 
-    if payload.get("sub") != "widget-session":
-        raise WidgetTokenError("Widget token subject is invalid.")
-
-    if is_widget_token_revoked(payload.get("jti")):
-        raise WidgetTokenRevokedError()
-
     now = int(time())
     skew = settings.WIDGET_JWT_CLOCK_SKEW_SECONDS
     if int(payload.get("nbf", 0)) > now + skew:
@@ -108,4 +101,27 @@ def decode_widget_token(token: str) -> dict[str, Any]:
     if int(payload.get("exp", 0)) <= now - skew:
         raise WidgetTokenError()
 
+    return payload
+
+
+def decode_widget_token(token: str) -> dict[str, Any]:
+    """Decode and validate a compact widget access JWT."""
+    payload = _decode_signed_token(token)
+    if payload.get("sub") != "widget-session":
+        raise WidgetTokenError("Widget token subject is invalid.")
+    if is_widget_token_revoked(payload.get("jti")):
+        raise WidgetTokenRevokedError()
+    return payload
+
+
+def encode_widget_resume_token(claims: dict[str, Any]) -> str:
+    """Encode a signed resume capability bound to one widget and origin."""
+    return encode_widget_token(claims)
+
+
+def decode_widget_resume_token(token: str) -> dict[str, Any]:
+    """Decode and validate a widget resume capability."""
+    payload = _decode_signed_token(token)
+    if payload.get("sub") != "widget-resume":
+        raise WidgetTokenError("Widget resume token subject is invalid.")
     return payload

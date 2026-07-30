@@ -1,4 +1,11 @@
 repos:
+  - repo: local
+    hooks:
+      - id: askvera-security-regressions
+        name: AskVera security regression checks
+        entry: python scripts/check_security_regressions.py
+        language: system
+        pass_filenames: false
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:

@@ -42,19 +42,21 @@ def _env_str(name: str, default: str) -> str:
 # Required values checked by scripts/validate_config.py before startup accepts traffic.
 REQUIRED_VALUES = [
     "AWS_REGION",
+    "RDS_HOST",
     "RDS_SECRET_ARN",
     "REDIS_HOST",
     "REDIS_CACHE_NAME",
     "REDIS_USER",
+    "S3_BUCKET",
     "LEGAL_BUCKET",
     "LEGAL_PREFIX",
     "LEGAL_VERSION",
 ]
 
 # AWS Region where all runtime resources are deployed. Found in AWS Console top-right region selector.
-AWS_REGION = "us-east-1"
-AWS_ACCOUNT_ID = "615592621509"
-BEDROCK_REGION = AWS_REGION
+AWS_REGION = _env_str("AWS_REGION", "us-east-1")
+AWS_ACCOUNT_ID = _env_str("AWS_ACCOUNT_ID", "")
+BEDROCK_REGION = _env_str("BEDROCK_REGION", AWS_REGION)
 # Bedrock embedding model used for app-owned section semantic retrieval.
 BEDROCK_EMBED_MODEL_ID = _env_str("BEDROCK_EMBED_MODEL_ID", "amazon.titan-embed-text-v2:0")
 # Public API version returned by /health. Found in release notes or deployment tag.
@@ -76,21 +78,24 @@ RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-di
 # Code-owned conversation-routing behavior version. Change this when routing
 # semantics change so stale cached answers cannot bypass the new router.
 CONVERSATION_ROUTING_VERSION = "2026-07-29-assistant-meta-v2"
-# RDS PostgreSQL database identifier. Found in RDS -> Databases -> database-1.
-RDS_DB_IDENTIFIER = "database-1"
+# RDS PostgreSQL database identifier. Found in RDS -> Databases.
+RDS_DB_IDENTIFIER = _env_str("RDS_DB_IDENTIFIER", "")
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
 # only contain username/password, so keep the endpoint in deploy-time config.
-RDS_HOST = _env_str("RDS_HOST", "database-1.cebeiie8qr4i.us-east-1.rds.amazonaws.com")
+RDS_HOST = _env_str("RDS_HOST", "")
 RDS_PORT = _env_int("RDS_PORT", 5432)
 RDS_DB_NAME = _env_str("RDS_DB_NAME", "postgres")
 # Secrets Manager ARN for the RDS PostgreSQL master credentials. Found in RDS -> database-1 -> Configuration -> Master credentials ARN.
-RDS_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:615592621509:secret:rds!db-617fcf32-1ae3-4f45-b803-4378b966fcf6-0xz7wN"
+RDS_SECRET_ARN = _env_str("RDS_SECRET_ARN", "")
 # PostgreSQL connection pool size for the FastAPI process. Tune in production after load testing.
 POSTGRES_POOL_SIZE = 5
 # Extra PostgreSQL connections allowed above the base pool. Tune in production after load testing.
 POSTGRES_MAX_OVERFLOW = 10
 # PostgreSQL connection timeout in seconds.
 POSTGRES_CONNECT_TIMEOUT_SECONDS = 5
+# Schema changes are applied by scripts/run_db_migrations.py. This compatibility
+# switch is only for explicitly bootstrapping a fresh local database.
+DB_SCHEMA_BOOTSTRAP_ON_STARTUP = _env_bool("DB_SCHEMA_BOOTSTRAP_ON_STARTUP", False)
 # Default AWS client timeouts and retry budget.
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
@@ -138,6 +143,34 @@ WIDGET_ASSET_PUBLIC_BASE_URL = _env_str("WIDGET_ASSET_PUBLIC_BASE_URL", "")
 WIDGET_LOGO_MAX_BYTES = _env_int("WIDGET_LOGO_MAX_BYTES", 1024 * 1024)
 KNOWLEDGE_UPLOAD_BUCKET = _env_str("KNOWLEDGE_UPLOAD_BUCKET", "")
 KNOWLEDGE_UPLOAD_PREFIX = _env_str("KNOWLEDGE_UPLOAD_PREFIX", "approved-knowledge")
+ADMIN_INGESTION_QUEUE_ENABLED = _env_bool("ADMIN_INGESTION_QUEUE_ENABLED", False)
+ADMIN_INGESTION_QUEUE_URL = _env_str("ADMIN_INGESTION_QUEUE_URL", "")
+ADMIN_INGESTION_QUARANTINE_PREFIX = _env_str(
+    "ADMIN_INGESTION_QUARANTINE_PREFIX",
+    "quarantine/admin-uploads",
+)
+ADMIN_INGESTION_STAGED_PUBLISH_ENABLED = _env_bool(
+    "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED",
+    False,
+)
+ADMIN_INGESTION_GENERATION_POINTER_ENABLED = _env_bool(
+    "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+    False,
+)
+ADMIN_INGESTION_MALWARE_SCAN_REQUIRED = _env_bool(
+    "ADMIN_INGESTION_MALWARE_SCAN_REQUIRED",
+    False,
+)
+ADMIN_TEXTRACT_OCR_ENABLED = _env_bool("ADMIN_TEXTRACT_OCR_ENABLED", False)
+ADMIN_TEXTRACT_OCR_TIMEOUT_SECONDS = _env_int("ADMIN_TEXTRACT_OCR_TIMEOUT_SECONDS", 600)
+ADMIN_INGESTION_WORKER_WAIT_SECONDS = _env_int("ADMIN_INGESTION_WORKER_WAIT_SECONDS", 20)
+ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS = _env_int(
+    "ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS",
+    900,
+)
+ADMIN_INGESTION_MAX_ATTEMPTS = _env_int("ADMIN_INGESTION_MAX_ATTEMPTS", 5)
+ADMIN_INGESTION_MAX_ARCHIVE_RATIO = _env_int("ADMIN_INGESTION_MAX_ARCHIVE_RATIO", 100)
+SECURITY_PROFILE = _env_str("SECURITY_PROFILE", "standard").lower()
 # Widget authentication. Keep disabled by default for local/dev until production
 # registry values and JWT secret are configured.
 WIDGET_AUTH_REQUIRED = _env_bool("WIDGET_AUTH_REQUIRED", False)
@@ -194,13 +227,13 @@ WIDGET_REGISTRY_JSON = _env_str(
     ),
 )
 # Bedrock Knowledge Base ID. Found in Bedrock -> Knowledge Bases -> your KB -> Knowledge base ID.
-BEDROCK_KB_ID = _env_str("BEDROCK_KB_ID", "P482AUAHKM")
+BEDROCK_KB_ID = _env_str("BEDROCK_KB_ID", "")
 # Bedrock data source ID. Found in Bedrock -> Knowledge Bases -> Data sources.
-BEDROCK_DATA_SOURCE_ID = _env_str("BEDROCK_DATA_SOURCE_ID", "JSAC3THB67")
+BEDROCK_DATA_SOURCE_ID = _env_str("BEDROCK_DATA_SOURCE_ID", "")
 # Alias matching the SSM key naming used in the AWS setup notes.
 BEDROCK_DATASOURCE_ID = BEDROCK_DATA_SOURCE_ID
 # Bedrock model ARN or inference profile ARN. Found in Bedrock -> Model access or Inference profiles.
-BEDROCK_MODEL_ARN = "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
+BEDROCK_MODEL_ARN = _env_str("BEDROCK_MODEL_ARN", "")
 # Optional secondary generation model. Keep empty until the fallback model has
 # passed the same retrieval and validation evaluation suite as the primary.
 BEDROCK_FALLBACK_MODEL_ARN = _env_str("BEDROCK_FALLBACK_MODEL_ARN", "")
@@ -215,9 +248,9 @@ BEDROCK_SHARED_CIRCUIT_BREAKER_PREFIX = _env_str(
 # policy and directory answers.
 BEDROCK_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_MAX_OUTPUT_TOKENS", 1024)
 # Bedrock Guardrail ID. Found in Bedrock -> Guardrails -> your guardrail -> Guardrail ID.
-BEDROCK_GUARDRAIL_ID = "idy33rbs9v1i"
+BEDROCK_GUARDRAIL_ID = _env_str("BEDROCK_GUARDRAIL_ID", "")
 # Bedrock Guardrail version. Found in Bedrock -> Guardrails -> Versions.
-BEDROCK_GUARDRAIL_VERSION = "DRAFT"
+BEDROCK_GUARDRAIL_VERSION = _env_str("BEDROCK_GUARDRAIL_VERSION", "")
 # Default model provider selected by the model router.
 DEFAULT_MODEL_PROVIDER = _env_str("DEFAULT_MODEL_PROVIDER", "claude")
 # Minimum retrieval confidence required before answering. Raw HYBRID scores for relevant policy matches
@@ -240,6 +273,8 @@ BEDROCK_STRONG_LOCAL_MATCH_THRESHOLD = _env_float("BEDROCK_STRONG_LOCAL_MATCH_TH
 # country-specific aliases in source code or configuration.
 BEDROCK_QUERY_PLANNER_ENABLED = _env_bool("BEDROCK_QUERY_PLANNER_ENABLED", True)
 BEDROCK_QUERY_PLANNER_QUERY_COUNT = _env_int("BEDROCK_QUERY_PLANNER_QUERY_COUNT", 4)
+BEDROCK_QUERY_PLANNER_MAX_QUERY_CHARS = _env_int("BEDROCK_QUERY_PLANNER_MAX_QUERY_CHARS", 500)
+BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS = _env_int("BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS", 12000)
 BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE = _env_float("BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE", 0.85)
 BEDROCK_SUPPORT_ROUTE_MIN_CONFIDENCE = _env_float("BEDROCK_SUPPORT_ROUTE_MIN_CONFIDENCE", 0.95)
 BEDROCK_EVIDENCE_SELECTOR_ENABLED = _env_bool("BEDROCK_EVIDENCE_SELECTOR_ENABLED", False)
@@ -292,11 +327,11 @@ CONVERSATION_ROUTES_PATH = _env_str("CONVERSATION_ROUTES_PATH", str(Path(__file_
 # that support every factual claim before an answer is released.
 EVIDENCE_GATED_OUTPUT_ENABLED = _env_bool("EVIDENCE_GATED_OUTPUT_ENABLED", False)
 # S3 bucket backing the Bedrock Knowledge Base approved documents.
-S3_BUCKET = "askverachat-prod-kb"
+S3_BUCKET = _env_str("S3_BUCKET", "")
 # S3 location for legal HTML documents returned by /api/privacy.
-LEGAL_BUCKET = "askverachat-prod-content"
-LEGAL_PREFIX = "legal"
-LEGAL_VERSION = "2026.1"
+LEGAL_BUCKET = _env_str("LEGAL_BUCKET", "")
+LEGAL_PREFIX = _env_str("LEGAL_PREFIX", "legal")
+LEGAL_VERSION = _env_str("LEGAL_VERSION", "2026.1")
 # Session inactivity timeout. A closed or idle session keeps its transcript for
 # retention/audit purposes, but cannot receive additional chat messages.
 SESSION_IDLE_TIMEOUT_MINUTES = _env_int("SESSION_IDLE_TIMEOUT_MINUTES", 30)
@@ -310,16 +345,22 @@ MAX_SESSION_DAYS = 7
 CHAT_MEMORY_BACKEND = _env_str("CHAT_MEMORY_BACKEND", "postgres").lower()
 CHAT_HISTORY_MAX_MESSAGES = _env_int("CHAT_HISTORY_MAX_MESSAGES", 10)
 CHAT_TRANSCRIPT_RETENTION_DAYS = _env_int("CHAT_TRANSCRIPT_RETENTION_DAYS", 90)
+CHAT_ANALYTICS_RETENTION_DAYS = _env_int("CHAT_ANALYTICS_RETENTION_DAYS", 180)
+FEEDBACK_RETENTION_DAYS = _env_int("FEEDBACK_RETENTION_DAYS", 365)
+SUPPORT_REQUEST_RETENTION_DAYS = _env_int("SUPPORT_REQUEST_RETENTION_DAYS", 365)
+RETRIEVAL_SHADOW_RETENTION_DAYS = _env_int("RETRIEVAL_SHADOW_RETENTION_DAYS", 30)
+INGESTION_JOB_RETENTION_DAYS = _env_int("INGESTION_JOB_RETENTION_DAYS", 90)
+CONSENT_LOG_RETENTION_DAYS = _env_int("CONSENT_LOG_RETENTION_DAYS", 2555)
 # ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.
-REDIS_CACHE_NAME = "askverachat-cache"
+REDIS_CACHE_NAME = _env_str("REDIS_CACHE_NAME", "")
 # ElastiCache Valkey primary endpoint hostname. Found in ElastiCache -> Valkey cache -> Connectivity.
-REDIS_HOST = "master.askverachat-cache.iivrdz.use1.cache.amazonaws.com"
+REDIS_HOST = _env_str("REDIS_HOST", "")
 # ElastiCache Valkey TLS port. Found in ElastiCache -> Valkey cache details -> Port.
 REDIS_PORT = 6379
 # Whether Valkey requires in-transit TLS. Found in ElastiCache -> Valkey cache -> Security.
 ELASTICACHE_REDIS_TLS = True
 # Valkey user configured for the application. Found in ElastiCache -> User groups.
-REDIS_USER = "askverachat-app-user"
+REDIS_USER = _env_str("REDIS_USER", "")
 # Backward-compatible aliases used by older cache code paths.
 ELASTICACHE_REDIS_HOST = REDIS_HOST
 ELASTICACHE_REDIS_PORT = REDIS_PORT
@@ -374,7 +415,7 @@ CREATE_SNS_TOPIC_IF_MISSING = _env_bool("CREATE_SNS_TOPIC_IF_MISSING", False)
 ENABLE_OK_NOTIFICATIONS = _env_bool("ENABLE_OK_NOTIFICATIONS", True)
 ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS = _env_bool("ENABLE_INSUFFICIENT_DATA_NOTIFICATIONS", False)
 # SQS feedback queue URL. Found in SQS -> Queues -> your feedback queue -> URL.
-SQS_FEEDBACK_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/615592621509/askverachat-feedback"
+SQS_FEEDBACK_QUEUE_URL = _env_str("SQS_FEEDBACK_QUEUE_URL", "")
 FEEDBACK_EXPECTED_ANSWER_ENABLED = _env_bool("FEEDBACK_EXPECTED_ANSWER_ENABLED", False)
 # Support requests are delivered through Amazon SES. Recipient routing remains
 # server-side so internal addresses are never exposed in the public widget.

@@ -10,9 +10,16 @@ from app.widget_registry.models import WidgetRegistration
 from app.widget_registry.service import WidgetRegistryService, widget_registry_service
 from utils.exceptions import AskVeraError
 from utils.logging import get_logger
-from services.session_service import can_resume_session
+from services.session_service import can_resume_bound_session, register_widget_session
 
-from .jwt import WidgetTokenError, decode_widget_token, encode_widget_token, revoke_widget_token_id
+from .jwt import (
+    WidgetTokenError,
+    decode_widget_resume_token,
+    decode_widget_token,
+    encode_widget_resume_token,
+    encode_widget_token,
+    revoke_widget_token_id,
+)
 from .models import WidgetAuthClaims, WidgetInitRequest, WidgetInitResponse, WidgetRefreshResponse
 from .origin_validator import is_origin_allowed
 
@@ -64,10 +71,26 @@ class WidgetAuthService:
             exp=issued_at + settings.WIDGET_JWT_TTL_SECONDS,
         )
 
+    def _resume_token(self, claims: WidgetAuthClaims) -> str:
+        return encode_widget_resume_token(
+            {
+                "iss": settings.WIDGET_JWT_ISSUER,
+                "aud": settings.WIDGET_JWT_AUDIENCE,
+                "sub": "widget-resume",
+                "widgetId": claims.widgetId,
+                "origin": claims.origin,
+                "sessionId": claims.sessionId,
+                "iat": claims.iat,
+                "nbf": claims.nbf,
+                "exp": claims.iat + settings.MAX_SESSION_DAYS * 24 * 60 * 60,
+            }
+        )
+
     def _response_from_claims(self, claims: WidgetAuthClaims) -> WidgetInitResponse:
         return WidgetInitResponse(
             token=encode_widget_token(claims.model_dump()),
             sessionId=claims.sessionId,
+            resumeToken=self._resume_token(claims),
         )
 
     def initialize(self, request: WidgetInitRequest, correlation_id: str, client_ip: str | None = None) -> WidgetInitResponse:
@@ -94,7 +117,34 @@ class WidgetAuthService:
             raise WidgetAuthError()
 
         requested_session_id = str(request.resumeSessionId or "")
-        session_id = requested_session_id if can_resume_session(requested_session_id, correlation_id) else str(uuid4())
+        resume_allowed = False
+        if requested_session_id and request.resumeToken:
+            try:
+                resume_claims = decode_widget_resume_token(request.resumeToken)
+                resume_allowed = (
+                    resume_claims.get("sessionId") == requested_session_id
+                    and resume_claims.get("widgetId") == registration.widgetId
+                    and resume_claims.get("origin") == origin_validation.normalized_origin
+                    and can_resume_bound_session(
+                        requested_session_id,
+                        registration.widgetId,
+                        origin_validation.normalized_origin,
+                        correlation_id,
+                    )
+                )
+            except WidgetTokenError:
+                LOGGER.info(
+                    "widget_session_resume_rejected",
+                    correlation_id=correlation_id,
+                    widget_id=registration.widgetId,
+                )
+        session_id = requested_session_id if resume_allowed else str(uuid4())
+        register_widget_session(
+            session_id,
+            registration.widgetId,
+            origin_validation.normalized_origin,
+            correlation_id,
+        )
         claims = self._build_claims(registration, origin_validation.normalized_origin, session_id)
         LOGGER.info(
             "widget_auth_initialized",

@@ -1,5 +1,6 @@
 """Fail-fast startup configuration validator."""
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -81,9 +82,14 @@ def _validate_production_auth(missing: list[str]) -> None:
 
 
 def _validate_production_integrations(missing: list[str]) -> None:
+    _require(missing, "AWS_ACCOUNT_ID")
+    _require(missing, "RDS_DB_IDENTIFIER")
     if settings.RETRIEVAL_PROVIDER == "opensearch_section":
         _require(missing, "OPENSEARCH_ENDPOINT")
         _require(missing, "OPENSEARCH_INDEX")
+    elif settings.RETRIEVAL_PROVIDER == "bedrock":
+        _require(missing, "BEDROCK_KB_ID")
+        _require(missing, "BEDROCK_DATA_SOURCE_ID")
     if settings.AUDIT_FIREHOSE_ENABLED:
         _require(missing, "AUDIT_FIREHOSE_STREAM")
     if settings.SUPPORT_EMAIL_ENABLED:
@@ -102,6 +108,30 @@ def _validate_production_integrations(missing: list[str]) -> None:
             missing.append("SUPPORT_ROUTES_JSON or SUPPORT_DEFAULT_ROUTE_JSON")
 
 
+def _validate_hardened_profile(missing: list[str]) -> None:
+    if settings.SECURITY_PROFILE != "hardened":
+        return
+    for name in (
+        "ADMIN_RBAC_ENABLED",
+        "ADMIN_USER_MANAGEMENT_ENABLED",
+        "ADMIN_DOCUMENT_PREFLIGHT_ENABLED",
+        "ADMIN_TEXTRACT_OCR_ENABLED",
+        "AUDIT_FIREHOSE_ENABLED",
+        "EVIDENCE_GATED_OUTPUT_ENABLED",
+        "ADMIN_INGESTION_QUEUE_ENABLED",
+        "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED",
+        "ENABLE_ALARM_NOTIFICATIONS",
+    ):
+        if not bool(getattr(settings, name, False)):
+            missing.append(f"{name} (must be enabled for the hardened security profile)")
+    for name in (
+        "ADMIN_INGESTION_QUEUE_URL",
+        "KNOWLEDGE_UPLOAD_BUCKET",
+        "AUDIT_FIREHOSE_STREAM",
+    ):
+        _require(missing, name)
+
+
 def validate() -> list[str]:
     """Return missing or placeholder required setting names."""
     missing: list[str] = []
@@ -112,11 +142,21 @@ def validate() -> list[str]:
     if settings.APP_ENV == "production":
         _validate_production_auth(missing)
         _validate_production_integrations(missing)
+        _validate_hardened_profile(missing)
     return missing
 
 
 def main() -> int:
     """Print validation result and return a process exit code."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--load-ssm",
+        action="store_true",
+        help="Load deployed SSM values before validating them.",
+    )
+    args = parser.parse_args()
+    if args.load_ssm:
+        settings.load_ssm_config()
     missing = validate()
     if missing:
         print("AskVera configuration is incomplete. Configure these values through the environment or SSM:")

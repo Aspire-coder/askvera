@@ -29,6 +29,9 @@ jobs:
       - name: Lint Python source
         run: python -m flake8 api app config services utils main.py
 
+      - name: Check security regressions
+        run: python scripts/check_security_regressions.py
+
       - name: Test
         run: python -m pytest tests/unit -q
 

@@ -3,6 +3,7 @@ import type { ThemeConfig } from "./themeConfig";
 import type { WidgetTopic } from "../generic-widget/types";
 
 export type LauncherPosition = "bottom-right" | "bottom-left";
+export type ConversationPersistence = "session" | "local" | "none";
 
 export type RuntimeEventCallbacks = {
   onOpen?: () => void;
@@ -37,6 +38,7 @@ export type RuntimeConfig = {
   contextualTopics?: WidgetTopic[];
   defaultCountry?: string;
   defaultLanguage?: string;
+  conversationPersistence?: ConversationPersistence;
   fontFamily?: string;
   debug?: boolean;
   features?: Partial<WidgetFeatureFlags>;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
@@ -33,8 +34,11 @@ from services.knowledge_ingestion import (
     ACCESS_SCOPES,
     DOCUMENT_TYPES,
     create_ingestion_job,
+    enqueue_ingestion_job,
+    fail_ingestion_job,
     list_ingestion_jobs,
     process_ingestion_job,
+    stage_ingestion_upload,
     safe_filename,
     validate_upload,
 )
@@ -322,6 +326,8 @@ async def upload_document(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    content_hash = hashlib.sha256(content).hexdigest()
+    accepted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
     job_id = create_ingestion_job(
         filename=filename,
         country=normalized_country,
@@ -329,7 +335,37 @@ async def upload_document(
         document_type=document_type,
         access_scope=access_scope,
         version=document_version,
+        content_hash=content_hash,
+        accepted_by=accepted_by,
     )
+    if settings.ADMIN_INGESTION_QUEUE_ENABLED:
+        try:
+            upload_uri = stage_ingestion_upload(job_id, filename, content)
+            enqueue_ingestion_job(
+                job_id=job_id,
+                upload_uri=upload_uri,
+                filename=filename,
+                country=normalized_country,
+                language=normalized_language,
+                document_type=document_type,
+                access_scope=access_scope,
+                version=document_version,
+                effective_date=effective_date,
+                content_hash=content_hash,
+                accepted_by=accepted_by,
+            )
+        except (ValueError, BotoCoreError, ClientError) as exc:
+            fail_ingestion_job(job_id, "Durable ingestion queueing failed.")
+            raise HTTPException(status_code=503, detail="The document could not be queued safely.") from exc
+        return _payload(
+            {
+                "jobId": job_id,
+                "filename": filename,
+                "status": "queued",
+                "message": "Document accepted and queued for durable processing.",
+            },
+            request,
+        )
     upload_directory = Path(gettempdir()) / "askvera-ingestion" / job_id
     upload_directory.mkdir(parents=True, exist_ok=True)
     local_path = upload_directory / filename
@@ -345,6 +381,7 @@ async def upload_document(
         access_scope=access_scope,
         version=document_version,
         effective_date=effective_date,
+        accepted_by=accepted_by,
     )
     return _payload(
         {

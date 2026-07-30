@@ -9,6 +9,7 @@ class WidgetInitRequest(BaseModel):
     widgetId: str = Field(min_length=1, max_length=128)
     origin: str | None = Field(default=None, min_length=1, max_length=512)
     resumeSessionId: str | None = Field(default=None, min_length=1, max_length=128)
+    resumeToken: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @field_validator("origin")
     @classmethod
@@ -47,6 +48,7 @@ class WidgetInitResponse(BaseModel):
 
     token: str
     sessionId: str
+    resumeToken: str | None = None
 
 
 class WidgetRefreshResponse(BaseModel):

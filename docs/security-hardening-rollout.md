@@ -1,0 +1,177 @@
+# AskVera Security and Ingestion Hardening Rollout
+
+## Purpose
+
+This package strengthens document ingestion, legal-content rendering, browser
+privacy, administrator access, and operational-data retention. It does not
+change the active retrieval provider, retrieval index, ranking, prompts, or
+answer-generation model.
+
+All higher-risk runtime changes are disabled by default. Deploy the code first,
+then enable each capability separately after its checks pass.
+
+## What Changes Immediately
+
+- Legal HTML is sanitized on the API and again in the widget.
+- Legal-document printing no longer uses `document.write`.
+- Query-planner output is bounded and schema-checked.
+- Full browser transcripts use `sessionStorage` by default instead of
+  `localStorage`. Closing the browser tab removes that browser copy.
+- Retention settings become available, but no deletion occurs until the timer is
+  installed and started.
+
+## What Remains Off
+
+| Setting | Default | Effect when enabled |
+| --- | --- | --- |
+| `ADMIN_INGESTION_QUEUE_ENABLED` | `false` | Stores accepted uploads in private S3 and sends a compact SQS command. |
+| `ADMIN_INGESTION_STAGED_PUBLISH_ENABLED` | `false` | Verifies a complete OpenSearch generation before activation. |
+| `ADMIN_TEXTRACT_OCR_ENABLED` | `false` | Uses Textract for scanned PDFs that fail text preflight. |
+| `SECURITY_PROFILE` | `standard` | `hardened` makes required security controls fail closed at startup. |
+| `EnableWebAcl` | `false` | Attaches AWS managed WAF protections to the operations portal. |
+
+## Safe Deployment Sequence
+
+### 1. Deploy Code With Defaults
+
+Deploy the API and widget code with every setting above left at its default.
+Run health checks and the current retrieval regression suite. Existing uploads
+continue to use the current in-process background task.
+
+Rollback: deploy the previous Git revision. No infrastructure or data path has
+changed yet.
+
+### 2. Apply Database Columns
+
+Allow application startup to add `upload_uri`, `content_hash`, `accepted_by`,
+and `attempt_count` to `ingestion_jobs`, plus `accepted_by` to
+`knowledge_documents`. Verify that existing jobs are unchanged and new columns
+contain their safe defaults.
+
+Rollback: leave the additive columns in place. They are ignored while queueing
+is disabled.
+
+### 3. Create Queue Infrastructure
+
+Deploy `deployment/ingestion-queue.yaml` as a CloudFormation change set. Review
+the encrypted main queue, retained dead-letter queue, message-age alarm, and
+dead-letter alarm before execution.
+
+Set `ADMIN_INGESTION_QUEUE_URL` to the stack output, but keep
+`ADMIN_INGESTION_QUEUE_ENABLED=false`.
+
+Rollback: do not delete retained queues until operators confirm they are empty.
+
+### 4. Grant Least-Privilege Access
+
+The EC2 instance role needs:
+
+- Main queue: `sqs:SendMessage`, `sqs:ReceiveMessage`,
+  `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`,
+  `sqs:GetQueueAttributes`.
+- Quarantine S3 prefix: `s3:PutObject`, `s3:GetObject`,
+  `s3:DeleteObject`.
+- Approved source prefix: the existing upload permissions.
+- Textract, only when OCR is enabled:
+  `textract:StartDocumentTextDetection` and
+  `textract:GetDocumentTextDetection`.
+- KMS permissions required by the selected S3 key, if a customer-managed key is
+  used.
+
+Scope queue actions to the created queue ARN and S3 actions to the exact bucket
+prefixes. Do not grant wildcard account administration.
+
+### 5. Install the Worker
+
+Install `deployment/systemd/askvera-ingestion-worker.service` and reload
+systemd, but do not start or enable it while queueing is disabled. Review its
+environment file and service sandbox first.
+
+Rollback: stop and disable the worker.
+
+### 6. Enable Durable Queueing
+
+Set `ADMIN_INGESTION_QUEUE_ENABLED=true`, restart the API, then start and enable
+the worker. Upload one non-production test document and verify:
+
+1. The API returns a queued job.
+2. The file exists under the quarantine prefix with encryption.
+3. The queue message contains only metadata and an S3 URI.
+4. The worker completes the job.
+5. A failure is retried and eventually reaches the dead-letter queue.
+6. A long-running test receives visibility extensions and is not processed by
+   two workers.
+
+Rollback: set the flag to `false` and restart the API. Existing queued messages
+remain available for controlled processing.
+
+### 7. Enable Staged Publication
+
+Set `ADMIN_INGESTION_STAGED_PUBLISH_ENABLED=true`. Upload a test replacement and
+confirm that the expected staging count is complete before the new generation
+becomes active. Run country/language isolation tests and the retrieval
+regression suite.
+
+Rollback: set the flag to `false`. Restore the prior approved source and cache
+namespace if a published document itself was incorrect.
+
+### 8. Enable OCR
+
+Set `ADMIN_TEXTRACT_OCR_ENABLED=true` only after Textract permissions and cost
+monitoring are in place. Test a scanned PDF and confirm page ordering, section
+counts, locale metadata, and retrieval quality before publication.
+
+Rollback: set the flag to `false`; scanned documents return to the existing
+preflight rejection path.
+
+### 9. Start Retention Cleanup
+
+Review legal and operational retention periods, install
+`askvera-retention.service` and `askvera-retention.timer`, then run the service
+once manually and inspect deletion counts. The timer runs daily with a
+randomized delay.
+
+Create an S3 lifecycle rule that expires quarantine objects after the approved
+period, recommended initially as 30 days. Keep approved source documents under
+their separate document-retention policy.
+
+Rollback: disable the timer. Database deletions cannot be undone without a
+backup, so confirm backups and retention approvals before the first run.
+
+### 10. Enforce the Hardened Profile
+
+After all required controls are verified, set `SECURITY_PROFILE=hardened`.
+Startup validation then refuses to run if a required security feature or
+destination is missing.
+
+Rollback: set `SECURITY_PROFILE=standard` only through the approved emergency
+change process.
+
+### 11. Portal MFA and WAF
+
+Review the `deployment/admin-portal.yaml` change set. MFA enrollment affects
+every administrator, so notify users before applying it. Enable the Web ACL
+with `EnableWebAcl=true` only after reviewing rate limits and managed-rule
+metrics in count/testing conditions where appropriate.
+
+Rollback: set `EnableWebAcl=false` if legitimate portal traffic is blocked.
+Cognito MFA rollback requires a deliberate identity-policy decision.
+
+## Required Verification
+
+- Python unit tests and lint pass.
+- Widget type-check, build, and artifact validation pass.
+- CloudFormation templates pass `validate-template` and change-set review.
+- Existing retrieval evaluation remains at or above the current approved
+  baseline.
+- Cross-market and cross-language isolation tests pass.
+- One queue retry and one dead-letter scenario are observed.
+- One scanned PDF is verified page by page before OCR publication.
+- Database backup restore procedure is confirmed before retention starts.
+
+## Operational Monitoring
+
+Monitor queue depth, oldest-message age, dead-letter count, ingestion job
+failure rate, Textract errors, OpenSearch activation failures, API health,
+administrator sign-in failures, WAF blocked requests, and daily retention
+deletion counts.

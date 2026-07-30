@@ -1,7 +1,10 @@
 const LOCALE_PREFERENCE_SCHEMA_VERSION = 1;
 const LOCALE_PREFERENCE_STORAGE_PREFIX = "askvera_locale_preference";
 
-type LocaleStorage = Pick<Storage, "getItem" | "setItem">;
+type LocaleStorage = {
+  getItem(key: string): string | null | undefined;
+  setItem(key: string, value: string): void;
+};
 
 export type LocalePreference = {
   country: string;

@@ -88,20 +88,19 @@ Production SSM path:
 
 ## Configure
 
-Current dev/QA values already configured:
+Configure environment-specific resource identifiers in SSM rather than source control. The
+required names are documented in `deployment/production.env.example`; this includes the RDS
+identifier and secret ARN, approved-content bucket, Valkey endpoint and user, retrieval
+resources, and queue URLs.
 
-- `AWS_REGION = us-east-1`
-- `RDS_DB_IDENTIFIER = database-1`
-- `RDS_SECRET_ARN = arn:aws:secretsmanager:us-east-1:615592621509:secret:rds!db-617fcf32-1ae3-4f45-b803-4378b966fcf6-0xz7wN`
-- Valkey cache name is `askverachat-cache`, endpoint is `master.askverachat-cache.iivrdz.use1.cache.amazonaws.com:6379`, and Redis user is `askverachat-app-user`.
-
-Fill remaining placeholders in `config/settings.py` after AWS setup is complete. Run:
+After the AWS resources and SSM parameters are ready, run:
 
 ```bash
 python scripts/validate_config.py
 ```
 
-The app refuses to start unless the currently required foundation values are present. Bedrock Knowledge Base/model/guardrail ID and SQS placeholders are allowed during dev/QA until those resources are created.
+The app refuses to start unless the required foundation values are present. Optional services
+are validated when their corresponding feature switches are enabled.
 
 ## Run Locally
 

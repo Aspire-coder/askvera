@@ -12,6 +12,7 @@ from app.retrieval.providers import (
     _expanded_retrieval_query,
     _planned_retrieval_plan,
     _planned_retrieval_queries,
+    _parse_planned_query_plan,
     _reference_score,
     _retrieval_configuration,
     _retrieval_queries,
@@ -483,6 +484,33 @@ def test_multilingual_query_planner_uses_runtime_question_without_country_aliase
     assert "requalification" in planner_prompt
     assert "inactivity" in planner_prompt
     assert "global_directory" in planner_prompt
+
+
+def test_query_planner_schema_limits_untrusted_model_output(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_QUERY_COUNT", 2)
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_MAX_QUERY_CHARS", 20)
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS", 2000)
+
+    parsed = _parse_planned_query_plan(
+        '{"queries":["first valid query","second query that is much too long","ignored",42],'
+        '"document_scopes":["locale_policy","unknown"],"answer_shape":"unknown",'
+        '"intent":"not_allowed","intent_confidence":4}'
+    )
+
+    assert parsed[0] == ["first valid query", "second query that is"]
+    assert parsed[1] is False
+    assert parsed[2] is False
+    assert parsed[3] == "knowledge"
+    assert parsed[5] == 1.0
+
+
+def test_query_planner_rejects_invalid_container_types(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS", 2000)
+
+    with pytest.raises(ValueError, match="queries"):
+        _parse_planned_query_plan('{"queries":"not-an-array"}')
+    with pytest.raises(ValueError, match="document scopes"):
+        _parse_planned_query_plan('{"queries":[],"document_scopes":"global_directory"}')
 
 
 def test_query_planner_selects_document_scope_from_semantic_intent(monkeypatch) -> None:

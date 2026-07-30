@@ -7,12 +7,26 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
-from utils.redaction import EMAIL_RE, GOVERNMENT_ID_RE, PHONE_RE, redact_payment_cards
+from utils.redaction import (
+    EMAIL_RE,
+    GOVERNMENT_ID_RE,
+    PHONE_RE,
+    redact_ibans,
+    redact_payment_cards,
+)
 from utils.exceptions import AwsServiceError
 from utils.logging import get_logger
 
 LOGGER = get_logger("services.pii")
-SENSITIVE_PII_PLACEHOLDERS = frozenset({"GOVERNMENT_ID", "PAYMENT_CARD", "SSN", "CREDIT_DEBIT_NUMBER"})
+SENSITIVE_PII_PLACEHOLDERS = frozenset(
+    {
+        "BANK_ACCOUNT",
+        "CREDIT_DEBIT_NUMBER",
+        "GOVERNMENT_ID",
+        "PAYMENT_CARD",
+        "SSN",
+    }
+)
 
 
 def contains_sensitive_pii_placeholder(text: str) -> bool:
@@ -107,6 +121,7 @@ def _scrub_pattern_pii(text: str, allowed_texts: Iterable[str]) -> str:
 
     scrubbed = GOVERNMENT_ID_RE.sub("[GOVERNMENT_ID]", text)
     scrubbed = redact_payment_cards(scrubbed)
+    scrubbed = redact_ibans(scrubbed)
     return PHONE_RE.sub(replace_phone, EMAIL_RE.sub(replace_email, scrubbed))
 
 

@@ -24,9 +24,17 @@ Parameters:
     Type: String
     Description: Globally unique prefix used for the Cognito hosted sign-in domain.
     AllowedPattern: "^[a-z0-9-]{3,63}$"
+  EnableWebAcl:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Attach managed AWS WAF protections after validating the change set.
 
 Conditions:
   UseCustomDomain: !Not [!Equals [!Ref CertificateArn, ""]]
+  UseWebAcl: !Equals [!Ref EnableWebAcl, "true"]
 
 Resources:
   PortalBucket:
@@ -119,7 +127,7 @@ Resources:
           EmailMessage: "<p>You have been invited to AskVera Operations.</p><p>Username: <strong>{username}</strong></p><p>Temporary password:</p><p><strong>{####}</strong></p><p>Sign in and choose a new password when prompted.</p>"
       AutoVerifiedAttributes:
         - email
-      MfaConfiguration: OPTIONAL
+      MfaConfiguration: "ON"
       EnabledMfas:
         - SOFTWARE_TOKEN_MFA
       Policies:
@@ -180,6 +188,57 @@ Resources:
       Domain: !Ref CognitoDomainPrefix
       UserPoolId: !Ref AdminUserPool
 
+  PortalWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Condition: UseWebAcl
+    Properties:
+      DefaultAction:
+        Allow: {}
+      Description: Managed protections and request-rate controls for AskVera Operations.
+      Name: !Sub "${AWS::StackName}-portal"
+      Scope: CLOUDFRONT
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${AWS::StackName}-portal-waf"
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: AWSManagedCommon
+          Priority: 10
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: managed-common
+            SampledRequestsEnabled: true
+        - Name: AWSManagedKnownBadInputs
+          Priority: 20
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: managed-known-bad-inputs
+            SampledRequestsEnabled: true
+        - Name: PerIpRateLimit
+          Priority: 30
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              AggregateKeyType: IP
+              Limit: 1000
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: per-ip-rate-limit
+            SampledRequestsEnabled: true
+
   PortalDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -217,6 +276,10 @@ Resources:
             ResponseCode: 200
             ResponsePagePath: /index.html
         PriceClass: PriceClass_100
+        WebACLId: !If
+          - UseWebAcl
+          - !GetAtt PortalWebAcl.Arn
+          - !Ref AWS::NoValue
         ViewerCertificate: !If
           - UseCustomDomain
           - AcmCertificateArn: !Ref CertificateArn

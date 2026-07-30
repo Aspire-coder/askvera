@@ -1,16 +1,23 @@
 """Tests for country-independent approved-document ingestion."""
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+from services import knowledge_ingestion
 from services.knowledge_ingestion import (
     MAX_CHUNK_CHARS,
     VNEXT_MAX_CHUNK_CHARS,
     ExtractedPage,
+    _activate_staged_sections,
+    _extract_pages_with_textract,
     build_sections,
+    enqueue_ingestion_job,
     extract_pages,
     safe_filename,
+    stage_ingestion_upload,
     validate_upload,
 )
 
@@ -86,3 +93,137 @@ def test_current_generic_chunk_profile_remains_the_default() -> None:
     )
 
     assert sections[0]["metadata"]["chunk_profile"] == "current"
+
+
+def test_durable_upload_uses_private_encrypted_s3_object(monkeypatch) -> None:
+    s3 = MagicMock()
+    monkeypatch.setattr(knowledge_ingestion, "get_aws_clients", lambda: SimpleNamespace(s3=s3))
+    monkeypatch.setattr(knowledge_ingestion.settings, "KNOWLEDGE_UPLOAD_BUCKET", "knowledge-bucket")
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_QUARANTINE_PREFIX", "quarantine")
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+    uri = stage_ingestion_upload("job-1", "policy.pdf", b"approved")
+
+    assert uri == "s3://knowledge-bucket/quarantine/job-1/policy.pdf"
+    assert s3.put_object.call_args.kwargs["ServerSideEncryption"] == "AES256"
+
+
+def test_queue_command_contains_reference_instead_of_document_bytes(monkeypatch) -> None:
+    sqs = MagicMock()
+    monkeypatch.setattr(knowledge_ingestion, "get_aws_clients", lambda: SimpleNamespace(sqs=sqs))
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_QUEUE_URL", "queue-url")
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+    enqueue_ingestion_job(
+        job_id="job-1",
+        upload_uri="s3://bucket/key",
+        filename="policy.pdf",
+        country="CA",
+        language="fr",
+        document_type="policy",
+        access_scope="country",
+        version="2026.1",
+        effective_date="2026-01-01",
+        content_hash="a" * 64,
+        accepted_by="reviewer@example.com",
+    )
+
+    body = sqs.send_message.call_args.kwargs["MessageBody"]
+    assert '"uploadUri":"s3://bucket/key"' in body
+    assert '"contentHash":"' + ("a" * 64) + '"' in body
+    assert '"acceptedBy":"reviewer@example.com"' in body
+    assert "approved document contents" not in body
+
+
+def test_textract_ocr_reconstructs_pages(monkeypatch) -> None:
+    textract = MagicMock()
+    textract.start_document_text_detection.return_value = {"JobId": "ocr-1"}
+    textract.get_document_text_detection.return_value = {
+        "JobStatus": "SUCCEEDED",
+        "Blocks": [
+            {"BlockType": "LINE", "Page": 1, "Text": "First page"},
+            {"BlockType": "WORD", "Page": 1, "Text": "ignored"},
+            {"BlockType": "LINE", "Page": 2, "Text": "Second page"},
+        ],
+    }
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "get_aws_clients",
+        lambda: SimpleNamespace(textract=textract),
+    )
+
+    pages = _extract_pages_with_textract("s3://bucket/quarantine/policy.pdf")
+
+    assert pages == [
+        ExtractedPage(number=1, text="First page"),
+        ExtractedPage(number=2, text="Second page"),
+    ]
+
+
+def test_staged_publish_verifies_count_before_activation(monkeypatch) -> None:
+    client = MagicMock()
+    client.count.return_value = {"count": 2}
+    monkeypatch.setattr(
+        knowledge_ingestion.helpers,
+        "bulk",
+        lambda *_args, **_kwargs: (2, []),
+    )
+    actions = [
+        {"_id": "one", "_source": {"id": "one"}},
+        {"_id": "two", "_source": {"id": "two"}},
+    ]
+
+    _activate_staged_sections(
+        client,
+        index="sections",
+        actions=actions,
+        expected_count=2,
+        ingestion_id="generation-1",
+    )
+
+    client.count.assert_called_once()
+
+
+def test_staged_publish_rejects_partial_generation(monkeypatch) -> None:
+    client = MagicMock()
+    client.count.return_value = {"count": 1}
+
+    with pytest.raises(RuntimeError, match="expected 2, found 1"):
+        _activate_staged_sections(
+            client,
+            index="sections",
+            actions=[],
+            expected_count=2,
+            ingestion_id="generation-1",
+        )
+
+
+def test_staged_publish_rolls_back_partial_activation(monkeypatch) -> None:
+    client = MagicMock()
+    client.count.return_value = {"count": 2}
+    bulk_calls = []
+
+    def fake_bulk(_client, actions, **_kwargs):
+        captured = list(actions)
+        bulk_calls.append(captured)
+        if len(bulk_calls) == 1:
+            return 1, [{"update": {"_id": "two", "status": 500}}]
+        return len(captured), []
+
+    monkeypatch.setattr(knowledge_ingestion.helpers, "bulk", fake_bulk)
+    actions = [
+        {"_id": "one", "_source": {"id": "one"}},
+        {"_id": "two", "_source": {"id": "two"}},
+    ]
+
+    with pytest.raises(RuntimeError, match="rejected 1 activation"):
+        _activate_staged_sections(
+            client,
+            index="sections",
+            actions=actions,
+            expected_count=2,
+            ingestion_id="generation-1",
+        )
+
+    assert [action["doc"]["status"] for action in bulk_calls[0]] == ["active", "active"]
+    assert [action["doc"]["status"] for action in bulk_calls[1]] == ["staging", "staging"]

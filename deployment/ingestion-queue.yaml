@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Durable SQS queue and dead-letter monitoring for AskVera knowledge ingestion.
+
+Parameters:
+  AlarmTopicArn:
+    Type: String
+    Default: ""
+    Description: Optional SNS topic ARN for dead-letter queue alarms.
+    AllowedPattern: "^$|^arn:aws:sns:[a-z0-9-]+:[0-9]{12}:.+$"
+  MessageRetentionSeconds:
+    Type: Number
+    Default: 345600
+    MinValue: 60
+    MaxValue: 1209600
+  VisibilityTimeoutSeconds:
+    Type: Number
+    Default: 900
+    MinValue: 30
+    MaxValue: 43200
+
+Conditions:
+  SendAlarmNotifications: !Not [!Equals [!Ref AlarmTopicArn, ""]]
+
+Resources:
+  IngestionDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      Tags:
+        - Key: Application
+          Value: AskVera
+        - Key: DataClassification
+          Value: Internal
+        - Key: Purpose
+          Value: IngestionDeadLetter
+
+  IngestionQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: !Ref MessageRetentionSeconds
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IngestionDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      VisibilityTimeout: !Ref VisibilityTimeoutSeconds
+      Tags:
+        - Key: Application
+          Value: AskVera
+        - Key: DataClassification
+          Value: Internal
+        - Key: Purpose
+          Value: KnowledgeIngestion
+
+  QueueTransportPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource:
+              - !GetAtt IngestionQueue.Arn
+              - !GetAtt IngestionDeadLetterQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+      Queues:
+        - !Ref IngestionQueue
+        - !Ref IngestionDeadLetterQueue
+
+  DeadLetterQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: !If
+        - SendAlarmNotifications
+        - - !Ref AlarmTopicArn
+        - !Ref AWS::NoValue
+      AlarmDescription: AskVera ingestion commands require operator review.
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt IngestionDeadLetterQueue.QueueName
+      EvaluationPeriods: 1
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Period: 300
+      Statistic: Maximum
+      Threshold: 0
+      TreatMissingData: notBreaching
+
+  OldestMessageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: !If
+        - SendAlarmNotifications
+        - - !Ref AlarmTopicArn
+        - !Ref AWS::NoValue
+      AlarmDescription: AskVera ingestion processing is delayed.
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt IngestionQueue.QueueName
+      EvaluationPeriods: 2
+      MetricName: ApproximateAgeOfOldestMessage
+      Namespace: AWS/SQS
+      Period: 300
+      Statistic: Maximum
+      Threshold: 1800
+      TreatMissingData: notBreaching
+
+Outputs:
+  IngestionQueueArn:
+    Value: !GetAtt IngestionQueue.Arn
+  IngestionQueueUrl:
+    Value: !Ref IngestionQueue
+  IngestionDeadLetterQueueArn:
+    Value: !GetAtt IngestionDeadLetterQueue.Arn
+  IngestionDeadLetterQueueUrl:
+    Value: !Ref IngestionDeadLetterQueue

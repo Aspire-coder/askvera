@@ -26,6 +26,11 @@ import type { ConsentEventPayload, GenericWidgetConfig, GenericWidgetRenderState
 import { authenticateWidget, renewWidgetAuth } from "./auth";
 import { getWidgetCopy } from "../localization/widgetCopy";
 import {
+  createLocalStorageAdapter,
+  createSessionStorageAdapter,
+  type StorageAdapter
+} from "../storage";
+import {
   readLocalePreference,
   writeLocalePreference,
   type LocalePreference
@@ -35,6 +40,7 @@ type WidgetRuntimeProps = {
   apiBaseUrl: string;
   widgetId?: string;
   authToken?: string;
+  conversationPersistence?: "session" | "local" | "none";
   onPositionChange?: (position: "bottom-right" | "bottom-left") => void;
   openSignal?: number;
   closeSignal?: number;
@@ -120,6 +126,8 @@ const baseWidgetConfig: GenericWidgetConfig = {
 };
 
 const conversationStorageKey = "askvera_widget_conversation";
+const persistentStorage = createLocalStorageAdapter();
+const transientStorage = createSessionStorageAdapter();
 
 function sessionIdFromToken(token?: string): string | undefined {
   if (!token) return undefined;
@@ -145,7 +153,7 @@ function storedLocale(widgetId?: string): InitialLocale {
     return { preference: { country: "US", language: "en" }, explicit: false };
   }
   try {
-    const rawMetadata = window.localStorage.getItem("askvera_session_metadata");
+    const rawMetadata = transientStorage.getItem("askvera_session_metadata");
     if (rawMetadata) {
       const metadata = JSON.parse(rawMetadata) as Record<string, string>;
       if (metadata.country && metadata.language) {
@@ -155,7 +163,7 @@ function storedLocale(widgetId?: string): InitialLocale {
         };
       }
     }
-    const preference = readLocalePreference(window.localStorage, widgetId);
+    const preference = readLocalePreference(persistentStorage, widgetId);
     if (preference) return { preference, explicit: true };
     return { preference: { country: "US", language: "en" }, explicit: false };
   } catch {
@@ -163,11 +171,18 @@ function storedLocale(widgetId?: string): InitialLocale {
   }
 }
 
-function storedMessages(expectedSessionId?: string): WidgetMessage[] {
+function conversationStorage(mode: "session" | "local" | "none"): StorageAdapter | undefined {
+  if (mode === "none") return undefined;
+  return mode === "local" ? persistentStorage : transientStorage;
+}
+
+function storedMessages(expectedSessionId: string | undefined, persistence: "session" | "local" | "none"): WidgetMessage[] {
   if (typeof window === "undefined") return [];
   try {
-    const sessionId = expectedSessionId || window.localStorage.getItem("askvera_session_id");
-    const stored = JSON.parse(window.localStorage.getItem(conversationStorageKey) || "{}") as {
+    const storage = conversationStorage(persistence);
+    if (!storage) return [];
+    const sessionId = expectedSessionId || transientStorage.getItem("askvera_session_id");
+    const stored = JSON.parse(storage.getItem(conversationStorageKey) || "{}") as {
       sessionId?: string;
       messages?: Array<Omit<WidgetMessage, "content"> & { content: string }>;
     };
@@ -289,6 +304,7 @@ export function WidgetRuntime({
   apiBaseUrl,
   widgetId,
   authToken,
+  conversationPersistence = "session",
   onPositionChange,
   openSignal = 0,
   closeSignal = 0,
@@ -299,7 +315,7 @@ export function WidgetRuntime({
   const [initialLocale] = useState<InitialLocale>(() => storedLocale(widgetId));
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(initialLocale.preference);
-  const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken)));
+  const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken), conversationPersistence));
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<MessageEventPayload | null>(null);
   const [consentRequiredSignal, setConsentRequiredSignal] = useState(0);
@@ -322,7 +338,7 @@ export function WidgetRuntime({
     }
     selectedLocaleRef.current = locale;
     if (typeof window !== "undefined") {
-      writeLocalePreference(window.localStorage, locale, widgetId);
+      writeLocalePreference(persistentStorage, locale, widgetId);
     }
     setApiConfig((current) => current
       ? { ...current, legalDocuments: [], legalDocs: [] }
@@ -493,10 +509,13 @@ export function WidgetRuntime({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const sessionId = window.localStorage.getItem("askvera_session_id");
+    const storage = conversationStorage(conversationPersistence);
+    persistentStorage.removeItem(conversationStorageKey);
+    if (!storage) return;
+    const sessionId = activeAuthSessionId || transientStorage.getItem("askvera_session_id");
     const serializable = messages.filter((message) => typeof message.content === "string");
-    window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId, messages: serializable }));
-  }, [messages]);
+    storage.setItem(conversationStorageKey, JSON.stringify({ sessionId, messages: serializable }));
+  }, [activeAuthSessionId, conversationPersistence, messages]);
 
   useEffect(() => {
     setActiveAuthToken(authToken);
@@ -883,7 +902,10 @@ export function WidgetRuntime({
         setPendingMessage(null);
         setMessages([]);
         consecutiveFailureCountRef.current = 0;
-        window.localStorage.setItem(conversationStorageKey, JSON.stringify({ sessionId: freshSessionId, messages: [] }));
+        conversationStorage(conversationPersistence)?.setItem(
+          conversationStorageKey,
+          JSON.stringify({ sessionId: freshSessionId, messages: [] })
+        );
         firstMessageSentRef.current = false;
         return { sessionId: freshSessionId };
       }}

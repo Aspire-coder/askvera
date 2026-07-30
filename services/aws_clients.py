@@ -29,6 +29,7 @@ class AwsClients:
         self.s3 = boto3.client("s3", region_name=settings.AWS_REGION, config=client_config)
         self.ses = boto3.client("ses", region_name=settings.AWS_REGION, config=client_config)
         self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION, config=client_config)
+        self.textract = boto3.client("textract", region_name=settings.AWS_REGION, config=client_config)
 
 
 aws_clients: AwsClients | None = None

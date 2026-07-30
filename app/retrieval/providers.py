@@ -248,20 +248,38 @@ def _retrieval_queries(message: str) -> list[str]:
 def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool]:
     """Parse planner-generated queries and content scopes from compact JSON."""
     stripped = text.strip()
+    if len(stripped) > settings.BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS:
+        raise ValueError("Planner response exceeded the configured size limit.")
     json_match = re.search(r"\{.*\}", stripped, flags=re.S)
     payload = json.loads(json_match.group(0) if json_match else stripped)
+    if not isinstance(payload, dict):
+        raise ValueError("Planner response must be a JSON object.")
     queries = payload.get("queries", [])
+    if not isinstance(queries, list):
+        raise ValueError("Planner queries must be a JSON array.")
     parsed: list[str] = []
-    for query in queries:
-        cleaned = re.sub(r"\s+", " ", str(query)).strip()
+    query_limit = max(1, min(int(settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT), 10))
+    max_query_chars = max(50, min(int(settings.BEDROCK_QUERY_PLANNER_MAX_QUERY_CHARS), 2000))
+    for query in queries[:query_limit]:
+        if not isinstance(query, str):
+            continue
+        cleaned = re.sub(r"\s+", " ", query).strip()
+        if len(cleaned) > max_query_chars:
+            cleaned = cleaned[:max_query_chars].rstrip()
         if cleaned and cleaned not in parsed:
             parsed.append(cleaned)
+    raw_scopes = payload.get("document_scopes", [])
+    if not isinstance(raw_scopes, list):
+        raise ValueError("Planner document scopes must be a JSON array.")
+    allowed_scopes = {"locale_policy", "global_directory"}
     scopes = {
-        str(scope).strip().lower()
-        for scope in payload.get("document_scopes", [])
-        if str(scope).strip()
+        scope.strip().lower()
+        for scope in raw_scopes
+        if isinstance(scope, str) and scope.strip().lower() in allowed_scopes
     }
     answer_shape = str(payload.get("answer_shape", "content")).strip().lower()
+    if answer_shape not in {"content", "document_structure"}:
+        answer_shape = "content"
     allowed_intents = {
         "knowledge",
         "assistant_meta",

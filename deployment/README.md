@@ -17,6 +17,10 @@ Production runtime configuration should come from IAM, SSM Parameter Store, and 
 - `production.env.example` - non-secret runtime environment template.
 - `nginx/askvera.conf` - production reverse proxy for `api.vera-api.xyz`.
 - `systemd/askvera.service` - systemd unit for Uvicorn.
+- `systemd/askvera-ingestion-worker.service` - opt-in durable ingestion worker.
+- `systemd/askvera-retention.service` and `.timer` - daily retention cleanup.
+- `ingestion-queue.yaml` - encrypted SQS queue, dead-letter queue, and alarms.
+- `admin-portal.yaml` - private portal hosting, Cognito MFA, and opt-in WAF.
 - `ssl/certbot.sh` - Certbot automation for the API domain.
 
 ## First-Time EC2 Setup
@@ -113,3 +117,7 @@ The EC2 role needs `ssm:PutParameter` only for the configured
 `/askverachat/prod/KB_VERSION` parameter. Staging loads and failed replacements
 never rotate the version. Roll back by restoring the previous approved source
 and previous `KB_VERSION`, then restart the API.
+
+The operations-portal ingestion hardening is intentionally disabled by default.
+Follow `docs/security-hardening-rollout.md` to introduce the queue, worker, OCR,
+retention, MFA, and WAF without changing the current retrieval pipeline.

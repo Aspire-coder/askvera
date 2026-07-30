@@ -32,13 +32,13 @@ These are local EC2 files under `/tmp`. They are safe to delete after reports ar
 
 | Item | Location / ID | Why it stays |
 | --- | --- | --- |
-| Production approved KB bucket | `s3://askverachat-prod-kb/approved/` | Source of approved company documents. |
-| Production content bucket | `s3://askverachat-prod-content/` | Legal docs, widget assets, and approved support files. |
-| OpenSearch Serverless collection | `p6ytwsfpt0la5h2hth4` / `bedrock-knowledge-base-6w5myh` | Hosts the active section retrieval index. |
-| OpenSearch section index | `askvera-policy-sections` | Active production retrieval index. |
-| DynamoDB widget registry | `AskVeraWidgets` | Runtime widget/customer configuration. |
-| RDS database | `database-1` | Sessions and consent records; also retains the rollback section index. |
-| RDS managed secret | `rds!db-617fcf32-1ae3-4f45-b803-4378b966fcf6-0xz7wN` | Active RDS credentials managed by AWS. |
+| Production approved KB bucket | SSM `S3_BUCKET` / approved prefix | Source of approved company documents. |
+| Production content bucket | Environment-specific S3 content bucket | Legal docs, widget assets, and approved support files. |
+| OpenSearch Serverless collection | SSM `OPENSEARCH_ENDPOINT` | Hosts the active section retrieval index. |
+| OpenSearch section index | SSM `OPENSEARCH_INDEX` | Active production retrieval index. |
+| DynamoDB widget registry | SSM `WIDGET_REGISTRY_TABLE` | Runtime widget/customer configuration. |
+| RDS database | SSM `RDS_DB_IDENTIFIER` | Sessions and consent records; also retains the rollback section index. |
+| RDS managed secret | SSM `RDS_SECRET_ARN` | Active RDS credentials managed by AWS. |
 
 ## Notes
 

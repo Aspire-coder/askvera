@@ -67,27 +67,89 @@ def validate_and_touch_session(session_id: str, correlation_id: str = "system") 
 
 def can_resume_session(session_id: str, correlation_id: str = "widget-init") -> bool:
     """Return whether a browser may resume an existing open conversation."""
+    return can_resume_bound_session(session_id, "", "", correlation_id)
+
+
+def can_resume_bound_session(
+    session_id: str,
+    widget_id: str,
+    origin: str,
+    correlation_id: str = "widget-init",
+) -> bool:
+    """Return whether a session belongs to the requesting widget and origin."""
     if not session_id:
         return False
+    binding_filter = ""
+    parameters = {
+        "session_id": session_id,
+        "max_days": settings.MAX_SESSION_DAYS,
+    }
+    if widget_id or origin:
+        if not widget_id or not origin:
+            return False
+        binding_filter = "AND widget_id = :widget_id AND origin = :origin"
+        parameters.update({"widget_id": widget_id, "origin": origin})
     try:
         with get_engine().begin() as connection:
             row = connection.execute(
                 text(
-                    """
+                    f"""
                     SELECT 1
                     FROM chat_sessions
                     WHERE session_id = :session_id
                       AND ended_at IS NULL
                       AND expires_at > now()
                       AND created_at > now() - (:max_days * interval '1 day')
+                      {binding_filter}
                     """
                 ),
-                {"session_id": session_id, "max_days": settings.MAX_SESSION_DAYS},
+                parameters,
             ).first()
     except SQLAlchemyError as exc:
         LOGGER.exception("session_resume_check_failed", correlation_id=correlation_id)
         raise AwsServiceError("Session resume check failed.") from exc
     return row is not None
+
+
+def register_widget_session(
+    session_id: str,
+    widget_id: str,
+    origin: str,
+    correlation_id: str = "widget-init",
+) -> None:
+    """Create a session row whose resume boundary is bound to a widget origin."""
+    expires_at = datetime.now(UTC) + session_timeout_delta()
+    try:
+        with get_engine().begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO chat_sessions (
+                        session_id, messages, expires_at, widget_id, origin
+                    ) VALUES (
+                        :session_id, '[]'::jsonb, :expires_at, :widget_id, :origin
+                    )
+                    ON CONFLICT (session_id) DO UPDATE SET
+                        widget_id = EXCLUDED.widget_id,
+                        origin = EXCLUDED.origin,
+                        last_activity_at = now(),
+                        expires_at = EXCLUDED.expires_at,
+                        updated_at = now()
+                    WHERE chat_sessions.ended_at IS NULL
+                      AND chat_sessions.widget_id = EXCLUDED.widget_id
+                      AND chat_sessions.origin = EXCLUDED.origin
+                    """
+                ),
+                {
+                    "session_id": session_id,
+                    "expires_at": expires_at,
+                    "widget_id": widget_id,
+                    "origin": origin,
+                },
+            )
+    except SQLAlchemyError as exc:
+        LOGGER.exception("widget_session_registration_failed", correlation_id=correlation_id)
+        raise AwsServiceError("Widget session registration failed.") from exc
 
 
 def close_session(session_id: str, reason: str, correlation_id: str = "system") -> bool:

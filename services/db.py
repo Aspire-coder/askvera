@@ -39,7 +39,7 @@ def _build_database_url(secret: dict[str, Any]) -> str:
 
 
 def init_db(correlation_id: str = "startup") -> Engine:
-    """Initialise the PostgreSQL engine and create required tables."""
+    """Initialise the PostgreSQL engine without mutating the schema."""
     global _engine
     secret = _read_rds_secret(correlation_id)
     _engine = create_engine(
@@ -52,7 +52,12 @@ def init_db(correlation_id: str = "startup") -> Engine:
             "sslmode": "require",
         },
     )
-    create_schema(correlation_id)
+    if settings.DB_SCHEMA_BOOTSTRAP_ON_STARTUP:
+        LOGGER.warning(
+            "postgres_legacy_schema_bootstrap_enabled",
+            correlation_id=correlation_id,
+        )
+        create_schema(correlation_id)
     LOGGER.info("postgres_initialized", correlation_id=correlation_id, db_identifier=settings.RDS_DB_IDENTIFIER)
     return _engine
 
@@ -65,7 +70,10 @@ def get_engine() -> Engine:
 
 
 def create_schema(correlation_id: str = "startup") -> None:
-    """Create session and consent tables if they do not exist."""
+    """Compatibility bootstrap for a fresh local database.
+
+    Production schema changes must use scripts/run_db_migrations.py.
+    """
     try:
         with get_engine().begin() as connection:
             connection.execute(
@@ -375,6 +383,10 @@ def create_schema(correlation_id: str = "startup") -> None:
                         progress INTEGER NOT NULL DEFAULT 0,
                         section_count INTEGER NOT NULL DEFAULT 0,
                         source_uri TEXT NOT NULL DEFAULT '',
+                        upload_uri TEXT NOT NULL DEFAULT '',
+                        content_hash TEXT NOT NULL DEFAULT '',
+                        accepted_by TEXT NOT NULL DEFAULT '',
+                        attempt_count INTEGER NOT NULL DEFAULT 0,
                         error_message TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -382,6 +394,10 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS upload_uri TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS accepted_by TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0"))
             connection.execute(
                 text(
                     """
@@ -396,6 +412,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                         document_version TEXT NOT NULL DEFAULT '',
                         section_count INTEGER NOT NULL DEFAULT 0,
                         content_hash TEXT NOT NULL,
+                        accepted_by TEXT NOT NULL DEFAULT '',
                         status TEXT NOT NULL DEFAULT 'active',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -403,6 +420,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS accepted_by TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false"))

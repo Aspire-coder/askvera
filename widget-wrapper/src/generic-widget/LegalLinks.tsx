@@ -1,5 +1,6 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { GenericWidgetConfig } from "./types";
+import { sanitizeLegalHtml } from "./legalHtml";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -43,6 +44,7 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
   const printDocument = (documentId: string) => {
     const documentToPrint = config.policyLinks.find((link) => link.id === documentId);
     if (!documentToPrint?.html) return;
+    const safeHtml = sanitizeLegalHtml(documentToPrint.html);
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
@@ -51,8 +53,11 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
     }
 
     printWindow.opener = null;
-    printWindow.document.write(`<!doctype html><html><head><title>${documentToPrint.label}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 28px;color:#1d1d1f;line-height:1.55}h1,h2,h3{line-height:1.25}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d9ddd9;padding:8px;text-align:left}@media print{body{margin:0;max-width:none}}</style></head><body>${documentToPrint.html}</body></html>`);
-    printWindow.document.close();
+    printWindow.document.title = documentToPrint.label;
+    const style = printWindow.document.createElement("style");
+    style.textContent = 'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 28px;color:#1d1d1f;line-height:1.55}h1,h2,h3{line-height:1.25}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d9ddd9;padding:8px;text-align:left}@media print{body{margin:0;max-width:none}}';
+    printWindow.document.head.appendChild(style);
+    printWindow.document.body.innerHTML = safeHtml;
     printWindow.focus();
     window.setTimeout(() => printWindow.print(), 250);
   };
@@ -134,7 +139,7 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
                 <span aria-hidden="true">{"\u00d7"}</span>
               </button>
             </header>
-            <div id={modalBodyId} className="gw-legal-modal-body" dangerouslySetInnerHTML={{ __html: activeDocument.html }} />
+            <div id={modalBodyId} className="gw-legal-modal-body" dangerouslySetInnerHTML={{ __html: sanitizeLegalHtml(activeDocument.html) }} />
           </section>
         </div>
       ) : null}

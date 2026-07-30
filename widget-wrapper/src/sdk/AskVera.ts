@@ -13,6 +13,7 @@ export type AskVeraInitConfig = {
   widgetId: string;
   apiUrl: string;
   position?: "bottom-right" | "bottom-left";
+  conversationPersistence?: "session" | "local" | "none";
 };
 
 export type SdkRenderState = {
@@ -55,6 +56,7 @@ class AskVeraSdkImpl implements AskVeraSdk {
       ...this.state.config,
       widgetId: config.widgetId,
       apiUrl: config.apiUrl,
+      conversationPersistence: config.conversationPersistence || "session",
       launcherPosition: config.position || this.state.config.launcherPosition
     };
     const auth = await authenticateWidget(nextConfig);

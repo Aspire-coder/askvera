@@ -14,9 +14,13 @@ class FakeBody:
 
     def __init__(self, value: str) -> None:
         self.value = value
+        self.closed = False
 
     def read(self) -> bytes:
         return self.value.encode("utf-8")
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeS3:
@@ -25,12 +29,15 @@ class FakeS3:
     def __init__(self, objects: dict[str, str]) -> None:
         self.objects = objects
         self.calls: list[tuple[str, str]] = []
+        self.bodies: list[FakeBody] = []
 
     def get_object(self, Bucket: str, Key: str) -> dict[str, FakeBody]:
         self.calls.append((Bucket, Key))
         if Key not in self.objects:
             raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "missing"}}, "GetObject")
-        return {"Body": FakeBody(self.objects[Key])}
+        body = FakeBody(self.objects[Key])
+        self.bodies.append(body)
+        return {"Body": body}
 
 
 def _legal_objects() -> dict[str, str]:
@@ -52,7 +59,7 @@ def test_legal_document_key_uses_configured_s3_path(monkeypatch) -> None:
 def test_load_legal_documents_returns_expected_response(monkeypatch) -> None:
     """The legal service returns the API response shape."""
     fake_s3 = FakeS3(_legal_objects())
-    monkeypatch.setattr(legal_service.settings, "LEGAL_BUCKET", "askverachat-prod-content")
+    monkeypatch.setattr(legal_service.settings, "LEGAL_BUCKET", "example-legal-content")
     monkeypatch.setattr(legal_service.settings, "LEGAL_PREFIX", "legal")
     monkeypatch.setattr(legal_service.settings, "LEGAL_VERSION", "2026.1")
     monkeypatch.setattr(legal_service, "get_aws_clients", lambda: SimpleNamespace(s3=fake_s3))
@@ -64,12 +71,13 @@ def test_load_legal_documents_returns_expected_response(monkeypatch) -> None:
     assert [document["id"] for document in result["documents"]] == ["privacy", "privacy-addendum", "arbitration"]
     assert all(document["required"] is True for document in result["documents"])
     assert result["documents"][0]["html"] == "<h1>Privacy</h1>"
+    assert all(call_body.closed for call_body in fake_s3.bodies)
 
 
 def test_load_legal_documents_caches_s3_results(monkeypatch) -> None:
     """Legal documents are fetched from S3 once and then served from memory."""
     fake_s3 = FakeS3(_legal_objects())
-    monkeypatch.setattr(legal_service.settings, "LEGAL_BUCKET", "askverachat-prod-content")
+    monkeypatch.setattr(legal_service.settings, "LEGAL_BUCKET", "example-legal-content")
     monkeypatch.setattr(legal_service.settings, "LEGAL_PREFIX", "legal")
     monkeypatch.setattr(legal_service.settings, "LEGAL_VERSION", "2026.1")
     monkeypatch.setattr(legal_service, "get_aws_clients", lambda: SimpleNamespace(s3=fake_s3))
@@ -87,7 +95,7 @@ def test_load_legal_documents_fails_when_document_missing(monkeypatch) -> None:
     objects = _legal_objects()
     objects.pop("legal/2026.1/html/Privacy Notice.html")
     fake_s3 = FakeS3(objects)
-    monkeypatch.setattr(legal_service.settings, "LEGAL_BUCKET", "askverachat-prod-content")
+    monkeypatch.setattr(legal_service.settings, "LEGAL_BUCKET", "example-legal-content")
     monkeypatch.setattr(legal_service.settings, "LEGAL_PREFIX", "legal")
     monkeypatch.setattr(legal_service.settings, "LEGAL_VERSION", "2026.1")
     monkeypatch.setattr(legal_service, "get_aws_clients", lambda: SimpleNamespace(s3=fake_s3))

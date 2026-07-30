@@ -272,7 +272,7 @@ def test_bedrock_provider_uses_configured_fallback_for_transient_failure(monkeyp
     assert result.model_name == "fallback-model"
     assert result.metadata["model_fallback_used"] is True
     assert [call.kwargs["modelId"] for call in runtime.converse.call_args_list] == [
-        "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
         "fallback-model",
     ]
 

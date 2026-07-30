@@ -33,7 +33,7 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig, options: 
     try {
       const refreshEnvelope = await refreshWidget(client, existing.token);
       if (refreshEnvelope.data) {
-        const refreshed = store.write(refreshEnvelope.data);
+        const refreshed = store.write(refreshEnvelope.data, existing);
         return { token: refreshed.token, expiresAt: refreshed.expiresAt, session: refreshed };
       }
     } catch {
@@ -44,7 +44,8 @@ export async function authenticateWidget(config: AskVeraRuntimeConfig, options: 
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
     origin: getCurrentOrigin(),
-    resumeSessionId: options.forceNew ? undefined : window.localStorage.getItem("askvera_session_id") || undefined
+    resumeSessionId: options.forceNew ? undefined : existing?.sessionId,
+    resumeToken: options.forceNew ? undefined : existing?.resumeToken
   });
   if (!envelope.data) {
     throw new Error("Widget initialization did not return a session token.");
@@ -64,13 +65,14 @@ export async function renewWidgetAuth(config: AskVeraRuntimeConfig, currentToken
   }
 
   const store = createWidgetSessionStore(config.widgetAuthStorageKey);
+  const existing = store.read();
   const client = createApiClient({ baseUrl: config.apiUrl });
 
   if (currentToken) {
     try {
       const refreshEnvelope = await refreshWidget(client, currentToken);
       if (refreshEnvelope.data) {
-        const session = store.write(refreshEnvelope.data);
+        const session = store.write(refreshEnvelope.data, existing);
         return { token: session.token, expiresAt: session.expiresAt, session };
       }
     } catch {
@@ -81,7 +83,8 @@ export async function renewWidgetAuth(config: AskVeraRuntimeConfig, currentToken
   const envelope = await initializeWidget(client, {
     widgetId: config.widgetId,
     origin: getCurrentOrigin(),
-    resumeSessionId: window.localStorage.getItem("askvera_session_id") || undefined
+    resumeSessionId: existing?.sessionId,
+    resumeToken: existing?.resumeToken
   });
   if (!envelope.data) {
     throw new Error("Widget initialization did not return a session token.");

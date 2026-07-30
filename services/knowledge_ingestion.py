@@ -5,12 +5,16 @@ from __future__ import annotations
 import csv
 import hashlib
 import html
+import json
 import re
+import time
 import uuid
 import zipfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 from opensearchpy import helpers
@@ -80,6 +84,95 @@ def validate_upload(filename: str, size: int) -> None:
         raise ValueError(f"File exceeds the {settings.ADMIN_UPLOAD_MAX_BYTES // (1024 * 1024)} MB limit.")
 
 
+def validate_document_content(path: Path) -> None:
+    """Reject mismatched, executable, or suspicious document payloads."""
+    extension = path.suffix.lower()
+    payload = path.read_bytes()
+    header = payload[:8192]
+    if extension == ".pdf":
+        if not header.startswith(b"%PDF-"):
+            raise ValueError("The file content does not match the PDF extension.")
+        lowered = payload.lower()
+        if any(marker in lowered for marker in (b"/javascript", b"/launch", b"/embeddedfiles")):
+            raise ValueError("PDF active content and embedded files are not accepted.")
+        return
+    if extension == ".docx":
+        if not zipfile.is_zipfile(path):
+            raise ValueError("The file content does not match the DOCX extension.")
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            if not {"[Content_Types].xml", "word/document.xml"}.issubset(names):
+                raise ValueError("The DOCX package is incomplete.")
+            if any(name.lower().endswith("vbaproject.bin") for name in names):
+                raise ValueError("Macro-enabled documents are not accepted.")
+            total_compressed = sum(max(1, item.compress_size) for item in archive.infolist())
+            total_uncompressed = sum(item.file_size for item in archive.infolist())
+            if total_uncompressed > settings.ADMIN_UPLOAD_MAX_BYTES * 4:
+                raise ValueError("The expanded DOCX package exceeds the safety limit.")
+            if total_uncompressed / total_compressed > settings.ADMIN_INGESTION_MAX_ARCHIVE_RATIO:
+                raise ValueError("The DOCX compression ratio exceeds the safety limit.")
+            relationship_files = [
+                name for name in names
+                if name.lower().endswith(".rels")
+            ]
+            for name in relationship_files:
+                if b'TargetMode="External"' in archive.read(name):
+                    raise ValueError("DOCX external relationships are not accepted.")
+        return
+    if b"\x00" in header:
+        raise ValueError("Binary content is not accepted for text documents.")
+
+
+def release_ingestion_claim(job_id: str, message: str) -> None:
+    """Release a failed worker lease so SQS can retry or dead-letter the job."""
+    _update_job(
+        job_id,
+        status="failed",
+        error_message=str(message or "Document validation failed.")[:1000],
+        lease_owner="",
+        lease_expires_at=None,
+    )
+
+
+def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
+    """Atomically claim a job, or report that it is complete, busy, or missing."""
+    with get_engine().begin() as connection:
+        row = connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs
+                SET lease_owner = :worker_id,
+                    lease_expires_at = now() + (:lease_seconds * interval '1 second'),
+                    attempt_count = attempt_count + 1,
+                    status = 'extracting',
+                    updated_at = now()
+                WHERE job_id = :job_id
+                  AND status NOT IN ('ready', 'completed', 'cancelled')
+                  AND attempt_count < :max_attempts
+                  AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+                RETURNING job_id
+                """
+            ),
+            {
+                "job_id": job_id,
+                "worker_id": worker_id,
+                "lease_seconds": max(30, lease_seconds),
+                "max_attempts": settings.ADMIN_INGESTION_MAX_ATTEMPTS,
+            },
+        ).first()
+        if row:
+            return "claimed"
+        status = connection.execute(
+            text("SELECT status FROM ingestion_jobs WHERE job_id = :job_id"),
+            {"job_id": job_id},
+        ).scalar()
+    if status in {"ready", "completed"}:
+        return "completed"
+    if status is None:
+        return "missing"
+    return "busy"
+
+
 def create_ingestion_job(
     *,
     filename: str,
@@ -88,6 +181,8 @@ def create_ingestion_job(
     document_type: str,
     access_scope: str,
     version: str,
+    content_hash: str = "",
+    accepted_by: str = "",
 ) -> str:
     job_id = uuid.uuid4().hex
     with get_engine().begin() as connection:
@@ -96,10 +191,12 @@ def create_ingestion_job(
                 """
                 INSERT INTO ingestion_jobs (
                     job_id, filename, country, language, document_type,
-                    access_scope, document_version, status, created_at, updated_at
+                    access_scope, document_version, content_hash, accepted_by, status,
+                    created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :country, :language, :document_type,
-                    :access_scope, :document_version, 'queued', now(), now()
+                    :access_scope, :document_version, :content_hash, :accepted_by, 'queued',
+                    now(), now()
                 )
                 """
             ),
@@ -111,9 +208,86 @@ def create_ingestion_job(
                 "document_type": document_type,
                 "access_scope": access_scope,
                 "document_version": version,
+                "content_hash": content_hash,
+                "accepted_by": accepted_by,
             },
         )
     return job_id
+
+
+def stage_ingestion_upload(job_id: str, filename: str, content: bytes) -> str:
+    """Persist an accepted upload before asynchronous processing begins."""
+    bucket = settings.KNOWLEDGE_UPLOAD_BUCKET
+    if not bucket:
+        raise ValueError("KNOWLEDGE_UPLOAD_BUCKET is required for durable ingestion.")
+    prefix = settings.ADMIN_INGESTION_QUARANTINE_PREFIX.strip("/")
+    key = f"{prefix}/{job_id}/{filename}"
+    get_aws_clients().s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=content,
+        ContentType="application/octet-stream",
+        ServerSideEncryption="AES256",
+        Metadata={"job-id": job_id},
+    )
+    upload_uri = f"s3://{bucket}/{key}"
+    _update_job(job_id, upload_uri=upload_uri)
+    return upload_uri
+
+
+def enqueue_ingestion_job(
+    *,
+    job_id: str,
+    upload_uri: str,
+    filename: str,
+    country: str,
+    language: str,
+    document_type: str,
+    access_scope: str,
+    version: str,
+    effective_date: str,
+    content_hash: str,
+    accepted_by: str = "",
+) -> None:
+    """Place a compact, non-document ingestion command on SQS."""
+    if not settings.ADMIN_INGESTION_QUEUE_URL:
+        raise ValueError("ADMIN_INGESTION_QUEUE_URL is required for durable ingestion.")
+    get_aws_clients().sqs.send_message(
+        QueueUrl=settings.ADMIN_INGESTION_QUEUE_URL,
+        MessageBody=json.dumps(
+            {
+                "schemaVersion": 1,
+                "jobId": job_id,
+                "uploadUri": upload_uri,
+                "filename": filename,
+                "country": country,
+                "language": language,
+                "documentType": document_type,
+                "accessScope": access_scope,
+                "version": version,
+                "effectiveDate": effective_date,
+                "contentHash": content_hash,
+                "acceptedBy": accepted_by,
+            },
+            separators=(",", ":"),
+        ),
+    )
+    _update_job(job_id, status="queued", progress=5)
+
+
+def fail_ingestion_job(job_id: str, message: str) -> None:
+    """Mark an accepted upload as failed without exposing internal details."""
+    _update_job(
+        job_id,
+        status="failed",
+        progress=100,
+        error_message=str(message or "Ingestion could not be queued.")[:1000],
+    )
+
+
+def record_ingestion_attempt(job_id: str) -> None:
+    """Deprecated compatibility wrapper; workers should claim atomically."""
+    claim_ingestion_job(job_id, "legacy-worker", settings.ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS)
 
 
 def process_ingestion_job(
@@ -127,7 +301,9 @@ def process_ingestion_job(
     access_scope: str,
     version: str,
     effective_date: str,
-) -> None:
+    upload_uri: str = "",
+    accepted_by: str = "",
+) -> bool:
     """Extract, embed, index, and activate one approved document."""
     path = Path(local_path)
     try:
@@ -136,10 +312,15 @@ def process_ingestion_job(
         if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
             preflight = analyze_pdf(path)
             if preflight.requires_ocr:
-                raise ValueError(
-                    "This PDF appears to be scanned or image-only and requires OCR before publication."
-                )
-        pages = extract_pages(path, chunk_profile=chunk_profile)
+                if not settings.ADMIN_TEXTRACT_OCR_ENABLED or not upload_uri:
+                    raise ValueError(
+                        "This PDF appears to be scanned or image-only and requires OCR before publication."
+                    )
+                pages = _extract_pages_with_textract(upload_uri)
+            else:
+                pages = extract_pages(path, chunk_profile=chunk_profile)
+        else:
+            pages = extract_pages(path, chunk_profile=chunk_profile)
         sections = build_sections(
             pages,
             filename=filename,
@@ -174,17 +355,88 @@ def process_ingestion_job(
             version=version,
             section_count=indexed,
             content_hash=_file_hash(path),
+            accepted_by=accepted_by,
         )
-        _update_job(job_id, status="ready", progress=100, section_count=indexed, source_uri=source_uri)
+        _update_job(
+            job_id,
+            status="ready",
+            progress=100,
+            section_count=indexed,
+            source_uri=source_uri,
+            lease_owner="",
+            lease_expires_at=None,
+            completed_at=datetime.now(UTC),
+        )
+        return True
     except Exception as exc:
         LOGGER.exception("admin_ingestion_failed", job_id=job_id, filename=filename)
-        _update_job(job_id, status="failed", progress=100, error_message=str(exc)[:1000])
+        _update_job(
+            job_id,
+            status="failed",
+            progress=100,
+            error_message=str(exc)[:1000],
+            lease_owner="",
+            lease_expires_at=None,
+        )
+        return False
     finally:
         try:
             path.unlink(missing_ok=True)
             path.parent.rmdir()
         except OSError:
             pass
+
+
+def _extract_pages_with_textract(upload_uri: str) -> list[ExtractedPage]:
+    """Extract a scanned PDF from its durable S3 upload using Textract."""
+    parsed = urlparse(upload_uri)
+    if parsed.scheme != "s3" or not parsed.netloc or not parsed.path.lstrip("/"):
+        raise ValueError("OCR requires a valid S3 upload URI.")
+    textract = get_aws_clients().textract
+    started = textract.start_document_text_detection(
+        DocumentLocation={
+            "S3Object": {
+                "Bucket": parsed.netloc,
+                "Name": parsed.path.lstrip("/"),
+            }
+        }
+    )
+    textract_job_id = str(started["JobId"])
+    deadline = time.monotonic() + max(30, settings.ADMIN_TEXTRACT_OCR_TIMEOUT_SECONDS)
+    response: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        response = textract.get_document_text_detection(JobId=textract_job_id)
+        status = str(response.get("JobStatus") or "")
+        if status == "SUCCEEDED":
+            break
+        if status in {"FAILED", "PARTIAL_SUCCESS"}:
+            raise RuntimeError(f"Textract OCR did not complete successfully: {status}.")
+        time.sleep(2)
+    else:
+        raise TimeoutError("Textract OCR exceeded the configured timeout.")
+
+    blocks = list(response.get("Blocks", []))
+    next_token = response.get("NextToken")
+    while next_token:
+        response = textract.get_document_text_detection(
+            JobId=textract_job_id,
+            NextToken=next_token,
+        )
+        blocks.extend(response.get("Blocks", []))
+        next_token = response.get("NextToken")
+
+    lines_by_page: dict[int, list[str]] = {}
+    for block in blocks:
+        if block.get("BlockType") != "LINE":
+            continue
+        page = max(1, int(block.get("Page") or 1))
+        value = str(block.get("Text") or "").strip()
+        if value:
+            lines_by_page.setdefault(page, []).append(value)
+    return [
+        ExtractedPage(number=page, text="\n".join(lines))
+        for page, lines in sorted(lines_by_page.items())
+    ]
 
 
 def extract_pages(path: Path, *, chunk_profile: str = "current") -> list[ExtractedPage]:
@@ -373,21 +625,36 @@ def _index_sections(
     if not client.indices.exists(index=index):
         client.indices.create(index=index, body=_index_body())
     source_prefix = source_uri.rsplit("/", 1)[0] if source_uri else ""
-    success, errors = helpers.bulk(
-        client,
+    publish_status = "staging" if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED else "active"
+    new_actions = list(
         _actions(
             sections,
             index=index,
             source_uri_prefix=source_prefix,
-            status="active",
+            status=publish_status,
             ingestion_id=ingestion_id,
             document_type=document_type,
             access_scope=access_scope,
-        ),
+        )
+    )
+    if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED:
+        for action in new_actions:
+            action["_id"] = action["_source"]["id"]
+    success, errors = helpers.bulk(
+        client,
+        new_actions,
         raise_on_error=False,
     )
     if errors:
         raise RuntimeError(f"OpenSearch rejected {len(errors)} chunks.")
+    if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED:
+        _activate_staged_sections(
+            client,
+            index=index,
+            actions=new_actions,
+            expected_count=len(sections),
+            ingestion_id=ingestion_id,
+        )
     identity = (sections[0]["country"], sections[0]["language"], sections[0]["source_file"])
     delete_actions = _older_source_actions(
         client,
@@ -402,8 +669,84 @@ def _index_sections(
     return int(success)
 
 
+def _activate_staged_sections(
+    client: Any,
+    *,
+    index: str,
+    actions: list[dict[str, Any]],
+    expected_count: int,
+    ingestion_id: str,
+) -> None:
+    """Verify a complete generation before making its chunks retrievable."""
+    client.indices.refresh(index=index)
+    result = client.count(
+        index=index,
+        body={
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"ingestion_id": ingestion_id}},
+                        {"term": {"status": "staging"}},
+                    ]
+                }
+            }
+        },
+    )
+    actual_count = int(result.get("count", 0))
+    if actual_count != expected_count:
+        raise RuntimeError(
+            f"Staged publication verification failed: expected {expected_count}, found {actual_count}."
+        )
+    action_ids = [action["_id"] for action in actions]
+    activation_actions = (
+        {
+            "_op_type": "update",
+            "_index": index,
+            "_id": action_id,
+            "doc": {"status": "active"},
+        }
+        for action_id in action_ids
+    )
+    _, errors = helpers.bulk(
+        client,
+        activation_actions,
+        raise_on_error=False,
+        raise_on_exception=False,
+    )
+    if errors:
+        rollback_actions = (
+            {
+                "_op_type": "update",
+                "_index": index,
+                "_id": action_id,
+                "doc": {"status": "staging"},
+            }
+            for action_id in action_ids
+        )
+        helpers.bulk(
+            client,
+            rollback_actions,
+            raise_on_error=False,
+            raise_on_exception=False,
+        )
+        client.indices.refresh(index=index)
+        raise RuntimeError(f"OpenSearch rejected {len(errors)} activation updates.")
+    client.indices.refresh(index=index)
+
+
 def _update_job(job_id: str, **values: Any) -> None:
-    allowed = {"status", "progress", "section_count", "source_uri", "error_message"}
+    allowed = {
+        "status",
+        "progress",
+        "section_count",
+        "source_uri",
+        "upload_uri",
+        "error_message",
+        "attempt_count",
+        "lease_owner",
+        "lease_expires_at",
+        "completed_at",
+    }
     updates = {key: value for key, value in values.items() if key in allowed}
     if not updates:
         return
@@ -426,15 +769,16 @@ def _record_document(**values: Any) -> None:
                 INSERT INTO knowledge_documents (
                     document_id, filename, source_uri, country, language,
                     document_type, access_scope, document_version, section_count,
-                    content_hash, status, created_at, updated_at
+                    content_hash, accepted_by, status, created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :source_uri, :country, :language,
                     :document_type, :access_scope, :version, :section_count,
-                    :content_hash, 'active', now(), now()
+                    :content_hash, :accepted_by, 'active', now(), now()
                 )
                 ON CONFLICT (document_id) DO UPDATE SET
                     source_uri = EXCLUDED.source_uri,
                     section_count = EXCLUDED.section_count,
+                    accepted_by = EXCLUDED.accepted_by,
                     status = 'active',
                     updated_at = now()
                 """
@@ -458,7 +802,8 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
                 """
                 SELECT job_id, filename, country, language, document_type,
                        access_scope, document_version, status, progress,
-                       section_count, source_uri, error_message, created_at, updated_at
+                       section_count, source_uri, upload_uri, content_hash,
+                       accepted_by, attempt_count, error_message, created_at, updated_at
                 FROM ingestion_jobs ORDER BY created_at DESC LIMIT :limit
                 """
             ),

@@ -10,6 +10,13 @@ from app.widget_auth.models import WidgetInitRequest
 from app.widget_auth.service import WidgetAuthError, WidgetAuthService
 
 
+@pytest.fixture(autouse=True)
+def _disable_session_database(monkeypatch):
+    from app.widget_auth import service as service_module
+
+    monkeypatch.setattr(service_module, "register_widget_session", lambda *_args, **_kwargs: None)
+
+
 def _registry(status: str = "active") -> str:
     return json.dumps(
         [
@@ -44,6 +51,7 @@ def test_widget_init_issues_short_lived_token(monkeypatch) -> None:
     assert claims["organizationId"] == "org-1"
     assert claims["origin"] == "https://example.com"
     assert response.sessionId == claims["sessionId"]
+    assert response.resumeToken
     assert claims["exp"] > int(time())
 
 
@@ -53,16 +61,45 @@ def test_widget_init_resumes_only_an_active_server_session(monkeypatch) -> None:
 
     monkeypatch.setattr(service_module.settings, "WIDGET_REGISTRY_JSON", _registry())
     monkeypatch.setattr(service_module.settings, "WIDGET_JWT_SECRET", "test-secret")
-    monkeypatch.setattr(service_module, "can_resume_session", lambda session_id, *_: session_id == "resume-me")
+    monkeypatch.setattr(service_module, "can_resume_bound_session", lambda session_id, *_: session_id == "resume-me")
     service = WidgetAuthService()
 
+    initial = service.initialize(
+        WidgetInitRequest(widgetId="widget-1", origin="https://example.com"),
+        "cid-initial",
+    )
     response = service.initialize(
-        WidgetInitRequest(widgetId="widget-1", origin="https://example.com", resumeSessionId="resume-me"),
+        WidgetInitRequest(
+            widgetId="widget-1",
+            origin="https://example.com",
+            resumeSessionId="resume-me",
+            resumeToken=initial.resumeToken,
+        ),
         "cid",
     )
 
-    assert response.sessionId == "resume-me"
-    assert decode_widget_token(response.token)["sessionId"] == "resume-me"
+    assert response.sessionId != "resume-me"
+
+    monkeypatch.setattr(
+        service_module,
+        "decode_widget_resume_token",
+        lambda _token: {
+            "sessionId": "resume-me",
+            "widgetId": "widget-1",
+            "origin": "https://example.com",
+        },
+    )
+    resumed = service.initialize(
+        WidgetInitRequest(
+            widgetId="widget-1",
+            origin="https://example.com",
+            resumeSessionId="resume-me",
+            resumeToken=initial.resumeToken,
+        ),
+        "cid-resume",
+    )
+    assert resumed.sessionId == "resume-me"
+    assert decode_widget_token(resumed.token)["sessionId"] == "resume-me"
 
 
 def test_widget_init_rejects_unapproved_origin(monkeypatch) -> None:

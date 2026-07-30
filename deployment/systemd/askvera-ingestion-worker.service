@@ -1,0 +1,38 @@
+[Unit]
+Description=ASK Vera durable knowledge-ingestion worker
+Documentation=https://github.com/Aspire-coder/askvera
+After=network-online.target askvera.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=askvera
+Group=askvera
+WorkingDirectory=/opt/askvera
+EnvironmentFile=/etc/askvera/production.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/askvera/.venv/bin/python -B scripts/run_ingestion_worker.py
+KillSignal=SIGTERM
+TimeoutStartSec=60
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+RuntimeDirectory=askvera-ingestion
+RuntimeDirectoryMode=0750
+SyslogIdentifier=askvera-ingestion
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=full
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

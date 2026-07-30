@@ -181,3 +181,16 @@ def test_government_id_is_scrubbed_without_language_specific_service() -> None:
 def test_valid_payment_card_is_scrubbed_but_long_phone_is_not_misclassified() -> None:
     assert scrub_pattern_pii("Card 4111 1111 1111 1111") == "Card [PAYMENT_CARD]"
     assert "[PAYMENT_CARD]" not in scrub_pattern_pii("Office +44 1926 626 600")
+
+
+def test_valid_iban_is_scrubbed_in_language_neutral_fallback() -> None:
+    scrubbed = scrub_pattern_pii("Mon IBAN est GB82 WEST 1234 5698 7654 32")
+
+    assert scrubbed == "Mon IBAN est [BANK_ACCOUNT]"
+    assert contains_sensitive_pii_placeholder(scrubbed) is True
+
+
+def test_invalid_iban_like_policy_reference_is_not_scrubbed() -> None:
+    scrubbed = scrub_pattern_pii("Policy reference GB00 TEST 1234 5678 9012 34")
+
+    assert "[BANK_ACCOUNT]" not in scrubbed

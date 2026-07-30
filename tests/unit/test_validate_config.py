@@ -8,6 +8,8 @@ def _configure_valid_production(monkeypatch) -> None:
     for name in settings.REQUIRED_VALUES:
         monkeypatch.setattr(settings, name, "configured")
     monkeypatch.setattr(settings, "APP_ENV", "production")
+    monkeypatch.setattr(settings, "AWS_ACCOUNT_ID", "123456789012")
+    monkeypatch.setattr(settings, "RDS_DB_IDENTIFIER", "askvera-db")
     monkeypatch.setattr(settings, "ADMIN_AUTH_MODE", "cognito")
     monkeypatch.setattr(settings, "ADMIN_AUTH_ALLOW_API_KEY", False)
     monkeypatch.setattr(settings, "ADMIN_COGNITO_USER_POOL_ID", "us-east-1_example")
@@ -35,6 +37,7 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "SUPPORT_EMAIL_ENABLED", False)
     monkeypatch.setattr(settings, "SUPPORT_ROUTES_JSON", {})
     monkeypatch.setattr(settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
+    monkeypatch.setattr(settings, "SECURITY_PROFILE", "standard")
 
 
 def test_valid_production_configuration_passes(monkeypatch) -> None:
@@ -60,6 +63,29 @@ def test_production_rejects_development_auth_and_missing_retrieval_config(monkey
     assert "WIDGET_JWT_SECRET (development value is not allowed)" in failures
     assert "WIDGET_AUTH_REQUIRED (must be true in production)" in failures
     assert "OPENSEARCH_ENDPOINT" in failures
+
+
+def test_production_requires_external_resource_inventory(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "AWS_ACCOUNT_ID", "")
+    monkeypatch.setattr(settings, "RDS_DB_IDENTIFIER", "")
+
+    failures = validate()
+
+    assert "AWS_ACCOUNT_ID" in failures
+    assert "RDS_DB_IDENTIFIER" in failures
+
+
+def test_bedrock_retrieval_requires_kb_and_data_source(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "bedrock")
+    monkeypatch.setattr(settings, "BEDROCK_KB_ID", "")
+    monkeypatch.setattr(settings, "BEDROCK_DATA_SOURCE_ID", "")
+
+    failures = validate()
+
+    assert "BEDROCK_KB_ID" in failures
+    assert "BEDROCK_DATA_SOURCE_ID" in failures
 
 
 def test_cognito_production_requires_pool_and_client(monkeypatch) -> None:
@@ -170,3 +196,24 @@ def test_shadow_reranking_requires_enough_candidates(monkeypatch) -> None:
         "RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT "
         "(must be at least OPENSEARCH_RESULT_COUNT)"
     ) in failures
+
+
+def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "SECURITY_PROFILE", "hardened")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_QUEUE_ENABLED", False)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED", False)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_QUEUE_URL", "")
+    monkeypatch.setattr(settings, "KNOWLEDGE_UPLOAD_BUCKET", "")
+    monkeypatch.setattr(settings, "ENABLE_ALARM_NOTIFICATIONS", False)
+    monkeypatch.setattr(settings, "ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
+    monkeypatch.setattr(settings, "EVIDENCE_GATED_OUTPUT_ENABLED", False)
+
+    failures = validate()
+
+    assert (
+        "ADMIN_INGESTION_QUEUE_ENABLED "
+        "(must be enabled for the hardened security profile)"
+    ) in failures
+    assert "ADMIN_INGESTION_QUEUE_URL" in failures
+    assert "KNOWLEDGE_UPLOAD_BUCKET" in failures

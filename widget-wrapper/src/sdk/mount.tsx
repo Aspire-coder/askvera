@@ -39,6 +39,7 @@ export function mountWidget(config: AskVeraRuntimeConfig, state: SdkRenderState)
           apiBaseUrl={nextState.config.apiUrl}
           widgetId={nextState.config.widgetId}
           authToken={nextState.config.widgetAuthToken}
+          conversationPersistence={nextState.config.conversationPersistence}
           onPositionChange={applyPosition}
           openSignal={nextState.openSignal}
           closeSignal={nextState.closeSignal}
