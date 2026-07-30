@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-20",
+  "version": "2026-07-30",
   "description": "Published company-policy locales exposed by the widget. documentCountries maps legacy index metadata to the public market code.",
   "locales": [
     { "market": "CA", "languages": ["en", "fr"] },
@@ -12,7 +12,7 @@
     { "market": "IT", "languages": ["it"] },
     { "market": "KG", "languages": ["ru"] },
     { "market": "LU", "languages": ["fr", "en"] },
-    { "market": "NL", "languages": ["nl", "en"] },
+    { "market": "NL", "languages": ["nl", "fr", "en"] },
     { "market": "NO", "languages": ["no", "en"] },
     { "market": "RS", "languages": ["sr"] },
     { "market": "SE", "languages": ["sv", "en"] },

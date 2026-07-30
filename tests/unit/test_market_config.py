@@ -124,6 +124,12 @@ def test_public_markets_are_limited_to_published_policy_locales() -> None:
         {"code": "sv", "name": "Swedish"},
     ]
     assert countries["SE"]["defaultLanguage"] == "en"
+    assert countries["NL"]["languages"] == [
+        {"code": "en", "name": "English"},
+        {"code": "fr", "name": "French"},
+        {"code": "nl", "name": "Dutch"},
+    ]
+    assert countries["NL"]["defaultLanguage"] == "nl"
     assert countries["RS"]["languages"] == [{"code": "sr", "name": "Serbian"}]
     assert countries["RS"]["defaultLanguage"] == "sr"
     assert market_config.get_document_country_codes("GB") == {"GB", "UK"}
