@@ -318,6 +318,9 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Unsupported document type.")
     if access_scope not in ACCESS_SCOPES:
         raise HTTPException(status_code=400, detail="Unsupported access scope.")
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if access_scope == "global" and principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can upload global content.")
     if document_type == "policy" and access_scope != "country":
         raise HTTPException(
             status_code=400,
@@ -328,9 +331,6 @@ async def upload_document(
             status_code=400,
             detail="The approved office directory must use global availability.",
         )
-    principal = getattr(request.state, "admin_identity", {}) or {}
-    if access_scope == "global" and principal.get("role") != "super_admin":
-        raise HTTPException(status_code=403, detail="Only a Super Admin can upload global content.")
     if settings.ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED and (
         not document_owner.strip() or not approval_reference.strip()
     ):
