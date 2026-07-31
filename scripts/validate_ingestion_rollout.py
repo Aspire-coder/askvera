@@ -28,6 +28,7 @@ from scripts.validate_config import validate  # noqa: E402
 from services.aws_clients import init_aws_clients  # noqa: E402
 from services.db import close_db, get_engine, init_db  # noqa: E402
 from utils.logging import configure_logging  # noqa: E402
+from utils.opensearch_fields import has_exact_keyword_mapping  # noqa: E402
 
 REQUIRED_JOB_COLUMNS = {
     "logical_document_id",
@@ -97,11 +98,13 @@ def opensearch_failures() -> list[str]:
         .get("properties", {})
     )
     field = properties.get("logical_document_id", {})
-    if field.get("type") != "keyword":
-        return ["OpenSearch logical_document_id must be mapped as keyword"]
+    if not has_exact_keyword_mapping(field):
+        return [
+            "OpenSearch logical_document_id must provide an exact keyword mapping"
+        ]
     ingestion = properties.get("ingestion_id", {})
-    if ingestion.get("type") != "keyword":
-        return ["OpenSearch ingestion_id must be mapped as keyword"]
+    if not has_exact_keyword_mapping(ingestion):
+        return ["OpenSearch ingestion_id must provide an exact keyword mapping"]
     return []
 
 

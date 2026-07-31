@@ -19,6 +19,7 @@ from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
 from services.market_config import get_document_country_codes
 from utils.logging import get_logger
+from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
@@ -122,8 +123,8 @@ def _generation_filters(
         document_type=document_type,
     )
     if not generation_ids:
-        return [{"term": {"ingestion_id": "__no_active_generation__"}}]
-    return [{"terms": {"ingestion_id": sorted(generation_ids)}}]
+        return [exact_term_query("ingestion_id", "__no_active_generation__")]
+    return [exact_terms_query("ingestion_id", sorted(generation_ids))]
 
 
 def is_approved_source(uri: str, country: str, language: str, correlation_id: str = "system") -> bool:

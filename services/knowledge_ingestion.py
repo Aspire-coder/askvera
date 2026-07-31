@@ -38,6 +38,7 @@ from services.knowledge_generations import (
     clear_active_generation_cache,
 )
 from utils.logging import get_logger
+from utils.opensearch_fields import exact_term_query
 
 LOGGER = get_logger("services.knowledge_ingestion")
 
@@ -936,7 +937,7 @@ def _activate_staged_sections(
             "query": {
                 "bool": {
                     "filter": [
-                        {"term": {"ingestion_id": ingestion_id}},
+                        exact_term_query("ingestion_id", ingestion_id),
                         {"term": {"status": "staging"}},
                     ]
                 }

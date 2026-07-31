@@ -163,7 +163,17 @@ def test_generation_filter_uses_only_published_locale_generations(monkeypatch) -
         "en",
         "locale",
         document_type="policy",
-    ) == [{"terms": {"ingestion_id": ["generation-ca-en"]}}]
+    ) == [
+        {
+            "bool": {
+                "should": [
+                    {"terms": {"ingestion_id": ["generation-ca-en"]}},
+                    {"terms": {"ingestion_id.keyword": ["generation-ca-en"]}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
+    ]
 
 
 def test_generation_filter_fails_closed_without_a_published_generation(
@@ -181,7 +191,19 @@ def test_generation_filter_fails_closed_without_a_published_generation(
     )
 
     assert _generation_filters("CA", "en", "locale") == [
-        {"term": {"ingestion_id": "__no_active_generation__"}}
+        {
+            "bool": {
+                "should": [
+                    {"term": {"ingestion_id": "__no_active_generation__"}},
+                    {
+                        "term": {
+                            "ingestion_id.keyword": "__no_active_generation__"
+                        }
+                    },
+                ],
+                "minimum_should_match": 1,
+            }
+        }
     ]
 
 
@@ -210,7 +232,17 @@ def test_global_generation_filter_is_not_limited_by_conversation_language(
         "fr",
         "global",
         document_type="office_directory",
-    ) == [{"terms": {"ingestion_id": ["directory-en"]}}]
+    ) == [
+        {
+            "bool": {
+                "should": [
+                    {"terms": {"ingestion_id": ["directory-en"]}},
+                    {"terms": {"ingestion_id.keyword": ["directory-en"]}},
+                ],
+                "minimum_should_match": 1,
+            }
+        }
+    ]
     assert captured["languages"] == set()
 
 

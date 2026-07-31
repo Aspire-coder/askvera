@@ -22,6 +22,7 @@ from scripts.ingestion.load_policy_sections_to_opensearch import _client  # noqa
 from services.aws_clients import get_aws_clients, init_aws_clients  # noqa: E402
 from services.db import close_db, get_engine, init_db  # noqa: E402
 from utils.logging import configure_logging  # noqa: E402
+from utils.opensearch_fields import exact_terms_query  # noqa: E402
 
 
 def quarantine_candidates(now: datetime) -> list[dict[str, Any]]:
@@ -102,7 +103,10 @@ def apply_cleanup(
                 query={
                     "_source": False,
                     "query": {
-                        "terms": {"ingestion_id": retired_ingestion_ids}
+                        **exact_terms_query(
+                            "ingestion_id",
+                            retired_ingestion_ids,
+                        )
                     },
                 },
             )
