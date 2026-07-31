@@ -14,10 +14,13 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [dragging, setDragging] = useState(false);
   const [country, setCountry] = useState("BE");
   const [language, setLanguage] = useState("nl");
-  const [documentType, setDocumentType] = useState("product_information");
+  const [documentType, setDocumentType] = useState("policy");
   const [accessScope, setAccessScope] = useState("country");
   const [version, setVersion] = useState("");
   const [effectiveDate, setEffectiveDate] = useState("");
+  const [logicalDocumentId, setLogicalDocumentId] = useState("");
+  const [documentOwner, setDocumentOwner] = useState("");
+  const [approvalReference, setApprovalReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +41,10 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     const timer = window.setInterval(() => void refresh(), 4000);
     return () => window.clearInterval(timer);
   }, [credentials.accessToken, credentials.apiKey]);
+
+  useEffect(() => {
+    setAccessScope(documentType === "office_directory" ? "global" : "country");
+  }, [documentType]);
 
   const selectedMarket = config.countries.find((market) => market.code === country) || config.countries[0];
   const languages = selectedMarket?.languages || [];
@@ -69,6 +76,9 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     formData.set("access_scope", accessScope);
     formData.set("document_version", version);
     formData.set("effective_date", effectiveDate);
+    formData.set("logical_document_id", logicalDocumentId);
+    formData.set("document_owner", documentOwner);
+    formData.set("approval_reference", approvalReference);
     setSubmitting(true);
     setNotice("");
     try {
@@ -121,7 +131,10 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field"><label htmlFor="scope">Availability</label><select id="scope" value={accessScope} onChange={(event) => setAccessScope(event.target.value)}><option value="country">Selected market only</option><option value="global">All markets</option></select></div>
             <div className="form-field"><label htmlFor="version">Document version</label><input id="version" value={version} onChange={(event) => setVersion(event.target.value)} placeholder="e.g. 2026.3" /></div>
             <div className="form-field"><label htmlFor="effective">Effective date</label><input id="effective" type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></div>
-            <div className="form-field upload-action"><span className="helper">The existing source with the same market, language and filename is replaced only after successful indexing.</span><button className="button primary" disabled={submitting || !file} onClick={() => void upload()}>{submitting ? "Preparing…" : "Upload and index"}</button></div>
+            <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder="e.g. US-company-policy" /></div>
+            <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
+            <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>
+            <div className="form-field upload-action"><span className="helper">A verified generation replaces the same stable document ID, even when the uploaded filename changes.</span><button className="button primary" disabled={submitting || !file} onClick={() => void upload()}>{submitting ? "Preparing…" : "Upload and index"}</button></div>
           </div>
           {notice ? <div className="notice" role="status">{notice}</div> : null}
         </div>
@@ -134,7 +147,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <li><span>3</span><div><strong>Semantic indexing</strong><p>Each chunk receives an embedding and searchable metadata.</p></div></li>
             <li><span>4</span><div><strong>Atomic activation</strong><p>The previous source is replaced only when the new index is complete.</p></div></li>
           </ol>
-          <div className="supported-note"><CheckIcon /><span>Designed for policies, product sheets, training, FAQs, legal and operational content.</span></div>
+          <div className="supported-note"><CheckIcon /><span>Limited to approved company policies and the global office directory.</span></div>
         </aside>
       </div>
 

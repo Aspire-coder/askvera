@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from services import knowledge_ingestion
+from scripts.ingestion.extract_policy_sections import PolicySection
+from services import knowledge_generations, knowledge_ingestion
 from services.knowledge_ingestion import (
     MAX_CHUNK_CHARS,
     VNEXT_MAX_CHUNK_CHARS,
@@ -16,6 +17,8 @@ from services.knowledge_ingestion import (
     build_sections,
     enqueue_ingestion_job,
     extract_pages,
+    process_ingestion_job,
+    release_ingestion_claim,
     safe_filename,
     stage_ingestion_upload,
     validate_upload,
@@ -93,6 +96,99 @@ def test_current_generic_chunk_profile_remains_the_default() -> None:
     )
 
     assert sections[0]["metadata"]["chunk_profile"] == "current"
+
+
+def test_policy_pdf_uses_policy_aware_extractor(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "policy.pdf"
+    source.write_bytes(b"%PDF-1.7\n")
+    policy_section = PolicySection(
+        source_file=source.name,
+        country="CA",
+        language="fr",
+        section_id="4.01",
+        title="Qualification",
+        start_page=8,
+        end_page=9,
+        content="4.01 Approved qualification requirements.",
+    )
+    indexed_sections: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        knowledge_ingestion.settings,
+        "ADMIN_DOCUMENT_PREFLIGHT_ENABLED",
+        False,
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion.settings,
+        "ADMIN_INGESTION_CHUNK_PROFILE",
+        "current",
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_pages",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_policy_sections",
+        lambda *_args, **_kwargs: [policy_section],
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "build_sections",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("generic chunking must not handle native policy PDFs")
+        ),
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "_index_sections",
+        lambda sections, **_kwargs: indexed_sections.extend(sections) or len(sections),
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "_upload_source",
+        lambda *_args, **_kwargs: "s3://approved/policy.pdf",
+    )
+    monkeypatch.setattr(knowledge_ingestion, "_record_document", lambda **_kwargs: None)
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+    assert process_ingestion_job(
+        "generation-1",
+        str(source),
+        filename=source.name,
+        country="CA",
+        language="fr",
+        document_type="policy",
+        access_scope="country",
+        version="2026.1",
+        effective_date="2026-07-01",
+    ) is True
+    assert indexed_sections[0]["section_id"] == "4.01"
+    assert indexed_sections[0]["content"] == policy_section.content
+
+
+def test_release_claim_marks_exhausted_retry_as_terminal(monkeypatch) -> None:
+    connection = MagicMock()
+    connection.execute.side_effect = [
+        MagicMock(scalar=lambda: 5),
+        MagicMock(),
+    ]
+    transaction = MagicMock()
+    transaction.__enter__.return_value = connection
+    transaction.__exit__.return_value = False
+    engine = MagicMock()
+    engine.begin.return_value = transaction
+    monkeypatch.setattr(knowledge_ingestion, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        knowledge_ingestion.settings,
+        "ADMIN_INGESTION_MAX_ATTEMPTS",
+        5,
+    )
+
+    status = release_ingestion_claim("job-1", "temporary failure", retryable=True)
+
+    assert status == "failed_terminal"
+    assert connection.execute.call_args_list[1].args[1]["terminal"] is True
 
 
 def test_durable_upload_uses_private_encrypted_s3_object(monkeypatch) -> None:
@@ -227,3 +323,58 @@ def test_staged_publish_rolls_back_partial_activation(monkeypatch) -> None:
 
     assert [action["doc"]["status"] for action in bulk_calls[0]] == ["active", "active"]
     assert [action["doc"]["status"] for action in bulk_calls[1]] == ["staging", "staging"]
+
+
+def test_generation_activation_locks_logical_document_before_read(
+    monkeypatch,
+) -> None:
+    connection = MagicMock()
+    connection.execute.return_value.scalar.return_value = ""
+    transaction = MagicMock()
+    transaction.__enter__.return_value = connection
+    engine = MagicMock()
+    engine.begin.return_value = transaction
+    monkeypatch.setattr(knowledge_ingestion, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "clear_active_generation_cache",
+        lambda: None,
+    )
+
+    knowledge_ingestion._activate_generation_pointer(
+        logical_document_id="country:CA:en:policy:company-policy",
+        ingestion_id="generation-2",
+        country="CA",
+        language="en",
+        source_file="CA-EN-Company-Policy.pdf",
+        document_type="policy",
+        access_scope="country",
+        activated_by="reviewer@example.invalid",
+    )
+
+    first_statement = str(connection.execute.call_args_list[0].args[0])
+    second_statement = str(connection.execute.call_args_list[1].args[0])
+    assert "pg_advisory_xact_lock" in first_statement
+    assert "FOR UPDATE" in second_statement
+
+
+def test_logical_document_ids_are_namespaced_by_locale() -> None:
+    canada = knowledge_generations.build_logical_document_id(
+        logical_document_id="company-policy",
+        country="CA",
+        language="en",
+        document_type="policy",
+        access_scope="country",
+        source_file="policy.pdf",
+    )
+    united_states = knowledge_generations.build_logical_document_id(
+        logical_document_id="company-policy",
+        country="US",
+        language="en",
+        document_type="policy",
+        access_scope="country",
+        source_file="policy.pdf",
+    )
+
+    assert canada == "country:CA:en:policy:company-policy"
+    assert united_states == "country:US:en:policy:company-policy"

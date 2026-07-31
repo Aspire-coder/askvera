@@ -398,6 +398,10 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS accepted_by TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS logical_document_id TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS document_owner TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS approval_reference TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS effective_date DATE"))
             connection.execute(
                 text(
                     """
@@ -421,6 +425,104 @@ def create_schema(correlation_id: str = "startup") -> None:
                 )
             )
             connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS accepted_by TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS logical_document_id TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS document_owner TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS approval_reference TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS effective_date DATE"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS knowledge_active_generations (
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        source_file TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        access_scope TEXT NOT NULL,
+                        active_ingestion_id TEXT NOT NULL,
+                        previous_ingestion_id TEXT NOT NULL DEFAULT '',
+                        activated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        activated_by TEXT NOT NULL DEFAULT '',
+                        logical_document_id TEXT NOT NULL DEFAULT '',
+                        PRIMARY KEY (
+                            country, language, source_file,
+                            document_type, access_scope
+                        )
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE knowledge_active_generations
+                    ADD COLUMN IF NOT EXISTS logical_document_id
+                    TEXT NOT NULL DEFAULT ''
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE knowledge_active_generations
+                    SET logical_document_id = concat_ws(
+                        ':', lower(access_scope), upper(country), lower(language),
+                        lower(document_type),
+                        left(
+                            COALESCE(
+                                NULLIF(
+                                    trim(
+                                        both '-' from regexp_replace(
+                                            lower(
+                                                regexp_replace(
+                                                    source_file,
+                                                    '\\.[^.]+$',
+                                                    ''
+                                                )
+                                            ),
+                                            '[^a-z0-9]+',
+                                            '-',
+                                            'g'
+                                        )
+                                    ),
+                                    ''
+                                ),
+                                'document'
+                            ),
+                            96
+                        )
+                    )
+                    WHERE logical_document_id = ''
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                    idx_knowledge_active_generations_logical_document
+                    ON knowledge_active_generations (logical_document_id)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS knowledge_document_generations (
+                        ingestion_id TEXT PRIMARY KEY,
+                        logical_document_id TEXT NOT NULL,
+                        country TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        source_file TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        access_scope TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        activated_at TIMESTAMPTZ,
+                        retired_at TIMESTAMPTZ,
+                        activated_by TEXT NOT NULL DEFAULT ''
+                    )
+                    """
+                )
+            )
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
             connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false"))

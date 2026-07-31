@@ -42,23 +42,41 @@ def apply_migrations(*, dry_run: bool) -> list[str]:
     engine = init_db("db-migrations")
     pending: list[str] = []
     with engine.begin() as connection:
-        connection.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": LOCK_ID})
-        connection.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS schema_migrations (
-                    version TEXT PRIMARY KEY,
-                    checksum TEXT NOT NULL,
-                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
-                """
-            )
+        tracking_table_exists = bool(
+            connection.execute(
+                text("SELECT to_regclass('public.schema_migrations')")
+            ).scalar()
         )
-        applied = {
-            row["version"]: row["checksum"]
-            for row in connection.execute(
+        if dry_run:
+            applied_rows = (
+                connection.execute(
+                    text("SELECT version, checksum FROM schema_migrations")
+                ).mappings()
+                if tracking_table_exists
+                else []
+            )
+        else:
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": LOCK_ID},
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS schema_migrations (
+                        version TEXT PRIMARY KEY,
+                        checksum TEXT NOT NULL,
+                        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
+            applied_rows = connection.execute(
                 text("SELECT version, checksum FROM schema_migrations")
             ).mappings()
+        applied = {
+            row["version"]: row["checksum"]
+            for row in applied_rows
         }
         for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
             checksum = _checksum(path)

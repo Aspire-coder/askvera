@@ -109,6 +109,9 @@ export type IngestionJob = {
   progress: number;
   section_count: number;
   source_uri: string;
+  logical_document_id?: string;
+  document_owner?: string;
+  approval_reference?: string;
   error_message: string;
   created_at: string;
   updated_at: string;

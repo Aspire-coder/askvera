@@ -303,6 +303,9 @@ async def upload_document(
     access_scope: Annotated[str, Form()] = "country",
     document_version: Annotated[str, Form()] = "",
     effective_date: Annotated[str, Form()] = "",
+    logical_document_id: Annotated[str, Form()] = "",
+    document_owner: Annotated[str, Form()] = "",
+    approval_reference: Annotated[str, Form()] = "",
 ) -> dict[str, Any]:
     normalized_country = country.upper().strip()
     normalized_language = language.lower().strip()
@@ -315,9 +318,26 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Unsupported document type.")
     if access_scope not in ACCESS_SCOPES:
         raise HTTPException(status_code=400, detail="Unsupported access scope.")
+    if document_type == "policy" and access_scope != "country":
+        raise HTTPException(
+            status_code=400,
+            detail="Company policies must be restricted to their selected market.",
+        )
+    if document_type == "office_directory" and access_scope != "global":
+        raise HTTPException(
+            status_code=400,
+            detail="The approved office directory must use global availability.",
+        )
     principal = getattr(request.state, "admin_identity", {}) or {}
     if access_scope == "global" and principal.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Only a Super Admin can upload global content.")
+    if settings.ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED and (
+        not document_owner.strip() or not approval_reference.strip()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Document owner and approval reference are required for controlled publication.",
+        )
 
     filename = safe_filename(file.filename or "document")
     content = await file.read(settings.ADMIN_UPLOAD_MAX_BYTES + 1)
@@ -335,8 +355,12 @@ async def upload_document(
         document_type=document_type,
         access_scope=access_scope,
         version=document_version,
+        effective_date=effective_date,
         content_hash=content_hash,
         accepted_by=accepted_by,
+        logical_document_id=logical_document_id.strip(),
+        document_owner=document_owner.strip(),
+        approval_reference=approval_reference.strip(),
     )
     if settings.ADMIN_INGESTION_QUEUE_ENABLED:
         try:
@@ -353,6 +377,9 @@ async def upload_document(
                 effective_date=effective_date,
                 content_hash=content_hash,
                 accepted_by=accepted_by,
+                logical_document_id=logical_document_id.strip(),
+                document_owner=document_owner.strip(),
+                approval_reference=approval_reference.strip(),
             )
         except (ValueError, BotoCoreError, ClientError) as exc:
             fail_ingestion_job(job_id, "Durable ingestion queueing failed.")
@@ -382,6 +409,9 @@ async def upload_document(
         version=document_version,
         effective_date=effective_date,
         accepted_by=accepted_by,
+        logical_document_id=logical_document_id.strip(),
+        document_owner=document_owner.strip(),
+        approval_reference=approval_reference.strip(),
     )
     return _payload(
         {

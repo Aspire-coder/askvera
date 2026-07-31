@@ -77,6 +77,7 @@ def _index_body() -> dict[str, Any]:
                 "search_text": {"type": "text"},
                 "content_hash": {"type": "keyword"},
                 "ingestion_id": {"type": "keyword"},
+                "logical_document_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": True},
                 "embedding": {
                     "type": "knn_vector",

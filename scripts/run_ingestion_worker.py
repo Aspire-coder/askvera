@@ -53,6 +53,10 @@ REQUIRED_FIELDS = {
 }
 
 
+class RetryableIngestionError(RuntimeError):
+    """A temporary condition that should return to SQS for another attempt."""
+
+
 def _parse_command(body: str) -> dict[str, str]:
     if len(body) > 16_384:
         raise ValueError("Ingestion command exceeds the maximum size.")
@@ -115,6 +119,9 @@ def process_message(message: dict[str, str]) -> bool:
     if claim == "completed":
         LOGGER.info("ingestion_duplicate_completed", job_id=job_id)
         return True
+    if claim == "terminal":
+        LOGGER.warning("ingestion_terminal_message_removed", job_id=job_id)
+        return True
     if claim != "claimed":
         LOGGER.info("ingestion_claim_skipped", job_id=job_id, claim=claim)
         return False
@@ -123,7 +130,9 @@ def process_message(message: dict[str, str]) -> bool:
             tags = get_aws_clients().s3.get_object_tagging(Bucket=bucket, Key=key)
             tag_map = {item["Key"].lower(): item["Value"].upper() for item in tags.get("TagSet", [])}
             if tag_map.get("malware-scan-status") != "CLEAN":
-                raise ValueError("Ingestion upload has not passed malware scanning.")
+                raise RetryableIngestionError(
+                    "Ingestion upload has not passed malware scanning."
+                )
         with TemporaryDirectory(prefix=f"askvera-{job_id[:10]}-") as directory:
             local_path = Path(directory) / filename
             get_aws_clients().s3.download_file(bucket, key, str(local_path))
@@ -143,9 +152,18 @@ def process_message(message: dict[str, str]) -> bool:
                 effective_date=command.get("effectiveDate", ""),
                 upload_uri=command["uploadUri"],
                 accepted_by=command.get("acceptedBy", ""),
+                logical_document_id=command.get("logicalDocumentId", ""),
+                document_owner=command.get("documentOwner", ""),
+                approval_reference=command.get("approvalReference", ""),
             )
+    except RetryableIngestionError as exc:
+        release_ingestion_claim(job_id, str(exc), retryable=True)
+        raise
     except ValueError as exc:
-        release_ingestion_claim(job_id, str(exc))
+        release_ingestion_claim(job_id, str(exc), retryable=False)
+        raise
+    except (BotoCoreError, ClientError, SQLAlchemyError, OSError) as exc:
+        release_ingestion_claim(job_id, str(exc), retryable=True)
         raise
 
 
@@ -202,6 +220,8 @@ def run_forever() -> None:
                     )
             except (KeyError, TypeError, ValueError, json.JSONDecodeError):
                 LOGGER.exception("invalid_ingestion_command")
+            except RetryableIngestionError:
+                LOGGER.info("ingestion_message_retry_scheduled")
             except (BotoCoreError, ClientError, SQLAlchemyError, OSError):
                 LOGGER.exception("ingestion_message_retry_scheduled")
             finally:

@@ -148,7 +148,7 @@ All records are loaded with:
 These records are intentionally available from every selected market. They are
 retrieved separately from country policy content.
 
-### 3.3 Admin portal general ingestion
+### 3.3 Admin portal controlled ingestion
 
 The admin upload API accepts:
 
@@ -156,27 +156,18 @@ The admin upload API accepts:
 .pdf .docx .txt .md .csv .html .htm
 ```
 
-It supports these document types:
+It supports these approved document types:
 
 ```text
 policy
-product_information
-training
-marketing
-legal
-faq
-operations
-other
+office_directory
 ```
 
-The generic path is heading-aware but is not policy-section-aware. It creates
-overlapping chunks up to 4,500 characters with a 450-character overlap.
-
-**Current operational consequence:** uploading a numbered company policy
-through the generic admin portal does not produce the same section, definition,
-list-item, and numeric-fact structure as
-`extract_policy_sections.py`. Until the portal invokes the specialized policy
-extractor, use the policy-aware command-line path for production policy files.
+Policy PDFs use the same section-aware extractor as the controlled command-line
+path. This preserves numbered sections, definitions, list items, numeric facts,
+and page references. Global office directories use the directory-specific
+structured extraction path. Unsupported content categories are rejected rather
+than silently entering the production index through generic chunking.
 
 ## 4. Policy PDF extraction in detail
 
@@ -1812,3 +1803,12 @@ management, then widget administration, and finally the RDS widget runtime.
 Use a non-production widget record and approved origin for the final runtime
 test. Rollback is performed by disabling the relevant flag; existing UAT
 retrieval and answer behavior remains untouched.
+
+Controlled publication has an additional fail-closed activation gate. After
+the additive migrations are applied, run
+`scripts/backfill_active_generation_pointers.py --load-ssm` without
+`--apply`. Review every logical document and resolve ambiguous generations
+before applying the backfill. Then rerun the dry run and require
+`scripts/validate_ingestion_rollout.py --load-ssm` to pass. Generation-pointer
+filtering must remain disabled until every active OpenSearch document has one
+matching RDS pointer and there are no mismatched or orphaned pointers.

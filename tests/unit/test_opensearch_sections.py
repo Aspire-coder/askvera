@@ -5,6 +5,7 @@ from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
     _directory_text_query,
+    _generation_filters,
     is_approved_source,
     _language_key,
     _outline_text_query,
@@ -123,6 +124,94 @@ def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch)
             ]
         }
     }
+
+
+def test_generation_filter_does_not_change_queries_while_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        False,
+    )
+
+    assert _generation_filters("CA", "en", "locale") == []
+
+
+def test_generation_filter_uses_only_published_locale_generations(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(settings, "OPENSEARCH_ALLOW_ENGLISH_FALLBACK", False)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "active_generation_ids",
+        lambda **kwargs: (
+            {"generation-ca-en"}
+            if kwargs == {
+                "countries": {"CA"},
+                "languages": {"en"},
+                "access_scope": "country",
+                "document_type": "policy",
+            }
+            else set()
+        ),
+    )
+
+    assert _generation_filters(
+        "CA",
+        "en",
+        "locale",
+        document_type="policy",
+    ) == [{"terms": {"ingestion_id": ["generation-ca-en"]}}]
+
+
+def test_generation_filter_fails_closed_without_a_published_generation(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        settings,
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        opensearch_sections,
+        "active_generation_ids",
+        lambda **_kwargs: set(),
+    )
+
+    assert _generation_filters("CA", "en", "locale") == [
+        {"term": {"ingestion_id": "__no_active_generation__"}}
+    ]
+
+
+def test_global_generation_filter_is_not_limited_by_conversation_language(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        opensearch_sections.settings,
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        True,
+    )
+    captured = {}
+
+    def fake_active_generation_ids(**kwargs):
+        captured.update(kwargs)
+        return {"directory-en"}
+
+    monkeypatch.setattr(
+        opensearch_sections,
+        "active_generation_ids",
+        fake_active_generation_ids,
+    )
+
+    assert _generation_filters(
+        "",
+        "fr",
+        "global",
+        document_type="office_directory",
+    ) == [{"terms": {"ingestion_id": ["directory-en"]}}]
+    assert captured["languages"] == set()
 
 
 def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:

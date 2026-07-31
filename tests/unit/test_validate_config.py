@@ -203,7 +203,11 @@ def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> Non
     monkeypatch.setattr(settings, "SECURITY_PROFILE", "hardened")
     monkeypatch.setattr(settings, "ADMIN_INGESTION_QUEUE_ENABLED", False)
     monkeypatch.setattr(settings, "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED", False)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED", False)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_MALWARE_SCAN_REQUIRED", False)
     monkeypatch.setattr(settings, "ADMIN_INGESTION_QUEUE_URL", "")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_DLQ_URL", "")
     monkeypatch.setattr(settings, "KNOWLEDGE_UPLOAD_BUCKET", "")
     monkeypatch.setattr(settings, "ENABLE_ALARM_NOTIFICATIONS", False)
     monkeypatch.setattr(settings, "ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
@@ -216,4 +220,5 @@ def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> Non
         "(must be enabled for the hardened security profile)"
     ) in failures
     assert "ADMIN_INGESTION_QUEUE_URL" in failures
+    assert "ADMIN_INGESTION_DLQ_URL" in failures
     assert "KNOWLEDGE_UPLOAD_BUCKET" in failures

@@ -10,7 +10,7 @@ import re
 import time
 import uuid
 import zipfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings
+from scripts.ingestion.extract_policy_sections import extract_sections as extract_policy_sections
 from scripts.ingestion.load_policy_sections_to_opensearch import (
     _actions,
     _client,
@@ -32,6 +33,10 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
 from services.aws_clients import get_aws_clients
 from services.document_preflight import analyze_pdf, extract_pdf_page_text, is_table_like_layout
 from services.db import get_engine
+from services.knowledge_generations import (
+    build_logical_document_id,
+    clear_active_generation_cache,
+)
 from utils.logging import get_logger
 
 LOGGER = get_logger("services.knowledge_ingestion")
@@ -39,13 +44,7 @@ LOGGER = get_logger("services.knowledge_ingestion")
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".html", ".htm"}
 DOCUMENT_TYPES = {
     "policy",
-    "product_information",
-    "training",
-    "marketing",
-    "legal",
-    "faq",
-    "operations",
-    "other",
+    "office_directory",
 }
 ACCESS_SCOPES = {"country", "global"}
 HEADING_RE = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?\s+)?[^.!?]{3,120}$")
@@ -123,15 +122,41 @@ def validate_document_content(path: Path) -> None:
         raise ValueError("Binary content is not accepted for text documents.")
 
 
-def release_ingestion_claim(job_id: str, message: str) -> None:
-    """Release a failed worker lease so SQS can retry or dead-letter the job."""
-    _update_job(
-        job_id,
-        status="failed",
-        error_message=str(message or "Document validation failed.")[:1000],
-        lease_owner="",
-        lease_expires_at=None,
-    )
+def release_ingestion_claim(
+    job_id: str,
+    message: str,
+    *,
+    retryable: bool = True,
+) -> str:
+    """Release a worker lease and explicitly classify the next job state."""
+    with get_engine().begin() as connection:
+        attempt_count = connection.execute(
+            text("SELECT attempt_count FROM ingestion_jobs WHERE job_id = :job_id"),
+            {"job_id": job_id},
+        ).scalar()
+        exhausted = int(attempt_count or 0) >= settings.ADMIN_INGESTION_MAX_ATTEMPTS
+        status = "retryable" if retryable and not exhausted else "failed_terminal"
+        connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs
+                SET status = :status,
+                    progress = CASE WHEN :terminal THEN 100 ELSE progress END,
+                    error_message = :error_message,
+                    lease_owner = '',
+                    lease_expires_at = NULL,
+                    updated_at = now()
+                WHERE job_id = :job_id
+                """
+            ),
+            {
+                "job_id": job_id,
+                "status": status,
+                "terminal": status == "failed_terminal",
+                "error_message": str(message or "Document processing failed.")[:1000],
+            },
+        )
+    return status
 
 
 def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
@@ -147,7 +172,10 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
                     status = 'extracting',
                     updated_at = now()
                 WHERE job_id = :job_id
-                  AND status NOT IN ('ready', 'completed', 'cancelled')
+                  AND status NOT IN (
+                      'ready', 'completed', 'cancelled',
+                      'failed_terminal', 'dead_lettered'
+                  )
                   AND attempt_count < :max_attempts
                   AND (lease_expires_at IS NULL OR lease_expires_at <= now())
                 RETURNING job_id
@@ -162,12 +190,44 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
         ).first()
         if row:
             return "claimed"
-        status = connection.execute(
-            text("SELECT status FROM ingestion_jobs WHERE job_id = :job_id"),
+        status_row = connection.execute(
+            text(
+                """
+                SELECT status, attempt_count
+                FROM ingestion_jobs
+                WHERE job_id = :job_id
+                """
+            ),
             {"job_id": job_id},
-        ).scalar()
+        ).mappings().first()
+        if (
+            status_row
+            and int(status_row["attempt_count"] or 0)
+            >= settings.ADMIN_INGESTION_MAX_ATTEMPTS
+            and status_row["status"] not in {
+                "ready", "completed", "cancelled",
+                "failed_terminal", "dead_lettered",
+            }
+        ):
+            connection.execute(
+                text(
+                    """
+                    UPDATE ingestion_jobs
+                    SET status = 'failed_terminal',
+                        lease_owner = '',
+                        lease_expires_at = NULL,
+                        updated_at = now()
+                    WHERE job_id = :job_id
+                    """
+                ),
+                {"job_id": job_id},
+            )
+            status_row = {**status_row, "status": "failed_terminal"}
+    status = status_row["status"] if status_row else None
     if status in {"ready", "completed"}:
         return "completed"
+    if status in {"failed_terminal", "dead_lettered", "cancelled"}:
+        return "terminal"
     if status is None:
         return "missing"
     return "busy"
@@ -181,8 +241,12 @@ def create_ingestion_job(
     document_type: str,
     access_scope: str,
     version: str,
+    effective_date: str = "",
     content_hash: str = "",
     accepted_by: str = "",
+    logical_document_id: str = "",
+    document_owner: str = "",
+    approval_reference: str = "",
 ) -> str:
     job_id = uuid.uuid4().hex
     with get_engine().begin() as connection:
@@ -191,11 +255,15 @@ def create_ingestion_job(
                 """
                 INSERT INTO ingestion_jobs (
                     job_id, filename, country, language, document_type,
-                    access_scope, document_version, content_hash, accepted_by, status,
+                    access_scope, document_version, content_hash, accepted_by,
+                    logical_document_id, document_owner, approval_reference,
+                    effective_date, status,
                     created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :country, :language, :document_type,
-                    :access_scope, :document_version, :content_hash, :accepted_by, 'queued',
+                    :access_scope, :document_version, :content_hash, :accepted_by,
+                    :logical_document_id, :document_owner, :approval_reference,
+                    NULLIF(:effective_date, '')::date, 'queued',
                     now(), now()
                 )
                 """
@@ -210,6 +278,10 @@ def create_ingestion_job(
                 "document_version": version,
                 "content_hash": content_hash,
                 "accepted_by": accepted_by,
+                "logical_document_id": logical_document_id,
+                "document_owner": document_owner,
+                "approval_reference": approval_reference,
+                "effective_date": effective_date,
             },
         )
     return job_id
@@ -248,6 +320,9 @@ def enqueue_ingestion_job(
     effective_date: str,
     content_hash: str,
     accepted_by: str = "",
+    logical_document_id: str = "",
+    document_owner: str = "",
+    approval_reference: str = "",
 ) -> None:
     """Place a compact, non-document ingestion command on SQS."""
     if not settings.ADMIN_INGESTION_QUEUE_URL:
@@ -268,6 +343,9 @@ def enqueue_ingestion_job(
                 "effectiveDate": effective_date,
                 "contentHash": content_hash,
                 "acceptedBy": accepted_by,
+                "logicalDocumentId": logical_document_id,
+                "documentOwner": document_owner,
+                "approvalReference": approval_reference,
             },
             separators=(",", ":"),
         ),
@@ -303,12 +381,16 @@ def process_ingestion_job(
     effective_date: str,
     upload_uri: str = "",
     accepted_by: str = "",
+    logical_document_id: str = "",
+    document_owner: str = "",
+    approval_reference: str = "",
 ) -> bool:
     """Extract, embed, index, and activate one approved document."""
     path = Path(local_path)
     try:
         _update_job(job_id, status="extracting", progress=15)
         chunk_profile = settings.ADMIN_INGESTION_CHUNK_PROFILE
+        use_policy_extractor = document_type == "policy" and path.suffix.lower() == ".pdf"
         if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
             preflight = analyze_pdf(path)
             if preflight.requires_ocr:
@@ -317,32 +399,60 @@ def process_ingestion_job(
                         "This PDF appears to be scanned or image-only and requires OCR before publication."
                     )
                 pages = _extract_pages_with_textract(upload_uri)
+                use_policy_extractor = False
             else:
                 pages = extract_pages(path, chunk_profile=chunk_profile)
         else:
             pages = extract_pages(path, chunk_profile=chunk_profile)
-        sections = build_sections(
-            pages,
-            filename=filename,
-            country=country,
-            language=language,
-            document_type=document_type,
-            version=version,
-            effective_date=effective_date,
-            chunk_profile=chunk_profile,
-        )
+        if use_policy_extractor:
+            sections = [
+                {
+                    **asdict(section),
+                    "metadata": section.metadata,
+                }
+                for section in extract_policy_sections(
+                    path,
+                    country=country,
+                    language=language,
+                    document_version=version,
+                    effective_date=effective_date,
+                    status="active",
+                    chunk_profile=chunk_profile,
+                )
+            ]
+        else:
+            sections = build_sections(
+                pages,
+                filename=filename,
+                country=country,
+                language=language,
+                document_type=document_type,
+                version=version,
+                effective_date=effective_date,
+                chunk_profile=chunk_profile,
+            )
         if not sections:
             raise ValueError("No readable text was found in the document.")
 
         _update_job(job_id, status="uploading", progress=35, section_count=len(sections))
         source_uri = _upload_source(path, filename, job_id)
         _update_job(job_id, status="indexing", progress=55, source_uri=source_uri)
+        stable_document_id = build_logical_document_id(
+            logical_document_id=logical_document_id,
+            country=str(sections[0]["country"]),
+            language=str(sections[0]["language"]),
+            document_type=document_type,
+            access_scope=access_scope,
+            source_file=str(sections[0]["source_file"]),
+        )
         indexed = _index_sections(
             sections,
             source_uri=source_uri,
             document_type=document_type,
             access_scope=access_scope,
             ingestion_id=job_id,
+            logical_document_id=stable_document_id,
+            activated_by=accepted_by,
         )
         _record_document(
             job_id=job_id,
@@ -356,6 +466,10 @@ def process_ingestion_job(
             section_count=indexed,
             content_hash=_file_hash(path),
             accepted_by=accepted_by,
+            logical_document_id=stable_document_id,
+            document_owner=document_owner,
+            approval_reference=approval_reference,
+            effective_date=effective_date,
         )
         _update_job(
             job_id,
@@ -368,16 +482,13 @@ def process_ingestion_job(
             completed_at=datetime.now(UTC),
         )
         return True
+    except ValueError as exc:
+        LOGGER.exception("admin_ingestion_rejected", job_id=job_id, filename=filename)
+        release_ingestion_claim(job_id, str(exc), retryable=False)
+        return False
     except Exception as exc:
         LOGGER.exception("admin_ingestion_failed", job_id=job_id, filename=filename)
-        _update_job(
-            job_id,
-            status="failed",
-            progress=100,
-            error_message=str(exc)[:1000],
-            lease_owner="",
-            lease_expires_at=None,
-        )
+        release_ingestion_claim(job_id, str(exc), retryable=True)
         return False
     finally:
         try:
@@ -498,7 +609,7 @@ def build_sections(
     effective_date: str = "",
     chunk_profile: str = "current",
 ) -> list[dict[str, Any]]:
-    """Create retrieval-sized chunks for policies, product sheets, FAQs, and training material."""
+    """Create retrieval-sized chunks for approved non-policy directory documents."""
     try:
         max_chars, overlap_chars = CHUNK_PROFILES[chunk_profile]
     except KeyError as exc:
@@ -619,6 +730,8 @@ def _index_sections(
     document_type: str,
     access_scope: str,
     ingestion_id: str,
+    logical_document_id: str = "",
+    activated_by: str = "",
 ) -> int:
     client = _client()
     index = settings.OPENSEARCH_INDEX
@@ -637,6 +750,17 @@ def _index_sections(
             access_scope=access_scope,
         )
     )
+    stable_document_id = logical_document_id or build_logical_document_id(
+        logical_document_id="",
+        country=str(sections[0]["country"]),
+        language=str(sections[0]["language"]),
+        document_type=document_type,
+        access_scope=access_scope,
+        source_file=str(sections[0]["source_file"]),
+    )
+    for action in new_actions:
+        action["_source"]["logical_document_id"] = stable_document_id
+        action["_source"].setdefault("metadata", {})["logical_document_id"] = stable_document_id
     if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED:
         for action in new_actions:
             action["_id"] = action["_source"]["id"]
@@ -655,18 +779,145 @@ def _index_sections(
             expected_count=len(sections),
             ingestion_id=ingestion_id,
         )
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        _activate_generation_pointer(
+            logical_document_id=stable_document_id,
+            ingestion_id=ingestion_id,
+            country=str(sections[0]["country"]),
+            language=str(sections[0]["language"]),
+            source_file=str(sections[0]["source_file"]),
+            document_type=document_type,
+            access_scope=access_scope,
+            activated_by=activated_by,
+        )
     identity = (sections[0]["country"], sections[0]["language"], sections[0]["source_file"])
-    delete_actions = _older_source_actions(
-        client,
-        index=index,
-        country=str(identity[0]),
-        language=str(identity[1]),
-        source_file=str(identity[2]),
-        ingestion_id=ingestion_id,
-    )
-    if delete_actions:
-        helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        delete_actions = _older_source_actions(
+            client,
+            index=index,
+            country=str(identity[0]),
+            language=str(identity[1]),
+            source_file=str(identity[2]),
+            ingestion_id=ingestion_id,
+        )
+        if delete_actions:
+            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
     return int(success)
+
+
+def _activate_generation_pointer(
+    *,
+    logical_document_id: str,
+    ingestion_id: str,
+    country: str,
+    language: str,
+    source_file: str,
+    document_type: str,
+    access_scope: str,
+    activated_by: str,
+) -> None:
+    """Atomically switch the stable document slot to a verified generation."""
+    with get_engine().begin() as connection:
+        # Serialize publication for this logical document even when its pointer
+        # row does not exist yet. SELECT FOR UPDATE alone cannot lock a missing row.
+        connection.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:logical_document_id))"),
+            {"logical_document_id": logical_document_id},
+        )
+        previous_ingestion_id = connection.execute(
+            text(
+                """
+                SELECT active_ingestion_id
+                FROM knowledge_active_generations
+                WHERE logical_document_id = :logical_document_id
+                FOR UPDATE
+                """
+            ),
+            {"logical_document_id": logical_document_id},
+        ).scalar() or ""
+        if previous_ingestion_id:
+            connection.execute(
+                text(
+                    """
+                    UPDATE knowledge_document_generations
+                    SET status = 'retired', retired_at = now()
+                    WHERE ingestion_id = :ingestion_id
+                    """
+                ),
+                {"ingestion_id": previous_ingestion_id},
+            )
+        connection.execute(
+            text(
+                """
+                INSERT INTO knowledge_active_generations (
+                    logical_document_id, country, language, source_file,
+                    document_type, access_scope, active_ingestion_id,
+                    previous_ingestion_id, activated_at, activated_by
+                ) VALUES (
+                    :logical_document_id, :country, :language, :source_file,
+                    :document_type, :access_scope, :ingestion_id,
+                    '', now(), :activated_by
+                )
+                ON CONFLICT (logical_document_id) DO UPDATE SET
+                    country = EXCLUDED.country,
+                    language = EXCLUDED.language,
+                    source_file = EXCLUDED.source_file,
+                    document_type = EXCLUDED.document_type,
+                    access_scope = EXCLUDED.access_scope,
+                    previous_ingestion_id = knowledge_active_generations.active_ingestion_id,
+                    active_ingestion_id = EXCLUDED.active_ingestion_id,
+                    activated_at = now(),
+                    activated_by = EXCLUDED.activated_by
+                """
+            ),
+            {
+                "logical_document_id": logical_document_id,
+                "country": country,
+                "language": language,
+                "source_file": source_file,
+                "document_type": document_type,
+                "access_scope": access_scope,
+                "ingestion_id": ingestion_id,
+                "activated_by": activated_by,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO knowledge_document_generations (
+                    ingestion_id, logical_document_id, country, language,
+                    source_file, document_type, access_scope, status,
+                    activated_at, activated_by
+                ) VALUES (
+                    :ingestion_id, :logical_document_id, :country, :language,
+                    :source_file, :document_type, :access_scope, 'active',
+                    now(), :activated_by
+                )
+                ON CONFLICT (ingestion_id) DO UPDATE SET
+                    logical_document_id = EXCLUDED.logical_document_id,
+                    country = EXCLUDED.country,
+                    language = EXCLUDED.language,
+                    source_file = EXCLUDED.source_file,
+                    document_type = EXCLUDED.document_type,
+                    access_scope = EXCLUDED.access_scope,
+                    status = 'active',
+                    activated_at = now(),
+                    activated_by = EXCLUDED.activated_by,
+                    retired_at = NULL
+                """
+            ),
+            {
+                "ingestion_id": ingestion_id,
+                "logical_document_id": logical_document_id,
+                "country": country,
+                "language": language,
+                "source_file": source_file,
+                "document_type": document_type,
+                "access_scope": access_scope,
+                "activated_by": activated_by,
+            },
+        )
+    clear_active_generation_cache()
 
 
 def _activate_staged_sections(
@@ -769,16 +1020,23 @@ def _record_document(**values: Any) -> None:
                 INSERT INTO knowledge_documents (
                     document_id, filename, source_uri, country, language,
                     document_type, access_scope, document_version, section_count,
-                    content_hash, accepted_by, status, created_at, updated_at
+                    content_hash, accepted_by, logical_document_id, document_owner,
+                    approval_reference, effective_date, status, created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :source_uri, :country, :language,
                     :document_type, :access_scope, :version, :section_count,
-                    :content_hash, :accepted_by, 'active', now(), now()
+                    :content_hash, :accepted_by, :logical_document_id, :document_owner,
+                    :approval_reference, NULLIF(:effective_date, '')::date,
+                    'active', now(), now()
                 )
                 ON CONFLICT (document_id) DO UPDATE SET
                     source_uri = EXCLUDED.source_uri,
                     section_count = EXCLUDED.section_count,
                     accepted_by = EXCLUDED.accepted_by,
+                    logical_document_id = EXCLUDED.logical_document_id,
+                    document_owner = EXCLUDED.document_owner,
+                    approval_reference = EXCLUDED.approval_reference,
+                    effective_date = EXCLUDED.effective_date,
                     status = 'active',
                     updated_at = now()
                 """
@@ -803,7 +1061,9 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
                 SELECT job_id, filename, country, language, document_type,
                        access_scope, document_version, status, progress,
                        section_count, source_uri, upload_uri, content_hash,
-                       accepted_by, attempt_count, error_message, created_at, updated_at
+                       accepted_by, logical_document_id, document_owner,
+                       approval_reference, attempt_count, error_message,
+                       created_at, updated_at
                 FROM ingestion_jobs ORDER BY created_at DESC LIMIT :limit
                 """
             ),

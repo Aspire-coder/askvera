@@ -120,12 +120,16 @@ def _validate_hardened_profile(missing: list[str]) -> None:
         "EVIDENCE_GATED_OUTPUT_ENABLED",
         "ADMIN_INGESTION_QUEUE_ENABLED",
         "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED",
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        "ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED",
+        "ADMIN_INGESTION_MALWARE_SCAN_REQUIRED",
         "ENABLE_ALARM_NOTIFICATIONS",
     ):
         if not bool(getattr(settings, name, False)):
             missing.append(f"{name} (must be enabled for the hardened security profile)")
     for name in (
         "ADMIN_INGESTION_QUEUE_URL",
+        "ADMIN_INGESTION_DLQ_URL",
         "KNOWLEDGE_UPLOAD_BUCKET",
         "AUDIT_FIREHOSE_STREAM",
     ):

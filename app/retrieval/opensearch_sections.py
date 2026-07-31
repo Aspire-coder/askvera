@@ -16,6 +16,7 @@ from opensearchpy.exceptions import OpenSearchException
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
+from services.knowledge_generations import active_generation_ids
 from services.market_config import get_document_country_codes
 from utils.logging import get_logger
 
@@ -92,6 +93,39 @@ def _scope_filter(country: str, language: str, scope: str) -> dict[str, Any]:
     }
 
 
+def _generation_filters(
+    country: str,
+    language: str,
+    scope: str,
+    *,
+    document_type: str = "",
+) -> list[dict[str, Any]]:
+    """Restrict retrieval to atomically published generations when enabled."""
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        return []
+    access_scope = "global" if scope == "global" else "country"
+    normalized_language = _language_key(language)
+    languages: set[str] = set()
+    if access_scope != "global":
+        languages.add(normalized_language)
+        if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK and normalized_language != "en":
+            languages.add("en")
+    countries = (
+        set(get_document_country_codes(country))
+        if access_scope != "global"
+        else set()
+    )
+    generation_ids = active_generation_ids(
+        countries=countries,
+        languages=languages,
+        access_scope=access_scope,
+        document_type=document_type,
+    )
+    if not generation_ids:
+        return [{"term": {"ingestion_id": "__no_active_generation__"}}]
+    return [{"terms": {"ingestion_id": sorted(generation_ids)}}]
+
+
 def is_approved_source(uri: str, country: str, language: str, correlation_id: str = "system") -> bool:
     """Confirm that a citation source is active and available to the requested locale."""
     normalized_language = _language_key(language)
@@ -109,12 +143,21 @@ def is_approved_source(uri: str, country: str, language: str, correlation_id: st
                     {"term": {"status": "active"}},
                 ],
                 "should": [
-                    {"term": {"access_scope": "global"}},
                     {
                         "bool": {
                             "filter": [
+                                {"term": {"access_scope": "global"}},
+                                *_generation_filters("", language, "global"),
+                            ]
+                        }
+                    },
+                    {
+                        "bool": {
+                            "filter": [
+                                {"term": {"access_scope": "country"}},
                                 {"terms": {"country": country_codes}},
                                 {"terms": {"language": allowed_languages}},
+                                *_generation_filters(country, language, "country"),
                             ]
                         }
                     },
@@ -156,6 +199,7 @@ def _text_query(message: str, country: str, language: str, *, scope: str = "loca
                 "filter": [
                     _scope_filter(country, language, scope),
                     {"term": {"status": "active"}},
+                    *_generation_filters(country, language, scope),
                 ],
                 "should": [
                     {
@@ -191,6 +235,12 @@ def _directory_text_query(message: str) -> dict[str, Any]:
                     _scope_filter("", "", "global"),
                     {"term": {"status": "active"}},
                     {"term": {"document_type": "office_directory"}},
+                    *_generation_filters(
+                        "",
+                        "en",
+                        "global",
+                        document_type="office_directory",
+                    ),
                 ],
                 "should": [
                     {
@@ -262,6 +312,7 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
                             "filter": [
                                 _scope_filter(country, language, scope),
                                 {"term": {"status": "active"}},
+                                *_generation_filters(country, language, scope),
                             ]
                         }
                     },

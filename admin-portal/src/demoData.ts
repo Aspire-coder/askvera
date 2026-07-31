@@ -55,13 +55,13 @@ export const demoConfig: AdminConfig = {
     { code: "US", name: "United States", languages: [{ code: "en", name: "English" }] },
     { code: "CA", name: "Canada", languages: [{ code: "en", name: "English" }, { code: "fr", name: "French" }] }
   ],
-  documentTypes: ["policy", "product_information", "training", "marketing", "legal", "faq", "operations", "other"],
+  documentTypes: ["policy", "office_directory"],
   accessScopes: ["country", "global"],
   maxUploadBytes: 26_214_400
 };
 
 export const demoJobs: IngestionJob[] = [
-  { job_id: "a1", filename: "Benelux Product Guide 2026.pdf", country: "BE", language: "nl", document_type: "product_information", access_scope: "country", document_version: "2026.1", status: "ready", progress: 100, section_count: 84, source_uri: "s3://approved-knowledge/a1/guide.pdf", error_message: "", created_at: iso(7200), updated_at: iso(7050) },
+  { job_id: "a1", filename: "Benelux Company Policy 2026.pdf", country: "BE", language: "nl", document_type: "policy", access_scope: "country", document_version: "2026.1", status: "ready", progress: 100, section_count: 84, source_uri: "s3://approved-knowledge/a1/policy.pdf", error_message: "", created_at: iso(7200), updated_at: iso(7050) },
   { job_id: "a2", filename: "Manager Training Handbook.pdf", country: "BE", language: "fr", document_type: "training", access_scope: "country", document_version: "2026.2", status: "indexing", progress: 72, section_count: 46, source_uri: "", error_message: "", created_at: iso(220), updated_at: iso(8) },
   { job_id: "a3", filename: "Global Product FAQ.docx", country: "US", language: "en", document_type: "faq", access_scope: "global", document_version: "2026.3", status: "ready", progress: 100, section_count: 31, source_uri: "s3://approved-knowledge/a3/faq.docx", error_message: "", created_at: iso(86400), updated_at: iso(86320) }
 ];

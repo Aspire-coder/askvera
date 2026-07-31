@@ -10,6 +10,7 @@ from scripts.run_ingestion_worker import (
     _parse_command,
     _s3_location,
     _validate_command,
+    process_message,
 )
 
 
@@ -107,3 +108,34 @@ def test_worker_extends_visibility_while_processing(monkeypatch) -> None:
         ReceiptHandle="receipt-1",
         VisibilityTimeout=60,
     )
+
+
+def test_terminal_job_command_is_removed_without_reprocessing(monkeypatch) -> None:
+    monkeypatch.setattr(run_ingestion_worker.settings, "KNOWLEDGE_UPLOAD_BUCKET", "bucket")
+    monkeypatch.setattr(
+        run_ingestion_worker.settings,
+        "ADMIN_INGESTION_QUARANTINE_PREFIX",
+        "quarantine",
+    )
+    monkeypatch.setattr(
+        run_ingestion_worker,
+        "claim_ingestion_job",
+        lambda *_args, **_kwargs: "terminal",
+    )
+    monkeypatch.setattr(
+        run_ingestion_worker,
+        "get_aws_clients",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("terminal jobs must not access document storage")
+        ),
+    )
+    body = (
+        '{"schemaVersion":1,"jobId":"j1",'
+        '"uploadUri":"s3://bucket/quarantine/j1/policy.pdf",'
+        '"filename":"policy.pdf","country":"CA","language":"en",'
+        '"documentType":"policy","accessScope":"country","contentHash":"'
+        + ("a" * 64)
+        + '"}'
+    )
+
+    assert process_message({"Body": body}) is True

@@ -26,6 +26,9 @@ then enable each capability separately after its checks pass.
 | --- | --- | --- |
 | `ADMIN_INGESTION_QUEUE_ENABLED` | `false` | Stores accepted uploads in private S3 and sends a compact SQS command. |
 | `ADMIN_INGESTION_STAGED_PUBLISH_ENABLED` | `false` | Verifies a complete OpenSearch generation before activation. |
+| `ADMIN_INGESTION_GENERATION_POINTER_ENABLED` | `false` | Makes retrieval use only the active generation selected in RDS. |
+| `ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED` | `false` | Requires a stable document ID, owner, approval reference, and effective date. |
+| `ADMIN_INGESTION_MALWARE_SCAN_REQUIRED` | `false` | Prevents workers from opening an upload until its malware-scan tag is clean. |
 | `ADMIN_TEXTRACT_OCR_ENABLED` | `false` | Uses Textract for scanned PDFs that fail text preflight. |
 | `SECURITY_PROFILE` | `standard` | `hardened` makes required security controls fail closed at startup. |
 | `EnableWebAcl` | `false` | Attaches AWS managed WAF protections to the operations portal. |
@@ -41,12 +44,12 @@ continue to use the current in-process background task.
 Rollback: deploy the previous Git revision. No infrastructure or data path has
 changed yet.
 
-### 2. Apply Database Columns
+### 2. Apply Database Migrations
 
-Allow application startup to add `upload_uri`, `content_hash`, `accepted_by`,
-and `attempt_count` to `ingestion_jobs`, plus `accepted_by` to
-`knowledge_documents`. Verify that existing jobs are unchanged and new columns
-contain their safe defaults.
+Dry-run and apply the ordered migrations. They add ingestion ownership,
+approval, effective-date, retry-state, active-generation, and generation-history
+records without replacing existing tables. Verify existing jobs and documents
+remain unchanged.
 
 Rollback: leave the additive columns in place. They are ignored while queueing
 is disabled.
@@ -57,7 +60,8 @@ Deploy `deployment/ingestion-queue.yaml` as a CloudFormation change set. Review
 the encrypted main queue, retained dead-letter queue, message-age alarm, and
 dead-letter alarm before execution.
 
-Set `ADMIN_INGESTION_QUEUE_URL` to the stack output, but keep
+Set `ADMIN_INGESTION_QUEUE_URL` and `ADMIN_INGESTION_DLQ_URL` to the stack
+outputs, but keep
 `ADMIN_INGESTION_QUEUE_ENABLED=false`.
 
 Rollback: do not delete retained queues until operators confirm they are empty.
@@ -101,19 +105,31 @@ the worker. Upload one non-production test document and verify:
 5. A failure is retried and eventually reaches the dead-letter queue.
 6. A long-running test receives visibility extensions and is not processed by
    two workers.
+7. `scripts/reconcile_ingestion_dlq.py --load-ssm` lists the dead-lettered job
+   without changing it; apply reconciliation only after review.
 
 Rollback: set the flag to `false` and restart the API. Existing queued messages
 remain available for controlled processing.
 
 ### 7. Enable Staged Publication
 
-Set `ADMIN_INGESTION_STAGED_PUBLISH_ENABLED=true`. Upload a test replacement and
-confirm that the expected staging count is complete before the new generation
-becomes active. Run country/language isolation tests and the retrieval
-regression suite.
+Set `ADMIN_INGESTION_STAGED_PUBLISH_ENABLED=true` while leaving generation
+filtering off. Before enabling generation filtering, run
+`scripts/backfill_active_generation_pointers.py --load-ssm` in dry-run mode,
+review every source identity, and resolve any source with multiple active
+ingestion IDs. Apply the backfill, then require
+`scripts/validate_ingestion_rollout.py --load-ssm` to pass. This proves every
+currently active OpenSearch generation has exactly one matching RDS pointer;
+otherwise enabling the filter could hide untouched documents.
 
-Rollback: set the flag to `false`. Restore the prior approved source and cache
-namespace if a published document itself was incorrect.
+Upload a test replacement and confirm the expected staging count is complete.
+Then enable `ADMIN_INGESTION_GENERATION_POINTER_ENABLED` and verify each RDS
+pointer exposes one complete generation. Run country/language isolation tests
+and the retrieval regression suite.
+
+Rollback: restore the prior RDS generation pointer, clear the pointer cache, and
+then disable the flag if needed. Retired generations remain indexed during the
+rollback window.
 
 ### 8. Enable OCR
 
@@ -131,9 +147,11 @@ Review legal and operational retention periods, install
 once manually and inspect deletion counts. The timer runs daily with a
 randomized delay.
 
-Create an S3 lifecycle rule that expires quarantine objects after the approved
-period, recommended initially as 30 days. Keep approved source documents under
-their separate document-retention policy.
+Review `deployment/knowledge-ingestion-lifecycle.json`, then create an S3
+lifecycle rule that expires quarantine objects after the approved period.
+`scripts/cleanup_knowledge_artifacts.py --load-ssm` is dry-run-only unless
+`--apply` is supplied. Keep approved source documents under their separate
+document-retention policy.
 
 Rollback: disable the timer. Database deletions cannot be undone without a
 backup, so confirm backups and retention approvals before the first run.
