@@ -117,6 +117,8 @@ def legacy_metadata_repairs(
         )
 
         for document_id, source in source_records:
+            if source.get("access_scope") and source.get("ingestion_id"):
+                continue
             current_logical_id = str(source.get("logical_document_id") or "")
             if current_logical_id and current_logical_id != logical_document_id:
                 raise ValueError(

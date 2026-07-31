@@ -59,6 +59,20 @@ def test_repairs_reuse_single_existing_generation_without_overwriting_it() -> No
     assert all("ingestion_id" not in repair.update for repair in repairs)
 
 
+def test_complete_records_are_not_modified_only_to_add_logical_id() -> None:
+    repairs = backfill.legacy_metadata_repairs(
+        [
+            _record(
+                "one",
+                access_scope="country",
+                ingestion_id="existing-run",
+            )
+        ]
+    )
+
+    assert repairs == []
+
+
 def test_repairs_infer_global_scope_from_global_country() -> None:
     repairs = backfill.legacy_metadata_repairs(
         [_record("one", country="GLOBAL", language="en")]
