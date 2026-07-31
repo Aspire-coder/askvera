@@ -7,6 +7,8 @@ SERVICE_NAME="${SERVICE_NAME:-askvera}"
 HEALTH_BASE_URL="${HEALTH_BASE_URL:-https://api.vera-api.xyz}"
 RUN_TESTS="${RUN_TESTS:-true}"
 BRANCH="${BRANCH:-main}"
+STARTUP_HEALTH_ATTEMPTS="${STARTUP_HEALTH_ATTEMPTS:-15}"
+STARTUP_HEALTH_INTERVAL_SECONDS="${STARTUP_HEALTH_INTERVAL_SECONDS:-2}"
 
 usage() {
   cat <<USAGE
@@ -18,6 +20,8 @@ Environment overrides:
   SERVICE_NAME=askvera
   HEALTH_BASE_URL=https://api.vera-api.xyz
   BRANCH=main
+  STARTUP_HEALTH_ATTEMPTS=15
+  STARTUP_HEALTH_INTERVAL_SECONDS=2
 USAGE
 }
 
@@ -43,14 +47,34 @@ log() {
   echo "[deploy] $*"
 }
 
+wait_for_local_health() {
+  local attempt
+  local local_health_url="http://127.0.0.1:8000/health"
+
+  for ((attempt = 1; attempt <= STARTUP_HEALTH_ATTEMPTS; attempt++)); do
+    if curl --silent --show-error --fail --max-time 5 "${local_health_url}" >/dev/null; then
+      log "Service became ready on attempt ${attempt}."
+      return 0
+    fi
+
+    if ((attempt < STARTUP_HEALTH_ATTEMPTS)); then
+      sleep "${STARTUP_HEALTH_INTERVAL_SECONDS}"
+    fi
+  done
+
+  echo "Service did not become ready after ${STARTUP_HEALTH_ATTEMPTS} attempts." >&2
+  return 1
+}
+
 rollback() {
   local previous_rev="$1"
   if [[ -n "${previous_rev}" ]]; then
     echo "Rolling back to ${previous_rev}" >&2
     sudo -u "${APP_USER}" git -C "${APP_DIR}" checkout "${previous_rev}"
     systemctl restart "${SERVICE_NAME}"
-    sleep 3
-    PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh" || true
+    if wait_for_local_health; then
+      PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh" || true
+    fi
   fi
 }
 
@@ -98,10 +122,10 @@ fi
 
 log "Restarting ${SERVICE_NAME}."
 systemctl restart "${SERVICE_NAME}"
-sleep 3
 
 log "Running health checks."
-if ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh"; then
+if ! wait_for_local_health ||
+  ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh"; then
   echo "Health check failed after deploy." >&2
   rollback "${PREVIOUS_REV}"
   exit 1
