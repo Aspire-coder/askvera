@@ -59,3 +59,44 @@ def test_pointer_coverage_reports_missing_mismatch_and_orphan() -> None:
 
     assert any(item.startswith("pointer mismatch:") for item in failures)
     assert any(item.startswith("orphaned pointer:") for item in failures)
+
+
+class _SearchClient:
+    def __init__(self, pages):
+        self.pages = iter(pages)
+        self.calls = []
+
+    def search(self, *, index, body):
+        self.calls.append((index, body))
+        return next(self.pages)
+
+
+def test_load_active_records_uses_search_after_without_scroll(monkeypatch) -> None:
+    monkeypatch.setattr(backfill.settings, "OPENSEARCH_INDEX", "sections")
+    first = [_record(), _record()]
+    first[0]["sort"] = ["doc-1"]
+    first[1]["sort"] = ["doc-2"]
+    second = [_record()]
+    second[0]["sort"] = ["doc-3"]
+    client = _SearchClient(
+        [
+            {"hits": {"hits": first}},
+            {"hits": {"hits": second}},
+        ]
+    )
+
+    records = list(backfill.load_active_records(client=client, page_size=2))
+
+    assert records == [*first, *second]
+    assert "scroll" not in client.calls[0][1]
+    assert client.calls[0][1]["sort"] == [{"_id": "asc"}]
+    assert "search_after" not in client.calls[0][1]
+    assert client.calls[1][1]["search_after"] == ["doc-2"]
+
+
+def test_load_active_records_rejects_missing_search_after_token(monkeypatch) -> None:
+    monkeypatch.setattr(backfill.settings, "OPENSEARCH_INDEX", "sections")
+    client = _SearchClient([{"hits": {"hits": [_record(), _record()]}}])
+
+    with pytest.raises(RuntimeError, match="search_after token"):
+        list(backfill.load_active_records(client=client, page_size=2))

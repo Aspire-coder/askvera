@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from opensearchpy import helpers
 from opensearchpy.exceptions import OpenSearchException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -102,12 +101,19 @@ def generation_candidates(
     return candidates
 
 
-def load_active_records() -> Iterable[dict[str, Any]]:
-    """Stream the metadata needed to identify every currently live generation."""
-    return helpers.scan(
-        _client(),
-        index=settings.OPENSEARCH_INDEX,
-        query={
+def load_active_records(
+    *,
+    client: Any | None = None,
+    page_size: int = 1000,
+) -> Iterable[dict[str, Any]]:
+    """Page through live generation metadata without the unsupported scroll API."""
+    search_client = client or _client()
+    search_after: list[Any] | None = None
+
+    while True:
+        body: dict[str, Any] = {
+            "size": page_size,
+            "track_total_hits": False,
             "_source": [
                 "country",
                 "language",
@@ -116,9 +122,32 @@ def load_active_records() -> Iterable[dict[str, Any]]:
                 "access_scope",
                 "ingestion_id",
             ],
+            "sort": [{"_id": "asc"}],
             "query": {"term": {"status": "active"}},
-        },
-    )
+        }
+        if search_after is not None:
+            body["search_after"] = search_after
+
+        response = search_client.search(
+            index=settings.OPENSEARCH_INDEX,
+            body=body,
+        )
+        hits = response.get("hits", {}).get("hits", [])
+        if not hits:
+            return
+
+        yield from hits
+        if len(hits) < page_size:
+            return
+
+        next_search_after = hits[-1].get("sort")
+        if not isinstance(next_search_after, list) or not next_search_after:
+            raise RuntimeError(
+                "OpenSearch did not return a search_after token for a full page."
+            )
+        if next_search_after == search_after:
+            raise RuntimeError("OpenSearch pagination token did not advance.")
+        search_after = next_search_after
 
 
 def existing_pointers() -> dict[str, str]:
