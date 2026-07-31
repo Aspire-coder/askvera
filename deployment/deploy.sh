@@ -87,7 +87,7 @@ log "Compiling Python source."
 sudo -u "${APP_USER}" .venv/bin/python -m compileall app api config services utils scripts tests >/dev/null
 
 log "Validating configuration."
-sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py
+sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm
 
 if [[ "${RUN_TESTS}" == "true" ]]; then
   log "Running tests."
