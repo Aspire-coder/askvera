@@ -64,13 +64,19 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: DenyInsecureTransport
+          - Sid: DenyInsecureTransportToIngestionQueue
             Effect: Deny
             Principal: "*"
             Action: sqs:*
-            Resource:
-              - !GetAtt IngestionQueue.Arn
-              - !GetAtt IngestionDeadLetterQueue.Arn
+            Resource: !GetAtt IngestionQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: DenyInsecureTransportToDeadLetterQueue
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource: !GetAtt IngestionDeadLetterQueue.Arn
             Condition:
               Bool:
                 aws:SecureTransport: "false"
