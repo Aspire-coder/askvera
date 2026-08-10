@@ -10,6 +10,7 @@ from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
     _expanded_retrieval_query,
+    _tokens,
     _planned_retrieval_plan,
     _planned_retrieval_queries,
     _parse_planned_query_plan,
@@ -445,6 +446,25 @@ def test_retrieval_query_expands_bonus_terms() -> None:
 
     assert "personal retail bonus" in query
     assert "personal retail bonus" in queries
+
+
+def test_local_retrieval_tokens_preserve_multilingual_words_and_accents() -> None:
+    """Local query heuristics must not drop non-English policy terminology."""
+    tokens = _tokens("Quelles sont les conditions d'inactivité du FBO? Где офис?")
+
+    assert "conditions" in tokens
+    assert "inactivite" in tokens
+    assert "fbo" in tokens
+    assert "где" in tokens
+    assert "офис" in tokens
+
+
+def test_multilingual_policy_query_keeps_terms_for_local_expansion() -> None:
+    """Accented policy questions should produce focused, non-empty expansions."""
+    queries = _retrieval_queries("Quelles sont les conditions d'inactivité du Manager?")
+
+    assert queries[0] == "Quelles sont les conditions d'inactivité du Manager?"
+    assert any("manager" in query for query in queries)
 
 
 def test_multilingual_query_planner_uses_runtime_question_without_country_aliases(monkeypatch) -> None:

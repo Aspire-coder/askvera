@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -144,11 +145,22 @@ def _reference_score(ref: dict[str, Any]) -> float | None:
     return None
 
 
+def _fold_search_text(text: str) -> str:
+    """Normalize Unicode text for language-neutral local query expansion.
+
+    Search backends still receive the original user text. This folded form is
+    used only for local token and phrase heuristics so accents, composed
+    characters, and non-Latin scripts are not discarded before retrieval.
+    """
+    decomposed = unicodedata.normalize("NFKD", text or "").casefold()
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
 def _tokens(text: str) -> set[str]:
-    """Return meaningful lowercase tokens for lightweight local reranking."""
+    """Return meaningful Unicode-aware tokens for lightweight local reranking."""
     return {
         token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
+        for token in re.findall(r"[^\W_]+", _fold_search_text(text), flags=re.UNICODE)
         if len(token) > 2 and token not in TOKEN_STOPWORDS
     }
 
@@ -175,10 +187,10 @@ def _capitalized_phrases(text: str) -> list[str]:
 
 
 def _ordered_tokens(text: str) -> list[str]:
-    """Return meaningful lowercase tokens in source order."""
+    """Return meaningful Unicode-aware tokens in source order."""
     return [
         token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
+        for token in re.findall(r"[^\W_]+", _fold_search_text(text), flags=re.UNICODE)
         if len(token) > 2 and token not in TOKEN_STOPWORDS
     ]
 
