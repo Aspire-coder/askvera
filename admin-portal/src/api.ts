@@ -50,14 +50,35 @@ export class AdminApi {
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
   interactions(filters: URLSearchParams) { return this.request<Interaction[]>(`/api/admin/analytics/interactions?${filters}`); }
+  async exportInteractions(filters: URLSearchParams): Promise<Blob> {
+    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.csv?${filters}`, {
+      headers: {
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+      }
+    });
+    if (!response.ok) throw new Error(`Export failed (${response.status})`);
+    return response.blob();
+  }
+  async exportInteractionsXlsx(filters: URLSearchParams): Promise<Blob> {
+    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.xlsx?${filters}`, {
+      headers: {
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+      }
+    });
+    if (!response.ok) throw new Error(`Excel export failed (${response.status})`);
+    return response.blob();
+  }
   retrievalShadow(filters: URLSearchParams) {
     return this.request<ShadowReport>(`/api/admin/analytics/retrieval-shadow?${filters}`);
   }
   ingestions() { return this.request<IngestionJob[]>("/api/admin/ingestions?limit=50"); }
-  upload(formData: FormData) {
+  upload(formData: FormData, signal?: AbortSignal) {
     return this.request<{ jobId: string; filename: string; status: string; message: string }>("/api/admin/documents", {
       method: "POST",
-      body: formData
+      body: formData,
+      signal
     });
   }
   users() { return this.request<AdminUser[]>("/api/admin/users"); }

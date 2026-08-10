@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import html
+import io
 import json
 import re
 import time
@@ -31,7 +32,7 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
     _older_source_actions,
 )
 from services.aws_clients import get_aws_clients
-from services.document_preflight import analyze_pdf, extract_pdf_page_text, is_table_like_layout
+from services.document_preflight import analyze_pdf_with_timeout, extract_pdf_page_text, is_table_like_layout
 from services.db import get_engine
 from services.knowledge_generations import (
     build_logical_document_id,
@@ -82,6 +83,30 @@ def validate_upload(filename: str, size: int) -> None:
         raise ValueError("The uploaded file is empty.")
     if size > settings.ADMIN_UPLOAD_MAX_BYTES:
         raise ValueError(f"File exceeds the {settings.ADMIN_UPLOAD_MAX_BYTES // (1024 * 1024)} MB limit.")
+
+
+def detect_upload_format(filename: str, content: bytes) -> dict[str, str]:
+    """Detect the accepted document family and reject extension/content mismatches."""
+    extension = Path(filename).suffix.lower()
+    header = content[:8192]
+    if header.startswith(b"%PDF-"):
+        detected = "pdf"
+        mime_type = "application/pdf"
+    elif extension == ".docx" and zipfile.is_zipfile(io.BytesIO(content)):
+        detected = "docx"
+        mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif b"\x00" not in header:
+        detected = "text"
+        mime_type = "text/plain"
+    else:
+        raise ValueError("The uploaded file type could not be verified safely.")
+    if extension == ".docx" and detected != "docx":
+        raise ValueError("The file content does not match the DOCX extension.")
+    if extension == ".pdf" and detected != "pdf":
+        raise ValueError("The file content does not match the PDF extension.")
+    if extension not in {".pdf", ".docx"} and detected != "text":
+        raise ValueError("The file content could not be verified as readable text.")
+    return {"extension": extension, "detectedType": detected, "mimeType": mime_type}
 
 
 def validate_document_content(path: Path) -> None:
@@ -308,6 +333,17 @@ def stage_ingestion_upload(job_id: str, filename: str, content: bytes) -> str:
     return upload_uri
 
 
+def cleanup_staged_ingestion_upload(upload_uri: str) -> None:
+    """Remove quarantine content when queue publication fails before processing."""
+    parsed = urlparse(upload_uri)
+    if parsed.scheme != "s3" or not parsed.netloc or not parsed.path:
+        return
+    try:
+        get_aws_clients().s3.delete_object(Bucket=parsed.netloc, Key=parsed.path.lstrip("/"))
+    except Exception:
+        LOGGER.exception("staged_upload_cleanup_failed", upload_uri=upload_uri)
+
+
 def enqueue_ingestion_job(
     *,
     job_id: str,
@@ -393,7 +429,12 @@ def process_ingestion_job(
         chunk_profile = settings.ADMIN_INGESTION_CHUNK_PROFILE
         use_policy_extractor = document_type == "policy" and path.suffix.lower() == ".pdf"
         if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
-            preflight = analyze_pdf(path)
+            preflight = analyze_pdf_with_timeout(
+                path,
+                timeout_seconds=settings.ADMIN_INGESTION_PARSER_TIMEOUT_SECONDS,
+                max_pages=settings.ADMIN_INGESTION_MAX_PDF_PAGES,
+                max_extracted_characters=settings.ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS,
+            )
             if preflight.requires_ocr:
                 if not settings.ADMIN_TEXTRACT_OCR_ENABLED or not upload_uri:
                     raise ValueError(

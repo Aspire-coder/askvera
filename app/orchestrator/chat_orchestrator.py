@@ -25,7 +25,13 @@ from app.validation.validators.numeric_grounding_validator import remove_unsuppo
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
-from services.cache import build_cache_key, get_cache_value, set_cache_value
+from services.cache import (
+    build_cache_key,
+    get_cache_value,
+    get_semantic_cache_value,
+    set_cache_value,
+    set_semantic_cache_value,
+)
 from services.consent_service import has_valid_consent
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
@@ -113,6 +119,11 @@ class AIOrchestrator:
         cached_response = self._cached_response(cache_key, body, correlation_id)
         if cached_response:
             return cached_response
+        semantic_cached = get_semantic_cache_value(
+            retrieval_query, body.country, body.language, body.role, correlation_id
+        )
+        if semantic_cached:
+            return self._cached_response_value(semantic_cached, body, correlation_id, cache_type="semantic")
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
@@ -222,6 +233,14 @@ class AIOrchestrator:
         )
         if self._should_cache_response(chat_response):
             set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
+            set_semantic_cache_value(
+                retrieval_query,
+                body.country,
+                body.language,
+                body.role,
+                chat_response.to_cache_value(),
+                correlation_id,
+            )
         else:
             LOGGER.info(
                 "cache_write_skipped",
@@ -321,24 +340,34 @@ class AIOrchestrator:
                 "outputTokensSaved": saved_output_tokens,
             },
         )
-        if cached:
-            chat_response = self._validate_response(
-                self.response_builder.from_cached(cached, correlation_id),
-                body,
-                correlation_id,
+        return self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+
+    def _cached_response_value(
+        self,
+        cached: dict | None,
+        body: ChatRequest,
+        correlation_id: str,
+        *,
+        cache_type: str,
+    ) -> ChatResponse | None:
+        if not cached:
+            return None
+        chat_response = self._validate_response(
+            self.response_builder.from_cached(cached, correlation_id), body, correlation_id
+        )
+        chat_response = self._replace_answer(chat_response, chat_response.answer, {"cache": cache_type})
+        governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
+        if not governance_decision.allowed:
+            LOGGER.warning(
+                "cached_response_governance_blocked",
+                correlation_id=correlation_id,
+                country=body.country,
+                language=body.language,
+                role=body.role,
+                cache_type=cache_type,
             )
-            governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
-            if not governance_decision.allowed:
-                LOGGER.warning(
-                    "cached_response_governance_blocked",
-                    correlation_id=correlation_id,
-                    country=body.country,
-                    language=body.language,
-                    role=body.role,
-                )
-                return self._governance_fallback(governance_decision, correlation_id, body.language)
-            return chat_response
-        return None
+            return self._governance_fallback(governance_decision, correlation_id, body.language)
+        return chat_response
 
     def _apply_evidence_contract(
         self,

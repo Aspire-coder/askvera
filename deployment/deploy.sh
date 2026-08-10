@@ -110,8 +110,8 @@ sudo -u "${APP_USER}" .venv/bin/python -m pip install -r requirements.txt
 log "Compiling Python source."
 sudo -u "${APP_USER}" .venv/bin/python -m compileall app api config services utils scripts tests >/dev/null
 
-log "Validating configuration."
-sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm
+log "Validating production configuration before restart."
+sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm --require-production
 
 if [[ "${RUN_TESTS}" == "true" ]]; then
   log "Running tests."

@@ -56,6 +56,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [trafficSource, setTrafficSource] = useState("");
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId
     ? interactions.find((item) => item.correlation_id === selectedId) || null
@@ -141,6 +142,29 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       return matchesFeedback && matchesQuery;
     });
   }, [feedback, interactions, query]);
+
+  const exportInteractions = async () => {
+    setExporting(true);
+    try {
+      const filters = new URLSearchParams({ days, feedback, limit: "5000" });
+      if (startAt) filters.set("start", new Date(startAt).toISOString());
+      if (endAt) filters.set("end", new Date(endAt).toISOString());
+      if (country) filters.set("country", country);
+      if (language) filters.set("language", language);
+      if (trafficSource) filters.set("traffic_source", trafficSource);
+      const blob = await new AdminApi(credentials).exportInteractionsXlsx(filters);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `askvera-feedback-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setQuery(error instanceof Error ? error.message : "Export failed.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const feedbackTotal = overview.totals.helpful + overview.totals.notHelpful;
   const unansweredRate = overview.totals.questions ? overview.totals.unanswered / overview.totals.questions : 0;
@@ -281,7 +305,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       </div>
 
       <div className="review-section">
-        <div className="section-heading"><div><h2>Answer review</h2><p>Open low-rated answers to see where retrieval or content can improve.</p></div><div className="review-controls"><label className="search-field"><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions" /></label><select value={feedback} onChange={(event) => setFeedback(event.target.value)}><option value="not_helpful">Not helpful</option><option value="helpful">Helpful</option><option value="all">All answers</option></select></div></div>
+        <div className="section-heading"><div><h2>Answer review</h2><p>Open low-rated answers to see where retrieval or content can improve.</p></div><div className="review-controls"><label className="search-field"><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions" /></label><select value={feedback} onChange={(event) => setFeedback(event.target.value)}><option value="not_helpful">Not helpful</option><option value="helpful">Helpful</option><option value="all">All answers</option></select><button className="button secondary" disabled={exporting} onClick={() => void exportInteractions()}>{exporting ? "Preparing..." : "Export Excel"}</button></div></div>
         <div className="review-list surface">
           {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelectedId(item.correlation_id)}>
             <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>

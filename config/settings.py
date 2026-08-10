@@ -334,6 +334,23 @@ EMBEDDING_SHARED_CACHE_ENABLED = _env_bool("EMBEDDING_SHARED_CACHE_ENABLED", Fal
 EMBEDDING_SHARED_CACHE_PREFIX = _env_str("EMBEDDING_SHARED_CACHE_PREFIX", "ask-vera:embedding")
 EMBEDDING_SHARED_CACHE_TTL_SECONDS = _env_int("EMBEDDING_SHARED_CACHE_TTL_SECONDS", 604800)
 ADMIN_DOCUMENT_PREFLIGHT_ENABLED = _env_bool("ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
+ADMIN_ANALYTICS_REDACTED_BY_DEFAULT = _env_bool(
+    "ADMIN_ANALYTICS_REDACTED_BY_DEFAULT",
+    False,
+)
+ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED = _env_bool(
+    "ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED",
+    False,
+)
+ADMIN_INGESTION_MAX_PDF_PAGES = _env_int("ADMIN_INGESTION_MAX_PDF_PAGES", 500)
+ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS = _env_int(
+    "ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS",
+    5_000_000,
+)
+ADMIN_INGESTION_PARSER_TIMEOUT_SECONDS = _env_int(
+    "ADMIN_INGESTION_PARSER_TIMEOUT_SECONDS",
+    90,
+)
 ADMIN_INGESTION_CHUNK_PROFILE = _env_str("ADMIN_INGESTION_CHUNK_PROFILE", "current").lower()
 CONVERSATION_ROUTES_PATH = _env_str("CONVERSATION_ROUTES_PATH", str(Path(__file__).with_name("conversation_routes.json")))
 # Optional staged rollout: require the model to declare the retrieved section IDs
@@ -380,6 +397,13 @@ ELASTICACHE_REDIS_PORT = REDIS_PORT
 # Redis TTL for answer cache in seconds. Found in architecture plan for cache layer.
 CACHE_TTL_SECONDS = 7200
 CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "4")
+# Semantic caching is deliberately opt-in. Exact, versioned caching remains
+# the default UAT and production behavior until similarity quality is evaluated.
+SEMANTIC_CACHE_ENABLED = _env_bool("SEMANTIC_CACHE_ENABLED", False)
+SEMANTIC_CACHE_THRESHOLD = _env_float("SEMANTIC_CACHE_THRESHOLD", 0.92)
+SEMANTIC_CACHE_MAX_CANDIDATES = _env_int("SEMANTIC_CACHE_MAX_CANDIDATES", 32)
+SEMANTIC_CACHE_TTL_SECONDS = _env_int("SEMANTIC_CACHE_TTL_SECONDS", CACHE_TTL_SECONDS)
+SEMANTIC_CACHE_MAX_VECTOR_DIMENSIONS = _env_int("SEMANTIC_CACHE_MAX_VECTOR_DIMENSIONS", 1536)
 # Audit Firehose sink configuration. Defaults are overridden by production.env, then by SSM.
 AUDIT_FIREHOSE_ENABLED = _env_bool("AUDIT_FIREHOSE_ENABLED", False)
 AUDIT_FIREHOSE_STREAM = _env_str("AUDIT_FIREHOSE_STREAM", "askvera-audit")
@@ -438,6 +462,11 @@ SUPPORT_EMAIL_SUBJECT_PREFIX = _env_str("SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera
 SUPPORT_RECOMMEND_AFTER_FAILURES = _env_int("SUPPORT_RECOMMEND_AFTER_FAILURES", 2)
 SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
 SUPPORT_DEFAULT_ROUTE_JSON: dict[str, str] = json.loads(_env_str("SUPPORT_DEFAULT_ROUTE_JSON", "{}"))
+# WhatsApp is a disabled integration boundary until Meta credentials,
+# verification, and outbound delivery have been provisioned and tested.
+WHATSAPP_ENABLED = _env_bool("WHATSAPP_ENABLED", False)
+WHATSAPP_VERIFY_TOKEN = _env_str("WHATSAPP_VERIFY_TOKEN", "")
+WHATSAPP_APP_SECRET = _env_str("WHATSAPP_APP_SECRET", "")
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.

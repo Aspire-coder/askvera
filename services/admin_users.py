@@ -117,6 +117,29 @@ def _write_audit(connection: Any, actor_sub: str, action: str, target_id: str) -
     )
 
 
+def record_admin_audit_event(actor_sub: str, action: str, target_id: str) -> None:
+    """Record a non-content admin access event for sensitive operational actions."""
+    try:
+        with get_engine().begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO admin_audit_log (
+                        event_id, actor_sub, action, target_type, target_id, metadata, created_at
+                    ) VALUES (:event_id, :actor_sub, :action, 'operations', :target_id, '{}'::jsonb, now())
+                    """
+                ),
+                {
+                    "event_id": str(uuid4()),
+                    "actor_sub": actor_sub,
+                    "action": action,
+                    "target_id": target_id,
+                },
+            )
+    except SQLAlchemyError:
+        LOGGER.exception("admin_audit_event_write_failed", actor_sub=actor_sub, action=action)
+
+
 def _lock_admin_lifecycle(connection: Any) -> None:
     connection.execute(text("SELECT pg_advisory_xact_lock(hashtext('askvera_admin_lifecycle'))"))
 

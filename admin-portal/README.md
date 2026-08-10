@@ -33,17 +33,36 @@ The CloudFormation template at `deployment/admin-portal.yaml` creates a private 
 ```powershell
 cd admin-portal
 .\scripts\deploy-portal.ps1 `
-  -CognitoDomainPrefix "askvera-operations-ACCOUNT"
+  -CognitoDomainPrefix "askvera-operations-ACCOUNT" `
+  -CertificateArn "arn:aws:acm:us-east-1:ACCOUNT:certificate/CERTIFICATE_ID"
 ```
 
-Without `-CertificateArn`, the first release uses the generated CloudFront HTTPS address. Pass an issued `us-east-1` certificate ARN to attach `operations.vera-api.xyz`.
+Always pass an issued ACM certificate in `us-east-1` when using the custom domain `operations.vera-api.xyz` (or a matching wildcard certificate). Without `-CertificateArn`, CloudFront uses its default `*.cloudfront.net` certificate. If DNS points the custom hostname at that distribution, browsers show `NET::ERR_CERT_COMMON_NAME_INVALID`.
+
+Verify the certificate before deploying and use only a certificate with status `ISSUED`:
+
+```powershell
+aws acm list-certificates `
+  --region us-east-1 `
+  --profile askvera-deploy `
+  --query "CertificateSummaryList[?contains(DomainName, 'vera-api.xyz')].[CertificateArn,DomainName,Status]" `
+  --output table
+```
+
+Set the AWS profile before running the script because the deployment script calls the AWS CLI internally:
+
+```powershell
+$env:AWS_PROFILE = "askvera-deploy"
+```
 
 After deployment:
 
 1. Add the CloudFront output as the DNS CNAME for `operations.vera-api.xyz`.
-2. Create Cognito users and add approved users to `AskVeraAdmins`.
-3. Store the user-pool and client outputs in API SSM configuration.
-4. Add `https://operations.vera-api.xyz` to the API's exact CORS origins.
+2. Wait for the CloudFront distribution and invalidation to complete.
+3. Open `https://operations.vera-api.xyz` and confirm the certificate is valid before sharing the URL.
+4. Create Cognito users and add approved users to `AskVeraAdmins`.
+5. Store the user-pool and client outputs in API SSM configuration.
+6. Add `https://operations.vera-api.xyz` to the API's exact CORS origins.
 
 ## Supported knowledge documents
 

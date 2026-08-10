@@ -54,6 +54,26 @@
         "controversy claim dispute arbitration",
         "court class action waiver"
       ]
+    },
+    {
+      "id": "preferred-customer-pc",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": [
+        "pc",
+        "p.c.",
+        "preferred customer",
+        "preferred customers",
+        "preferred-customer",
+        "cliente preferido",
+        "client privilégié",
+        "klant"
+      ],
+      "queries": [
+        "Preferred Customer definition",
+        "Preferred Customer qualification",
+        "Preferred Customer discount and status"
+      ]
     }
   ]
 }

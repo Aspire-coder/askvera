@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 from typing import Any
 
 import boto3
@@ -158,3 +159,68 @@ def set_cache_value(key: str, value: dict[str, Any], correlation_id: str) -> Non
     except redis.RedisError as exc:
         LOGGER.exception("cache_write_failed", correlation_id=correlation_id)
         raise CacheConnectionError("Redis cache write failed.") from exc
+
+
+def _semantic_namespace(country: str, language: str, role: str) -> str:
+    versions = "|".join(
+        [settings.CACHE_SCHEMA_VERSION, settings.KB_VERSION, settings.RETRIEVAL_PIPELINE_VERSION,
+         settings.RESPONSE_PIPELINE_VERSION, settings.PROMPT_VERSION]
+    )
+    digest = hashlib.sha256(versions.encode("utf-8")).hexdigest()[:16]
+    return f"ask-vera:semantic:{country}:{language}:{role}:{digest}"
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or len(left) != len(right):
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(value * value for value in left))
+    right_norm = math.sqrt(sum(value * value for value in right))
+    return dot / (left_norm * right_norm) if left_norm and right_norm else 0.0
+
+
+def _semantic_embedding(message: str) -> list[float]:
+    # Local import avoids a cache/embedding module cycle.
+    from services.embeddings import embed_text
+
+    vector = embed_text(message)
+    return [float(value) for value in vector[: settings.SEMANTIC_CACHE_MAX_VECTOR_DIMENSIONS]]
+
+
+def get_semantic_cache_value(
+    message: str, country: str, language: str, role: str, correlation_id: str
+) -> dict[str, Any] | None:
+    """Return a revalidated candidate only when semantic caching is explicitly enabled."""
+    if not settings.SEMANTIC_CACHE_ENABLED or _redis_client is None:
+        return None
+    try:
+        query_vector = _semantic_embedding(message)
+        raw_items = _redis_client.lrange(_semantic_namespace(country, language, role), 0, settings.SEMANTIC_CACHE_MAX_CANDIDATES - 1)
+        best: tuple[float, dict[str, Any] | None] = (0.0, None)
+        for raw in raw_items:
+            item = json.loads(raw)
+            score = _cosine_similarity(query_vector, item.get("embedding") or [])
+            if score > best[0]:
+                best = (score, item)
+        LOGGER.info("semantic_cache_read", correlation_id=correlation_id, score=round(best[0], 4), hit=best[0] >= settings.SEMANTIC_CACHE_THRESHOLD)
+        if best[0] >= settings.SEMANTIC_CACHE_THRESHOLD and best[1]:
+            return best[1].get("response")
+    except Exception as exc:
+        LOGGER.warning("semantic_cache_read_failed", correlation_id=correlation_id, error=str(exc))
+    return None
+
+
+def set_semantic_cache_value(
+    message: str, country: str, language: str, role: str, response: dict[str, Any], correlation_id: str
+) -> None:
+    """Store a bounded semantic candidate without changing exact-cache behavior."""
+    if not settings.SEMANTIC_CACHE_ENABLED or _redis_client is None:
+        return
+    try:
+        item = json.dumps({"embedding": _semantic_embedding(message), "response": response})
+        key = _semantic_namespace(country, language, role)
+        _redis_client.lpush(key, item)
+        _redis_client.ltrim(key, 0, settings.SEMANTIC_CACHE_MAX_CANDIDATES - 1)
+        _redis_client.expire(key, settings.SEMANTIC_CACHE_TTL_SECONDS)
+    except Exception as exc:
+        LOGGER.warning("semantic_cache_write_failed", correlation_id=correlation_id, error=str(exc))

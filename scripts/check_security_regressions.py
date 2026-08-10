@@ -21,6 +21,10 @@ SECRET_PATTERNS = {
     "AWS account-bearing ARN": re.compile(r"arn:aws(?:-[a-z]+)?:[^:\s]+:[^:\s]*:\d{12}:"),
     "SQS URL with account ID": re.compile(r"https://sqs\.[^\s/]+\.amazonaws\.com/\d{12}/"),
     "presigned AWS credential": re.compile(r"X-Amz-(?:Credential|Signature|Security-Token)=", re.I),
+    "configured AWS account ID": re.compile(
+        r"\b(?:aws[_-]?account(?:[_-]?id)?|account[_-]?id)\b\s*[:=]\s*['\"]?\d{12}\b",
+        re.I,
+    ),
 }
 
 

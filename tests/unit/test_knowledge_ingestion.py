@@ -15,6 +15,7 @@ from services.knowledge_ingestion import (
     _activate_staged_sections,
     _extract_pages_with_textract,
     build_sections,
+    detect_upload_format,
     enqueue_ingestion_job,
     extract_pages,
     process_ingestion_job,
@@ -34,6 +35,14 @@ def test_validate_upload_rejects_unknown_type_and_empty_file() -> None:
         validate_upload("payload.exe", 20)
     with pytest.raises(ValueError, match="empty"):
         validate_upload("guide.pdf", 0)
+
+
+def test_detect_upload_format_accepts_text_families_and_rejects_binary_payload() -> None:
+    for filename in ("guide.txt", "guide.md", "guide.csv", "guide.html"):
+        result = detect_upload_format(filename, b"Approved content\n")
+        assert result["detectedType"] == "text"
+    with pytest.raises(ValueError, match="verified safely"):
+        detect_upload_format("payload.txt", b"MZ\x00\x01")
 
 
 def test_plain_text_extraction_and_generic_section_chunking(tmp_path: Path) -> None:

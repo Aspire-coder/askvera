@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import zipfile
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from xml.sax.saxutils import escape
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,6 +20,19 @@ from utils.validators import TRAFFIC_SOURCES, ChatRequest, FeedbackRequest, Supp
 
 LOGGER = get_logger("services.analytics")
 FILTER_TRAFFIC_SOURCES = TRAFFIC_SOURCES | {"legacy"}
+REDACTED_INTERACTION_PREVIEW_LIMIT = 800
+MAX_INTERACTION_EXPORT_ROWS = 5000
+INTERACTION_EXPORT_COLUMNS = [
+    "created_at", "correlation_id", "session_id", "country", "language",
+    "traffic_source", "question", "answer", "topic", "confidence",
+    "source_count", "tokens", "fallback", "failure_layer", "rating",
+    "comment", "expected_answer",
+]
+
+
+def _redacted_preview(value: Any, *, limit: int = REDACTED_INTERACTION_PREVIEW_LIMIT) -> str:
+    """Return a compact PII-scrubbed preview suitable for operational review."""
+    return redact_common_pii(" ".join(str(value or "").split()))[:limit]
 
 
 def _normalize_traffic_source(value: str) -> str:
@@ -160,7 +177,7 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                     "country": body.country,
                     "language": body.language,
                     "question": redact_common_pii(" ".join(body.message.split()))[:4000],
-                    "answer": response.answer[:12_000],
+                    "answer": redact_common_pii(response.answer)[:12_000],
                     "topic": _topic(response),
                     "confidence": float(response.confidence or 0.0),
                     "source_count": len(response.citations),
@@ -202,8 +219,8 @@ def record_feedback_event(feedback: FeedbackRequest, correlation_id: str) -> Non
                     "session_id": feedback.sessionId,
                     "message_id": feedback.messageId,
                     "rating": feedback.rating,
-                    "comment": feedback.comment,
-                    "expected_answer": feedback.expected_answer,
+                    "comment": redact_common_pii(feedback.comment or "")[:4000],
+                    "expected_answer": redact_common_pii(feedback.expected_answer or "")[:12_000],
                     "expected_answer_present": bool(feedback.expected_answer),
                     "request_type": feedback.requestType,
                     "country": str(metadata.get("country") or ""),
@@ -593,6 +610,7 @@ def interaction_list(
     limit: int = 100,
     start: datetime | None = None,
     end: datetime | None = None,
+    redact_content: bool = False,
 ) -> list[dict[str, Any]]:
     """Return recent questions with optional negative-feedback filtering."""
     since, until = _analytics_window(days=days, start=start, end=end)
@@ -600,7 +618,7 @@ def interaction_list(
     parameters: dict[str, Any] = {
         "since": since,
         "until": until,
-        "limit": max(1, min(int(limit), 500)),
+        "limit": max(1, min(int(limit), MAX_INTERACTION_EXPORT_ROWS)),
     }
     traffic_source = _normalize_traffic_source(traffic_source)
     market_filter = _market_scope(
@@ -644,10 +662,102 @@ def interaction_list(
             ),
             parameters,
         ).mappings().all()
-    return [
-        {
+    interactions: list[dict[str, Any]] = []
+    for row in rows:
+        item = {
             **dict(row),
             "created_at": row["created_at"].isoformat() if row["created_at"] else "",
+            "contentRedacted": redact_content,
         }
-        for row in rows
-    ]
+        if redact_content:
+            for field in ("question", "answer", "comment", "expected_answer"):
+                item[field] = _redacted_preview(item.get(field))
+        interactions.append(item)
+    return interactions
+
+
+def interaction_export_csv(**filters: Any) -> str:
+    """Build a spreadsheet-friendly export using the same scoped interaction query."""
+    rows = interaction_list(**filters)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=INTERACTION_EXPORT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
+
+
+def _xlsx_column_name(number: int) -> str:
+    """Return the Excel column name for a one-based column number."""
+    name = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _xlsx_cell(reference: str, value: Any) -> str:
+    """Write every export value as an escaped inline string to avoid formula injection."""
+    raw_value = str(value if value is not None else "")
+    safe_value = "".join(
+        character for character in raw_value
+        if character in "\t\n\r" or ord(character) >= 0x20
+    )
+    text_value = escape(safe_value)
+    return f'<c r="{reference}" t="inlineStr"><is><t xml:space="preserve">{text_value}</t></is></c>'
+
+
+def interaction_export_xlsx(**filters: Any) -> bytes:
+    """Build a native Excel workbook from the same scoped interaction query as CSV."""
+    rows = interaction_list(**filters)
+    worksheet_rows = [INTERACTION_EXPORT_COLUMNS, *(
+        [row.get(column, "") for column in INTERACTION_EXPORT_COLUMNS] for row in rows
+    )]
+    xml_rows: list[str] = []
+    for row_number, row in enumerate(worksheet_rows, start=1):
+        cells = "".join(
+            _xlsx_cell(f"{_xlsx_column_name(column_number)}{row_number}", value)
+            for column_number, value in enumerate(row, start=1)
+        )
+        xml_rows.append(f'<row r="{row_number}">{cells}</row>')
+
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Feedback" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    relationships_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/></Relationships>'
+    )
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '</Types>'
+    )
+    root_relationships_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/></Relationships>'
+    )
+    worksheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(xml_rows)}</sheetData></worksheet>'
+    )
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as workbook:
+        workbook.writestr("[Content_Types].xml", content_types_xml)
+        workbook.writestr("_rels/.rels", root_relationships_xml)
+        workbook.writestr("xl/workbook.xml", workbook_xml)
+        workbook.writestr("xl/_rels/workbook.xml.rels", relationships_xml)
+        workbook.writestr("xl/worksheets/sheet1.xml", worksheet_xml)
+    return output.getvalue()

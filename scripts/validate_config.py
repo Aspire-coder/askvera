@@ -115,6 +115,7 @@ def _validate_hardened_profile(missing: list[str]) -> None:
         "ADMIN_RBAC_ENABLED",
         "ADMIN_USER_MANAGEMENT_ENABLED",
         "ADMIN_DOCUMENT_PREFLIGHT_ENABLED",
+        "ADMIN_ANALYTICS_REDACTED_BY_DEFAULT",
         "ADMIN_TEXTRACT_OCR_ENABLED",
         "AUDIT_FIREHOSE_ENABLED",
         "EVIDENCE_GATED_OUTPUT_ENABLED",
@@ -136,9 +137,11 @@ def _validate_hardened_profile(missing: list[str]) -> None:
         _require(missing, name)
 
 
-def validate() -> list[str]:
+def validate(*, require_production: bool = False) -> list[str]:
     """Return missing or placeholder required setting names."""
     missing: list[str] = []
+    if require_production and settings.APP_ENV != "production":
+        missing.append("APP_ENV (must be production for a production restart)")
     for name in settings.REQUIRED_VALUES:
         _require(missing, name)
 
@@ -158,10 +161,15 @@ def main() -> int:
         action="store_true",
         help="Load deployed SSM values before validating them.",
     )
+    parser.add_argument(
+        "--require-production",
+        action="store_true",
+        help="Require APP_ENV=production for a production restart.",
+    )
     args = parser.parse_args()
     if args.load_ssm:
         settings.load_ssm_config()
-    missing = validate()
+    missing = validate(require_production=args.require_production)
     if missing:
         print("AskVera configuration is incomplete. Configure these values through the environment or SSM:")
         for name in missing:

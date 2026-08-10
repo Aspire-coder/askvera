@@ -4,7 +4,12 @@ import pytest
 
 from pydantic import ValidationError
 
-from services.analytics import _analytics_window, _live_session_scope, _normalize_traffic_source
+from services.analytics import (
+    _analytics_window,
+    _live_session_scope,
+    _normalize_traffic_source,
+    _redacted_preview,
+)
 from utils.validators import ChatRequest
 
 
@@ -42,6 +47,13 @@ def test_traffic_source_defaults_to_widget() -> None:
     )
 
     assert request.trafficSource == "widget"
+
+
+def test_redacted_interaction_preview_scrubs_sensitive_values() -> None:
+    preview = _redacted_preview("Contact me at person@example.com. Card 4111 1111 1111 1111")
+
+    assert "person@example.com" not in preview
+    assert "4111 1111 1111 1111" not in preview
 
 
 def test_traffic_source_accepts_supported_test_categories() -> None:

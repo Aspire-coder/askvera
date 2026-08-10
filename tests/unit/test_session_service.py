@@ -16,6 +16,11 @@ def _engine_with_row(row):
     return engine, connection
 
 
+def test_legacy_resume_check_fails_closed_without_widget_binding() -> None:
+    """An unbound legacy call must not authorize session resumption."""
+    assert session_service.can_resume_session("session-1") is False
+
+
 def test_validate_and_touch_session_reuses_unexpired_session(monkeypatch) -> None:
     """An unexpired session is reused and receives sliding expiration."""
     now = datetime.now(UTC)

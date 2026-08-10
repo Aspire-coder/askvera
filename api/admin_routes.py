@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
@@ -10,6 +11,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,12 +26,19 @@ from services.admin_users import (
     create_admin_user,
     list_admin_audit_events,
     list_admin_users,
+    record_admin_audit_event,
     require_admin_access,
     resend_admin_invite,
     set_admin_user_enabled,
     update_admin_user,
 )
-from services.analytics import analytics_overview, interaction_list, retrieval_shadow_report
+from services.analytics import (
+    analytics_overview,
+    interaction_export_csv,
+    interaction_export_xlsx,
+    interaction_list,
+    retrieval_shadow_report,
+)
 from services.knowledge_ingestion import (
     ACCESS_SCOPES,
     DOCUMENT_TYPES,
@@ -39,9 +48,13 @@ from services.knowledge_ingestion import (
     list_ingestion_jobs,
     process_ingestion_job,
     stage_ingestion_upload,
+    cleanup_staged_ingestion_upload,
+    detect_upload_format,
     safe_filename,
+    validate_document_content,
     validate_upload,
 )
+from services.document_preflight import analyze_pdf_with_timeout
 from services.market_config import (
     get_countries,
     get_country_codes,
@@ -62,6 +75,27 @@ from services.widget_configs import (
 from app.widget_registry.service import widget_registry_service
 
 admin_router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin_identity)])
+
+
+def _preflight_uploaded_document(filename: str, content: bytes) -> None:
+    """Reject suspicious uploads before durable storage when hardened preflight is enabled."""
+    if not settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
+        return
+    directory = Path(gettempdir()) / "askvera-upload-preflight" / str(uuid4())
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / filename
+    try:
+        path.write_bytes(content)
+        validate_document_content(path)
+        if path.suffix.lower() == ".pdf":
+            analyze_pdf_with_timeout(
+                path,
+                timeout_seconds=settings.ADMIN_INGESTION_PARSER_TIMEOUT_SECONDS,
+                max_pages=settings.ADMIN_INGESTION_MAX_PDF_PAGES,
+                max_extracted_characters=settings.ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS,
+            )
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 class AdminScopeInput(BaseModel):
@@ -206,6 +240,7 @@ def interactions(
     limit: int = 100,
     start: datetime | None = None,
     end: datetime | None = None,
+    include_raw: bool = False,
 ) -> dict[str, Any]:
     principal = getattr(request.state, "admin_identity", None) or {}
     markets = accessible_markets(principal, "insights", "view")
@@ -215,6 +250,15 @@ def interactions(
         raise HTTPException(status_code=403, detail="You do not have access to Insights.")
     if feedback not in {"all", "helpful", "not_helpful"}:
         raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
+    if include_raw:
+        if not settings.ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED:
+            raise HTTPException(status_code=403, detail="Raw interaction access is disabled.")
+        require_admin_access(request, "audit", "view")
+        record_admin_audit_event(
+            str(principal.get("sub") or principal.get("email") or "unknown"),
+            "analytics.raw_interactions_viewed",
+            country.upper() or "all_markets",
+        )
     try:
         result = interaction_list(
             days=days,
@@ -226,10 +270,117 @@ def interactions(
             limit=limit,
             start=start,
             end=end,
+            redact_content=settings.ADMIN_ANALYTICS_REDACTED_BY_DEFAULT and not include_raw,
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return _payload(result, request)
+
+
+@admin_router.get("/analytics/interactions.csv")
+def interactions_export(
+    request: Request,
+    days: int = 30,
+    country: str = "",
+    language: str = "",
+    traffic_source: str = "",
+    feedback: str = "all",
+    limit: int = 5000,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    include_raw: bool = False,
+) -> StreamingResponse:
+    """Download filtered feedback/interactions with redaction as the default."""
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
+    if feedback not in {"all", "helpful", "not_helpful"}:
+        raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
+    if include_raw:
+        if not settings.ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED:
+            raise HTTPException(status_code=403, detail="Raw interaction access is disabled.")
+        require_admin_access(request, "audit", "view")
+        record_admin_audit_event(
+            str(principal.get("sub") or principal.get("email") or "unknown"),
+            "analytics.raw_interactions_exported",
+            country.upper() or "all_markets",
+        )
+    try:
+        csv_text = interaction_export_csv(
+            days=days,
+            country=country,
+            language=language,
+            traffic_source=traffic_source,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
+            feedback=feedback,
+            limit=limit,
+            start=start,
+            end=end,
+            redact_content=settings.ADMIN_ANALYTICS_REDACTED_BY_DEFAULT and not include_raw,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return StreamingResponse(
+        iter([csv_text]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="askvera-interactions.csv"'},
+    )
+
+
+@admin_router.get("/analytics/interactions.xlsx")
+def interactions_export_xlsx(
+    request: Request,
+    days: int = 30,
+    country: str = "",
+    language: str = "",
+    traffic_source: str = "",
+    feedback: str = "all",
+    limit: int = 5000,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    include_raw: bool = False,
+) -> StreamingResponse:
+    """Download filtered feedback as an Excel workbook with the same controls as CSV."""
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
+    if feedback not in {"all", "helpful", "not_helpful"}:
+        raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
+    if include_raw:
+        if not settings.ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED:
+            raise HTTPException(status_code=403, detail="Raw interaction access is disabled.")
+        require_admin_access(request, "audit", "view")
+        record_admin_audit_event(
+            str(principal.get("sub") or principal.get("email") or "unknown"),
+            "analytics.raw_interactions_exported",
+            country.upper() or "all_markets",
+        )
+    try:
+        workbook = interaction_export_xlsx(
+            days=days,
+            country=country,
+            language=language,
+            traffic_source=traffic_source,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
+            feedback=feedback,
+            limit=limit,
+            start=start,
+            end=end,
+            redact_content=settings.ADMIN_ANALYTICS_REDACTED_BY_DEFAULT and not include_raw,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return StreamingResponse(
+        iter([workbook]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="askvera-feedback.xlsx"'},
+    )
 
 
 @admin_router.get("/analytics/retrieval-shadow")
@@ -343,6 +494,8 @@ async def upload_document(
     content = await file.read(settings.ADMIN_UPLOAD_MAX_BYTES + 1)
     try:
         validate_upload(filename, len(content))
+        detected_format = detect_upload_format(filename, content)
+        _preflight_uploaded_document(filename, content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -382,12 +535,15 @@ async def upload_document(
                 approval_reference=approval_reference.strip(),
             )
         except (ValueError, BotoCoreError, ClientError) as exc:
+            if "upload_uri" in locals():
+                cleanup_staged_ingestion_upload(upload_uri)
             fail_ingestion_job(job_id, "Durable ingestion queueing failed.")
             raise HTTPException(status_code=503, detail="The document could not be queued safely.") from exc
         return _payload(
             {
                 "jobId": job_id,
                 "filename": filename,
+                "detectedFormat": detected_format,
                 "status": "queued",
                 "message": "Document accepted and queued for durable processing.",
             },
@@ -417,6 +573,7 @@ async def upload_document(
         {
             "jobId": job_id,
             "filename": filename,
+            "detectedFormat": detected_format,
             "status": "queued",
             "message": "Document accepted. Extraction and indexing continue in the background.",
         },

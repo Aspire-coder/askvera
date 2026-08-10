@@ -1,0 +1,33 @@
+# Credentials, deployment values, and local secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+.iam-*.json
+.ssm-*.json
+secrets/
+
+# Generated exports and local artifacts
+exports/
+outputs/
+logs/
+*.log
+__pycache__/
+.pytest_cache/
+.pytest-*/
+.tmp-*/
+.codex-*/
+
+# Installed and built dependencies
+node_modules/
+dist/
+.venv/
+.codex-test-venv*/
+
+# Source policy files are knowledge-base inputs, not software architecture sources
+*.pdf
+*.docx
+*.xlsx

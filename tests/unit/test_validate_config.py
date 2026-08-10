@@ -46,6 +46,15 @@ def test_valid_production_configuration_passes(monkeypatch) -> None:
     assert validate() == []
 
 
+def test_production_restart_validation_rejects_non_production_environment(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "APP_ENV", "uat")
+
+    failures = validate(require_production=True)
+
+    assert "APP_ENV (must be production for a production restart)" in failures
+
+
 def test_production_rejects_development_auth_and_missing_retrieval_config(monkeypatch) -> None:
     _configure_valid_production(monkeypatch)
     monkeypatch.setattr(settings, "ADMIN_AUTH_MODE", "api_key")
@@ -211,6 +220,7 @@ def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> Non
     monkeypatch.setattr(settings, "KNOWLEDGE_UPLOAD_BUCKET", "")
     monkeypatch.setattr(settings, "ENABLE_ALARM_NOTIFICATIONS", False)
     monkeypatch.setattr(settings, "ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
+    monkeypatch.setattr(settings, "ADMIN_ANALYTICS_REDACTED_BY_DEFAULT", False)
     monkeypatch.setattr(settings, "EVIDENCE_GATED_OUTPUT_ENABLED", False)
 
     failures = validate()
@@ -222,3 +232,7 @@ def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> Non
     assert "ADMIN_INGESTION_QUEUE_URL" in failures
     assert "ADMIN_INGESTION_DLQ_URL" in failures
     assert "KNOWLEDGE_UPLOAD_BUCKET" in failures
+    assert (
+        "ADMIN_ANALYTICS_REDACTED_BY_DEFAULT "
+        "(must be enabled for the hardened security profile)"
+    ) in failures

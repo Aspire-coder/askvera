@@ -42,7 +42,24 @@ from infrastructure decisions that require approval.
 
 - Widget tokens expire and can be refreshed.
 - Sessions enforce idle and absolute lifetime limits.
+- Session resumption is bound to the originating widget instance and approved
+  website origin. A session identifier alone cannot resume a conversation.
 - New chat and end chat explicitly close the prior conversation state.
+
+### Operational transcript controls
+
+- Analytics persistence scrubs common PII from questions, answers, feedback,
+  and suggested answers before storage.
+- The hardened profile requires redacted, bounded interaction previews by
+  default. Raw interaction access is a separate disabled-by-default setting,
+  restricted through the Audit permission and recorded in `admin_audit_log`.
+
+### Ingestion safety
+
+- Hardened preflight validates the claimed file type before parsing and applies
+  PDF page, extracted-text, and parser-time limits in an isolated subprocess.
+- Malware scanning, queue delivery, staged publication, and OCR remain
+  separately gated until their AWS resources and permissions are approved.
 
 ### Human support
 
@@ -91,6 +108,8 @@ Before production promotion:
 3. Publish documents as staging and verify counts, metadata, and isolation.
 4. Publish active records with replacement and rotate `KB_VERSION`.
 5. Record Git commit and SSM runtime versions in the release entry.
-6. Restart the API, run health checks, and execute representative live tests.
-7. Confirm dashboards show no rise in fallbacks, validation failures, or model
+6. Run `scripts/validate_config.py --load-ssm` before restart and correct any
+   reported configuration issue while the current service is still running.
+7. Restart the API, run health checks, and execute representative live tests.
+8. Confirm dashboards show no rise in fallbacks, validation failures, or model
    failover before completing the rollout.

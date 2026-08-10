@@ -3,14 +3,33 @@
   "description": "Controlled zero-token conversation copy by language.",
   "locales": {
     "en": {
-      "patterns": {"greeting": ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"], "thanks": ["thanks", "thank you"], "capability": ["who are you", "what do you do", "what can you help with", "help"]},
+      "patterns": {
+        "greeting": [
+          "hi",
+          "hello",
+          "hey",
+          "good morning",
+          "good afternoon",
+          "good evening"
+        ],
+        "thanks": [
+          "thanks",
+          "thank you"
+        ],
+        "capability": [
+          "who are you",
+          "what do you do",
+          "what can you help with",
+          "help"
+        ]
+      },
       "responses": {
         "greeting": "Hello, I'm AskVera. How can I help with approved Forever Living company policies or information from the global office directory?",
         "thanks": "You're welcome. I'm here whenever you need another approved Forever Living answer.",
         "capability": "I'm AskVera, Forever Living's approved knowledge assistant. I can help find approved answers from Forever Living company policies and the global office directory.",
         "insufficient_evidence": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer.",
         "off_topic": "I'm sorry, but I can't help with that question. AskVera can help with approved Forever Living company policies and information from the global office directory. Please ask me about one of those areas, and I'll be happy to help.",
-        "medical_claim": "I can't provide medical advice or treatment claims. Please check the approved product information and speak with a qualified healthcare professional.",
+        "medical_claim": "I'm sorry, but I can't provide medical advice or treatment claims. AskVera is limited to approved Forever Living company policies and information from the global office directory. Please speak with a qualified healthcare professional about medical questions.",
         "income_claim": "I can't predict or guarantee earnings. I can explain approved bonus and compensation-plan rules from the published documents.",
         "bedrock_error": "I couldn't complete that answer just now. Please try again or request additional support.",
         "sensitive_pii": "For your privacy, I removed sensitive personal information from your message. AskVera does not use or save government IDs, payment details, passwords, or other sensitive identifiers. Please ask again without personal details.",
@@ -18,14 +37,30 @@
       }
     },
     "fr": {
-      "patterns": {"greeting": ["bonjour", "salut", "bonsoir"], "thanks": ["merci", "merci beaucoup"], "capability": ["qui es tu", "qui etes vous", "que peux tu faire", "aide"]},
+      "patterns": {
+        "greeting": [
+          "bonjour",
+          "salut",
+          "bonsoir"
+        ],
+        "thanks": [
+          "merci",
+          "merci beaucoup"
+        ],
+        "capability": [
+          "qui es tu",
+          "qui etes vous",
+          "que peux tu faire",
+          "aide"
+        ]
+      },
       "responses": {
         "greeting": "Bonjour, je suis AskVera. Comment puis-je vous aider avec les politiques d’entreprise approuvées de Forever Living ou les informations du répertoire mondial des bureaux?",
         "thanks": "Je vous en prie. Je suis là lorsque vous avez besoin d'une autre réponse approuvée de Forever Living.",
         "capability": "Je suis AskVera, l’assistante de connaissances approuvée de Forever Living. Je peux trouver des réponses approuvées dans les politiques d’entreprise de Forever Living et le répertoire mondial des bureaux.",
         "insufficient_evidence": "Les documents de politique approuvés actuellement disponibles ne contiennent pas suffisamment d'informations pour répondre clairement à cette question. Veuillez reformuler la question ou contacter le support Forever Living pour obtenir une réponse officielle.",
         "off_topic": "Je suis désolée, mais je ne peux pas répondre à cette question. AskVera peut vous aider avec les politiques d’entreprise approuvées de Forever Living et les informations du répertoire mondial des bureaux. Posez-moi une question sur l’un de ces sujets et je serai ravie de vous aider.",
-        "medical_claim": "Je ne peux pas fournir de conseils médicaux ni d'allégations de traitement. Consultez les informations approuvées sur le produit et un professionnel de santé qualifié.",
+        "medical_claim": "Je suis désolée, mais je ne peux pas fournir de conseils médicaux ni d’allégations de traitement. AskVera est limitée aux politiques d’entreprise approuvées de Forever Living et aux informations du répertoire mondial des bureaux. Consultez un professionnel de santé qualifié pour toute question médicale.",
         "income_claim": "Je ne peux pas prévoir ni garantir des revenus. Je peux expliquer les règles approuvées relatives aux primes et au plan de rémunération.",
         "bedrock_error": "Je n'ai pas pu terminer cette réponse. Veuillez réessayer ou demander une aide supplémentaire.",
         "sensitive_pii": "Pour protéger votre vie privée, j'ai supprimé les informations personnelles sensibles de votre message. AskVera n'utilise ni n'enregistre les pièces d'identité, les données de paiement, les mots de passe ou d'autres identifiants sensibles. Reformulez votre question sans données personnelles.",
@@ -33,14 +68,30 @@
       }
     },
     "es": {
-      "patterns": {"greeting": ["hola", "buenos dias", "buenas tardes", "buenas noches"], "thanks": ["gracias", "muchas gracias"], "capability": ["quien eres", "que puedes hacer", "ayuda"]},
+      "patterns": {
+        "greeting": [
+          "hola",
+          "buenos dias",
+          "buenas tardes",
+          "buenas noches"
+        ],
+        "thanks": [
+          "gracias",
+          "muchas gracias"
+        ],
+        "capability": [
+          "quien eres",
+          "que puedes hacer",
+          "ayuda"
+        ]
+      },
       "responses": {
         "greeting": "Hola, soy AskVera. ¿Cómo puedo ayudarte con las políticas empresariales aprobadas de Forever Living o la información del directorio mundial de oficinas?",
         "thanks": "De nada. Estoy aquí cuando necesites otra respuesta aprobada de Forever Living.",
         "capability": "Soy AskVera, la asistente de conocimiento aprobado de Forever Living. Puedo encontrar respuestas aprobadas en las políticas empresariales de Forever Living y el directorio mundial de oficinas.",
         "insufficient_evidence": "Los documentos de política aprobados disponibles actualmente no contienen información suficiente para responder claramente a esta pregunta. Reformula la pregunta o contacta con el soporte de Forever Living para obtener una respuesta oficial.",
         "off_topic": "Lo siento, pero no puedo ayudarte con esa pregunta. AskVera puede ayudarte con las políticas empresariales aprobadas de Forever Living y la información del directorio mundial de oficinas. Pregúntame sobre uno de esos temas y estaré encantada de ayudarte.",
-        "medical_claim": "No puedo ofrecer consejos médicos ni afirmaciones de tratamiento. Consulta la información aprobada del producto y a un profesional sanitario cualificado.",
+        "medical_claim": "Lo siento, pero no puedo ofrecer consejos médicos ni afirmaciones de tratamiento. AskVera se limita a las políticas empresariales aprobadas de Forever Living y a la información del directorio mundial de oficinas. Consulta a un profesional sanitario cualificado para preguntas médicas.",
         "income_claim": "No puedo predecir ni garantizar ingresos. Puedo explicar las reglas aprobadas de bonos y del plan de compensación.",
         "bedrock_error": "No pude completar esa respuesta. Inténtalo de nuevo o solicita ayuda adicional.",
         "sensitive_pii": "Para proteger tu privacidad, eliminé la información personal confidencial del mensaje. AskVera no usa ni guarda identificaciones oficiales, datos de pago, contraseñas u otros identificadores confidenciales. Vuelve a preguntar sin datos personales.",
@@ -48,14 +99,30 @@
       }
     },
     "de": {
-      "patterns": {"greeting": ["hallo", "guten morgen", "guten tag", "guten abend"], "thanks": ["danke", "vielen dank"], "capability": ["wer bist du", "was kannst du", "hilfe"]},
+      "patterns": {
+        "greeting": [
+          "hallo",
+          "guten morgen",
+          "guten tag",
+          "guten abend"
+        ],
+        "thanks": [
+          "danke",
+          "vielen dank"
+        ],
+        "capability": [
+          "wer bist du",
+          "was kannst du",
+          "hilfe"
+        ]
+      },
       "responses": {
         "greeting": "Hallo, ich bin AskVera. Wie kann ich bei freigegebenen Unternehmensrichtlinien von Forever Living oder Informationen aus dem weltweiten Büroverzeichnis helfen?",
         "thanks": "Gern geschehen. Ich bin hier, wenn Sie eine weitere freigegebene Antwort von Forever Living benötigen.",
         "capability": "Ich bin AskVera, die freigegebene Wissensassistentin von Forever Living. Ich finde freigegebene Antworten in den Unternehmensrichtlinien von Forever Living und im weltweiten Büroverzeichnis.",
         "insufficient_evidence": "Die derzeit verfügbaren freigegebenen Richtliniendokumente enthalten nicht genügend Informationen, um diese Frage eindeutig zu beantworten. Formulieren Sie die Frage neu oder wenden Sie sich an den Forever Living Support, um eine offizielle Antwort zu erhalten.",
         "off_topic": "Es tut mir leid, aber bei dieser Frage kann ich nicht helfen. AskVera unterstützt Sie bei freigegebenen Unternehmensrichtlinien von Forever Living und Informationen aus dem weltweiten Büroverzeichnis. Stellen Sie mir gern eine Frage zu einem dieser Bereiche.",
-        "medical_claim": "Ich kann keine medizinische Beratung oder Heilversprechen geben. Prüfen Sie die freigegebenen Produktinformationen und sprechen Sie mit medizinischem Fachpersonal.",
+        "medical_claim": "Es tut mir leid, aber ich kann keine medizinische Beratung oder Heilversprechen geben. AskVera ist auf freigegebene Unternehmensrichtlinien von Forever Living und Informationen aus dem weltweiten Büroverzeichnis beschränkt. Wenden Sie sich bei medizinischen Fragen an medizinisches Fachpersonal.",
         "income_claim": "Ich kann kein Einkommen vorhersagen oder garantieren. Ich kann die freigegebenen Bonus- und Vergütungsplanregeln erklären.",
         "bedrock_error": "Ich konnte diese Antwort nicht abschließen. Versuchen Sie es erneut oder fordern Sie zusätzliche Hilfe an.",
         "sensitive_pii": "Zum Schutz Ihrer Privatsphäre habe ich sensible persönliche Angaben aus Ihrer Nachricht entfernt. AskVera verwendet oder speichert keine Ausweis-, Zahlungs- oder Zugangsdaten. Stellen Sie die Frage bitte erneut ohne persönliche Daten.",
@@ -63,14 +130,32 @@
       }
     },
     "nl": {
-      "patterns": {"greeting": ["hallo", "hoi", "goedemorgen", "goedemiddag", "goedenavond"], "thanks": ["bedankt", "dank je", "dank u"], "capability": ["wie ben je", "wat kun je", "help"]},
+      "patterns": {
+        "greeting": [
+          "hallo",
+          "hoi",
+          "goedemorgen",
+          "goedemiddag",
+          "goedenavond"
+        ],
+        "thanks": [
+          "bedankt",
+          "dank je",
+          "dank u"
+        ],
+        "capability": [
+          "wie ben je",
+          "wat kun je",
+          "help"
+        ]
+      },
       "responses": {
         "greeting": "Hallo, ik ben AskVera. Hoe kan ik helpen met goedgekeurd bedrijfsbeleid van Forever Living of informatie uit de wereldwijde kantorengids?",
         "thanks": "Graag gedaan. Ik ben er wanneer u nog een goedgekeurd antwoord van Forever Living nodig hebt.",
         "capability": "Ik ben AskVera, de goedgekeurde kennisassistent van Forever Living. Ik vind goedgekeurde antwoorden in het bedrijfsbeleid van Forever Living en de wereldwijde kantorengids.",
         "insufficient_evidence": "De momenteel beschikbare goedgekeurde beleidsdocumenten bevatten onvoldoende informatie om deze vraag duidelijk te beantwoorden. Formuleer de vraag anders of neem contact op met Forever Living Support voor een officieel antwoord.",
         "off_topic": "Het spijt me, maar ik kan niet helpen met die vraag. AskVera kan helpen met goedgekeurd bedrijfsbeleid van Forever Living en informatie uit de wereldwijde kantorengids. Stel gerust een vraag over een van deze onderwerpen.",
-        "medical_claim": "Ik kan geen medisch advies of behandelingsclaims geven. Bekijk de goedgekeurde productinformatie en raadpleeg een bevoegde zorgverlener.",
+        "medical_claim": "Het spijt me, maar ik kan geen medisch advies of behandelclaims geven. AskVera is beperkt tot goedgekeurd bedrijfsbeleid van Forever Living en informatie uit de wereldwijde kantorengids. Raadpleeg een gekwalificeerde zorgverlener voor medische vragen.",
         "income_claim": "Ik kan inkomsten niet voorspellen of garanderen. Ik kan de goedgekeurde bonus- en compensatieregels uitleggen.",
         "bedrock_error": "Ik kon dat antwoord niet voltooien. Probeer het opnieuw of vraag extra hulp aan.",
         "sensitive_pii": "Om uw privacy te beschermen heb ik gevoelige persoonsgegevens uit uw bericht verwijderd. AskVera gebruikt of bewaart geen identiteits-, betaal- of inloggegevens. Stel uw vraag opnieuw zonder persoonlijke gegevens.",
@@ -80,56 +165,57 @@
     "it": {
       "patterns": {},
       "responses": {
-        "off_topic": "Mi dispiace, ma non posso aiutarti con questa domanda. AskVera può aiutarti con le politiche aziendali approvate di Forever Living e le informazioni dell’elenco globale degli uffici. Fammi una domanda su uno di questi argomenti e sarò felice di aiutarti."
+        "off_topic": "Mi dispiace, ma non posso aiutarti con questa domanda. AskVera può aiutarti con le politiche aziendali approvate di Forever Living e le informazioni dell’elenco globale degli uffici. Fammi una domanda su uno di questi argomenti e sarò felice di aiutarti.",
+        "medical_claim": "Mi dispiace, ma non posso fornire consigli medici o affermazioni su trattamenti. AskVera è limitata alle politiche aziendali approvate di Forever Living e alle informazioni dell’elenco globale degli uffici. Per domande mediche, consulta un professionista sanitario qualificato.",
+        "income_claim": "Mi dispiace, ma non posso prevedere o garantire guadagni. Posso spiegare le regole approvate su bonus e compensi contenute nei documenti pubblicati."
       }
     },
     "da": {
       "patterns": {},
       "responses": {
-        "off_topic": "Det beklager jeg, men jeg kan ikke hjælpe med det spørgsmål. AskVera kan hjælpe med godkendte Forever Living-virksomhedspolitikker og oplysninger fra den globale kontoroversigt. Spørg mig gerne om et af disse områder."
+        "off_topic": "Det beklager jeg, men jeg kan ikke hjælpe med det spørgsmål. AskVera kan hjælpe med godkendte Forever Living-virksomhedspolitikker og oplysninger fra den globale kontoroversigt. Spørg mig gerne om et af disse områder.",
+        "medical_claim": "Det beklager jeg, men jeg kan ikke give medicinsk rådgivning eller behandlingspåstande. AskVera er begrænset til godkendte Forever Living-virksomhedspolitikker og oplysninger fra den globale kontoroversigt. Kontakt kvalificeret sundhedspersonale ved medicinske spørgsmål.",
+        "income_claim": "Det beklager jeg, men jeg kan ikke forudsige eller garantere indtjening. Jeg kan forklare de godkendte regler om bonusser og kompensation i de offentliggjorte dokumenter."
       }
     },
     "fi": {
       "patterns": {},
       "responses": {
-        "off_topic": "Olen pahoillani, mutta en voi auttaa tässä kysymyksessä. AskVera auttaa Forever Livingin hyväksyttyihin yrityskäytäntöihin ja maailmanlaajuisen toimistohakemiston tietoihin liittyvissä asioissa. Kysy mielellään jommastakummasta aiheesta."
+        "off_topic": "Olen pahoillani, mutta en voi auttaa tässä kysymyksessä. AskVera auttaa Forever Livingin hyväksyttyihin yrityskäytäntöihin ja maailmanlaajuisen toimistohakemiston tietoihin liittyvissä asioissa. Kysy mielellään jommastakummasta aiheesta.",
+        "medical_claim": "Olen pahoillani, mutta en voi antaa lääketieteellisiä neuvoja tai hoitoväitteitä. AskVera keskittyy hyväksyttyihin Forever Living -yrityskäytäntöihin ja maailmanlaajuisen toimistohakemiston tietoihin. Käänny lääketieteellisissä kysymyksissä pätevän terveydenhuollon ammattilaisen puoleen.",
+        "income_claim": "Olen pahoillani, mutta en voi ennustaa tai taata tuloja. Voin selittää julkaistuissa asiakirjoissa olevat hyväksytyt bonus- ja korvaussäännöt."
       }
     },
     "no": {
       "patterns": {},
       "responses": {
-        "off_topic": "Beklager, men jeg kan ikke hjelpe med det spørsmålet. AskVera kan hjelpe med godkjente selskapsretningslinjer for Forever Living og informasjon fra den globale kontoroversikten. Spør meg gjerne om et av disse områdene."
+        "off_topic": "Beklager, men jeg kan ikke hjelpe med det spørsmålet. AskVera kan hjelpe med godkjente selskapsretningslinjer for Forever Living og informasjon fra den globale kontoroversikten. Spør meg gjerne om et av disse områdene.",
+        "medical_claim": "Beklager, men jeg kan ikke gi medisinske råd eller behandlingspåstander. AskVera er begrenset til godkjente selskapsretningslinjer for Forever Living og informasjon fra den globale kontoroversikten. Kontakt kvalifisert helsepersonell ved medisinske spørsmål.",
+        "income_claim": "Beklager, men jeg kan ikke forutsi eller garantere inntekt. Jeg kan forklare de godkjente reglene for bonuser og kompensasjon i de publiserte dokumentene."
       }
     },
     "sr": {
       "patterns": {},
       "responses": {
-        "off_topic": "Žao mi je, ali ne mogu da pomognem sa tim pitanjem. AskVera može da pomogne sa odobrenim pravilima kompanije Forever Living i informacijama iz globalnog imenika kancelarija. Slobodno pitajte o nekoj od tih oblasti."
+        "off_topic": "Žao mi je, ali ne mogu da pomognem sa tim pitanjem. AskVera može da pomogne sa odobrenim pravilima kompanije Forever Living i informacijama iz globalnog imenika kancelarija. Slobodno pitajte o nekoj od tih oblasti.",
+        "medical_claim": "Žao mi je, ali ne mogu da pružam medicinske savete ili tvrdnje o lečenju. AskVera je ograničena na odobrena pravila kompanije Forever Living i informacije iz globalnog imenika kancelarija. Za medicinska pitanja obratite se kvalifikovanom zdravstvenom radniku.",
+        "income_claim": "Žao mi je, ali ne mogu da predvidim ili garantujem zaradu. Mogu da objasnim odobrena pravila o bonusima i naknadama iz objavljenih dokumenata."
       }
     },
     "sv": {
       "patterns": {},
       "responses": {
-        "off_topic": "Jag är ledsen, men jag kan inte hjälpa till med den frågan. AskVera kan hjälpa till med godkända företagspolicyer för Forever Living och information från den globala kontorskatalogen. Fråga gärna om något av dessa områden."
+        "off_topic": "Jag är ledsen, men jag kan inte hjälpa till med den frågan. AskVera kan hjälpa till med godkända företagspolicyer för Forever Living och information från den globala kontorskatalogen. Fråga gärna om något av dessa områden.",
+        "medical_claim": "Jag är ledsen, men jag kan inte ge medicinska råd eller behandlingspåståenden. AskVera är begränsad till godkända företagspolicyer för Forever Living och information från den globala kontorskatalogen. Kontakta kvalificerad vårdpersonal vid medicinska frågor.",
+        "income_claim": "Jag är ledsen, men jag kan inte förutsäga eller garantera inkomster. Jag kan förklara de godkända reglerna för bonusar och ersättning i de publicerade dokumenten."
       }
     },
     "ru": {
-      "patterns": {
-        "greeting": ["привет", "здравствуйте", "доброе утро", "добрый день", "добрый вечер"],
-        "thanks": ["спасибо", "благодарю"],
-        "capability": ["кто ты", "кто вы", "что ты умеешь", "чем ты можешь помочь", "помощь"]
-      },
+      "patterns": {},
       "responses": {
-        "greeting": "Здравствуйте, я AskVera. Чем я могу помочь в вопросах утвержденных корпоративных политик Forever Living или информации из глобального справочника офисов?",
-        "thanks": "Пожалуйста. Я готова помочь, если вам понадобится еще один утвержденный ответ Forever Living.",
-        "capability": "Я AskVera, утвержденный информационный помощник Forever Living. Я могу находить ответы в корпоративных политиках Forever Living и глобальном справочнике офисов.",
-        "insufficient_evidence": "В доступных утвержденных документах недостаточно информации, чтобы ясно ответить на этот вопрос. Пожалуйста, переформулируйте вопрос или обратитесь в службу поддержки Forever Living за официальным ответом.",
-        "off_topic": "Мне жаль, но я не могу помочь с этим вопросом. AskVera помогает с утвержденными корпоративными политиками Forever Living и информацией из глобального справочника офисов. Задайте вопрос по одной из этих тем, и я буду рада помочь.",
-        "medical_claim": "Я не могу давать медицинские рекомендации или делать заявления о лечении. Ознакомьтесь с утвержденной информацией о продукте и обратитесь к квалифицированному медицинскому специалисту.",
-        "income_claim": "Я не могу прогнозировать или гарантировать доход. Я могу объяснить утвержденные правила бонусов и компенсационного плана из опубликованных документов.",
-        "bedrock_error": "Сейчас мне не удалось подготовить ответ. Пожалуйста, попробуйте еще раз или запросите дополнительную поддержку.",
-        "sensitive_pii": "Для защиты вашей конфиденциальности я удалила чувствительные персональные данные из сообщения. AskVera не использует и не сохраняет государственные идентификаторы, платежные данные, пароли или другие чувствительные сведения. Пожалуйста, задайте вопрос повторно без персональных данных.",
-        "guardrail_blocked": "Я не могу предоставить этот ответ, потому что он не прошел проверки безопасности AskVera. Пожалуйста, переформулируйте вопрос без частной информации или небезопасных утверждений."
+        "off_topic": "Извините, я не могу помочь с этим вопросом. AskVera может помочь с утверждёнными корпоративными политиками Forever Living и информацией из глобального справочника офисов. Пожалуйста, задайте вопрос по одной из этих тем.",
+        "medical_claim": "Извините, но я не могу давать медицинские советы или делать заявления о лечении. AskVera ограничена утверждёнными корпоративными политиками Forever Living и информацией из глобального справочника офисов. По медицинским вопросам обратитесь к квалифицированному медицинскому специалисту.",
+        "income_claim": "Извините, но я не могу прогнозировать или гарантировать доход. Я могу объяснить утверждённые правила о бонусах и вознаграждении из опубликованных документов."
       }
     }
   }

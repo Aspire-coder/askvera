@@ -24,6 +24,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadController = useRef<AbortController | null>(null);
 
   const refresh = async () => {
     const api = new AdminApi(credentials);
@@ -60,6 +61,11 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
       setNotice(`That file is larger than ${formatSize(config.maxUploadBytes)}.`);
       return;
     }
+    const extension = candidate.name.slice(candidate.name.lastIndexOf(".")).toLowerCase();
+    if (!acceptedExtensions.split(",").includes(extension)) {
+      setNotice("That file type is not supported. Choose PDF, DOCX, text, Markdown, CSV or HTML.");
+      return;
+    }
     setFile(candidate);
   };
 
@@ -81,17 +87,21 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     formData.set("approval_reference", approvalReference);
     setSubmitting(true);
     setNotice("");
+    uploadController.current = new AbortController();
     try {
-      const result = await new AdminApi(credentials).upload(formData);
-      setNotice(`${result.filename} is queued for extraction and indexing.`);
+      const result = await new AdminApi(credentials).upload(formData, uploadController.current.signal);
+      setNotice(`${result.filename} was verified and queued for extraction and indexing.`);
       setFile(null);
       await refresh();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Upload failed.");
+      setNotice(error instanceof DOMException && error.name === "AbortError" ? "Upload cancelled before processing began." : error instanceof Error ? error.message : "Upload failed. The document was not queued.");
     } finally {
+      uploadController.current = null;
       setSubmitting(false);
     }
   };
+
+  const cancelUpload = () => uploadController.current?.abort();
 
   return (
     <section className="page-section" aria-labelledby="knowledge-title">
@@ -134,7 +144,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder="e.g. US-company-policy" /></div>
             <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
             <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>
-            <div className="form-field upload-action"><span className="helper">A verified generation replaces the same stable document ID, even when the uploaded filename changes.</span><button className="button primary" disabled={submitting || !file} onClick={() => void upload()}>{submitting ? "Preparing…" : "Upload and index"}</button></div>
+            <div className="form-field upload-action"><span className="helper">Files are checked before queueing. If the connection stops, the job is not activated until processing completes.</span>{submitting ? <button className="button secondary" onClick={cancelUpload}>Cancel upload</button> : <button className="button primary" disabled={!file} onClick={() => void upload()}>Upload and index</button>}</div>
           </div>
           {notice ? <div className="notice" role="status">{notice}</div> : null}
         </div>
