@@ -64,7 +64,9 @@ def test_unconfigured_language_localizes_reviewed_safety_copy(monkeypatch) -> No
     monkeypatch.setattr(controlled_copy, "get_aws_clients", lambda: clients)
     controlled_copy.localize_reviewed_copy.cache_clear()
 
-    response = localized_conversation_response("income_claim", "it-IT") or ""
+    # Italian is now a configured locale. Use a deliberately unconfigured
+    # locale so this test exercises the controlled translation fallback.
+    response = localized_conversation_response("income_claim", "pt-BR") or ""
 
     assert response == "Non posso prevedere o garantire guadagni."
 
@@ -78,7 +80,9 @@ def test_unconfigured_language_rejects_translation_that_adds_numbers(monkeypatch
     monkeypatch.setattr(controlled_copy, "get_aws_clients", lambda: clients)
     controlled_copy.localize_reviewed_copy.cache_clear()
 
-    response = localized_conversation_response("income_claim", "sv-SE") or ""
+    # Swedish is now a configured locale, so it should use the reviewed route
+    # copy directly. Use an unconfigured locale to exercise rejection.
+    response = localized_conversation_response("income_claim", "pt-PT") or ""
 
     assert response == localized_conversation_response("income_claim", "en")
 
