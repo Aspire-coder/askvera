@@ -772,7 +772,10 @@ class OpenSearchSectionProvider:
                 title = f"{title}: {row['section_title']}"
         content = str(row.get("content") or "")
         metadata = dict(row.get("metadata") or {})
-        if row.get("document_type") == "office_directory":
+        if (
+            row.get("document_type") == "office_directory"
+            and metadata.get("directory_kind") != "international_sponsoring"
+        ):
             metadata["directory_fields"] = parse_directory_fields(content)
         return RetrievedDocument(
             id=str(row.get("id") or ""),

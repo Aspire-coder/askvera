@@ -107,6 +107,28 @@ def test_provider_can_target_an_isolated_vnext_index(monkeypatch) -> None:
     assert OpenSearchSectionProvider(index_name="vnext-index").index_name == "vnext-index"
 
 
+def test_sponsoring_directory_keeps_source_text_instead_of_office_fields() -> None:
+    document = OpenSearchSectionProvider()._document_from_row(
+        {
+            "id": "sponsoring-001",
+            "section_id": "sponsoring-001",
+            "section_title": "Forever Canada",
+            "content": "Welcome to Forever Canada!\nSponsor: example.com",
+            "country": "GLOBAL",
+            "language": "en",
+            "document_type": "office_directory",
+            "metadata": {
+                "directory_kind": "international_sponsoring",
+                "record_country": "Canada",
+            },
+        },
+        1.0,
+    )
+
+    assert document.metadata["directory_kind"] == "international_sponsoring"
+    assert "directory_fields" not in document.metadata
+
+
 def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_ALLOW_ENGLISH_FALLBACK", False)
     assert _scope_filter("CA", "fr", "locale")["bool"]["filter"] == [
