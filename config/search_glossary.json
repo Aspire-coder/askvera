@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-13",
+  "version": "2026-08-11",
   "description": "Approved search glossary for converting user wording into policy-document wording. This file is data, not code; expand it as new reviewed wording gaps are found.",
   "entries": [
     {
@@ -74,6 +74,55 @@
         "Preferred Customer qualification",
         "Preferred Customer discount and status"
       ]
+    },
+    {
+      "id": "forever-preferred-customer-fpc",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["fpc", "f.p.c.", "forever preferred customer"],
+      "queries": ["Forever Preferred Customer definition", "Preferred Customer discount and status", "Preferred Customer qualification"]
+    },
+    {
+      "id": "forever-business-owner-fbo",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["fbo", "f.b.o.", "forever business owner"],
+      "queries": ["Forever Business Owner definition", "FBO registration and eligibility", "FBO rights and responsibilities"]
+    },
+    {
+      "id": "sponsor-change-and-responsoring",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["responsor", "re-sponsor", "change sponsor", "change sponsorship", "new sponsor", "sponsor change"],
+      "queries": ["sponsorship change and responsoring requirements", "change sponsor eligibility", "former FBO sponsor change"]
+    },
+    {
+      "id": "rank-qualification-and-status",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["recognized manager", "recognised manager", "unrecognized manager", "unrecognised manager", "assistant supervisor", "assistant manager", "supervisor"],
+      "queries": ["rank qualification requirements and Case Credits", "active status during rank qualification", "manager recognition and requalification"]
+    },
+    {
+      "id": "case-credit-activity-rules",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["personal case credit", "personal cc", "active case credits", "4 cc", "four cc", "operating company"],
+      "queries": ["Case Credit activity and Operating Company requirements", "personal Case Credits qualification", "active FBO requirements during qualification"]
+    },
+    {
+      "id": "bonus-qualification-rules",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["gem bonus", "leadership bonus", "personal retail bonus", "wholesale bonus", "bonus qualification"],
+      "queries": ["bonus qualification requirements", "Gem Bonus and Leadership Bonus rules", "bonus compensation plan definitions"]
+    },
+    {
+      "id": "order-and-payment-deadlines",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["order deadline", "last day to order", "orders must be placed", "bank transfer", "payment deadline"],
+      "queries": ["order submission deadline", "bank transfer payment deadline", "ordering and payment requirements"]
     }
   ]
 }

@@ -1600,11 +1600,12 @@ diagnosed as a retrieval failure.
 - source document content and metadata;
 - directory country and contact values.
 
-The repository still contains `OPENSEARCH_GLOSSARY_*` settings and a
-`search_glossary.json` file. The current OpenSearch provider does not read
-those settings or that file. Current query expansion comes from the multilingual
-query planner. Treat the glossary settings as inactive compatibility remnants,
-not as part of the live retrieval path.
+The OpenSearch provider supports the optional `OPENSEARCH_GLOSSARY_*` settings
+and reads `search_glossary.json` when `OPENSEARCH_GLOSSARY_ENABLED=true`.
+Glossary entries add approved terminology queries after the original user and
+planner queries; they do not contain answers or bypass locale/global filters.
+The flag remains `false` by default so existing UAT retrieval is unchanged until
+the expanded glossary is evaluated and explicitly enabled.
 
 ### Generic code rules
 

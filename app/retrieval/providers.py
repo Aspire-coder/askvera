@@ -13,6 +13,7 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from utils.logging import get_logger
 
+from .glossary import glossary_queries
 from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.providers")
@@ -363,9 +364,13 @@ def _planned_retrieval_plan(
 ) -> RetrievalQueryPlan:
     """Create multilingual search phrases and choose relevant document scopes."""
     base_queries = _retrieval_queries(message)
+    glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
         # Preserve directory availability when the planner is intentionally off.
-        return RetrievalQueryPlan(base_queries, include_global_documents=True)
+        return RetrievalQueryPlan(
+            [*base_queries, *glossary],
+            include_global_documents=True,
+        )
 
     system_prompt = (
         "You create search queries for a policy knowledge base. Do not answer the user. "
@@ -421,7 +426,13 @@ def _planned_retrieval_plan(
         ) = _parse_planned_query_plan(text)
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
-        return RetrievalQueryPlan(base_queries, include_global_documents=True)
+        # Keep approved terminology expansion even when the optional planner is
+        # unavailable. The original query remains first, and all normal locale
+        # and document-scope filters still apply downstream.
+        return RetrievalQueryPlan(
+            [*base_queries, *glossary],
+            include_global_documents=True,
+        )
 
     if conversation_intent == "assistant_meta":
         # Exact, reviewed phrases are already handled before retrieval. Do not let
@@ -446,7 +457,7 @@ def _planned_retrieval_plan(
         intent_confidence = 0.0
 
     merged: list[str] = []
-    for query in [message, *planned_queries, *base_queries[1:]]:
+    for query in [message, *planned_queries, *base_queries[1:], *glossary]:
         cleaned = re.sub(r"\s+", " ", query).strip()
         if cleaned and cleaned not in merged:
             merged.append(cleaned)
@@ -454,6 +465,7 @@ def _planned_retrieval_plan(
         "query_planner_success",
         correlation_id=correlation_id,
         planned_query_count=len(planned_queries),
+        glossary_query_count=len(glossary),
         query_count=len(merged),
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,
