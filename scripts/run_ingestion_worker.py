@@ -155,6 +155,7 @@ def process_message(message: dict[str, str]) -> bool:
                 logical_document_id=command.get("logicalDocumentId", ""),
                 document_owner=command.get("documentOwner", ""),
                 approval_reference=command.get("approvalReference", ""),
+                review_before_publish=command.get("reviewBeforePublish", "false").lower() == "true",
             )
     except RetryableIngestionError as exc:
         release_ingestion_claim(job_id, str(exc), retryable=True)

@@ -14,6 +14,8 @@ import type {
   AdminUser,
   AnalyticsOverview,
   IngestionJob,
+  IngestionPreview,
+  IngestionPreviewTest,
   Interaction,
   PipelineTrace,
   ShadowReport,
@@ -74,8 +76,21 @@ export class AdminApi {
     return this.request<ShadowReport>(`/api/admin/analytics/retrieval-shadow?${filters}`);
   }
   ingestions() { return this.request<IngestionJob[]>("/api/admin/ingestions?limit=50"); }
+  ingestionPreview(jobId: string, limit = 12) {
+    return this.request<IngestionPreview>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/preview?limit=${limit}`);
+  }
+  testIngestionPreview(jobId: string, message: string) {
+    return this.request<IngestionPreviewTest>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/preview-test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message })
+    });
+  }
+  publishIngestion(jobId: string) {
+    return this.request<{ job: IngestionJob; publishedCount: number }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/publish`, { method: "POST" });
+  }
   upload(formData: FormData, signal?: AbortSignal) {
-    return this.request<{ jobId: string; filename: string; status: string; message: string }>("/api/admin/documents", {
+    return this.request<{ jobId: string; filename: string; detectedFormat?: { format?: string; media_type?: string }; status: string; message: string }>("/api/admin/documents", {
       method: "POST",
       body: formData,
       signal

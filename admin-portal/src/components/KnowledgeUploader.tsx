@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
-import type { AdminConfig, IngestionJob } from "../types";
+import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest } from "../types";
 
 const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
-
 export function KnowledgeUploader({ credentials }: { credentials: AdminCredentials }) {
   const [config, setConfig] = useState<AdminConfig>(demo.config);
   const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
@@ -21,10 +20,19 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [logicalDocumentId, setLogicalDocumentId] = useState("");
   const [documentOwner, setDocumentOwner] = useState("");
   const [approvalReference, setApprovalReference] = useState("");
+  const [reviewBeforePublish, setReviewBeforePublish] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadController = useRef<AbortController | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [preview, setPreview] = useState<IngestionPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [testQuestion, setTestQuestion] = useState("");
+  const [testResult, setTestResult] = useState<IngestionPreviewTest | null>(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const [publishLoading, setPublishLoading] = useState(false);
 
   const refresh = async () => {
     const api = new AdminApi(credentials);
@@ -85,12 +93,14 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     formData.set("logical_document_id", logicalDocumentId);
     formData.set("document_owner", documentOwner);
     formData.set("approval_reference", approvalReference);
+    formData.set("review_before_publish", String(reviewBeforePublish));
     setSubmitting(true);
     setNotice("");
     uploadController.current = new AbortController();
     try {
       const result = await new AdminApi(credentials).upload(formData, uploadController.current.signal);
-      setNotice(`${result.filename} was verified and queued for extraction and indexing.`);
+      const detected = result.detectedFormat?.format ? ` Detected as ${readableType(result.detectedFormat.format)}.` : "";
+      setNotice(`${result.filename} was verified and queued for extraction and indexing.${detected}${reviewBeforePublish ? " It will stay out of live answers until you publish it." : ""}`);
       setFile(null);
       await refresh();
     } catch (error) {
@@ -102,6 +112,53 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   };
 
   const cancelUpload = () => uploadController.current?.abort();
+
+  const reviewableJobs = jobs.filter((job) => job.status === "ready_for_review");
+  const loadPreview = async (jobId: string) => {
+    setSelectedJobId(jobId);
+    setPreview(null);
+    setTestResult(null);
+    setPreviewError("");
+    if (!jobId || mode !== "live") return;
+    setPreviewLoading(true);
+    try {
+      const result = await new AdminApi(credentials).ingestionPreview(jobId, 12);
+      setPreview(result);
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "The document review could not be loaded.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const runPreviewTest = async () => {
+    if (!selectedJobId || !testQuestion.trim()) return;
+    setTestLoading(true);
+    try {
+      const result = await new AdminApi(credentials).testIngestionPreview(selectedJobId, testQuestion.trim());
+      setTestResult(result);
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "The staging test could not be completed.");
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
+  const publishReview = async () => {
+    if (!selectedJobId || !preview?.can_publish) return;
+    setPublishLoading(true);
+    try {
+      const result = await new AdminApi(credentials).publishIngestion(selectedJobId);
+      setNotice(`${result.publishedCount} chunks were published. The document is now available to approved retrieval.`);
+      setPreview(null);
+      setSelectedJobId("");
+      await refresh();
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "The document could not be published.");
+    } finally {
+      setPublishLoading(false);
+    }
+  };
 
   return (
     <section className="page-section" aria-labelledby="knowledge-title">
@@ -144,7 +201,8 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder="e.g. US-company-policy" /></div>
             <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
             <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>
-            <div className="form-field upload-action"><span className="helper">Files are checked before queueing. If the connection stops, the job is not activated until processing completes.</span>{submitting ? <button className="button secondary" onClick={cancelUpload}>Cancel upload</button> : <button className="button primary" disabled={!file} onClick={() => void upload()}>Upload and index</button>}</div>
+            <label className="review-toggle"><input type="checkbox" checked={reviewBeforePublish} onChange={(event) => setReviewBeforePublish(event.target.checked)} /><span><strong>Review chunks before publishing</strong><small>Keep this document out of live answers until you test and approve it.</small></span></label>
+            <div className="form-field upload-action"><span className="helper">Files are checked before queueing. If the connection stops, the job is not activated until processing completes.</span>{submitting ? <button className="button secondary" onClick={cancelUpload}>Cancel upload</button> : <button className="button primary" disabled={!file} onClick={() => void upload()}>{reviewBeforePublish ? "Upload for review" : "Upload and index"}</button>}</div>
           </div>
           {notice ? <div className="notice" role="status">{notice}</div> : null}
         </div>
@@ -161,6 +219,22 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
         </aside>
       </div>
 
+      <section className="review-panel surface" aria-labelledby="review-title">
+        <div className="section-heading"><div><span className="eyebrow">Staging workspace</span><h2 id="review-title">Review before publish</h2><p>Check the extracted chunks and try a question before a document can affect customer answers.</p></div><span className="review-safety">Staging only</span></div>
+        {mode !== "live" ? <div className="review-empty">Connect the portal to load staging documents. Demo data never publishes anything.</div> : <>
+          <div className="review-toolbar"><label htmlFor="review-job">Document ready for review</label><select id="review-job" value={selectedJobId} onChange={(event) => void loadPreview(event.target.value)}><option value="">Select a reviewed document</option>{reviewableJobs.map((job) => <option key={job.job_id} value={job.job_id}>{job.filename} ({job.section_count} chunks)</option>)}</select><button className="button secondary" disabled={!selectedJobId || previewLoading} onClick={() => void loadPreview(selectedJobId)}><RefreshIcon /> Check document</button></div>
+          {previewLoading ? <div className="review-empty">Loading the extracted chunks...</div> : null}
+          {previewError ? <div className="notice error" role="alert">{previewError}</div> : null}
+          {preview ? <>
+            <div className="review-summary"><div className="review-stat"><strong>{preview.summary.chunk_count}</strong><span>chunks</span></div><div className="review-stat"><strong>{preview.summary.page_count}</strong><span>pages found</span></div><div className="review-stat"><strong>{preview.summary.average_chars}</strong><span>average characters</span></div><div className="review-stat"><strong>{preview.summary.largest_chars}</strong><span>largest chunk</span></div></div>
+            {preview.summary.warnings.length ? <div className="review-warnings"><strong>Review notes</strong>{preview.summary.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : <div className="review-good"><CheckIcon /> No chunk quality warnings in this document.</div>}
+            <div className="review-chunk-list">{preview.chunks.map((chunk) => <article className="review-chunk" key={chunk.id}><div className="review-chunk-meta"><strong>{chunk.sectionId || "Content block"}</strong><span>{chunk.title || "Untitled"}</span><span>{chunk.page ? `Page ${chunk.page}${chunk.endPage && chunk.endPage !== chunk.page ? `-${chunk.endPage}` : ""}` : "Page not detected"}</span></div><div className="review-chunk-content">{chunk.content || "No readable text found."}</div></article>)}</div>
+            <div className="review-test"><div><strong>Test a question against this document</strong><span>Searches only this staged document.</span></div><div className="review-test-row"><input value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} placeholder="e.g. What are the qualification requirements?" onKeyDown={(event) => { if (event.key === "Enter") void runPreviewTest(); }} /><button className="button secondary" disabled={testLoading || !testQuestion.trim()} onClick={() => void runPreviewTest()}>{testLoading ? "Testing..." : "Test question"}</button></div>{testResult ? <div className="review-results"><strong>{testResult.matchCount} matching chunks</strong>{testResult.matches.map((match) => <div className="review-result" key={`${match.sectionId}-${match.page}`}><b>{match.title || match.sectionId}</b><span>Page {match.page || "-"} · score {Number(match.score || 0).toFixed(2)}</span><p>{match.excerpt}</p></div>)}</div> : null}</div>
+            <div className="review-publish"><span>{preview.can_publish ? "The full staged document is ready." : "The document is not complete enough to publish."}</span><button className="button primary" disabled={!preview.can_publish || publishLoading} onClick={() => void publishReview()}>{publishLoading ? "Publishing..." : "Publish approved document"}</button></div>
+          </> : <div className="review-empty">{reviewableJobs.length ? "Select a document to inspect its chunks." : "Upload a document with review enabled to see it here."}</div>}
+        </>}
+      </section>
+
       <div className="jobs-section">
         <div className="section-heading"><div><h2>Document activity</h2><p>Recent ingestion jobs and indexing progress.</p></div><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
         <div className="jobs-table surface">
@@ -169,7 +243,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <span className="document-cell"><FileIcon /><span><strong>{job.filename}</strong><small>{job.document_version || "No version"}</small></span></span>
             <span>{job.access_scope === "global" ? "Global" : `${job.country} · ${job.language.toUpperCase()}`}</span>
             <span>{readableType(job.document_type)}</span>
-            <span><span className={`status-label ${job.status}`}>{job.status}</span>{job.status !== "ready" && job.status !== "failed" ? <span className="mini-progress"><i style={{ width: `${job.progress}%` }} /></span> : null}</span>
+            <span><span className={`status-label ${job.status}`}>{job.status}</span>{job.status !== "ready" && job.status !== "failed" ? <span className="mini-progress"><i style={{ width: `${job.progress}%` }} /></span> : null}{job.status === "failed" && job.error_message ? <small className="job-error">{job.error_message}</small> : null}</span>
             <span>{job.section_count || "—"}</span>
           </div>)}
         </div>

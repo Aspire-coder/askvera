@@ -1,4 +1,4 @@
-export type View = "flow" | "knowledge" | "insights" | "support" | "users" | "widget";
+export type View = "overview" | "flow" | "knowledge" | "insights" | "support" | "users" | "widget";
 
 export type TraceStage = {
   stage: string;
@@ -112,9 +112,47 @@ export type IngestionJob = {
   logical_document_id?: string;
   document_owner?: string;
   approval_reference?: string;
+  review_before_publish?: boolean;
   error_message: string;
   created_at: string;
   updated_at: string;
+};
+
+export type IngestionChunkPreview = {
+  id: string;
+  sectionId: string;
+  title: string;
+  page: string;
+  endPage: string;
+  content: string;
+  sourceFile: string;
+  country: string;
+  language: string;
+};
+
+export type IngestionPreview = {
+  job: IngestionJob;
+  summary: {
+    chunk_count: number;
+    preview_count: number;
+    page_count: number;
+    pages: string[];
+    average_chars: number;
+    largest_chars: number;
+    empty_chunks: number;
+    oversized_chunks: number;
+    duplicate_chunks: number;
+    warnings: string[];
+  };
+  chunks: IngestionChunkPreview[];
+  can_publish: boolean;
+};
+
+export type IngestionPreviewTest = {
+  job: IngestionJob;
+  message: string;
+  matches: Array<{ score: number; sectionId: string; title: string; page: string; excerpt: string }>;
+  matchCount: number;
 };
 
 export type AnalyticsOverview = {

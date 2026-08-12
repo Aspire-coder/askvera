@@ -250,7 +250,7 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
             )
             status_row = {**status_row, "status": "failed_terminal"}
     status = status_row["status"] if status_row else None
-    if status in {"ready", "completed"}:
+    if status in {"ready", "ready_for_review", "completed"}:
         return "completed"
     if status in {"failed_terminal", "dead_lettered", "cancelled"}:
         return "terminal"
@@ -273,6 +273,7 @@ def create_ingestion_job(
     logical_document_id: str = "",
     document_owner: str = "",
     approval_reference: str = "",
+    review_before_publish: bool = False,
 ) -> str:
     job_id = uuid.uuid4().hex
     with get_engine().begin() as connection:
@@ -283,12 +284,14 @@ def create_ingestion_job(
                     job_id, filename, country, language, document_type,
                     access_scope, document_version, content_hash, accepted_by,
                     logical_document_id, document_owner, approval_reference,
+                    review_before_publish,
                     effective_date, status,
                     created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :country, :language, :document_type,
                     :access_scope, :document_version, :content_hash, :accepted_by,
                     :logical_document_id, :document_owner, :approval_reference,
+                    :review_before_publish,
                     NULLIF(:effective_date, '')::date, 'queued',
                     now(), now()
                 )
@@ -307,6 +310,7 @@ def create_ingestion_job(
                 "logical_document_id": logical_document_id,
                 "document_owner": document_owner,
                 "approval_reference": approval_reference,
+                "review_before_publish": review_before_publish,
                 "effective_date": effective_date,
             },
         )
@@ -360,6 +364,7 @@ def enqueue_ingestion_job(
     logical_document_id: str = "",
     document_owner: str = "",
     approval_reference: str = "",
+    review_before_publish: bool = False,
 ) -> None:
     """Place a compact, non-document ingestion command on SQS."""
     if not settings.ADMIN_INGESTION_QUEUE_URL:
@@ -383,6 +388,7 @@ def enqueue_ingestion_job(
                 "logicalDocumentId": logical_document_id,
                 "documentOwner": document_owner,
                 "approvalReference": approval_reference,
+                "reviewBeforePublish": review_before_publish,
             },
             separators=(",", ":"),
         ),
@@ -421,6 +427,7 @@ def process_ingestion_job(
     logical_document_id: str = "",
     document_owner: str = "",
     approval_reference: str = "",
+    review_before_publish: bool = False,
 ) -> bool:
     """Extract, embed, index, and activate one approved document."""
     path = Path(local_path)
@@ -495,27 +502,29 @@ def process_ingestion_job(
             ingestion_id=job_id,
             logical_document_id=stable_document_id,
             activated_by=accepted_by,
+            review_before_publish=review_before_publish,
         )
-        _record_document(
-            job_id=job_id,
-            filename=filename,
-            source_uri=source_uri,
-            country=country,
-            language=language,
-            document_type=document_type,
-            access_scope=access_scope,
-            version=version,
-            section_count=indexed,
-            content_hash=_file_hash(path),
-            accepted_by=accepted_by,
-            logical_document_id=stable_document_id,
-            document_owner=document_owner,
-            approval_reference=approval_reference,
-            effective_date=effective_date,
-        )
+        if not review_before_publish:
+            _record_document(
+                job_id=job_id,
+                filename=filename,
+                source_uri=source_uri,
+                country=country,
+                language=language,
+                document_type=document_type,
+                access_scope=access_scope,
+                version=version,
+                section_count=indexed,
+                content_hash=_file_hash(path),
+                accepted_by=accepted_by,
+                logical_document_id=stable_document_id,
+                document_owner=document_owner,
+                approval_reference=approval_reference,
+                effective_date=effective_date,
+            )
         _update_job(
             job_id,
-            status="ready",
+            status="ready_for_review" if review_before_publish else "ready",
             progress=100,
             section_count=indexed,
             source_uri=source_uri,
@@ -774,13 +783,15 @@ def _index_sections(
     ingestion_id: str,
     logical_document_id: str = "",
     activated_by: str = "",
+    review_before_publish: bool = False,
 ) -> int:
     client = _client()
     index = settings.OPENSEARCH_INDEX
     if not client.indices.exists(index=index):
         client.indices.create(index=index, body=_index_body())
     source_prefix = source_uri.rsplit("/", 1)[0] if source_uri else ""
-    publish_status = "staging" if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED else "active"
+    keep_staged = review_before_publish or settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED
+    publish_status = "staging" if keep_staged else "active"
     new_actions = list(
         _actions(
             sections,
@@ -803,7 +814,7 @@ def _index_sections(
     for action in new_actions:
         action["_source"]["logical_document_id"] = stable_document_id
         action["_source"].setdefault("metadata", {})["logical_document_id"] = stable_document_id
-    if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED:
+    if keep_staged:
         for action in new_actions:
             action["_id"] = action["_source"]["id"]
     success, errors = helpers.bulk(
@@ -813,7 +824,7 @@ def _index_sections(
     )
     if errors:
         raise RuntimeError(f"OpenSearch rejected {len(errors)} chunks.")
-    if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED:
+    if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED and not review_before_publish:
         _activate_staged_sections(
             client,
             index=index,
@@ -821,7 +832,7 @@ def _index_sections(
             expected_count=len(sections),
             ingestion_id=ingestion_id,
         )
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED and not review_before_publish:
         _activate_generation_pointer(
             logical_document_id=stable_document_id,
             ingestion_id=ingestion_id,
@@ -833,7 +844,7 @@ def _index_sections(
             activated_by=activated_by,
         )
     identity = (sections[0]["country"], sections[0]["language"], sections[0]["source_file"])
-    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED and not review_before_publish:
         delete_actions = _older_source_actions(
             client,
             index=index,
@@ -1039,6 +1050,8 @@ def _update_job(job_id: str, **values: Any) -> None:
         "lease_owner",
         "lease_expires_at",
         "completed_at",
+        "accepted_by",
+        "review_before_publish",
     }
     updates = {key: value for key, value in values.items() if key in allowed}
     if not updates:
@@ -1103,7 +1116,7 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
                 SELECT job_id, filename, country, language, document_type,
                        access_scope, document_version, status, progress,
                        section_count, source_uri, upload_uri, content_hash,
-                       accepted_by, logical_document_id, document_owner,
+                       accepted_by, review_before_publish, logical_document_id, document_owner,
                        approval_reference, attempt_count, error_message,
                        created_at, updated_at
                 FROM ingestion_jobs ORDER BY created_at DESC LIMIT :limit
@@ -1116,6 +1129,204 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
             **dict(row),
             "created_at": row["created_at"].isoformat() if row["created_at"] else "",
             "updated_at": row["updated_at"].isoformat() if row["updated_at"] else "",
+            "review_before_publish": bool(row.get("review_before_publish", False)),
         }
         for row in rows
     ]
+
+
+def summarize_ingestion_chunks(
+    chunks: list[dict[str, Any]],
+    total_count: int,
+    *,
+    max_chunk_chars: int = 8_000,
+) -> dict[str, Any]:
+    """Return review-safe chunk quality signals without exposing full content."""
+    lengths = [len(str(chunk.get("content") or "")) for chunk in chunks]
+    hashes = [
+        hashlib.sha256(str(chunk.get("content") or "").encode("utf-8")).hexdigest()
+        for chunk in chunks
+        if str(chunk.get("content") or "").strip()
+    ]
+    duplicate_count = len(hashes) - len(set(hashes))
+    empty_count = sum(length == 0 for length in lengths)
+    oversized_count = sum(length > max_chunk_chars for length in lengths)
+    warnings: list[str] = []
+    if int(total_count) != len(chunks):
+        warnings.append(f"Preview shows {len(chunks)} of {total_count} chunks.")
+    if empty_count:
+        warnings.append(f"{empty_count} chunk(s) contain no readable text.")
+    if duplicate_count:
+        warnings.append(f"{duplicate_count} duplicate chunk(s) detected in the preview.")
+    if oversized_count:
+        warnings.append(f"{oversized_count} chunk(s) exceed the {max_chunk_chars:,}-character review limit.")
+    return {
+        "chunk_count": int(total_count),
+        "preview_count": len(chunks),
+        "page_count": len({str(chunk.get("page") or "") for chunk in chunks if chunk.get("page")}),
+        "pages": sorted({str(chunk.get("page") or "") for chunk in chunks if chunk.get("page")}),
+        "average_chars": round(sum(lengths) / len(lengths)) if lengths else 0,
+        "largest_chars": max(lengths, default=0),
+        "empty_chunks": empty_count,
+        "oversized_chunks": oversized_count,
+        "duplicate_chunks": duplicate_count,
+        "warnings": warnings,
+    }
+
+
+def _ingestion_job(job_id: str) -> dict[str, Any]:
+    jobs = list_ingestion_jobs(200)
+    for job in jobs:
+        if job.get("job_id") == job_id:
+            return job
+    raise KeyError(job_id)
+
+
+def _staging_documents(job_id: str, *, limit: int = 20) -> tuple[int, list[dict[str, Any]]]:
+    client = _client()
+    index = settings.OPENSEARCH_INDEX
+    filters = [
+        exact_term_query("ingestion_id", job_id),
+        {"term": {"status": "staging"}},
+    ]
+    count = int(client.count(index=index, body={"query": {"bool": {"filter": filters}}}).get("count", 0))
+    result = client.search(
+        index=index,
+        body={
+            "size": max(1, min(int(limit), 10_000)),
+            "sort": [
+                {"start_page": {"order": "asc", "unmapped_type": "integer"}},
+                {"_id": {"order": "asc"}},
+            ],
+            "query": {"bool": {"filter": filters}},
+        },
+    )
+    documents = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = dict(hit.get("_source") or {})
+        documents.append({
+            "id": hit.get("_id", ""),
+            "sectionId": source.get("section_id", ""),
+            "title": source.get("section_title") or source.get("title") or "",
+            "page": source.get("page") or source.get("start_page") or "",
+            "endPage": source.get("end_page") or "",
+            "content": source.get("content", ""),
+            "sourceFile": source.get("source_file", ""),
+            "country": source.get("country", ""),
+            "language": source.get("language", ""),
+        })
+    return count, documents
+
+
+def preview_ingestion_job(job_id: str, *, limit: int = 20) -> dict[str, Any]:
+    job = _ingestion_job(job_id)
+    count, all_chunks = _staging_documents(job_id, limit=10000)
+    chunks = all_chunks[: max(1, min(int(limit), 100))]
+    summary = summarize_ingestion_chunks(all_chunks, count)
+    if job.get("status") != "ready_for_review":
+        return {"job": job, "summary": summary, "chunks": chunks, "can_publish": False}
+    return {
+        "job": job,
+        "summary": summary,
+        "chunks": chunks,
+        "can_publish": count == int(job.get("section_count") or 0) and count > 0,
+    }
+
+
+def test_ingestion_job(job_id: str, message: str, *, limit: int = 5) -> dict[str, Any]:
+    job = _ingestion_job(job_id)
+    if job.get("status") != "ready_for_review":
+        raise ValueError("This document is not ready for staging review.")
+    client = _client()
+    filters = [exact_term_query("ingestion_id", job_id), {"term": {"status": "staging"}}]
+    result = client.search(
+        index=settings.OPENSEARCH_INDEX,
+        body={
+            "size": max(1, min(int(limit), 10)),
+            "query": {"bool": {"filter": filters, "must": [{"query_string": {
+                "query": message,
+                "fields": ["content", "search_text", "section_title"],
+            }}]}},
+        },
+    )
+    matches = []
+    for hit in result.get("hits", {}).get("hits", []):
+        source = dict(hit.get("_source") or {})
+        matches.append({
+            "score": hit.get("_score", 0),
+            "sectionId": source.get("section_id", ""),
+            "title": source.get("section_title") or source.get("title") or "",
+            "page": source.get("page") or source.get("start_page") or "",
+            "excerpt": str(source.get("content") or "")[:1200],
+        })
+    return {"job": job, "message": message, "matches": matches, "matchCount": len(matches)}
+
+
+def publish_ingestion_job(job_id: str, *, accepted_by: str) -> dict[str, Any]:
+    job = _ingestion_job(job_id)
+    if job.get("status") != "ready_for_review":
+        raise ValueError("Only documents marked ready for review can be published.")
+    count, documents = _staging_documents(job_id, limit=10000)
+    expected = int(job.get("section_count") or 0)
+    if count != expected or not documents:
+        raise ValueError(f"Staged publication verification failed: expected {expected}, found {count}.")
+    client = _client()
+    actions = [{"_id": document["id"]} for document in documents]
+    _activate_staged_sections(
+        client,
+        index=settings.OPENSEARCH_INDEX,
+        actions=actions,
+        expected_count=expected,
+        ingestion_id=job_id,
+    )
+    first = documents[0]
+    logical_document_id = str(job.get("logical_document_id") or build_logical_document_id(
+        logical_document_id="",
+        country=str(first.get("country") or job.get("country") or ""),
+        language=str(first.get("language") or job.get("language") or ""),
+        document_type=str(job.get("document_type") or "policy"),
+        access_scope=str(job.get("access_scope") or "country"),
+        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+    ))
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        _activate_generation_pointer(
+            logical_document_id=logical_document_id,
+            ingestion_id=job_id,
+            country=str(job.get("country") or first.get("country") or ""),
+            language=str(job.get("language") or first.get("language") or ""),
+            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+            document_type=str(job.get("document_type") or "policy"),
+            access_scope=str(job.get("access_scope") or "country"),
+            activated_by=accepted_by,
+        )
+    else:
+        delete_actions = _older_source_actions(
+            client,
+            index=settings.OPENSEARCH_INDEX,
+            country=str(job.get("country") or first.get("country") or ""),
+            language=str(job.get("language") or first.get("language") or ""),
+            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+            ingestion_id=job_id,
+        )
+        if delete_actions:
+            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
+    _record_document(
+        job_id=job_id,
+        filename=str(job.get("filename") or "document"),
+        source_uri=str(job.get("source_uri") or ""),
+        country=str(job.get("country") or ""),
+        language=str(job.get("language") or ""),
+        document_type=str(job.get("document_type") or "policy"),
+        access_scope=str(job.get("access_scope") or "country"),
+        version=str(job.get("document_version") or ""),
+        section_count=count,
+        content_hash=str(job.get("content_hash") or ""),
+        accepted_by=accepted_by,
+        logical_document_id=logical_document_id,
+        document_owner=str(job.get("document_owner") or ""),
+        approval_reference=str(job.get("approval_reference") or ""),
+        effective_date="",
+    )
+    _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
+    clear_active_generation_cache()
+    return {"job": _ingestion_job(job_id), "publishedCount": count}

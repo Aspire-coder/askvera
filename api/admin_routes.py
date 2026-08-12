@@ -47,7 +47,10 @@ from services.knowledge_ingestion import (
     fail_ingestion_job,
     list_ingestion_jobs,
     process_ingestion_job,
+    preview_ingestion_job,
+    publish_ingestion_job,
     stage_ingestion_upload,
+    test_ingestion_job,
     cleanup_staged_ingestion_upload,
     detect_upload_format,
     safe_filename,
@@ -443,6 +446,57 @@ def ingestions(request: Request, limit: int = 50) -> dict[str, Any]:
     return _payload(visible[: max(1, min(limit, 200))], request)
 
 
+class IngestionPreviewTestRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    limit: int = Field(default=5, ge=1, le=10)
+
+
+@admin_router.get("/ingestions/{job_id}/preview")
+def ingestion_preview(job_id: str, request: Request, limit: int = 20) -> dict[str, Any]:
+    require_admin_access(request, "knowledge", "view")
+    try:
+        preview = preview_ingestion_job(job_id, limit=limit)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    require_admin_access(request, "knowledge", "view", str(preview["job"].get("country") or ""))
+    return _payload(preview, request)
+
+
+@admin_router.post("/ingestions/{job_id}/preview-test")
+def ingestion_preview_test(
+    job_id: str,
+    body: IngestionPreviewTestRequest,
+    request: Request,
+) -> dict[str, Any]:
+    require_admin_access(request, "knowledge", "view")
+    try:
+        preview = preview_ingestion_job(job_id, limit=1)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    require_admin_access(request, "knowledge", "view", str(preview["job"].get("country") or ""))
+    try:
+        result = test_ingestion_job(job_id, body.message, limit=body.limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _payload(result, request)
+
+
+@admin_router.post("/ingestions/{job_id}/publish")
+def publish_ingestion(job_id: str, request: Request) -> dict[str, Any]:
+    principal = require_admin_access(request, "knowledge", "stage")
+    try:
+        preview = preview_ingestion_job(job_id, limit=1)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    require_admin_access(request, "knowledge", "stage", str(preview["job"].get("country") or ""))
+    accepted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
+    try:
+        result = publish_ingestion_job(job_id, accepted_by=accepted_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _payload(result, request)
+
+
 @admin_router.post("/documents")
 async def upload_document(
     request: Request,
@@ -457,6 +511,7 @@ async def upload_document(
     logical_document_id: Annotated[str, Form()] = "",
     document_owner: Annotated[str, Form()] = "",
     approval_reference: Annotated[str, Form()] = "",
+    review_before_publish: Annotated[bool, Form()] = False,
 ) -> dict[str, Any]:
     normalized_country = country.upper().strip()
     normalized_language = language.lower().strip()
@@ -514,6 +569,7 @@ async def upload_document(
         logical_document_id=logical_document_id.strip(),
         document_owner=document_owner.strip(),
         approval_reference=approval_reference.strip(),
+        review_before_publish=review_before_publish,
     )
     if settings.ADMIN_INGESTION_QUEUE_ENABLED:
         try:
@@ -533,6 +589,7 @@ async def upload_document(
                 logical_document_id=logical_document_id.strip(),
                 document_owner=document_owner.strip(),
                 approval_reference=approval_reference.strip(),
+                review_before_publish=review_before_publish,
             )
         except (ValueError, BotoCoreError, ClientError) as exc:
             if "upload_uri" in locals():
@@ -568,6 +625,7 @@ async def upload_document(
         logical_document_id=logical_document_id.strip(),
         document_owner=document_owner.strip(),
         approval_reference=approval_reference.strip(),
+        review_before_publish=review_before_publish,
     )
     return _payload(
         {

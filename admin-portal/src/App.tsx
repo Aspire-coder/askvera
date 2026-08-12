@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { AdminApi, demo, type AdminCredentials } from "./api";
 import { beginSignIn, cognitoConfigured, completeSignIn, demoAllowed, signOut, type AuthSession } from "./auth";
-import { AskVeraMark, ChartIcon, FlowIcon, KeyIcon, UploadIcon } from "./icons";
+import { AskVeraMark, ChartIcon, FlowIcon, HomeIcon, KeyIcon, UploadIcon } from "./icons";
 import { FlowVisualizer } from "./components/FlowVisualizer";
 import { InsightsDashboard } from "./components/InsightsDashboard";
 import { KnowledgeUploader } from "./components/KnowledgeUploader";
+import { OperationsOverview } from "./components/OperationsOverview";
 import { SupportRoutesManager } from "./components/SupportRoutesManager";
 import { UsersManager } from "./components/UsersManager";
 import { WidgetManager } from "./components/WidgetManager";
 import type { AdminConfig, View } from "./types";
 
 const nav = [
+  { id: "overview" as const, label: "Overview", detail: "Run the operation", icon: <HomeIcon /> },
   { id: "flow" as const, label: "Live flow", detail: "Follow an answer", icon: <FlowIcon /> },
   { id: "knowledge" as const, label: "Knowledge", detail: "Manage approved content", icon: <UploadIcon /> },
   { id: "insights" as const, label: "Insights", detail: "Measure and improve", icon: <ChartIcon /> },
@@ -20,7 +22,7 @@ const nav = [
 ];
 
 export function App() {
-  const [view, setView] = useState<View>("flow");
+  const [view, setView] = useState<View>("overview");
   const [session, setSession] = useState<AuthSession | null>(null);
   const [authReady, setAuthReady] = useState(!cognitoConfigured);
   const [authError, setAuthError] = useState("");
@@ -47,6 +49,7 @@ export function App() {
 
   const credentials: AdminCredentials = session ? { accessToken: session.accessToken } : { apiKey };
   const canView = (section: View) => {
+    if (section === "overview") return true;
     if (section === "users" && !adminConfig.userManagementEnabled) return false;
     if (section === "widget" && !adminConfig.widgetConfigEnabled) return false;
     if (!adminConfig.rbacEnabled || adminConfig.principal?.role === "super_admin") return true;
@@ -96,6 +99,7 @@ export function App() {
 
       <main className="main-content">
         <header className="mobile-header"><div className="brand"><div className="brand-mark"><AskVeraMark /></div><strong>AskVera Operations</strong></div><button onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /></button></header>
+        {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={setView} /> : null}
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
         {view === "insights" ? <InsightsDashboard credentials={credentials} /> : null}

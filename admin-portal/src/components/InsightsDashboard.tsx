@@ -57,6 +57,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId
     ? interactions.find((item) => item.correlation_id === selectedId) || null
@@ -145,6 +146,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
 
   const exportInteractions = async () => {
     setExporting(true);
+    setExportError("");
     try {
       const filters = new URLSearchParams({ days, feedback, limit: "5000" });
       if (startAt) filters.set("start", new Date(startAt).toISOString());
@@ -160,7 +162,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      setQuery(error instanceof Error ? error.message : "Export failed.");
+      setExportError(error instanceof Error ? error.message : "Export failed.");
     } finally {
       setExporting(false);
     }
@@ -306,6 +308,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
 
       <div className="review-section">
         <div className="section-heading"><div><h2>Answer review</h2><p>Open low-rated answers to see where retrieval or content can improve.</p></div><div className="review-controls"><label className="search-field"><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions" /></label><select value={feedback} onChange={(event) => setFeedback(event.target.value)}><option value="not_helpful">Not helpful</option><option value="helpful">Helpful</option><option value="all">All answers</option></select><button className="button secondary" disabled={exporting} onClick={() => void exportInteractions()}>{exporting ? "Preparing..." : "Export Excel"}</button></div></div>
+        {exportError ? <div className="notice error export-error" role="alert">{exportError}</div> : null}
         <div className="review-list surface">
           {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelectedId(item.correlation_id)}>
             <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>

@@ -6,6 +6,7 @@ const Icon = ({ size = 18, children }: IconProps) => (
 );
 
 export const FlowIcon = () => <Icon><path d="M4 6h5a3 3 0 0 1 3 3v6a3 3 0 0 0 3 3h5"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="18" r="2"/><circle cx="12" cy="12" r="2"/></Icon>;
+export const HomeIcon = () => <Icon><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-7h6v7"/></Icon>;
 export const UploadIcon = () => <Icon><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/></Icon>;
 export const ChartIcon = () => <Icon><path d="M4 20V10m6 10V4m6 16v-7m4 7H2"/></Icon>;
 export const KeyIcon = () => <Icon><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8m-3 3 2 2"/></Icon>;

@@ -386,6 +386,7 @@ def create_schema(correlation_id: str = "startup") -> None:
                         upload_uri TEXT NOT NULL DEFAULT '',
                         content_hash TEXT NOT NULL DEFAULT '',
                         accepted_by TEXT NOT NULL DEFAULT '',
+                        review_before_publish BOOLEAN NOT NULL DEFAULT false,
                         attempt_count INTEGER NOT NULL DEFAULT 0,
                         error_message TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -397,6 +398,7 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS upload_uri TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS accepted_by TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS review_before_publish BOOLEAN NOT NULL DEFAULT false"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS logical_document_id TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS document_owner TEXT NOT NULL DEFAULT ''"))
