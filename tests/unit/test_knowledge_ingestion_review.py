@@ -15,7 +15,9 @@ def test_chunk_review_reports_quality_signals_and_preview_limits():
     assert summary["preview_count"] == 4
     assert summary["page_count"] == 4
     assert summary["empty_chunks"] == 1
-    assert summary["oversized_chunks"] == 1
+    # Both repeated manager chunks and the final sample exceed the 10-character
+    # review limit, so all three visible oversized chunks must be reported.
+    assert summary["oversized_chunks"] == 3
     assert summary["duplicate_chunks"] == 1
     assert any("Preview shows 4 of 6" in warning for warning in summary["warnings"])
     assert any("duplicate" in warning for warning in summary["warnings"])
