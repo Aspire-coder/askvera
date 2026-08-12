@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import unicodedata
 from functools import lru_cache
 from typing import Any
@@ -221,6 +222,41 @@ def _text_query(message: str, country: str, language: str, *, scope: str = "loca
                     {"match_phrase": {"content": {"query": message, "boost": 2}}},
                 ],
                 "minimum_should_match": 1,
+            }
+        },
+    }
+
+
+_SECTION_REFERENCE_RE = re.compile(
+    r"(?:\b(?:section|sec\.?)\s*|§\s*)([0-9]+(?:[.-][0-9]+)*(?:[.-]?[a-z])?)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_section_reference(value: str) -> str:
+    """Normalize common human-written section references to the indexed form."""
+    normalized = re.sub(r"\s+", "", value).replace("-", ".").lower()
+    return normalized.rstrip(".")
+
+
+def _section_reference(message: str) -> str | None:
+    """Extract an explicit policy section reference without guessing from prose."""
+    match = _SECTION_REFERENCE_RE.search(message or "")
+    return _normalize_section_reference(match.group(1)) if match else None
+
+
+def _exact_section_query(section_id: str, country: str, language: str) -> dict[str, Any]:
+    """Build a locale-isolated exact section lookup for explicit references only."""
+    return {
+        "size": settings.OPENSEARCH_CANDIDATE_COUNT,
+        "query": {
+            "bool": {
+                "filter": [
+                    _scope_filter(country, language, "locale"),
+                    {"term": {"status": "active"}},
+                    *_generation_filters(country, language, "locale"),
+                    exact_term_query("section_id", section_id),
+                ],
             }
         },
     }
@@ -476,6 +512,16 @@ class OpenSearchSectionProvider:
             global_search_message = ""
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
+            explicit_section_id = _section_reference(message)
+            if explicit_section_id:
+                exact_response = client.search(
+                    index=self.index_name,
+                    body=_exact_section_query(explicit_section_id, country, language),
+                )
+                text_hits.extend(
+                    {**hit, "_score": max(float(hit.get("_score") or 0.0), 100.0)}
+                    for hit in exact_response.get("hits", {}).get("hits", [])
+                )
             for index, search_message in enumerate(search_messages):
                 weight = 1.0 if index == 0 else 0.88
                 text_response = client.search(
@@ -548,6 +594,7 @@ class OpenSearchSectionProvider:
                 "client_action": search_plan.client_action,
                 "conversation_intent": "knowledge",
                 "global_query_translated": bool(global_search_message) and global_search_message != message,
+                "explicit_section_reference": explicit_section_id,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
                     for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]

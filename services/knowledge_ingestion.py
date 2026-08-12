@@ -1142,14 +1142,17 @@ def summarize_ingestion_chunks(
     max_chunk_chars: int = 8_000,
 ) -> dict[str, Any]:
     """Return review-safe chunk quality signals without exposing full content."""
-    lengths = [len(str(chunk.get("content") or "")) for chunk in chunks]
+    # The API intentionally receives only a preview. Never infer that chunks
+    # outside that preview are empty; their content has not been inspected.
+    contents = [str(chunk.get("content") or "") for chunk in chunks]
+    lengths = [len(content) for content in contents]
     hashes = [
-        hashlib.sha256(str(chunk.get("content") or "").encode("utf-8")).hexdigest()
-        for chunk in chunks
-        if str(chunk.get("content") or "").strip()
+        hashlib.sha256(content.encode("utf-8")).hexdigest()
+        for content in contents
+        if content.strip()
     ]
     duplicate_count = len(hashes) - len(set(hashes))
-    empty_count = sum(length == 0 for length in lengths)
+    empty_count = sum(not content.strip() for content in contents)
     oversized_count = sum(length > max_chunk_chars for length in lengths)
     warnings: list[str] = []
     if int(total_count) != len(chunks):

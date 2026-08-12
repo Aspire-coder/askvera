@@ -33,3 +33,14 @@ def test_chunk_review_is_clean_for_complete_unique_chunks():
     assert summary["warnings"] == []
     assert summary["empty_chunks"] == 0
     assert summary["duplicate_chunks"] == 0
+
+
+def test_chunk_review_does_not_infer_unseen_chunks_are_empty():
+    summary = summarize_ingestion_chunks(
+        [{"content": "Visible approved section", "page": "1"}],
+        total_count=3,
+    )
+
+    assert summary["preview_count"] == 1
+    assert summary["chunk_count"] == 3
+    assert summary["empty_chunks"] == 0

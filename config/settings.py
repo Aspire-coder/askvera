@@ -294,10 +294,9 @@ BEDROCK_EVIDENCE_SELECTOR_ENABLED = _env_bool("BEDROCK_EVIDENCE_SELECTOR_ENABLED
 BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 BEDROCK_FALLBACK_SOURCE_WEIGHT = 0.12
 BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
-# Retrieval backend. Keep "bedrock" as the default production path. Use
-# "section" only after loading reviewed policy sections into PostgreSQL and
-# validating retrieval quality with the test harness.
-RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "bedrock").lower()
+# Retrieval backend. The deployed and evaluated path is OpenSearch section
+# retrieval. A missing value must not silently route requests to a retired KB.
+RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "opensearch_section").lower()
 # Optional retrieval-vNext shadow evaluation. These defaults are deliberately
 # inert so deployments continue to use only the established UAT path until an
 # operator explicitly enables a separate-index comparison.

@@ -5,12 +5,14 @@ from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
     _directory_text_query,
+    _exact_section_query,
     _generation_filters,
     is_approved_source,
     _language_key,
     _outline_text_query,
     _selector_candidates,
     _scope_filter,
+    _section_reference,
 )
 from app.retrieval.providers import RetrievalQueryPlan
 from config import settings
@@ -36,6 +38,28 @@ def _hit(identifier: str, title: str, score: float) -> dict[str, object]:
 def test_language_key_normalizes_regional_language_tags() -> None:
     assert _language_key("fr-CA") == "fr"
     assert _language_key("PT-br") == "pt"
+
+
+def test_explicit_section_reference_is_normalized_without_guessing() -> None:
+    assert _section_reference("Please explain Section 4-01a.") == "4.01a"
+    assert _section_reference("What does §4.01a say?") == "4.01a"
+    assert _section_reference("What does the policy say about managers?") is None
+
+
+def test_exact_section_query_keeps_locale_and_active_filters() -> None:
+    filters = _exact_section_query("4.01a", "CA", "fr")["query"]["bool"]["filter"]
+
+    assert _scope_filter("CA", "fr", "locale") in filters
+    assert {"term": {"status": "active"}} in filters
+    assert {
+        "bool": {
+            "should": [
+                {"term": {"section_id": "4.01a"}},
+                {"term": {"section_id.keyword": "4.01a"}},
+            ],
+            "minimum_should_match": 1,
+        }
+    } in filters
 
 
 class SourceClient:
