@@ -14,6 +14,25 @@ from utils.logging import get_logger
 
 LOGGER = get_logger("app.retrieval.glossary")
 
+_MAX_ENTRIES = 500
+_MAX_TRIGGERS = 32
+_MAX_QUERIES = 16
+_MAX_TRIGGER_CHARS = 160
+_MAX_QUERY_CHARS = 300
+
+
+def _bounded_strings(value: Any, *, limit: int, max_chars: int) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    result: list[str] = []
+    for item in value[:limit]:
+        if not isinstance(item, str):
+            continue
+        cleaned = re.sub(r"\s+", " ", item).strip()
+        if cleaned and len(cleaned) <= max_chars and cleaned not in result:
+            result.append(cleaned)
+    return tuple(result)
+
 
 def _normalize(value: str) -> str:
     value = unicodedata.normalize("NFKC", value or "").casefold()
@@ -35,13 +54,26 @@ def _valid_entries(payload: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
         return ()
     entries: list[dict[str, Any]] = []
-    for entry in payload["entries"]:
+    for entry in payload["entries"][:_MAX_ENTRIES]:
         if not isinstance(entry, dict):
             continue
-        triggers = entry.get("triggers")
-        queries = entry.get("queries")
-        if isinstance(triggers, list) and isinstance(queries, list) and triggers and queries:
-            entries.append(entry)
+        triggers = _bounded_strings(
+            entry.get("triggers"), limit=_MAX_TRIGGERS, max_chars=_MAX_TRIGGER_CHARS
+        )
+        queries = _bounded_strings(
+            entry.get("queries"), limit=_MAX_QUERIES, max_chars=_MAX_QUERY_CHARS
+        )
+        countries = _bounded_strings(entry.get("country", ["*"]), limit=64, max_chars=16)
+        languages = _bounded_strings(entry.get("language", ["*"]), limit=64, max_chars=16)
+        if triggers and queries and countries and languages:
+            entries.append(
+                {
+                    "country": list(countries),
+                    "language": list(languages),
+                    "triggers": list(triggers),
+                    "queries": list(queries),
+                }
+            )
     return tuple(entries)
 
 

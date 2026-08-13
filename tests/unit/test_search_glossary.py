@@ -62,3 +62,36 @@ def test_glossary_respects_locale_metadata(tmp_path, monkeypatch):
 def test_glossary_is_inactive_by_default(monkeypatch):
     monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_ENABLED", False)
     assert glossary.glossary_queries("How do I change sponsor?", "US", "en") == []
+
+
+def test_glossary_skips_malformed_and_oversized_entries(tmp_path, monkeypatch):
+    path = tmp_path / "glossary.json"
+    path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "country": ["US"],
+                        "language": ["en"],
+                        "triggers": ["pc"],
+                        "queries": ["Preferred Customer definition"],
+                    },
+                    {
+                        "country": ["US"],
+                        "language": ["en"],
+                        "triggers": ["x" * 161],
+                        "queries": ["This entry must be ignored"],
+                    },
+                    "not-an-entry",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_PATH", str(path))
+    glossary.load_glossary.cache_clear()
+
+    assert glossary.glossary_queries("What does PC mean?", "US", "en") == [
+        "Preferred Customer definition"
+    ]

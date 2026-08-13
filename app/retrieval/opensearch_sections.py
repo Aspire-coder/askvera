@@ -629,6 +629,7 @@ class OpenSearchSectionProvider:
                 modelId=settings.BEDROCK_MODEL_ARN,
                 system=[{"text": system_prompt}],
                 messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+                inferenceConfig={"maxTokens": settings.BEDROCK_GLOBAL_TRANSLATION_MAX_OUTPUT_TOKENS},
             )
             translated = response["output"]["message"]["content"][0].get("text", "").strip()
         except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
@@ -754,6 +755,7 @@ class OpenSearchSectionProvider:
                 modelId=settings.BEDROCK_MODEL_ARN,
                 system=[{"text": system_prompt}],
                 messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+                inferenceConfig={"maxTokens": settings.OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS},
             )
             text = response["output"]["message"]["content"][0].get("text", "")
             ranks = _parse_selector_ranks(text)

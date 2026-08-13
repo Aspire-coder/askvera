@@ -346,6 +346,7 @@ def _verify_explicit_support_request(
             modelId=settings.BEDROCK_MODEL_ARN,
             system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_SUPPORT_ROUTE_MAX_OUTPUT_TOKENS},
         )
         text = response["output"]["message"]["content"][0].get("text", "")
         json_match = re.search(r"\{.*\}", text.strip(), flags=re.S)
@@ -413,6 +414,7 @@ def _planned_retrieval_plan(
             modelId=settings.BEDROCK_MODEL_ARN,
             system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_QUERY_PLANNER_MAX_OUTPUT_TOKENS},
         )
         text = response["output"]["message"]["content"][0].get("text", "")
         (
@@ -663,6 +665,7 @@ def _select_evidence_documents(
             modelId=settings.BEDROCK_MODEL_ARN,
             system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS},
         )
         text = response["output"]["message"]["content"][0].get("text", "")
         ranks = _parse_selector_ranks(text)

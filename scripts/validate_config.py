@@ -42,6 +42,25 @@ def _validate_shadow_retrieval(missing: list[str]) -> None:
             )
 
 
+def _validate_retrieval_experiments(missing: list[str]) -> None:
+    """Validate opt-in retrieval controls without enabling any of them."""
+    if settings.RETRIEVAL_RRF_K <= 0:
+        missing.append("RETRIEVAL_RRF_K (must be greater than 0)")
+    if settings.RETRIEVAL_MAX_RESULTS_PER_PARENT <= 0:
+        missing.append("RETRIEVAL_MAX_RESULTS_PER_PARENT (must be greater than 0)")
+    if settings.RETRIEVAL_NEIGHBOR_LIMIT < 0:
+        missing.append("RETRIEVAL_NEIGHBOR_LIMIT (must not be negative)")
+    for name in (
+        "RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE",
+        "RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP",
+    ):
+        value = getattr(settings, name)
+        if not 0.0 <= value <= 1.0:
+            missing.append(f"{name} (must be between 0 and 1)")
+    if settings.RETRIEVAL_PROMOTION_MAX_LATENCY_MS <= 0:
+        missing.append("RETRIEVAL_PROMOTION_MAX_LATENCY_MS (must be greater than 0)")
+
+
 def _validate_production_auth(missing: list[str]) -> None:
     for name in (
         "WIDGET_JWT_SECRET",
@@ -146,6 +165,7 @@ def validate(*, require_production: bool = False) -> list[str]:
         _require(missing, name)
 
     _validate_shadow_retrieval(missing)
+    _validate_retrieval_experiments(missing)
     if settings.APP_ENV == "production":
         _validate_production_auth(missing)
         _validate_production_integrations(missing)
