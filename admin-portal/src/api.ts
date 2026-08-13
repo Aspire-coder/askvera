@@ -17,6 +17,7 @@ import type {
   IngestionPreview,
   IngestionPreviewTest,
   Interaction,
+  MarketReadiness,
   PipelineTrace,
   ShadowReport,
   SupportRoute,
@@ -49,6 +50,7 @@ export class AdminApi {
   }
 
   config() { return this.request<AdminConfig>("/api/admin/config"); }
+  marketReadiness() { return this.request<MarketReadiness>("/api/admin/market-readiness"); }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
   interactions(filters: URLSearchParams) { return this.request<Interaction[]>(`/api/admin/analytics/interactions?${filters}`); }

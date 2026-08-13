@@ -65,6 +65,7 @@ from services.market_config import (
     get_widget_countries,
     get_widget_country_codes,
 )
+from services.market_readiness import build_market_readiness
 from services.support_routes import list_support_routes, upsert_support_route
 from services.aws_clients import get_aws_clients
 from services.widget_configs import (
@@ -199,6 +200,13 @@ def admin_config(request: Request) -> dict[str, Any]:
         },
         request,
     )
+
+
+@admin_router.get("/market-readiness")
+def market_readiness(request: Request) -> dict[str, Any]:
+    """Return market onboarding checks for the Operations portal."""
+    require_admin_access(request, "knowledge", "view")
+    return _payload(build_market_readiness(), request)
 
 
 @admin_router.get("/analytics/overview")

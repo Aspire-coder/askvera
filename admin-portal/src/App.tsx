@@ -5,6 +5,7 @@ import { AskVeraMark, ChartIcon, FlowIcon, HomeIcon, KeyIcon, UploadIcon } from 
 import { FlowVisualizer } from "./components/FlowVisualizer";
 import { InsightsDashboard } from "./components/InsightsDashboard";
 import { KnowledgeUploader } from "./components/KnowledgeUploader";
+import { MarketReadiness } from "./components/MarketReadiness";
 import { OperationsOverview } from "./components/OperationsOverview";
 import { SupportRoutesManager } from "./components/SupportRoutesManager";
 import { UsersManager } from "./components/UsersManager";
@@ -15,6 +16,7 @@ const nav = [
   { id: "overview" as const, label: "Overview", detail: "Run the operation", icon: <HomeIcon /> },
   { id: "flow" as const, label: "Live flow", detail: "Follow an answer", icon: <FlowIcon /> },
   { id: "knowledge" as const, label: "Knowledge", detail: "Manage approved content", icon: <UploadIcon /> },
+  { id: "readiness" as const, label: "Market readiness", detail: "Prepare and verify markets", icon: <ChartIcon /> },
   { id: "insights" as const, label: "Insights", detail: "Measure and improve", icon: <ChartIcon /> },
   { id: "support" as const, label: "Support", detail: "Route customer requests", icon: <FlowIcon /> },
   { id: "users" as const, label: "Users", detail: "Manage access", icon: <KeyIcon /> },
@@ -52,6 +54,7 @@ export function App() {
     if (section === "overview") return true;
     if (section === "users" && !adminConfig.userManagementEnabled) return false;
     if (section === "widget" && !adminConfig.widgetConfigEnabled) return false;
+    if (section === "readiness") return canView("knowledge");
     if (!adminConfig.rbacEnabled || adminConfig.principal?.role === "super_admin") return true;
     return Boolean(adminConfig.principal?.scopes.some((scope) => scope.section === section));
   };
@@ -102,6 +105,7 @@ export function App() {
         {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={setView} /> : null}
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
+        {view === "readiness" ? <MarketReadiness credentials={credentials} config={adminConfig} /> : null}
         {view === "insights" ? <InsightsDashboard credentials={credentials} /> : null}
         {view === "support" ? <SupportRoutesManager credentials={credentials} config={adminConfig} /> : null}
         {view === "users" ? <UsersManager credentials={credentials} config={adminConfig} /> : null}

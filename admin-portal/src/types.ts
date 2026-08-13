@@ -1,4 +1,4 @@
-export type View = "overview" | "flow" | "knowledge" | "insights" | "support" | "users" | "widget";
+export type View = "overview" | "flow" | "knowledge" | "readiness" | "insights" | "support" | "users" | "widget";
 
 export type TraceStage = {
   stage: string;
@@ -40,6 +40,31 @@ export type AdminConfig = {
 };
 
 export type AdminScope = { market: string; section: string; permission: string };
+
+export type ReadinessCheckStatus = "pass" | "warning" | "not_configured" | "not_verified";
+export type MarketReadinessCheck = {
+  key: string;
+  label: string;
+  status: ReadinessCheckStatus;
+  detail: string;
+};
+export type MarketReadinessLanguage = {
+  code: string;
+  name: string;
+  policy_published: boolean;
+};
+export type MarketReadinessMarket = {
+  code: string;
+  name: string;
+  overall: ReadinessCheckStatus;
+  languages: MarketReadinessLanguage[];
+  checks: MarketReadinessCheck[];
+};
+export type MarketReadiness = {
+  checked_at: string;
+  summary: { total: number; ready: number; needs_review: number; not_configured: number };
+  markets: MarketReadinessMarket[];
+};
 
 export type AdminUser = {
   id: string;
