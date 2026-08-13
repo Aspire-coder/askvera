@@ -7,7 +7,7 @@ from app.evidence import approve_evidence, assistant_meta_response, classify_int
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
 from services import controlled_copy
-from services.market_config import load_policy_locales
+from services.market_config import get_countries, load_policy_locales
 
 
 def test_routes_configured_english_greeting_without_retrieval() -> None:
@@ -55,7 +55,11 @@ def test_wellbeing_copy_exists_for_every_published_language() -> None:
     routes_path = Path(__file__).parents[2] / "config" / "conversation_routes.json"
     payload = json.loads(routes_path.read_text(encoding="utf-8"))
     locales = payload["locales"]
-    published_languages = set(load_policy_locales())
+    published_languages = {
+        language["code"]
+        for country in get_countries()
+        for language in country["languages"]
+    }
 
     assert published_languages <= locales.keys()
     for language in published_languages:
