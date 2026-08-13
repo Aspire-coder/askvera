@@ -33,6 +33,7 @@ from services.cache import (
     set_semantic_cache_value,
 )
 from services.consent_service import has_valid_consent
+from services.claim_safety import localized_claim_response
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -113,7 +114,9 @@ class AIOrchestrator:
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
         if not governance_decision.allowed:
-            return self._governance_fallback(governance_decision, correlation_id, body.language)
+            return self._governance_fallback(
+                governance_decision, correlation_id, body.language, body.country, body.message
+            )
 
         cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
         cached_response = self._cached_response(cache_key, body, correlation_id)
@@ -217,7 +220,9 @@ class AIOrchestrator:
         )
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
         if not governance_decision.allowed:
-            return self._governance_fallback(governance_decision, correlation_id, body.language)
+            return self._governance_fallback(
+                governance_decision, correlation_id, body.language, body.country, body.message
+            )
         append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
@@ -366,7 +371,9 @@ class AIOrchestrator:
                 role=body.role,
                 cache_type=cache_type,
             )
-            return self._governance_fallback(governance_decision, correlation_id, body.language)
+            return self._governance_fallback(
+                governance_decision, correlation_id, body.language, body.country, body.message
+            )
         return chat_response
 
     def _apply_evidence_contract(
@@ -502,9 +509,16 @@ class AIOrchestrator:
             correlation_id=correlation_id,
         )
 
-    def _governance_fallback(self, decision: GovernanceDecision, correlation_id: str, language: str = "en") -> ChatResponse:
+    def _governance_fallback(
+        self,
+        decision: GovernanceDecision,
+        correlation_id: str,
+        language: str = "en",
+        country: str = "",
+        message: str = "",
+    ) -> ChatResponse:
         """Return a safe fallback when governance blocks the request or response."""
-        user_message = self._governance_user_message(decision, language)
+        user_message = self._governance_user_message(decision, language, country, message)
         failure_layer = self._governance_failure_layer(decision)
         LOGGER.warning(
             "governance_fallback_response",
@@ -542,7 +556,13 @@ class AIOrchestrator:
             return "low_confidence"
         return "low_confidence"
 
-    def _governance_user_message(self, decision: GovernanceDecision, language: str = "en") -> str:
+    def _governance_user_message(
+        self,
+        decision: GovernanceDecision,
+        language: str = "en",
+        country: str = "",
+        message: str = "",
+    ) -> str:
         """Convert internal governance reasons into user-friendly copy."""
         risk_issues = (decision.metadata or {}).get("risk", {}).get("issues", [])
         issue_codes = {str(issue.get("code", "")).lower() for issue in risk_issues}
@@ -551,6 +571,9 @@ class AIOrchestrator:
         if guardrail_topic == "income_claim" or any("income" in code for code in issue_codes):
             return localized_conversation_response("income_claim", language) or FALLBACK_RESPONSES["income_claim"]
         if guardrail_topic == "medical_claim" or any("medical" in code or "health" in code for code in issue_codes):
+            claim_response, _ = localized_claim_response(message, "medical_claim", country, language)
+            if claim_response:
+                return claim_response
             return localized_conversation_response("medical_claim", language) or FALLBACK_RESPONSES["medical_claim"]
         if guardrail_topic == "off_topic":
             return localized_conversation_response("off_topic", language) or FALLBACK_RESPONSES["off_topic"]
@@ -651,7 +674,20 @@ class AIOrchestrator:
             else:
                 intent = "off_topic"
                 response_key = "off_topic"
-        elif intent in {"medical_claim", "income_claim", "off_topic"}:
+        elif intent == "medical_claim":
+            answer, claim_scope = localized_claim_response(body.message, intent, body.country, body.language)
+            if answer:
+                return self.response_builder.fallback(
+                    answer,
+                    correlation_id,
+                    metadata={
+                        "intent": claim_scope,
+                        "fallback": False,
+                        "response_source": "reviewed_claim_copy",
+                    },
+                )
+            response_key = intent
+        elif intent in {"income_claim", "off_topic"}:
             response_key = intent
         if not response_key:
             return None
