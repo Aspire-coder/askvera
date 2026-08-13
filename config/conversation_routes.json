@@ -4,6 +4,7 @@
   "locales": {
     "en": {
       "patterns": {
+        "wellbeing": ["how are you", "how are you doing", "are you doing well", "how is it going"],
         "greeting": [
           "hi",
           "hello",
@@ -24,6 +25,7 @@
         ]
       },
       "responses": {
+        "wellbeing": "I'm doing well, thank you for asking. I'm here to help with approved Forever Living company policies and information from the global office directory. What would you like to know?",
         "greeting": "Hello, I'm AskVera. How can I help with approved Forever Living company policies or information from the global office directory?",
         "thanks": "You're welcome. I'm here whenever you need another approved Forever Living answer.",
         "capability": "I'm AskVera, Forever Living's approved knowledge assistant. I can help find approved answers from Forever Living company policies and the global office directory.",
@@ -38,6 +40,7 @@
     },
     "fr": {
       "patterns": {
+        "wellbeing": ["comment allez vous", "comment vas tu", "ca va", "allez vous bien"],
         "greeting": [
           "bonjour",
           "salut",
@@ -55,6 +58,7 @@
         ]
       },
       "responses": {
+        "wellbeing": "Je vais bien, merci de le demander. Je suis là pour vous aider avec les politiques d'entreprise approuvées de Forever Living et les informations du répertoire mondial des bureaux. Que souhaitez-vous savoir ?",
         "greeting": "Bonjour, je suis AskVera. Comment puis-je vous aider avec les politiques d’entreprise approuvées de Forever Living ou les informations du répertoire mondial des bureaux?",
         "thanks": "Je vous en prie. Je suis là lorsque vous avez besoin d'une autre réponse approuvée de Forever Living.",
         "capability": "Je suis AskVera, l’assistante de connaissances approuvée de Forever Living. Je peux trouver des réponses approuvées dans les politiques d’entreprise de Forever Living et le répertoire mondial des bureaux.",
@@ -69,6 +73,7 @@
     },
     "es": {
       "patterns": {
+        "wellbeing": ["como estas", "como esta", "como te va", "estas bien"],
         "greeting": [
           "hola",
           "buenos dias",
@@ -86,6 +91,7 @@
         ]
       },
       "responses": {
+        "wellbeing": "Estoy bien, gracias por preguntar. Estoy aquí para ayudarte con las políticas empresariales aprobadas de Forever Living y la información del directorio mundial de oficinas. ¿Qué te gustaría saber?",
         "greeting": "Hola, soy AskVera. ¿Cómo puedo ayudarte con las políticas empresariales aprobadas de Forever Living o la información del directorio mundial de oficinas?",
         "thanks": "De nada. Estoy aquí cuando necesites otra respuesta aprobada de Forever Living.",
         "capability": "Soy AskVera, la asistente de conocimiento aprobado de Forever Living. Puedo encontrar respuestas aprobadas en las políticas empresariales de Forever Living y el directorio mundial de oficinas.",
@@ -100,6 +106,7 @@
     },
     "de": {
       "patterns": {
+        "wellbeing": ["wie geht es dir", "wie geht es ihnen", "wie gehts", "geht es dir gut"],
         "greeting": [
           "hallo",
           "guten morgen",
@@ -117,6 +124,7 @@
         ]
       },
       "responses": {
+        "wellbeing": "Mir geht es gut, danke der Nachfrage. Ich helfe Ihnen gern mit freigegebenen Unternehmensrichtlinien von Forever Living und Informationen aus dem weltweiten Büroverzeichnis. Was möchten Sie wissen?",
         "greeting": "Hallo, ich bin AskVera. Wie kann ich bei freigegebenen Unternehmensrichtlinien von Forever Living oder Informationen aus dem weltweiten Büroverzeichnis helfen?",
         "thanks": "Gern geschehen. Ich bin hier, wenn Sie eine weitere freigegebene Antwort von Forever Living benötigen.",
         "capability": "Ich bin AskVera, die freigegebene Wissensassistentin von Forever Living. Ich finde freigegebene Antworten in den Unternehmensrichtlinien von Forever Living und im weltweiten Büroverzeichnis.",
@@ -131,6 +139,7 @@
     },
     "nl": {
       "patterns": {
+        "wellbeing": ["hoe gaat het", "hoe gaat het met je", "gaat het goed met je"],
         "greeting": [
           "hallo",
           "hoi",
@@ -150,6 +159,7 @@
         ]
       },
       "responses": {
+        "wellbeing": "Het gaat goed met me, bedankt dat je het vraagt. Ik help je graag met goedgekeurd bedrijfsbeleid van Forever Living en informatie uit de wereldwijde kantorengids. Wat wil je weten?",
         "greeting": "Hallo, ik ben AskVera. Hoe kan ik helpen met goedgekeurd bedrijfsbeleid van Forever Living of informatie uit de wereldwijde kantorengids?",
         "thanks": "Graag gedaan. Ik ben er wanneer u nog een goedgekeurd antwoord van Forever Living nodig hebt.",
         "capability": "Ik ben AskVera, de goedgekeurde kennisassistent van Forever Living. Ik vind goedgekeurde antwoorden in het bedrijfsbeleid van Forever Living en de wereldwijde kantorengids.",
@@ -163,56 +173,119 @@
       }
     },
     "it": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["come stai", "come sta", "come va", "stai bene"],
+        "greeting": ["ciao", "buongiorno", "buonasera"],
+        "thanks": ["grazie", "grazie mille"],
+        "capability": ["chi sei", "cosa puoi fare", "come puoi aiutarmi", "aiuto"]
+      },
       "responses": {
+        "wellbeing": "Sto bene, grazie per averlo chiesto. Sono qui per aiutarti con le politiche aziendali approvate di Forever Living e le informazioni dell'elenco globale degli uffici. Cosa vorresti sapere?",
+        "greeting": "Ciao, sono AskVera. Come posso aiutarti con le politiche aziendali approvate di Forever Living o con le informazioni dell'elenco globale degli uffici?",
+        "thanks": "Prego. Sono qui quando hai bisogno di un'altra risposta approvata di Forever Living.",
+        "capability": "Sono AskVera, l'assistente autorizzata di Forever Living. Posso aiutarti a trovare risposte approvate nelle politiche aziendali e nell'elenco globale degli uffici.",
         "off_topic": "Mi dispiace, ma non posso aiutarti con questa domanda. AskVera può aiutarti con le politiche aziendali approvate di Forever Living e le informazioni dell’elenco globale degli uffici. Fammi una domanda su uno di questi argomenti e sarò felice di aiutarti.",
         "medical_claim": "Mi dispiace, ma non posso fornire consigli medici o affermazioni su trattamenti. AskVera è limitata alle politiche aziendali approvate di Forever Living e alle informazioni dell’elenco globale degli uffici. Per domande mediche, consulta un professionista sanitario qualificato.",
         "income_claim": "Mi dispiace, ma non posso prevedere o garantire guadagni. Posso spiegare le regole approvate su bonus e compensi contenute nei documenti pubblicati."
       }
     },
     "da": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["hvordan har du det", "hvordan går det", "har du det godt"],
+        "greeting": ["hej", "godmorgen", "god eftermiddag", "god aften"],
+        "thanks": ["tak", "mange tak"],
+        "capability": ["hvem er du", "hvad kan du", "hvordan kan du hjælpe", "hjælp"]
+      },
       "responses": {
+        "wellbeing": "Jeg har det godt, tak fordi du spørger. Jeg hjælper gerne med godkendte Forever Living-virksomhedspolitikker og oplysninger fra den globale kontoroversigt. Hvad vil du gerne vide?",
+        "greeting": "Hej, jeg er AskVera. Hvordan kan jeg hjælpe med godkendte Forever Living-virksomhedspolitikker eller oplysninger fra den globale kontoroversigt?",
+        "thanks": "Det var så lidt. Jeg er her, når du har brug for et nyt godkendt svar fra Forever Living.",
+        "capability": "Jeg er AskVera, Forever Livings godkendte videnassistent. Jeg kan finde godkendte svar i Forever Livings virksomhedspolitikker og den globale kontoroversigt.",
         "off_topic": "Det beklager jeg, men jeg kan ikke hjælpe med det spørgsmål. AskVera kan hjælpe med godkendte Forever Living-virksomhedspolitikker og oplysninger fra den globale kontoroversigt. Spørg mig gerne om et af disse områder.",
         "medical_claim": "Det beklager jeg, men jeg kan ikke give medicinsk rådgivning eller behandlingspåstande. AskVera er begrænset til godkendte Forever Living-virksomhedspolitikker og oplysninger fra den globale kontoroversigt. Kontakt kvalificeret sundhedspersonale ved medicinske spørgsmål.",
         "income_claim": "Det beklager jeg, men jeg kan ikke forudsige eller garantere indtjening. Jeg kan forklare de godkendte regler om bonusser og kompensation i de offentliggjorte dokumenter."
       }
     },
     "fi": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["mitä kuuluu", "kuinka voit", "voitko hyvin"],
+        "greeting": ["hei", "terve", "hyvää huomenta", "hyvää iltaa"],
+        "thanks": ["kiitos", "paljon kiitos"],
+        "capability": ["kuka olet", "mitä voit tehdä", "miten voit auttaa", "apu"]
+      },
       "responses": {
+        "wellbeing": "Minulle kuuluu hyvää, kiitos kun kysyit. Autan mielelläni Forever Livingin hyväksytyissä yrityskäytännöissä ja maailmanlaajuisen toimistohakemiston tiedoissa. Mitä haluaisit tietää?",
+        "greeting": "Hei, olen AskVera. Miten voin auttaa Forever Livingin hyväksytyissä yrityskäytännöissä tai maailmanlaajuisen toimistohakemiston tiedoissa?",
+        "thanks": "Ole hyvä. Olen täällä, kun tarvitset uuden hyväksytyn vastauksen Forever Livingistä.",
+        "capability": "Olen AskVera, Forever Livingin hyväksytty tietämysavustaja. Voin auttaa löytämään hyväksyttyjä vastauksia yrityskäytännöistä ja maailmanlaajuisesta toimistohakemistosta.",
         "off_topic": "Olen pahoillani, mutta en voi auttaa tässä kysymyksessä. AskVera auttaa Forever Livingin hyväksyttyihin yrityskäytäntöihin ja maailmanlaajuisen toimistohakemiston tietoihin liittyvissä asioissa. Kysy mielellään jommastakummasta aiheesta.",
         "medical_claim": "Olen pahoillani, mutta en voi antaa lääketieteellisiä neuvoja tai hoitoväitteitä. AskVera keskittyy hyväksyttyihin Forever Living -yrityskäytäntöihin ja maailmanlaajuisen toimistohakemiston tietoihin. Käänny lääketieteellisissä kysymyksissä pätevän terveydenhuollon ammattilaisen puoleen.",
         "income_claim": "Olen pahoillani, mutta en voi ennustaa tai taata tuloja. Voin selittää julkaistuissa asiakirjoissa olevat hyväksytyt bonus- ja korvaussäännöt."
       }
     },
     "no": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["hvordan har du det", "hvordan går det", "har du det bra"],
+        "greeting": ["hei", "hallo", "god morgen", "god kveld"],
+        "thanks": ["takk", "tusen takk"],
+        "capability": ["hvem er du", "hva kan du gjøre", "hvordan kan du hjelpe", "hjelp"]
+      },
       "responses": {
+        "wellbeing": "Jeg har det bra, takk som spør. Jeg hjelper gjerne med godkjente selskapsretningslinjer for Forever Living og informasjon fra den globale kontoroversikten. Hva vil du vite?",
+        "greeting": "Hei, jeg er AskVera. Hvordan kan jeg hjelpe med godkjente selskapsretningslinjer for Forever Living eller informasjon fra den globale kontoroversikten?",
+        "thanks": "Bare hyggelig. Jeg er her når du trenger et nytt godkjent svar fra Forever Living.",
+        "capability": "Jeg er AskVera, Forever Livings godkjente kunnskapsassistent. Jeg kan finne godkjente svar i selskapets retningslinjer og den globale kontoroversikten.",
         "off_topic": "Beklager, men jeg kan ikke hjelpe med det spørsmålet. AskVera kan hjelpe med godkjente selskapsretningslinjer for Forever Living og informasjon fra den globale kontoroversikten. Spør meg gjerne om et av disse områdene.",
         "medical_claim": "Beklager, men jeg kan ikke gi medisinske råd eller behandlingspåstander. AskVera er begrenset til godkjente selskapsretningslinjer for Forever Living og informasjon fra den globale kontoroversikten. Kontakt kvalifisert helsepersonell ved medisinske spørsmål.",
         "income_claim": "Beklager, men jeg kan ikke forutsi eller garantere inntekt. Jeg kan forklare de godkjente reglene for bonuser og kompensasjon i de publiserte dokumentene."
       }
     },
     "sr": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["kako si", "kako ste", "da li si dobro"],
+        "greeting": ["zdravo", "dobar dan", "dobro jutro", "dobro veče"],
+        "thanks": ["hvala", "hvala puno"],
+        "capability": ["ko si ti", "šta možeš", "kako možeš da pomogneš", "pomoć"]
+      },
       "responses": {
+        "wellbeing": "Dobro sam, hvala što pitate. Tu sam da pomognem sa odobrenim pravilima kompanije Forever Living i informacijama iz globalnog imenika kancelarija. Šta želite da saznate?",
+        "greeting": "Zdravo, ja sam AskVera. Kako mogu da pomognem sa odobrenim pravilima kompanije Forever Living ili informacijama iz globalnog imenika kancelarija?",
+        "thanks": "Nema na čemu. Tu sam kada vam zatreba još jedan odobreni odgovor kompanije Forever Living.",
+        "capability": "Ja sam AskVera, odobreni asistent za znanje kompanije Forever Living. Mogu da pronađem odobrene odgovore u pravilima kompanije i globalnom imeniku kancelarija.",
         "off_topic": "Žao mi je, ali ne mogu da pomognem sa tim pitanjem. AskVera može da pomogne sa odobrenim pravilima kompanije Forever Living i informacijama iz globalnog imenika kancelarija. Slobodno pitajte o nekoj od tih oblasti.",
         "medical_claim": "Žao mi je, ali ne mogu da pružam medicinske savete ili tvrdnje o lečenju. AskVera je ograničena na odobrena pravila kompanije Forever Living i informacije iz globalnog imenika kancelarija. Za medicinska pitanja obratite se kvalifikovanom zdravstvenom radniku.",
         "income_claim": "Žao mi je, ali ne mogu da predvidim ili garantujem zaradu. Mogu da objasnim odobrena pravila o bonusima i naknadama iz objavljenih dokumenata."
       }
     },
     "sv": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["hur mår du", "hur går det", "mår du bra"],
+        "greeting": ["hej", "hallå", "god morgon", "god kväll"],
+        "thanks": ["tack", "tack så mycket"],
+        "capability": ["vem är du", "vad kan du göra", "hur kan du hjälpa", "hjälp"]
+      },
       "responses": {
+        "wellbeing": "Jag mår bra, tack för att du frågar. Jag hjälper gärna till med godkända företagspolicyer för Forever Living och information från den globala kontorskatalogen. Vad vill du veta?",
+        "greeting": "Hej, jag är AskVera. Hur kan jag hjälpa till med godkända företagspolicyer för Forever Living eller information från den globala kontorskatalogen?",
+        "thanks": "Varsågod. Jag finns här när du behöver ett nytt godkänt svar från Forever Living.",
+        "capability": "Jag är AskVera, Forever Livings godkända kunskapsassistent. Jag kan hitta godkända svar i företagets policyer och den globala kontorskatalogen.",
         "off_topic": "Jag är ledsen, men jag kan inte hjälpa till med den frågan. AskVera kan hjälpa till med godkända företagspolicyer för Forever Living och information från den globala kontorskatalogen. Fråga gärna om något av dessa områden.",
         "medical_claim": "Jag är ledsen, men jag kan inte ge medicinska råd eller behandlingspåståenden. AskVera är begränsad till godkända företagspolicyer för Forever Living och information från den globala kontorskatalogen. Kontakta kvalificerad vårdpersonal vid medicinska frågor.",
         "income_claim": "Jag är ledsen, men jag kan inte förutsäga eller garantera inkomster. Jag kan förklara de godkända reglerna för bonusar och ersättning i de publicerade dokumenten."
       }
     },
     "ru": {
-      "patterns": {},
+      "patterns": {
+        "wellbeing": ["как дела", "как вы", "ты в порядке"],
+        "greeting": ["здравствуйте", "привет", "доброе утро", "добрый вечер"],
+        "thanks": ["спасибо", "большое спасибо"],
+        "capability": ["кто вы", "что вы умеете", "чем вы можете помочь", "помощь"]
+      },
       "responses": {
+        "wellbeing": "У меня все хорошо, спасибо, что спросили. Я помогу с утвержденными корпоративными политиками Forever Living и информацией из глобального справочника офисов. Что вы хотели бы узнать?",
+        "greeting": "Здравствуйте, я AskVera. Чем я могу помочь в вопросах утвержденных корпоративных политик Forever Living или глобального справочника офисов?",
+        "thanks": "Пожалуйста. Я здесь, когда вам понадобится еще один утвержденный ответ Forever Living.",
+        "capability": "Я AskVera, утвержденный информационный ассистент Forever Living. Я могу найти утвержденные ответы в корпоративных политиках и глобальном справочнике офисов.",
         "off_topic": "Извините, я не могу помочь с этим вопросом. AskVera может помочь с утверждёнными корпоративными политиками Forever Living и информацией из глобального справочника офисов. Пожалуйста, задайте вопрос по одной из этих тем.",
         "medical_claim": "Извините, но я не могу давать медицинские советы или делать заявления о лечении. AskVera ограничена утверждёнными корпоративными политиками Forever Living и информацией из глобального справочника офисов. По медицинским вопросам обратитесь к квалифицированному медицинскому специалисту.",
         "income_claim": "Извините, но я не могу прогнозировать или гарантировать доход. Я могу объяснить утверждённые правила о бонусах и вознаграждении из опубликованных документов."

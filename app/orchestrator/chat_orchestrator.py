@@ -647,7 +647,7 @@ class AIOrchestrator:
             # The planner is advisory. Only reviewed exact phrases may produce
             # assistant identity/capability copy.
             if classify_intent(body.message, body.language) == "assistant_meta":
-                response_key = subtype if subtype in {"greeting", "capability", "thanks"} else "capability"
+                response_key = subtype if subtype in {"greeting", "capability", "thanks", "wellbeing"} else "capability"
             else:
                 intent = "off_topic"
                 response_key = "off_topic"

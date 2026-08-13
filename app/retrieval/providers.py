@@ -304,7 +304,7 @@ def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, st
     intent = str(payload.get("intent", "knowledge")).strip().lower()
     if intent not in allowed_intents:
         intent = "knowledge"
-    allowed_subtypes = {"greeting", "capability", "thanks"}
+    allowed_subtypes = {"greeting", "capability", "thanks", "wellbeing"}
     subtype = str(payload.get("intent_subtype", "")).strip().lower()
     if subtype not in allowed_subtypes:
         subtype = ""
@@ -389,9 +389,10 @@ def _planned_retrieval_plan(
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
         "Classify the conversation intent as knowledge, assistant_meta, medical_claim, income_claim, off_topic, "
         "or support_request. assistant_meta covers social greetings, thanking AskVera, asking how AskVera is, "
-        "asking who AskVera is, or asking what AskVera can do. Questions about any other person, family member, "
+        "asking who AskVera is, or asking what AskVera can do. Use intent_subtype wellbeing for questions about "
+        "AskVera's state such as 'how are you?'. Questions about any other person, family member, "
         "relationship, or identity are not assistant_meta; use knowledge when the approved directory may answer "
-        "them and off_topic otherwise. Set intent_subtype to greeting, capability, or thanks. medical_claim covers symptoms, "
+        "them and off_topic otherwise. Set intent_subtype to greeting, capability, thanks, or wellbeing. medical_claim covers symptoms, "
         "illnesses, diagnosis, treatment, medical advice, and health-benefit claims. income_claim covers requests "
         "for guaranteed or personalized earnings predictions, while factual compensation-plan questions remain "
         "knowledge. Set support_request only when the user directly asks to create, open, or submit a support "

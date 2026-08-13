@@ -43,6 +43,30 @@ def test_routes_launched_language_greetings_without_model_tokens() -> None:
     assert "ordering" not in capability
 
 
+def test_routes_wellbeing_question_without_retrieval() -> None:
+    assert classify_intent("How are you?", "en") == "assistant_meta"
+    response = assistant_meta_response("How are you?", "en") or ""
+    assert "doing well" in response.lower()
+    assert "company policies" in response
+    assert "global office directory" in response
+
+
+def test_wellbeing_copy_exists_for_every_published_language() -> None:
+    routes_path = Path(__file__).parents[2] / "config" / "conversation_routes.json"
+    payload = json.loads(routes_path.read_text(encoding="utf-8"))
+    locales = payload["locales"]
+    published_languages = set(load_policy_locales())
+
+    assert published_languages <= locales.keys()
+    for language in published_languages:
+        assert locales[language]["patterns"].get("wellbeing")
+        assert locales[language]["responses"].get("wellbeing")
+
+
+def test_wellbeing_copy_does_not_capture_policy_questions() -> None:
+    assert classify_intent("How do I become a Recognized Manager?", "en") == "policy_fact"
+
+
 def test_localized_fallback_uses_selected_language() -> None:
     assert "documents de politique" in (
         localized_conversation_response("insufficient_evidence", "fr-CA") or ""
