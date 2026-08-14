@@ -16,7 +16,7 @@ import type {
   IngestionJob,
   IngestionPreview,
   IngestionPreviewTest,
-  Interaction,
+  InteractionPage,
   MarketReadiness,
   PipelineTrace,
   ShadowReport,
@@ -53,7 +53,7 @@ export class AdminApi {
   marketReadiness() { return this.request<MarketReadiness>("/api/admin/market-readiness"); }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
-  interactions(filters: URLSearchParams) { return this.request<Interaction[]>(`/api/admin/analytics/interactions?${filters}`); }
+  interactions(filters: URLSearchParams) { return this.request<InteractionPage>(`/api/admin/analytics/interactions?${filters}`); }
   async exportInteractions(filters: URLSearchParams): Promise<Blob> {
     const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.csv?${filters}`, {
       headers: {

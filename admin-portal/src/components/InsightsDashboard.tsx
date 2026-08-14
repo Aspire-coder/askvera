@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
-import type { AnalyticsOverview, Interaction, Market, ShadowReport } from "../types";
+import type { AnalyticsOverview, Interaction, InteractionPage, Market, ShadowReport } from "../types";
 import "../tokenSplit.css";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
@@ -13,6 +13,13 @@ const interactionDateLabel = (value: string) => new Date(value).toLocaleString([
   hour: "numeric",
   minute: "2-digit"
 });
+const demoInteractionPage: InteractionPage = {
+  items: demo.interactions,
+  total: demo.interactions.length,
+  page: 1,
+  pageSize: 50,
+  totalPages: 1
+};
 
 function TrendChart({ overview }: { overview: AnalyticsOverview }) {
   const data = overview.trend;
@@ -46,6 +53,8 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
   const [shadowReport, setShadowReport] = useState<ShadowReport>(demo.shadowReport);
   const [interactions, setInteractions] = useState<Interaction[]>(demo.interactions);
+  const [interactionTotal, setInteractionTotal] = useState(demo.interactions.length);
+  const [interactionTotalPages, setInteractionTotalPages] = useState(1);
   const [markets, setMarkets] = useState<Market[]>(demo.config.countries);
   const [mode, setMode] = useState<DataMode>("demo");
   const [days, setDays] = useState("30");
@@ -56,6 +65,9 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [trafficSource, setTrafficSource] = useState("");
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewPageSize, setReviewPageSize] = useState("50");
+  const [reviewSort, setReviewSort] = useState("newest");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -65,7 +77,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
 
   const refresh = async () => {
     const overviewFilters = new URLSearchParams({ days });
-    const interactionFilters = new URLSearchParams({ days, feedback, limit: "100" });
+    const interactionFilters = new URLSearchParams({ days, feedback, search: query, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
     const shadowFilters = new URLSearchParams({ days });
     if (startAt) {
       const start = new Date(startAt).toISOString();
@@ -93,12 +105,14 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     const api = new AdminApi(credentials);
     const [overviewResult, interactionResult, shadowResult, configResult] = await Promise.all([
       withDemoFallback(() => api.overview(overviewFilters), demo.overview),
-      withDemoFallback(() => api.interactions(interactionFilters), demo.interactions),
+      withDemoFallback(() => api.interactions(interactionFilters), demoInteractionPage),
       withDemoFallback(() => api.retrievalShadow(shadowFilters), demo.shadowReport),
       withDemoFallback(() => api.config(), demo.config)
     ]);
     setOverview(overviewResult.data);
-    setInteractions(interactionResult.data);
+    setInteractions(interactionResult.data.items);
+    setInteractionTotal(interactionResult.data.total);
+    setInteractionTotalPages(interactionResult.data.totalPages);
     setShadowReport(shadowResult.data);
     setMarkets(configResult.data.countries);
     setMode(
@@ -111,7 +125,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     );
   };
 
-  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback]);
+  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback, query, reviewPage, reviewPageSize, reviewSort]);
 
   const resetDashboard = () => {
     setDays("30");
@@ -122,6 +136,9 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setTrafficSource("");
     setFeedback("all");
     setQuery("");
+    setReviewPage(1);
+    setReviewPageSize("50");
+    setReviewSort("newest");
     setSelectedId(null);
     if (days === "30" && !startAt && !endAt && !country && !language && !trafficSource && feedback === "all") void refresh();
   };
@@ -133,22 +150,15 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     return [...unique].map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [country, markets]);
 
-  const filteredInteractions = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return interactions.filter((item) => {
-      const matchesFeedback = feedback === "all"
-        || (feedback === "helpful" && Number(item.rating) > 0)
-        || (feedback === "not_helpful" && Number(item.rating) < 0);
-      const matchesQuery = !normalized || `${item.question} ${item.topic}`.toLowerCase().includes(normalized);
-      return matchesFeedback && matchesQuery;
-    });
-  }, [feedback, interactions, query]);
+  const filteredInteractions = interactions;
+  const firstReviewResult = interactionTotal ? (reviewPage - 1) * Number(reviewPageSize) + 1 : 0;
+  const lastReviewResult = Math.min(reviewPage * Number(reviewPageSize), interactionTotal);
 
   const exportInteractions = async () => {
     setExporting(true);
     setExportError("");
     try {
-      const filters = new URLSearchParams({ days, feedback, limit: "5000" });
+      const filters = new URLSearchParams({ days, feedback, search: query, limit: "5000", sort: reviewSort });
       if (startAt) filters.set("start", new Date(startAt).toISOString());
       if (endAt) filters.set("end", new Date(endAt).toISOString());
       if (country) filters.set("country", country);
@@ -184,12 +194,12 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       </div>
 
       <div className="filter-bar surface">
-        <label><span>Quick range</span><select value={days} onChange={(event) => { setDays(event.target.value); setStartAt(""); setEndAt(""); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
-        <label><span>From date and hour</span><input type="datetime-local" value={startAt} max={endAt || undefined} onChange={(event) => setStartAt(event.target.value)} /></label>
-        <label><span>To date and hour</span><input type="datetime-local" value={endAt} min={startAt || undefined} onChange={(event) => setEndAt(event.target.value)} /></label>
-        <label><span>Country</span><select value={country} onChange={(event) => { setCountry(event.target.value); setLanguage(""); }}><option value="">All countries</option>{markets.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></label>
-        <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option value="">All languages</option>{availableLanguages.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
-        <label><span>Traffic source</span><select value={trafficSource} onChange={(event) => setTrafficSource(event.target.value)}><option value="">All traffic</option><option value="widget">Widget users</option><option value="evaluation">Evaluation runs</option><option value="backend_test">Backend tests</option><option value="admin_test">Admin tests</option><option value="legacy">Legacy / unclassified</option></select></label>
+        <label><span>Quick range</span><select value={days} onChange={(event) => { setDays(event.target.value); setStartAt(""); setEndAt(""); setReviewPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+        <label><span>From date and hour</span><input type="datetime-local" value={startAt} max={endAt || undefined} onChange={(event) => { setStartAt(event.target.value); setReviewPage(1); }} /></label>
+        <label><span>To date and hour</span><input type="datetime-local" value={endAt} min={startAt || undefined} onChange={(event) => { setEndAt(event.target.value); setReviewPage(1); }} /></label>
+        <label><span>Country</span><select value={country} onChange={(event) => { setCountry(event.target.value); setLanguage(""); setReviewPage(1); }}><option value="">All countries</option>{markets.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></label>
+        <label><span>Language</span><select value={language} onChange={(event) => { setLanguage(event.target.value); setReviewPage(1); }}><option value="">All languages</option>{availableLanguages.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+        <label><span>Traffic source</span><select value={trafficSource} onChange={(event) => { setTrafficSource(event.target.value); setReviewPage(1); }}><option value="">All traffic</option><option value="widget">Widget users</option><option value="evaluation">Evaluation runs</option><option value="backend_test">Backend tests</option><option value="admin_test">Admin tests</option><option value="legacy">Legacy / unclassified</option></select></label>
         <button className="button primary" onClick={() => void refresh()}>Apply filters</button>
         <small className="filter-note">Date and hour use your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</small>
       </div>
@@ -307,17 +317,18 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
       </div>
 
       <div className="review-section">
-        <div className="section-heading"><div><h2>Answer review</h2><p>Open low-rated answers to see where retrieval or content can improve.</p></div><div className="review-controls"><label className="search-field"><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions" /></label><select value={feedback} onChange={(event) => setFeedback(event.target.value)}><option value="not_helpful">Not helpful</option><option value="helpful">Helpful</option><option value="all">All answers</option></select><button className="button secondary" disabled={exporting} onClick={() => void exportInteractions()}>{exporting ? "Preparing..." : "Export Excel"}</button></div></div>
+        <div className="section-heading"><div><h2>Answer review</h2><p>Review every captured answer and see where retrieval or content can improve.</p></div><div className="review-controls"><label className="search-field"><SearchIcon /><input value={query} onChange={(event) => { setQuery(event.target.value); setReviewPage(1); }} placeholder="Search questions" /></label><select value={feedback} onChange={(event) => { setFeedback(event.target.value); setReviewPage(1); }} aria-label="Feedback filter"><option value="all">All answers</option><option value="not_helpful">Not helpful</option><option value="helpful">Helpful</option><option value="unrated">Unrated</option></select><select value={reviewSort} onChange={(event) => { setReviewSort(event.target.value); setReviewPage(1); }} aria-label="Sort answers"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="lowest_confidence">Lowest confidence</option><option value="highest_confidence">Highest confidence</option><option value="not_helpful_first">Not helpful first</option><option value="helpful_first">Helpful first</option></select><span className="review-count">Showing {firstReviewResult}–{lastReviewResult} of {interactionTotal}</span><button className="button secondary" disabled={exporting} onClick={() => void exportInteractions()}>{exporting ? "Preparing..." : "Export Excel"}</button></div></div>
         {exportError ? <div className="notice error export-error" role="alert">{exportError}</div> : null}
         <div className="review-list surface">
           {filteredInteractions.map((item) => <button className="review-row" key={item.correlation_id} onClick={() => setSelectedId(item.correlation_id)}>
-            <span className={`feedback-mark ${item.rating && item.rating > 0 ? "positive" : "negative"}`}>{item.rating && item.rating > 0 ? "↑" : "↓"}</span>
+            <span className={`feedback-mark ${item.rating === null || item.rating === undefined ? "neutral" : item.rating > 0 ? "positive" : "negative"}`}>{item.rating === null || item.rating === undefined ? "-" : item.rating > 0 ? "↑" : "↓"}</span>
             <span className="review-question"><strong>{item.question}</strong><small>{item.topic} · {item.country}/{item.language.toUpperCase()} · {item.traffic_source.replaceAll("_", " ")} · {interactionDateLabel(item.created_at)}</small></span>
             {item.expected_answer_present ? <span className="suggestion-badge">Suggestion</span> : null}
             <span className="confidence">{percent(item.confidence)}</span>{item.rating === -1 ? <ArrowIcon /> : <span className="review-label">Review</span>}
           </button>)}
           {!filteredInteractions.length ? <div className="empty-state">No answers match these filters.</div> : null}
         </div>
+        {interactionTotalPages > 1 ? <div className="review-pagination"><button className="button secondary" disabled={reviewPage <= 1} onClick={() => setReviewPage((value) => Math.max(1, value - 1))}>Previous</button><span>Page {reviewPage} of {interactionTotalPages}</span><label>Rows <select value={reviewPageSize} onChange={(event) => { setReviewPageSize(event.target.value); setReviewPage(1); }}><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><button className="button secondary" disabled={reviewPage >= interactionTotalPages} onClick={() => setReviewPage((value) => Math.min(interactionTotalPages, value + 1))}>Next</button></div> : null}
       </div>
 
       {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}><aside className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">

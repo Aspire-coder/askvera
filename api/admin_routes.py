@@ -36,6 +36,7 @@ from services.analytics import (
     analytics_overview,
     interaction_export_csv,
     interaction_export_xlsx,
+    interaction_page,
     interaction_list,
     retrieval_shadow_report,
 )
@@ -248,7 +249,10 @@ def interactions(
     language: str = "",
     traffic_source: str = "",
     feedback: str = "all",
-    limit: int = 100,
+    search: str = "",
+    sort: str = "newest",
+    page: int = 1,
+    page_size: int = 50,
     start: datetime | None = None,
     end: datetime | None = None,
     include_raw: bool = False,
@@ -259,7 +263,7 @@ def interactions(
         require_admin_access(request, "insights", "view", country)
     elif not markets:
         raise HTTPException(status_code=403, detail="You do not have access to Insights.")
-    if feedback not in {"all", "helpful", "not_helpful"}:
+    if feedback not in {"all", "helpful", "not_helpful", "unrated"}:
         raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
     if include_raw:
         if not settings.ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED:
@@ -271,14 +275,17 @@ def interactions(
             country.upper() or "all_markets",
         )
     try:
-        result = interaction_list(
+        result = interaction_page(
             days=days,
             country=country,
             language=language,
             traffic_source=traffic_source,
             allowed_countries=None if principal.get("role") == "super_admin" else markets,
             feedback=feedback,
-            limit=limit,
+            search=search,
+            sort=sort,
+            page=page,
+            page_size=page_size,
             start=start,
             end=end,
             redact_content=settings.ADMIN_ANALYTICS_REDACTED_BY_DEFAULT and not include_raw,
@@ -296,6 +303,8 @@ def interactions_export(
     language: str = "",
     traffic_source: str = "",
     feedback: str = "all",
+    search: str = "",
+    sort: str = "newest",
     limit: int = 5000,
     start: datetime | None = None,
     end: datetime | None = None,
@@ -308,7 +317,7 @@ def interactions_export(
         require_admin_access(request, "insights", "view", country)
     elif not markets:
         raise HTTPException(status_code=403, detail="You do not have access to Insights.")
-    if feedback not in {"all", "helpful", "not_helpful"}:
+    if feedback not in {"all", "helpful", "not_helpful", "unrated"}:
         raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
     if include_raw:
         if not settings.ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED:
@@ -327,6 +336,8 @@ def interactions_export(
             traffic_source=traffic_source,
             allowed_countries=None if principal.get("role") == "super_admin" else markets,
             feedback=feedback,
+            search=search,
+            sort=sort,
             limit=limit,
             start=start,
             end=end,
@@ -349,6 +360,8 @@ def interactions_export_xlsx(
     language: str = "",
     traffic_source: str = "",
     feedback: str = "all",
+    search: str = "",
+    sort: str = "newest",
     limit: int = 5000,
     start: datetime | None = None,
     end: datetime | None = None,
@@ -361,7 +374,7 @@ def interactions_export_xlsx(
         require_admin_access(request, "insights", "view", country)
     elif not markets:
         raise HTTPException(status_code=403, detail="You do not have access to Insights.")
-    if feedback not in {"all", "helpful", "not_helpful"}:
+    if feedback not in {"all", "helpful", "not_helpful", "unrated"}:
         raise HTTPException(status_code=400, detail="Unsupported feedback filter.")
     if include_raw:
         if not settings.ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED:
@@ -380,6 +393,8 @@ def interactions_export_xlsx(
             traffic_source=traffic_source,
             allowed_countries=None if principal.get("role") == "super_admin" else markets,
             feedback=feedback,
+            search=search,
+            sort=sort,
             limit=limit,
             start=start,
             end=end,

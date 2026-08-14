@@ -222,6 +222,14 @@ export type Interaction = {
   expected_answer_present?: boolean;
 };
 
+export type InteractionPage = {
+  items: Interaction[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 export type ShadowDisagreement = {
   correlation_id: string;
   country: string;
