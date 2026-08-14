@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5176",
     "build": "tsc --noEmit && vite build",
+    "validate-production-build": "node scripts/validate-production-build.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1 --port 4176"
   },
