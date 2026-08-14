@@ -37,7 +37,6 @@ from services.analytics import (
     interaction_export_csv,
     interaction_export_xlsx,
     interaction_page,
-    interaction_list,
     retrieval_shadow_report,
 )
 from services.knowledge_ingestion import (
