@@ -607,18 +607,63 @@ def interaction_list(
     traffic_source: str = "",
     allowed_countries: set[str] | None = None,
     feedback: str = "all",
+    search: str = "",
+    sort: str = "newest",
     limit: int = 100,
+    page: int = 1,
+    page_size: int | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
     redact_content: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return recent questions with optional negative-feedback filtering."""
+    """Return recent questions with optional filtering."""
+    result = interaction_page(
+        days=days,
+        country=country,
+        language=language,
+        traffic_source=traffic_source,
+        allowed_countries=allowed_countries,
+        feedback=feedback,
+        search=search,
+        sort=sort,
+        limit=limit,
+        page=page,
+        page_size=page_size,
+        start=start,
+        end=end,
+        redact_content=redact_content,
+    )
+    return result["items"]
+
+
+def interaction_page(
+    *,
+    days: int = 30,
+    country: str = "",
+    language: str = "",
+    traffic_source: str = "",
+    allowed_countries: set[str] | None = None,
+    feedback: str = "all",
+    search: str = "",
+    sort: str = "newest",
+    page: int = 1,
+    page_size: int = 50,
+    limit: int | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    redact_content: bool = False,
+) -> dict[str, Any]:
+    """Return a server-filtered, server-paginated interaction page."""
     since, until = _analytics_window(days=days, start=start, end=end)
     filters = ["c.created_at >= :since", "c.created_at < :until"]
+    safe_page = max(1, int(page))
+    max_page_size = MAX_INTERACTION_EXPORT_ROWS if limit is not None else 100
+    safe_page_size = max(1, min(int(page_size or limit or 50), max_page_size))
     parameters: dict[str, Any] = {
         "since": since,
         "until": until,
-        "limit": max(1, min(int(limit), MAX_INTERACTION_EXPORT_ROWS)),
+        "limit": safe_page_size,
+        "offset": (safe_page - 1) * safe_page_size,
     }
     traffic_source = _normalize_traffic_source(traffic_source)
     market_filter = _market_scope(
@@ -639,8 +684,38 @@ def interaction_list(
         filters.append("f.rating < 0")
     elif feedback == "helpful":
         filters.append("f.rating > 0")
+    elif feedback == "unrated":
+        filters.append("f.rating IS NULL")
+    if search.strip():
+        filters.append("(LOWER(c.question) LIKE :search OR LOWER(c.topic) LIKE :search)")
+        parameters["search"] = f"%{search.strip().lower()}%"
+    sort_sql = {
+        "newest": "c.created_at DESC",
+        "oldest": "c.created_at ASC",
+        "lowest_confidence": "c.confidence ASC",
+        "highest_confidence": "c.confidence DESC",
+        "helpful_first": "CASE WHEN f.rating > 0 THEN 0 ELSE 1 END ASC, c.created_at DESC",
+        "not_helpful_first": "CASE WHEN f.rating < 0 THEN 0 ELSE 1 END ASC, c.created_at DESC",
+    }.get(sort)
+    if sort_sql is None:
+        raise ValueError("Unsupported interaction sort.")
     where = " AND ".join(filters)
     with get_engine().connect() as connection:
+        total = int(connection.execute(
+            text(
+                f"""
+                SELECT COUNT(*)
+                FROM chat_analytics c
+                LEFT JOIN LATERAL (
+                    SELECT rating FROM feedback_events
+                    WHERE correlation_id = c.correlation_id
+                    ORDER BY created_at DESC LIMIT 1
+                ) f ON true
+                WHERE {where}
+                """
+            ),
+            parameters,
+        ).scalar() or 0)
         rows = connection.execute(
             text(
                 f"""
@@ -657,7 +732,8 @@ def interaction_list(
                     ORDER BY created_at DESC LIMIT 1
                 ) f ON true
                 WHERE {where}
-                ORDER BY c.created_at DESC LIMIT :limit
+                ORDER BY {sort_sql}, c.correlation_id
+                LIMIT :limit OFFSET :offset
                 """
             ),
             parameters,
@@ -673,7 +749,13 @@ def interaction_list(
             for field in ("question", "answer", "comment", "expected_answer"):
                 item[field] = _redacted_preview(item.get(field))
         interactions.append(item)
-    return interactions
+    return {
+        "items": interactions,
+        "total": total,
+        "page": safe_page,
+        "pageSize": safe_page_size,
+        "totalPages": max(1, (total + safe_page_size - 1) // safe_page_size),
+    }
 
 
 def interaction_export_csv(**filters: Any) -> str:
