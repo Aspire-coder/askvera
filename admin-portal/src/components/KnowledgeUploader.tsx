@@ -66,7 +66,15 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
   const selectedMarket = config.countries.find((market) => market.code === country) || config.countries[0];
   const languages = selectedMarket?.languages || [];
+  const marketJobs = useMemo(
+    () => jobs.filter((job) => job.access_scope === "global" || job.country === country),
+    [country, jobs],
+  );
+  const readyDocuments = marketJobs.filter((job) => job.status === "ready").length;
+  const inProgressDocuments = marketJobs.filter((job) => !["ready", "failed"].includes(job.status)).length;
+  const suggestedDocumentId = `${country.toLowerCase()}-${documentType.replaceAll("_", "-")}`;
   useEffect(() => {
+    if (!config.countries.some((market) => market.code === country) && config.countries[0]) setCountry(config.countries[0].code);
     if (!languages.some((option) => option.code === language) && languages[0]) setLanguage(languages[0].code);
   }, [country, config]);
 
@@ -180,6 +188,25 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
         <span className={`mode-pill ${loadError ? "error" : mode}`}><span />{loadError ? "Connection error" : mode === "live" ? "Connected" : "Demo data"}</span>
       </div>
 
+      <section className="knowledge-market-summary surface" aria-labelledby="knowledge-market-title">
+        <div className="knowledge-market-selector">
+          <label htmlFor="knowledge-market"><span className="eyebrow">Selected market</span><strong id="knowledge-market-title">Where should this document live?</strong></label>
+          <select id="knowledge-market" value={country} onChange={(event) => setCountry(event.target.value)} aria-label="Select knowledge market">
+            {config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}
+          </select>
+        </div>
+        <div className="knowledge-market-stats" aria-label={`${selectedMarket?.name || "Selected market"} document summary`}>
+          <div><strong>{marketJobs.length}</strong><span>Available here</span></div>
+          <div><strong>{readyDocuments}</strong><span>Ready</span></div>
+          <div><strong>{inProgressDocuments}</strong><span>In progress</span></div>
+        </div>
+      </section>
+
+      <section className="knowledge-existing surface" aria-labelledby="existing-documents-title">
+        <div className="section-heading"><div><span className="eyebrow">Current coverage</span><h2 id="existing-documents-title">Documents available for {selectedMarket?.name || "this market"}</h2><p>Global documents are included. Use names and versions to avoid replacing the wrong document.</p></div><span className="review-safety">{marketJobs.length} found</span></div>
+        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.length ? <div className="knowledge-existing-list">{marketJobs.map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span></article>)}</div> : <div className="review-empty">No documents are currently available for {selectedMarket?.name || "this market"}. Upload the first approved document below.</div>}
+      </section>
+
       <div className="uploader-layout">
         <div className="upload-card surface">
           <div
@@ -202,12 +229,12 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field span-2"><label>Content type</label><div className="type-options">
               {config.documentTypes.map((type) => <button key={type} type="button" className={documentType === type ? "selected" : ""} onClick={() => setDocumentType(type)}>{readableType(type)}</button>)}
             </div></div>
-            <div className="form-field"><label htmlFor="market">Market</label><select id="market" value={country} onChange={(event) => setCountry(event.target.value)}>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></div>
+            <div className="form-field"><label htmlFor="market">Market</label><select id="market" value={country} onChange={(event) => setCountry(event.target.value)}>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}</select></div>
             <div className="form-field"><label htmlFor="language">Language</label><select id="language" value={language} onChange={(event) => setLanguage(event.target.value)}>{languages.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)}</select></div>
             <div className="form-field"><label htmlFor="scope">Availability</label><select id="scope" value={accessScope} onChange={(event) => setAccessScope(event.target.value)}><option value="country">Selected market only</option><option value="global">All markets</option></select></div>
             <div className="form-field"><label htmlFor="version">Document version</label><input id="version" value={version} onChange={(event) => setVersion(event.target.value)} placeholder="e.g. 2026.3" /></div>
             <div className="form-field"><label htmlFor="effective">Effective date</label><input id="effective" type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></div>
-            <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder="e.g. US-company-policy" /></div>
+            <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder={suggestedDocumentId} /><small className="field-help">Suggested: {suggestedDocumentId}. Keep this stable when replacing the same document.</small></div>
             <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
             <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>
             <label className="review-toggle"><input type="checkbox" checked={reviewBeforePublish} onChange={(event) => setReviewBeforePublish(event.target.checked)} /><span><strong>Review chunks before publishing</strong><small>Keep this document out of live answers until you test and approve it.</small></span></label>
@@ -248,7 +275,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
         <div className="section-heading"><div><h2>Document activity</h2><p>Recent ingestion jobs and indexing progress.</p></div><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
         <div className="jobs-table surface">
           <div className="table-row table-head"><span>Document</span><span>Market</span><span>Type</span><span>Status</span><span>Chunks</span></div>
-          {jobs.length ? jobs.map((job) => <div className="table-row" key={job.job_id}>
+          {marketJobs.length ? marketJobs.map((job) => <div className="table-row" key={job.job_id}>
             <span className="document-cell"><FileIcon /><span><strong>{job.filename}</strong><small>{job.document_version || "No version"}</small></span></span>
             <span>{job.access_scope === "global" ? "Global" : `${job.country} · ${job.language.toUpperCase()}`}</span>
             <span>{readableType(job.document_type)}</span>

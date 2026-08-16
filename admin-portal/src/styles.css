@@ -206,6 +206,23 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 
 /* Knowledge */
 .uploader-layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, .7fr); gap: 20px; align-items: start; }
+.knowledge-market-summary { display: grid; grid-template-columns: minmax(280px, 1.2fr) minmax(280px, 1fr); gap: 24px; align-items: center; margin: 24px 0 14px; padding: 20px 24px; }
+.knowledge-market-selector { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(220px, 1.2fr); gap: 16px; align-items: end; }
+.knowledge-market-selector label { display: flex; flex-direction: column; gap: 6px; }
+.knowledge-market-selector select { min-height: 44px; }
+.knowledge-market-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.knowledge-market-stats div { display: flex; flex-direction: column; gap: 4px; padding-left: 16px; border-left: 1px solid var(--line); }
+.knowledge-market-stats strong { font-size: 24px; color: var(--ink); }
+.knowledge-market-stats span, .field-help { color: var(--tertiary); font-size: 11px; }
+.knowledge-existing { margin: 14px 0 24px; padding: 22px 24px; }
+.knowledge-existing .section-heading { margin-bottom: 16px; }
+.knowledge-existing-list { display: grid; gap: 8px; }
+.knowledge-existing-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.knowledge-existing-row > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.knowledge-existing-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-existing-row small { color: var(--tertiary); }
+.knowledge-chunks { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+.field-help { display: block; margin-top: 5px; }
 .upload-card { padding: clamp(20px, 3vw, 32px); }
 .drop-zone { min-height: 230px; border: 1.5px dashed rgba(0,0,0,.18); border-radius: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 28px; background: rgba(0,0,0,.015); text-align: center; transition: border .2s ease, background .2s ease, transform .2s ease; }
 .drop-zone.dragging { border-color: var(--blue); background: var(--blue-soft); transform: scale(.995); }
@@ -373,6 +390,7 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   .sidebar { padding-inline: 12px; }
   .page-section { padding-inline: 28px; }
   .uploader-layout { grid-template-columns: 1fr; }
+  .knowledge-market-summary { grid-template-columns: 1fr; }
   .processing-card { display: grid; grid-template-columns: 170px 1fr; gap: 20px; }
   .processing-card .supported-note { grid-column: 1 / -1; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -396,6 +414,11 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   .mobile-nav button.active { color: var(--blue); }
   .page-section { padding: 34px 16px 100px; }
   .page-heading { display: block; }
+  .knowledge-market-selector { grid-template-columns: 1fr; }
+  .knowledge-market-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .knowledge-existing { padding: 18px; }
+  .knowledge-existing-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .knowledge-existing-row .knowledge-chunks { grid-column: 2 / -1; }
   .heading-actions, .dashboard-heading > .mode-pill { margin-top: 20px; }
   .trace-toolbar, .filter-bar { grid-template-columns: 1fr; align-items: stretch; }
   .journey-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
