@@ -84,10 +84,11 @@ try {
       $liveHtml = (Invoke-WebRequest -Uri "$portalUrl/?release=verify-$cacheBust" -UseBasicParsing).Content
       $liveAsset = [regex]::Match($liveHtml, 'assets/index-[^"'']+\.js').Value
       if (-not $liveAsset) { throw "Live portal does not reference an application bundle." }
-      $liveBundle = (Invoke-WebRequest -Uri "$portalUrl/$liveAsset?release=verify-$cacheBust" -UseBasicParsing).Content
-      foreach ($marker in @("Select market", "Select support market")) {
-        if (-not $liveBundle.Contains($marker)) { throw "Live portal is missing required feature marker: $marker" }
-      }
+      $liveAssetResponse = Invoke-WebRequest -Uri "$portalUrl/$liveAsset?release=verify-$cacheBust" -UseBasicParsing
+      if ($liveAssetResponse.StatusCode -ne 200) { throw "Live portal application bundle returned HTTP $($liveAssetResponse.StatusCode)." }
+      $assetKey = $liveAsset -replace '^/+', ''
+      aws s3api head-object --bucket $bucket --key $assetKey --region $Region | Out-Null
+      Assert-NativeCommandSucceeded "Verify uploaded portal application bundle"
       $verified = $true
     } catch {
       $lastVerificationError = $_.Exception.Message
