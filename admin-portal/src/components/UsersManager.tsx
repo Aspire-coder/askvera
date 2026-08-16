@@ -12,6 +12,8 @@ const sections = [
   { id: "audit", label: "Audit log", permissions: ["view"] }
 ];
 
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
 function summary(role: string, scopes: AdminScope[]) {
   if (role === "super_admin") return "This user will have full access to every market and admin section.";
   if (role === "auditor") return "This user will have read-only access to the user list and audit history.";
@@ -116,7 +118,16 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
   };
 
   const save = async () => {
-    if (!editing && !email.trim()) { setError("Enter an email address."); return; }
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!editing && !normalizedEmail) { setError("Enter an email address."); return; }
+    if (!editing && !EMAIL_PATTERN.test(normalizedEmail)) {
+      setError("Enter a valid email address, such as name@example.com.");
+      return;
+    }
+    if (!editing && users.some((user) => user.email.trim().toLowerCase() === normalizedEmail)) {
+      setError("A user with this email address already exists.");
+      return;
+    }
     if (role !== "super_admin" && !scopes.length) { setError("Choose at least one market and permission."); return; }
     setSaving(true);
     setError("");
@@ -125,8 +136,8 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
         await api.updateUser(editing.id, { role, scopes });
         setNotice("Access updated.");
       } else {
-        await api.createUser({ email: email.trim(), role, scopes });
-        setNotice(`Invite sent. ${email.trim()} will receive a temporary password by email.`);
+        await api.createUser({ email: normalizedEmail, role, scopes });
+        setNotice(`Invite sent. ${normalizedEmail} will receive a temporary password by email.`);
       }
       closeForm();
       await load();
@@ -163,7 +174,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
     {canViewAudit ? <section className="audit-list surface" aria-labelledby="audit-title"><div className="section-heading"><div><span className="eyebrow">Read-only history</span><h2 id="audit-title">Recent access changes</h2></div></div>{auditEvents.map((event) => <div className="audit-row" key={event.event_id}><strong>{event.action.replaceAll(".", " ")}</strong><span>{event.target_type}</span><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></div>)}{!loading && !auditEvents.length ? <div className="empty-state">No access changes have been recorded yet.</div> : null}</section> : null}
     {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}><section className="admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title">
       <button className="drawer-close" onClick={closeForm} aria-label="Close">x</button><span className="eyebrow">{editing ? "Edit access" : "New administrator"}</span><h2 id="user-form-title">{editing ? editing.email : "Invite a user"}</h2>
-      {!editing ? <label><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoFocus /></label> : null}
+      {!editing ? <label><span>Email</span><input type="email" inputMode="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoFocus /></label> : null}
       <label><span>Role template</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="super_admin">Super Admin</option><option value="country_admin">Country Admin</option><option value="section_scoped">Section-scoped user</option><option value="auditor">Auditor</option></select></label>
       {role !== "super_admin" && role !== "auditor" ? <><fieldset><legend>Markets</legend><div className="choice-grid">{config.countries.map((market) => <label key={market.code}><input type="checkbox" checked={markets.includes(market.code)} onChange={() => setMarkets((current) => current.includes(market.code) ? current.filter((item) => item !== market.code) : [...current, market.code])} />{market.name}</label>)}</div></fieldset><fieldset><legend>Section permissions</legend>{sections.filter((section) => role === "country_admin" ? ["knowledge", "insights", "flow", "support"].includes(section.id) : !["users", "audit"].includes(section.id)).map((section) => <label className="permission-row" key={section.id}><span>{section.label}</span><select value={sectionPermissions[section.id] || ""} onChange={(event) => setSectionPermissions((current) => ({ ...current, [section.id]: event.target.value }))}><option value="">No access</option>{section.permissions.map((permission) => <option key={permission}>{permission}</option>)}</select></label>)}</fieldset></> : null}
       <div className="access-summary">{summary(role, scopes)}</div>
