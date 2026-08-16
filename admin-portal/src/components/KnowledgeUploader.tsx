@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
+import { demoAllowed } from "../auth";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
 import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest } from "../types";
 
@@ -7,8 +8,9 @@ const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
 export function KnowledgeUploader({ credentials }: { credentials: AdminCredentials }) {
   const [config, setConfig] = useState<AdminConfig>(demo.config);
-  const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
-  const [mode, setMode] = useState<DataMode>("demo");
+  const [jobs, setJobs] = useState<IngestionJob[]>(demoAllowed ? demo.jobs : []);
+  const [mode, setMode] = useState<DataMode>(demoAllowed ? "demo" : "live");
+  const [loadError, setLoadError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [country, setCountry] = useState("BE");
@@ -36,13 +38,20 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
   const refresh = async () => {
     const api = new AdminApi(credentials);
-    const [configResult, jobsResult] = await Promise.all([
-      withDemoFallback(() => api.config(), demo.config),
-      withDemoFallback(() => api.ingestions(), demo.jobs)
-    ]);
-    setConfig(configResult.data);
-    setJobs(jobsResult.data);
-    setMode(configResult.mode === "live" && jobsResult.mode === "live" ? "live" : "demo");
+    try {
+      const [configResult, jobsResult] = await Promise.all([
+        withDemoFallback(() => api.config(), demo.config),
+        withDemoFallback(() => api.ingestions(), demo.jobs)
+      ]);
+      setConfig(configResult.data);
+      setJobs(jobsResult.data);
+      setMode(configResult.mode === "live" && jobsResult.mode === "live" ? "live" : "demo");
+      setLoadError("");
+    } catch (error) {
+      setJobs([]);
+      setMode("live");
+      setLoadError(error instanceof Error ? error.message : "Live document activity could not be loaded.");
+    }
   };
 
   useEffect(() => {
@@ -168,7 +177,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
           <h1 id="knowledge-title">Add knowledge. Keep control.</h1>
           <p>Upload approved content, describe it once, and follow it into the search index.</p>
         </div>
-        <span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Connected" : "Demo data"}</span>
+        <span className={`mode-pill ${loadError ? "error" : mode}`}><span />{loadError ? "Connection error" : mode === "live" ? "Connected" : "Demo data"}</span>
       </div>
 
       <div className="uploader-layout">
@@ -221,7 +230,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
       <section className="review-panel surface" aria-labelledby="review-title">
         <div className="section-heading"><div><span className="eyebrow">Staging workspace</span><h2 id="review-title">Review before publish</h2><p>Check the extracted chunks and try a question before a document can affect customer answers.</p></div><span className="review-safety">Staging only</span></div>
-        {mode !== "live" ? <div className="review-empty">Connect the portal to load staging documents. Demo data never publishes anything.</div> : <>
+        {loadError ? <div className="review-empty" role="alert">{loadError} Refresh after the live service is available. No demo documents are shown in production.</div> : mode !== "live" ? <div className="review-empty">Connect the portal to load staging documents. Demo data never publishes anything.</div> : <>
           <div className="review-toolbar"><label htmlFor="review-job">Document ready for review</label><select id="review-job" value={selectedJobId} onChange={(event) => void loadPreview(event.target.value)}><option value="">Select a reviewed document</option>{reviewableJobs.map((job) => <option key={job.job_id} value={job.job_id}>{job.filename} ({job.section_count} chunks)</option>)}</select><button className="button secondary" disabled={!selectedJobId || previewLoading} onClick={() => void loadPreview(selectedJobId)}><RefreshIcon /> Check document</button></div>
           {previewLoading ? <div className="review-empty">Loading the extracted chunks...</div> : null}
           {previewError ? <div className="notice error" role="alert">{previewError}</div> : null}
@@ -239,13 +248,13 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
         <div className="section-heading"><div><h2>Document activity</h2><p>Recent ingestion jobs and indexing progress.</p></div><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
         <div className="jobs-table surface">
           <div className="table-row table-head"><span>Document</span><span>Market</span><span>Type</span><span>Status</span><span>Chunks</span></div>
-          {jobs.map((job) => <div className="table-row" key={job.job_id}>
+          {jobs.length ? jobs.map((job) => <div className="table-row" key={job.job_id}>
             <span className="document-cell"><FileIcon /><span><strong>{job.filename}</strong><small>{job.document_version || "No version"}</small></span></span>
             <span>{job.access_scope === "global" ? "Global" : `${job.country} · ${job.language.toUpperCase()}`}</span>
             <span>{readableType(job.document_type)}</span>
             <span><span className={`status-label ${job.status}`}>{job.status}</span>{job.status !== "ready" && job.status !== "failed" ? <span className="mini-progress"><i style={{ width: `${job.progress}%` }} /></span> : null}{job.status === "failed" && job.error_message ? <small className="job-error">{job.error_message}</small> : null}</span>
             <span>{job.section_count || "—"}</span>
-          </div>)}
+          </div>) : <div className="empty-state">{loadError || "No document activity found."}</div>}
         </div>
       </div>
     </section>
