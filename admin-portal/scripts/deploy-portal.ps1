@@ -18,6 +18,16 @@ function Assert-NativeCommandSucceeded([string]$Operation) {
   }
 }
 
+if (-not $CertificateArn) {
+  $CertificateArn = aws cloudformation describe-stacks `
+    --stack-name $StackName `
+    --region $Region `
+    --query "Stacks[0].Parameters[?ParameterKey=='CertificateArn'].ParameterValue | [0]" `
+    --output text
+  Assert-NativeCommandSucceeded "Read existing portal certificate configuration"
+  if ($CertificateArn -eq "None") { $CertificateArn = "" }
+}
+
 aws cloudformation deploy `
   --template-file $template `
   --stack-name $StackName `
