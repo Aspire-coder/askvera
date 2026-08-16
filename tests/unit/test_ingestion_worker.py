@@ -8,10 +8,48 @@ from scripts import run_ingestion_worker
 from scripts.run_ingestion_worker import (
     _extend_message_visibility,
     _parse_command,
+    _approved_object_details,
+    _s3_event_objects,
     _s3_location,
     _validate_command,
     process_message,
 )
+
+
+def test_approved_s3_path_maps_country_name_and_uk_alias(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run_ingestion_worker,
+        "get_widget_countries",
+        lambda: [{"code": "GB", "name": "United Kingdom"}],
+    )
+    monkeypatch.setattr(
+        run_ingestion_worker,
+        "get_widget_language_codes_for_country",
+        lambda country: {"en"} if country == "GB" else set(),
+    )
+    details = _approved_object_details(
+        "approved-bucket",
+        "approved/United_Kingdom_en/policies/UK-EN-Company-Policy.pdf",
+    )
+
+    assert details["country"] == "GB"
+    assert details["language"] == "en"
+    assert details["accessScope"] == "country"
+
+
+def test_s3_event_parser_accepts_eventbridge_envelope() -> None:
+    events = _s3_event_objects(
+        '{"source":"aws.s3","detail":{"bucket":{"name":"bucket"},'
+        '"object":{"key":"approved/Italy_it/policies/policy.pdf",'
+        '"version-id":"v1"}}}'
+    )
+
+    assert events == [{
+        "bucket": "bucket",
+        "key": "approved/Italy_it/policies/policy.pdf",
+        "versionId": "v1",
+        "etag": "",
+    }]
 
 
 class _StopAfterOneHeartbeat:

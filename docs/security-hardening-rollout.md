@@ -81,6 +81,24 @@ Set `ADMIN_INGESTION_QUEUE_URL` and `ADMIN_INGESTION_DLQ_URL` to the stack
 outputs, but keep
 `ADMIN_INGESTION_QUEUE_ENABLED=false`.
 
+For automatic ingestion of approved S3 uploads, pass
+`KnowledgeBucketName=askverachat-prod-kb` when updating the stack. The stack
+then creates an EventBridge rule that sends `approved/` object-created events
+to the ingestion queue. In production, the bucket currently has no S3
+notification configuration, so enable EventBridge with:
+
+```bash
+aws s3api put-bucket-notification-configuration \
+  --bucket askverachat-prod-kb \
+  --notification-configuration '{"EventBridgeConfiguration":{}}'
+```
+
+The worker accepts only objects shaped like
+`approved/{CountryName}_{language}/policies/{file}.pdf`, validates the market
+and language against the configured markets, and treats repeated S3 events as
+duplicates. Sidecar metadata is optional; when present, the object metadata
+keys `document-version` and `effective-date` are recorded with the document.
+
 Rollback: do not delete retained queues until operators confirm they are empty.
 
 ### 5. Grant Least-Privilege Access

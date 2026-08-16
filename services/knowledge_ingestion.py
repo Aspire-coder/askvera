@@ -261,6 +261,7 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
 
 def create_ingestion_job(
     *,
+    job_id: str | None = None,
     filename: str,
     country: str,
     language: str,
@@ -275,7 +276,7 @@ def create_ingestion_job(
     approval_reference: str = "",
     review_before_publish: bool = False,
 ) -> str:
-    job_id = uuid.uuid4().hex
+    job_id = job_id or uuid.uuid4().hex
     with get_engine().begin() as connection:
         connection.execute(
             text(
@@ -295,6 +296,7 @@ def create_ingestion_job(
                     NULLIF(:effective_date, '')::date, 'queued',
                     now(), now()
                 )
+                ON CONFLICT (job_id) DO NOTHING
                 """
             ),
             {
@@ -485,7 +487,8 @@ def process_ingestion_job(
 
         _update_job(job_id, status="uploading", progress=35, section_count=len(sections))
         source_uri = _upload_source(path, filename, job_id)
-        _update_job(job_id, status="indexing", progress=55, source_uri=source_uri)
+        document_hash = _file_hash(path)
+        _update_job(job_id, status="indexing", progress=55, source_uri=source_uri, content_hash=document_hash)
         stable_document_id = build_logical_document_id(
             logical_document_id=logical_document_id,
             country=str(sections[0]["country"]),
@@ -515,7 +518,7 @@ def process_ingestion_job(
                 access_scope=access_scope,
                 version=version,
                 section_count=indexed,
-                content_hash=_file_hash(path),
+                content_hash=document_hash,
                 accepted_by=accepted_by,
                 logical_document_id=stable_document_id,
                 document_owner=document_owner,
@@ -1045,6 +1048,7 @@ def _update_job(job_id: str, **values: Any) -> None:
         "section_count",
         "source_uri",
         "upload_uri",
+        "content_hash",
         "error_message",
         "attempt_count",
         "lease_owner",
