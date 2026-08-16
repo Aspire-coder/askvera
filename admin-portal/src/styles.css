@@ -550,6 +550,8 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 
 .user-toolbar input,
 .user-toolbar select {
+  flex: 1 1 220px;
+  min-width: 180px;
   min-height: 42px;
   border: 1px solid #dedede;
   border-radius: 10px;
@@ -557,7 +559,7 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   background: #fff;
 }
 
-.user-toolbar input { flex: 1; }
+.user-toolbar input { min-width: 220px; }
 .user-list { overflow: hidden; }
 
 .user-row {
@@ -1028,4 +1030,6 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   .widget-config-grid, .form-grid, .choice-grid { grid-template-columns: 1fr; }
   .permission-row { grid-template-columns: 1fr; }
   .user-toolbar { flex-direction: column; }
+  .user-toolbar input,
+  .user-toolbar select { width: 100%; min-width: 0; }
 }
