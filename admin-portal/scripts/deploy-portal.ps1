@@ -76,13 +76,25 @@ try {
   Assert-NativeCommandSucceeded "CloudFront invalidation"
   aws cloudfront wait invalidation-completed --distribution-id $distribution --id $invalidation.Invalidation.Id
   Assert-NativeCommandSucceeded "CloudFront invalidation wait"
-  $liveHtml = (Invoke-WebRequest -Uri "$portalUrl/?release=verify" -UseBasicParsing).Content
-  $liveAsset = [regex]::Match($liveHtml, 'assets/index-[^"'']+\.js').Value
-  if (-not $liveAsset) { throw "Live portal does not reference an application bundle." }
-  $liveBundle = (Invoke-WebRequest -Uri "$portalUrl/$liveAsset?release=verify" -UseBasicParsing).Content
-  foreach ($marker in @("Select market", "Select support market")) {
-    if (-not $liveBundle.Contains($marker)) { throw "Live portal is missing required feature marker: $marker" }
+  $verified = $false
+  $lastVerificationError = ""
+  for ($attempt = 1; $attempt -le 6 -and -not $verified; $attempt++) {
+    try {
+      $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+      $liveHtml = (Invoke-WebRequest -Uri "$portalUrl/?release=verify-$cacheBust" -UseBasicParsing).Content
+      $liveAsset = [regex]::Match($liveHtml, 'assets/index-[^"'']+\.js').Value
+      if (-not $liveAsset) { throw "Live portal does not reference an application bundle." }
+      $liveBundle = (Invoke-WebRequest -Uri "$portalUrl/$liveAsset?release=verify-$cacheBust" -UseBasicParsing).Content
+      foreach ($marker in @("Select market", "Select support market")) {
+        if (-not $liveBundle.Contains($marker)) { throw "Live portal is missing required feature marker: $marker" }
+      }
+      $verified = $true
+    } catch {
+      $lastVerificationError = $_.Exception.Message
+      if ($attempt -lt 6) { Start-Sleep -Seconds 3 }
+    }
   }
+  if (-not $verified) { throw "Live portal verification failed after 6 attempts: $lastVerificationError" }
 } finally {
   Pop-Location
 }

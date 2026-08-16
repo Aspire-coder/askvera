@@ -70,12 +70,14 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [reviewSort, setReviewSort] = useState("newest");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId
     ? interactions.find((item) => item.correlation_id === selectedId) || null
     : null;
 
   const refresh = async () => {
+    setLoadError("");
     const overviewFilters = new URLSearchParams({ days });
     const interactionFilters = new URLSearchParams({ days, feedback, search: query, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
     const shadowFilters = new URLSearchParams({ days });
@@ -103,26 +105,30 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     }
     if (trafficSource) { overviewFilters.set("traffic_source", trafficSource); interactionFilters.set("traffic_source", trafficSource); }
     const api = new AdminApi(credentials);
-    const [overviewResult, interactionResult, shadowResult, configResult] = await Promise.all([
-      withDemoFallback(() => api.overview(overviewFilters), demo.overview),
-      withDemoFallback(() => api.interactions(interactionFilters), demoInteractionPage),
-      withDemoFallback(() => api.retrievalShadow(shadowFilters), demo.shadowReport),
-      withDemoFallback(() => api.config(), demo.config)
-    ]);
-    setOverview(overviewResult.data);
-    setInteractions(interactionResult.data.items);
-    setInteractionTotal(interactionResult.data.total);
-    setInteractionTotalPages(interactionResult.data.totalPages);
-    setShadowReport(shadowResult.data);
-    setMarkets(configResult.data.countries);
-    setMode(
-      overviewResult.mode === "live"
-      && interactionResult.mode === "live"
-      && shadowResult.mode === "live"
-      && configResult.mode === "live"
-        ? "live"
-        : "demo"
-    );
+    try {
+      const [overviewResult, interactionResult, shadowResult, configResult] = await Promise.all([
+        withDemoFallback(() => api.overview(overviewFilters), demo.overview),
+        withDemoFallback(() => api.interactions(interactionFilters), demoInteractionPage),
+        withDemoFallback(() => api.retrievalShadow(shadowFilters), demo.shadowReport),
+        withDemoFallback(() => api.config(), demo.config)
+      ]);
+      setOverview(overviewResult.data);
+      setInteractions(interactionResult.data.items);
+      setInteractionTotal(interactionResult.data.total);
+      setInteractionTotalPages(interactionResult.data.totalPages);
+      setShadowReport(shadowResult.data);
+      setMarkets(configResult.data.countries);
+      setMode(
+        overviewResult.mode === "live"
+        && interactionResult.mode === "live"
+        && shadowResult.mode === "live"
+        && configResult.mode === "live"
+          ? "live"
+          : "demo"
+      );
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Insights data could not be loaded.");
+    }
   };
 
   useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback, query, reviewPage, reviewPageSize, reviewSort]);
@@ -192,6 +198,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <div><span className="eyebrow">Experience intelligence</span><h1 id="insights-title">Know what users need next.</h1><p>Measure adoption, answer quality, knowledge gaps and AI usage across every market.</p></div>
         <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span><button className="button secondary" onClick={resetDashboard}>Reset dashboard</button></div>
       </div>
+      {loadError ? <div className="admin-toast error" role="alert">{loadError}</div> : null}
 
       <div className="filter-bar surface">
         <label><span>Quick range</span><select value={days} onChange={(event) => { setDays(event.target.value); setStartAt(""); setEndAt(""); setReviewPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>

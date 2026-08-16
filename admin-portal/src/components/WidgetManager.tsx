@@ -88,6 +88,16 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     const origins = originText.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean);
     const validationError = validateOrigins(originText);
     if (!draft.name.trim() || validationError) { setError(!draft.name.trim() ? "Enter a widget name." : validationError); return; }
+    if (!draft.markets.length) { setError("Select at least one market."); return; }
+    if (!draft.languages.length) { setError("Select at least one language."); return; }
+    if (draft.default_market && !draft.markets.includes(draft.default_market)) {
+      setError("Choose a default market that is enabled for this widget.");
+      return;
+    }
+    if (draft.default_language && !draft.languages.includes(draft.default_language)) {
+      setError("Choose a default language that is enabled for this widget.");
+      return;
+    }
     setSaving(true); setError("");
     try {
       const body = { ...draft, allowed_origins: origins };

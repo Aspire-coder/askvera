@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminApi, type AdminCredentials } from "../api";
 import type { AdminConfig, SupportRoute } from "../types";
 
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
 export function SupportRoutesManager({ credentials, config }: { credentials: AdminCredentials; config: AdminConfig }) {
   const api = useMemo(() => new AdminApi(credentials), [credentials.accessToken, credentials.apiKey]);
   const [routes, setRoutes] = useState<SupportRoute[]>([]);
@@ -43,11 +45,21 @@ export function SupportRoutesManager({ credentials, config }: { credentials: Adm
   };
 
   const save = async (route: SupportRoute) => {
+    const email = route.email.trim().toLowerCase();
+    const department = route.department.trim();
+    if (route.enabled && !department) {
+      setError(`Enter a department for ${route.country_name} before enabling this route.`);
+      return;
+    }
+    if (route.enabled && !EMAIL_PATTERN.test(email)) {
+      setError(`Enter a valid destination email for ${route.country_name}.`);
+      return;
+    }
     setSaving(route.country);
     setError("");
     try {
       await api.updateSupportRoute(route.country, {
-        department: route.department.trim(), email: route.email.trim(), enabled: route.enabled
+        department, email, enabled: route.enabled
       });
       setNotice(`${route.country_name} routing saved.`);
       await load();
