@@ -22,6 +22,8 @@ from services.aws_clients import get_aws_clients
 from services.db import get_engine
 from services.knowledge_generations import build_logical_document_id
 
+COUNTRY_ALIASES = {"UK": "GB"}
+
 
 def _objects(bucket: str, prefix: str) -> list[dict[str, Any]]:
     client = get_aws_clients().s3
@@ -61,7 +63,8 @@ def _record(item: dict[str, Any], *, apply: bool) -> dict[str, Any]:
     bucket = settings.S3_BUCKET
     key = str(item["Key"])
     first, section_count, content_hash = _read_sections(bucket, key)
-    country = str(first.get("country") or "").upper()
+    source_country = str(first.get("country") or "").upper()
+    country = COUNTRY_ALIASES.get(source_country, source_country)
     language = str(first.get("language") or "").lower()
     filename = str(first.get("source_file") or PurePosixPath(key).name.replace(".sections.jsonl", ""))
     access_scope = "global" if country in {"GLOBAL", ""} else "country"
