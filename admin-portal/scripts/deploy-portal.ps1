@@ -4,6 +4,7 @@ param(
   [string]$PortalDomain = "operations.vera-api.xyz",
   [string]$CertificateArn = "",
   [string]$ApiOrigin = "https://api.vera-api.xyz",
+  [ValidateSet("true", "false")][string]$EnableWebAcl = "true",
   [Parameter(Mandatory = $true)][string]$CognitoDomainPrefix
 )
 
@@ -36,9 +37,16 @@ aws cloudformation deploy `
     "PortalDomainName=$PortalDomain" `
     "CertificateArn=$CertificateArn" `
     "ApiOrigin=$ApiOrigin" `
+    "EnableWebAcl=$EnableWebAcl" `
     "CognitoDomainPrefix=$CognitoDomainPrefix" `
   --no-fail-on-empty-changeset
 Assert-NativeCommandSucceeded "CloudFormation deployment"
+
+aws cloudformation update-termination-protection `
+  --stack-name $StackName `
+  --region $Region `
+  --enable-termination-protection
+Assert-NativeCommandSucceeded "Enable stack termination protection"
 
 function Get-StackOutput([string]$Key) {
   return aws cloudformation describe-stacks `

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminApi, type AdminCredentials } from "../api";
 import type { AdminConfig, WidgetConfig } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 
 type Draft = Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">;
 const blank = (): Draft => ({
@@ -55,12 +56,6 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, [api]);
-  useEffect(() => {
-    if (!showForm) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [showForm]);
 
   const widgetCountries = config.widgetCountries || config.countries;
   const allowedLanguages = useMemo(() => {
@@ -83,6 +78,7 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     setError("");
   };
   const close = () => { setShowForm(false); setEditing(null); };
+  const formDialogRef = useDialogFocus<HTMLElement>(showForm, close);
 
   const save = async () => {
     const origins = originText.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean);
@@ -145,7 +141,7 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
       </article>)}
       {!loading && !items.length ? <div className="empty-state surface">No widget instances yet. Create one when a customer site is ready.</div> : null}
     </div>
-    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className="admin-form-modal widget-form-modal" role="dialog" aria-modal="true" aria-labelledby="widget-form-title">
+    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section ref={formDialogRef} className="admin-form-modal widget-form-modal" role="dialog" aria-modal="true" aria-labelledby="widget-form-title" tabIndex={-1}>
       <button className="drawer-close" onClick={close} aria-label="Close">x</button><span className="eyebrow">{editing ? "Edit instance" : "New instance"}</span><h2 id="widget-form-title">{editing ? editing.name : "Create a widget"}</h2>
       <div className="form-grid"><label><span>Name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} autoFocus /></label><label><span>Customer</span><input value={draft.customer} onChange={(event) => setDraft({ ...draft, customer: event.target.value })} /></label></div>
       <label><span>Approved website origins</span><textarea aria-describedby="origin-help origin-error" aria-invalid={Boolean(originIssue)} value={originText} onChange={(event) => setOriginText(event.target.value)} placeholder={"https://www.example.com\nhttps://portal.example.com"} /><small id="origin-help">One exact http or https origin per line. Paths are not accepted.</small>{originIssue ? <small id="origin-error" className="inline-error" role="alert">{originIssue}</small> : null}</label>

@@ -26,7 +26,7 @@ Parameters:
     AllowedPattern: "^[a-z0-9-]{3,63}$"
   EnableWebAcl:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
@@ -53,6 +53,48 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
+
+  PortalLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn-lint:
+        config:
+          # CloudFront standard logging still requires an ACL-enabled target.
+          ignore_checks:
+            - W3045
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: RetainPortalAccessLogs
+            Status: Enabled
+            ExpirationInDays: 365
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        # CloudFront standard logging uses the log-delivery ACL grant.
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Application
+          Value: AskVera
+        - Key: DataClassification
+          Value: Internal
+        - Key: Purpose
+          Value: PortalAccessLogs
 
   PortalOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -120,6 +162,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      DeletionProtection: ACTIVE
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
         InviteMessageTemplate:
@@ -262,6 +305,10 @@ Resources:
         Enabled: true
         HttpVersion: http2and3
         IPV6Enabled: true
+        Logging:
+          Bucket: !GetAtt PortalLogBucket.DomainName
+          IncludeCookies: false
+          Prefix: cloudfront/
         Origins:
           - DomainName: !GetAtt PortalBucket.RegionalDomainName
             Id: portal-s3

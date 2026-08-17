@@ -30,6 +30,32 @@ const ALLOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEMO === "t
 type Envelope<T> = { success: boolean; data?: T; error?: { message?: string } };
 export type AdminCredentials = { accessToken?: string; apiKey?: string };
 
+export class AdminApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "AdminApiError";
+  }
+}
+
+const signalExpiredSession = (response: Response) => {
+  if (response.status === 401) window.dispatchEvent(new Event("askvera:auth-expired"));
+};
+
+const responseError = async (response: Response, fallback: string): Promise<AdminApiError> => {
+  signalExpiredSession(response);
+  const text = await response.text();
+  let message = "";
+  if (text) {
+    try {
+      const payload = JSON.parse(text) as Envelope<unknown> & { detail?: string };
+      message = payload.error?.message || payload.detail || "";
+    } catch {
+      message = "";
+    }
+  }
+  return new AdminApiError(message || `${fallback} (${response.status})`, response.status);
+};
+
 export class AdminApi {
   constructor(private readonly credentials: AdminCredentials) {}
 
@@ -42,9 +68,16 @@ export class AdminApi {
         ...(init?.headers || {})
       }
     });
-    const payload = await response.json() as Envelope<T> & { detail?: string };
+    if (!response.ok) throw await responseError(response, "Request failed");
+    const text = await response.text();
+    let payload: Envelope<T> & { detail?: string };
+    try {
+      payload = JSON.parse(text) as Envelope<T> & { detail?: string };
+    } catch {
+      throw new AdminApiError("The service returned an invalid response.", response.status);
+    }
     if (!response.ok || payload.success === false || payload.data === undefined) {
-      throw new Error(payload.error?.message || payload.detail || `Request failed (${response.status})`);
+      throw new AdminApiError(payload.error?.message || payload.detail || `Request failed (${response.status})`, response.status);
     }
     return payload.data;
   }
@@ -61,7 +94,7 @@ export class AdminApi {
         ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
       }
     });
-    if (!response.ok) throw new Error(`Export failed (${response.status})`);
+    if (!response.ok) throw await responseError(response, "Export failed");
     return response.blob();
   }
   async exportInteractionsXlsx(filters: URLSearchParams): Promise<Blob> {
@@ -71,7 +104,7 @@ export class AdminApi {
         ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
       }
     });
-    if (!response.ok) throw new Error(`Excel export failed (${response.status})`);
+    if (!response.ok) throw await responseError(response, "Excel export failed");
     return response.blob();
   }
   retrievalShadow(filters: URLSearchParams) {

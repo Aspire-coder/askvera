@@ -17,8 +17,8 @@ then enable each capability separately after its checks pass.
 - Query-planner output is bounded and schema-checked.
 - Full browser transcripts use `sessionStorage` by default instead of
   `localStorage`. Closing the browser tab removes that browser copy.
-- Retention settings become available, but no deletion occurs until the timer is
-  installed and started.
+- The normal deployment installs and enables the retention timer. Review its
+  dry-run output and the backup policy before the first production deployment.
 
 ## What Remains Off
 
@@ -33,7 +33,7 @@ then enable each capability separately after its checks pass.
 | `ADMIN_ANALYTICS_REDACTED_BY_DEFAULT` | `false` | Returns PII-scrubbed, length-bounded interaction previews from the portal API. Required by the hardened profile. |
 | `ADMIN_ANALYTICS_RAW_TRANSCRIPT_ACCESS_ENABLED` | `false` | Permits a separately authorized and audited raw interaction view. Leave disabled unless Privacy approves the operational need. |
 | `SECURITY_PROFILE` | `standard` | `hardened` makes required security controls fail closed at startup. |
-| `EnableWebAcl` | `false` | Attaches AWS managed WAF protections to the operations portal. |
+| `EnableWebAcl` | `true` | Attaches AWS managed WAF protections to the operations portal. |
 
 ## Safe Deployment Sequence
 
@@ -101,7 +101,16 @@ keys `document-version` and `effective-date` are recorded with the document.
 
 Rollback: do not delete retained queues until operators confirm they are empty.
 
-### 5. Grant Least-Privilege Access
+### 5. Enable Malware Scanning
+
+Deploy `deployment/ingestion-malware-protection.yaml` and wait until the
+GuardDuty plan is active. Upload a harmless test file to the quarantine prefix
+and verify the object receives
+`GuardDutyMalwareScanStatus=NO_THREATS_FOUND`. Keep
+`ADMIN_INGESTION_MALWARE_SCAN_REQUIRED=false` until this check passes; enabling
+it earlier intentionally prevents the worker from opening unscanned files.
+
+### 6. Grant Least-Privilege Access
 
 The EC2 instance role needs:
 
@@ -120,7 +129,7 @@ The EC2 instance role needs:
 Scope queue actions to the created queue ARN and S3 actions to the exact bucket
 prefixes. Do not grant wildcard account administration.
 
-### 6. Install the Worker
+### 7. Install the Worker
 
 Install `deployment/systemd/askvera-ingestion-worker.service` and reload
 systemd, but do not start or enable it while queueing is disabled. Review its
@@ -128,7 +137,7 @@ environment file and service sandbox first.
 
 Rollback: stop and disable the worker.
 
-### 7. Enable Durable Queueing
+### 8. Enable Durable Queueing
 
 Set `ADMIN_INGESTION_QUEUE_ENABLED=true`, restart the API, then start and enable
 the worker. Upload one non-production test document and verify:
@@ -146,7 +155,7 @@ the worker. Upload one non-production test document and verify:
 Rollback: set the flag to `false` and restart the API. Existing queued messages
 remain available for controlled processing.
 
-### 8. Enable Staged Publication
+### 9. Enable Staged Publication
 
 Set `ADMIN_INGESTION_STAGED_PUBLISH_ENABLED=true` while leaving generation
 filtering off. Before enabling generation filtering, run
@@ -166,7 +175,7 @@ Rollback: restore the prior RDS generation pointer, clear the pointer cache, and
 then disable the flag if needed. Retired generations remain indexed during the
 rollback window.
 
-### 9. Enable OCR
+### 10. Enable OCR
 
 Set `ADMIN_TEXTRACT_OCR_ENABLED=true` only after Textract permissions and cost
 monitoring are in place. Test a scanned PDF and confirm page ordering, section
@@ -175,7 +184,7 @@ counts, locale metadata, and retrieval quality before publication.
 Rollback: set the flag to `false`; scanned documents return to the existing
 preflight rejection path.
 
-### 10. Start Retention Cleanup
+### 11. Start Retention Cleanup
 
 Review legal and operational retention periods, install
 `askvera-retention.service` and `askvera-retention.timer`, then run the service
@@ -191,7 +200,7 @@ document-retention policy.
 Rollback: disable the timer. Database deletions cannot be undone without a
 backup, so confirm backups and retention approvals before the first run.
 
-### 11. Enforce the Hardened Profile
+### 12. Enforce the Hardened Profile
 
 After all required controls are verified, set `SECURITY_PROFILE=hardened`.
 Startup validation then refuses to run if a required security feature or
@@ -200,12 +209,12 @@ destination is missing.
 Rollback: set `SECURITY_PROFILE=standard` only through the approved emergency
 change process.
 
-### 12. Portal MFA and WAF
+### 13. Portal MFA and WAF
 
 Review the `deployment/admin-portal.yaml` change set. MFA enrollment affects
-every administrator, so notify users before applying it. Enable the Web ACL
-with `EnableWebAcl=true` only after reviewing rate limits and managed-rule
-metrics in count/testing conditions where appropriate.
+every administrator, so notify users before applying it. The Web ACL is enabled
+by default; review its rate limits and managed-rule metrics before execution,
+then verify legitimate sign-in and portal API traffic after deployment.
 
 Rollback: set `EnableWebAcl=false` if legitimate portal traffic is blocked.
 Cognito MFA rollback requires a deliberate identity-policy decision.
