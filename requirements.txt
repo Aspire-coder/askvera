@@ -1,4 +1,4 @@
-fastapi==0.115.6
+fastapi==0.141.1
 uvicorn[standard]==0.34.0
 boto3>=1.40.0,<2.0.0
 botocore>=1.40.0,<2.0.0
@@ -6,15 +6,15 @@ redis==5.2.1
 psycopg[binary]==3.2.3
 sqlalchemy==2.0.36
 pydantic==2.10.4
-pytest==8.3.4
+pytest==9.1.1
 pytest-cov==6.0.0
 httpx==0.28.1
 moto==5.0.24
-black==24.10.0
+black==26.5.1
 flake8==7.1.1
 detect-secrets==1.5.0
 reportlab==4.2.5
-pypdf==5.1.0
-python-multipart==0.0.20
+pypdf==6.16.1
+python-multipart==0.0.32
 opensearch-py==2.8.0
-PyJWT[crypto]==2.10.1
+PyJWT[crypto]==2.13.0

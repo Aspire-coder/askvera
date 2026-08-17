@@ -20,7 +20,9 @@ Production runtime configuration should come from IAM, SSM Parameter Store, and 
 - `systemd/askvera-ingestion-worker.service` - opt-in durable ingestion worker.
 - `systemd/askvera-retention.service` and `.timer` - daily retention cleanup.
 - `ingestion-queue.yaml` - encrypted SQS queue, dead-letter queue, and alarms.
-- `admin-portal.yaml` - private portal hosting, Cognito MFA, and opt-in WAF.
+- `ingestion-malware-protection.yaml` - GuardDuty scanning for quarantined portal uploads.
+- `admin-portal.yaml` - private portal hosting, Cognito MFA, WAF, and access logging.
+- `github-actions-oidc.yaml` - short-lived, least-privilege GitHub deployment identity.
 - `ssl/certbot.sh` - Certbot automation for the API domain.
 
 ## First-Time EC2 Setup
@@ -118,6 +120,7 @@ The EC2 role needs `ssm:PutParameter` only for the configured
 never rotate the version. Roll back by restoring the previous approved source
 and previous `KB_VERSION`, then restart the API.
 
-The operations-portal ingestion hardening is intentionally disabled by default.
-Follow `docs/security-hardening-rollout.md` to introduce the queue, worker, OCR,
-retention, MFA, and WAF without changing the current retrieval pipeline.
+The operations-portal ingestion feature flags must be enabled only after the
+queue and GuardDuty stacks are active. Follow `docs/security-hardening-rollout.md`
+to introduce the queue, worker, malware scanning, retention, MFA, and WAF without
+interrupting the current retrieval pipeline.

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminApi, type AdminCredentials } from "../api";
 import type { AdminAuditEvent, AdminConfig, AdminScope, AdminUser } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 
 const sections = [
   { id: "knowledge", label: "Knowledge", permissions: ["view", "stage", "publish"] },
@@ -101,12 +102,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
     setMarkets([]);
     setSectionPermissions({ knowledge: "view" });
   };
-  useEffect(() => {
-    if (!showForm) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeForm(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [showForm]);
+  const formDialogRef = useDialogFocus<HTMLElement>(showForm, closeForm);
 
   const edit = (user: AdminUser) => {
     setEditing(user);
@@ -172,7 +168,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
       {!loading && filtered.length > pageSize ? <div className="pagination"><button className="button secondary" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>Previous</button><span>Page {page} of {pageCount} / {filtered.length} users</span><button className="button secondary" disabled={page === pageCount} onClick={() => setPage((value) => value + 1)}>Next</button></div> : null}
     </div>
     {canViewAudit ? <section className="audit-list surface" aria-labelledby="audit-title"><div className="section-heading"><div><span className="eyebrow">Read-only history</span><h2 id="audit-title">Recent access changes</h2></div></div>{auditEvents.map((event) => <div className="audit-row" key={event.event_id}><strong>{event.action.replaceAll(".", " ")}</strong><span>{event.target_type}</span><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></div>)}{!loading && !auditEvents.length ? <div className="empty-state">No access changes have been recorded yet.</div> : null}</section> : null}
-    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}><section className="admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title">
+    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}><section ref={formDialogRef} className="admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title" tabIndex={-1}>
       <button className="drawer-close" onClick={closeForm} aria-label="Close">x</button><span className="eyebrow">{editing ? "Edit access" : "New administrator"}</span><h2 id="user-form-title">{editing ? editing.email : "Invite a user"}</h2>
       {!editing ? <label><span>Email</span><input type="email" inputMode="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoFocus /></label> : null}
       <label><span>Role template</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="super_admin">Super Admin</option><option value="country_admin">Country Admin</option><option value="section_scoped">Section-scoped user</option><option value="auditor">Auditor</option></select></label>

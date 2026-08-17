@@ -11,7 +11,7 @@ Group=askvera
 WorkingDirectory=/opt/askvera
 EnvironmentFile=/etc/askvera/production.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/askvera/.venv/bin/python -B scripts/cleanup_retained_data.py
+ExecStart=/opt/askvera/.venv/bin/python -B scripts/cleanup_retained_data.py --apply
 RuntimeDirectory=askvera-retention
 RuntimeDirectoryMode=0750
 SyslogIdentifier=askvera-retention

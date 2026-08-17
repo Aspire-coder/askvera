@@ -85,17 +85,20 @@ Resources:
             Condition:
               Bool:
                 aws:SecureTransport: "false"
-          - Sid: AllowApprovedS3Events
-            Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sqs:SendMessage
-            Resource: !GetAtt IngestionQueue.Arn
-            Condition:
-              ArnEquals:
-                aws:SourceArn: !GetAtt ApprovedPolicyObjectCreatedRule.Arn
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
+          - !If
+            - EnableS3AutoIngestion
+            - Sid: AllowApprovedS3Events
+              Effect: Allow
+              Principal:
+                Service: events.amazonaws.com
+              Action: sqs:SendMessage
+              Resource: !GetAtt IngestionQueue.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !GetAtt ApprovedPolicyObjectCreatedRule.Arn
+                StringEquals:
+                  aws:SourceAccount: !Ref AWS::AccountId
+            - !Ref AWS::NoValue
       Queues:
         - !Ref IngestionQueue
         - !Ref IngestionDeadLetterQueue

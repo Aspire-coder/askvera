@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
 import type { AnalyticsOverview, Interaction, InteractionPage, Market, ShadowReport } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 import "../tokenSplit.css";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
@@ -65,6 +66,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [trafficSource, setTrafficSource] = useState("");
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [reviewPageSize, setReviewPageSize] = useState("50");
   const [reviewSort, setReviewSort] = useState("newest");
@@ -75,11 +77,13 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const selected = selectedId
     ? interactions.find((item) => item.correlation_id === selectedId) || null
     : null;
+  const closeReview = () => setSelectedId(null);
+  const reviewDialogRef = useDialogFocus<HTMLElement>(Boolean(selected), closeReview);
 
   const refresh = async () => {
     setLoadError("");
     const overviewFilters = new URLSearchParams({ days });
-    const interactionFilters = new URLSearchParams({ days, feedback, search: query, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
+    const interactionFilters = new URLSearchParams({ days, feedback, search: debouncedQuery, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
     const shadowFilters = new URLSearchParams({ days });
     if (startAt) {
       const start = new Date(startAt).toISOString();
@@ -131,7 +135,12 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     }
   };
 
-  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback, query, reviewPage, reviewPageSize, reviewSort]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 350);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback, debouncedQuery, reviewPage, reviewPageSize, reviewSort]);
 
   const resetDashboard = () => {
     setDays("30");
@@ -164,7 +173,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setExporting(true);
     setExportError("");
     try {
-      const filters = new URLSearchParams({ days, feedback, search: query, limit: "5000", sort: reviewSort });
+      const filters = new URLSearchParams({ days, feedback, search: debouncedQuery, limit: "5000", sort: reviewSort });
       if (startAt) filters.set("start", new Date(startAt).toISOString());
       if (endAt) filters.set("end", new Date(endAt).toISOString());
       if (country) filters.set("country", country);
@@ -338,7 +347,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         {interactionTotalPages > 1 ? <div className="review-pagination"><button className="button secondary" disabled={reviewPage <= 1} onClick={() => setReviewPage((value) => Math.max(1, value - 1))}>Previous</button><span>Page {reviewPage} of {interactionTotalPages}</span><label>Rows <select value={reviewPageSize} onChange={(event) => { setReviewPageSize(event.target.value); setReviewPage(1); }}><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><button className="button secondary" disabled={reviewPage >= interactionTotalPages} onClick={() => setReviewPage((value) => Math.min(interactionTotalPages, value + 1))}>Next</button></div> : null}
       </div>
 
-      {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}><aside className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">
+      {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeReview(); }}><aside ref={reviewDialogRef} className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title" tabIndex={-1}>
         <button className="drawer-close" onClick={() => setSelectedId(null)} aria-label="Close review">x</button>
         <span className="eyebrow">Answer review</span><h2 id="review-title">{selected.question}</h2>
         <div className="drawer-meta"><span>{selected.country}</span><span>{selected.language.toUpperCase()}</span><span>{selected.traffic_source.replaceAll("_", " ")}</span><span>{percent(selected.confidence)} confidence</span><span>{selected.tokens} tokens</span></div>

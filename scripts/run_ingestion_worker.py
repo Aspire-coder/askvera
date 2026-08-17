@@ -270,7 +270,9 @@ def process_message(message: dict[str, str]) -> bool:
         if settings.ADMIN_INGESTION_MALWARE_SCAN_REQUIRED:
             tags = get_aws_clients().s3.get_object_tagging(Bucket=bucket, Key=key)
             tag_map = {item["Key"].lower(): item["Value"].upper() for item in tags.get("TagSet", [])}
-            if tag_map.get("malware-scan-status") != "CLEAN":
+            guardduty_status = tag_map.get("guarddutymalwarescanstatus")
+            legacy_status = tag_map.get("malware-scan-status")
+            if guardduty_status != "NO_THREATS_FOUND" and legacy_status != "CLEAN":
                 raise RetryableIngestionError(
                     "Ingestion upload has not passed malware scanning."
                 )

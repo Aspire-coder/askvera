@@ -11,6 +11,7 @@ import { SupportRoutesManager } from "./components/SupportRoutesManager";
 import { UsersManager } from "./components/UsersManager";
 import { WidgetManager } from "./components/WidgetManager";
 import type { AdminConfig, View } from "./types";
+import { useDialogFocus } from "./useDialogFocus";
 
 const nav = [
   { id: "overview" as const, label: "Overview", detail: "Run the operation", icon: <HomeIcon /> },
@@ -23,8 +24,14 @@ const nav = [
   { id: "widget" as const, label: "Widget", detail: "Configure customer embeds", icon: <UploadIcon /> },
 ];
 
+const viewIds = new Set<View>(nav.map((item) => item.id));
+const initialView = (): View => {
+  const candidate = window.location.hash.replace(/^#/, "") as View;
+  return viewIds.has(candidate) ? candidate : "overview";
+};
+
 export function App() {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>(initialView);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [authReady, setAuthReady] = useState(!cognitoConfigured);
   const [authError, setAuthError] = useState("");
@@ -32,6 +39,11 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftKey, setDraftKey] = useState(apiKey);
   const [adminConfig, setAdminConfig] = useState<AdminConfig>(demo.config);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configError, setConfigError] = useState("");
+  const [configAttempt, setConfigAttempt] = useState(0);
+  const closeSettings = () => setSettingsOpen(false);
+  const settingsDialogRef = useDialogFocus<HTMLElement>(settingsOpen && demoAllowed, closeSettings);
 
   useEffect(() => {
     if (!cognitoConfigured) return;
@@ -39,6 +51,27 @@ export function App() {
       .then((nextSession) => setSession(nextSession))
       .catch((error) => setAuthError(error instanceof Error ? error.message : "Sign-in failed."))
       .finally(() => setAuthReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    const expire = () => signOut();
+    const remaining = Math.max(0, session.expiresAt - Date.now() - 15_000);
+    const timer = window.setTimeout(expire, remaining);
+    window.addEventListener("askvera:auth-expired", expire);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("askvera:auth-expired", expire);
+    };
+  }, [session?.expiresAt]);
+
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const candidate = window.location.hash.replace(/^#/, "") as View;
+      if (viewIds.has(candidate)) setView(candidate);
+    };
+    window.addEventListener("hashchange", syncFromLocation);
+    return () => window.removeEventListener("hashchange", syncFromLocation);
   }, []);
 
   const connect = () => {
@@ -50,6 +83,10 @@ export function App() {
   };
 
   const credentials: AdminCredentials = session ? { accessToken: session.accessToken } : { apiKey };
+  const navigate = (nextView: View) => {
+    setView(nextView);
+    if (window.location.hash !== `#${nextView}`) window.location.hash = nextView;
+  };
   const canView = (section: View) => {
     if (section === "overview") return true;
     if (section === "users" && !adminConfig.userManagementEnabled) return false;
@@ -64,12 +101,18 @@ export function App() {
 
   useEffect(() => {
     if (!session && !apiKey) return;
+    setConfigLoading(true);
+    setConfigError("");
     void new AdminApi(credentials).config()
       .then((nextConfig) => {
         setAdminConfig(nextConfig);
       })
-      .catch(() => setAdminConfig(demo.config));
-  }, [session?.accessToken, apiKey]);
+      .catch((error) => {
+        if (demoAllowed) setAdminConfig(demo.config);
+        else setConfigError(error instanceof Error ? error.message : "Your administrator access could not be loaded.");
+      })
+      .finally(() => setConfigLoading(false));
+  }, [session?.accessToken, apiKey, configAttempt]);
   useEffect(() => {
     if (visibleNav.length && !visibleNav.some((item) => item.id === view)) {
       setView(visibleNav[0].id);
@@ -89,11 +132,19 @@ export function App() {
     </section></main>;
   }
 
+  if (configLoading) {
+    return <main className="auth-page"><section className="auth-card"><div className="brand-mark"><AskVeraMark /></div><span className="eyebrow">AskVera Operations</span><h1>Loading your access</h1><p>Checking your assigned markets and permissions.</p></section></main>;
+  }
+
+  if (configError) {
+    return <main className="auth-page"><section className="auth-card"><div className="brand-mark"><AskVeraMark /></div><span className="eyebrow">Connection problem</span><h1>We could not load your access.</h1><p>{configError}</p><div className="modal-actions"><button className="button secondary" onClick={() => signOut()}>Sign out</button><button className="button primary" onClick={() => setConfigAttempt((value) => value + 1)}>Try again</button></div></section></main>;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><AskVeraMark /></div><div><strong>AskVera</strong><span>Operations</span></div></div>
-        <nav aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span><strong>{item.label}</strong><small>{item.detail}</small></span></button>)}</nav>
+        <nav aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigate(item.id)}>{item.icon}<span><strong>{item.label}</strong><small>{item.detail}</small></span></button>)}</nav>
         <div className="sidebar-bottom">
           <button className="connection-button" onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /><span><strong>{connectionLabel}</strong><small>{session ? "Select to sign out" : connectionDetail}</small></span><i className={session || apiKey ? "online" : ""} /></button>
           <div className="environment"><span>Production</span><strong>Operations</strong></div>
@@ -102,7 +153,7 @@ export function App() {
 
       <main className="main-content">
         <header className="mobile-header"><div className="brand"><div className="brand-mark"><AskVeraMark /></div><strong>AskVera Operations</strong></div><button onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /></button></header>
-        {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={setView} /> : null}
+        {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={navigate} /> : null}
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
         {view === "readiness" ? <MarketReadiness credentials={credentials} config={adminConfig} /> : null}
@@ -111,10 +162,10 @@ export function App() {
         {view === "users" ? <UsersManager credentials={credentials} config={adminConfig} /> : null}
         {view === "widget" ? <WidgetManager credentials={credentials} config={adminConfig} /> : null}
         {!visibleNav.length ? <section className="page-section"><div className="empty-state surface">Your account does not currently have access to an operations section.</div></section> : null}
-        <nav className="mobile-nav" aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+        <nav className="mobile-nav" aria-label="Admin sections">{visibleNav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigate(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
       </main>
 
-      {settingsOpen && demoAllowed ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}><section className="connection-modal" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+      {settingsOpen && demoAllowed ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}><section ref={settingsDialogRef} className="connection-modal" role="dialog" aria-modal="true" aria-labelledby="connect-title" tabIndex={-1}>
         <button className="drawer-close" onClick={() => setSettingsOpen(false)} aria-label="Close">x</button>
         <div className="connection-icon"><KeyIcon /></div><span className="eyebrow">Local connection</span><h2 id="connect-title">Connect operational data</h2><p>Enter the development admin key. Production uses company sign-in and never places an API key in the website bundle.</p>
         <label><span>Admin API key</span><input type="password" value={draftKey} onChange={(event) => setDraftKey(event.target.value)} placeholder="Enter admin key" autoFocus /></label>
