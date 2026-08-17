@@ -43,6 +43,7 @@ from services.knowledge_ingestion import (
     ACCESS_SCOPES,
     DOCUMENT_TYPES,
     create_ingestion_job,
+    delete_ingestion_job,
     enqueue_ingestion_job,
     fail_ingestion_job,
     list_ingestion_jobs,
@@ -466,6 +467,26 @@ def ingestions(request: Request, limit: int = 50) -> dict[str, Any]:
         if job.get("access_scope") == "global" or str(job.get("country") or "").upper() in markets
     ]
     return _payload(visible[: max(1, min(limit, 200))], request)
+
+
+@admin_router.delete("/ingestions/{job_id}")
+def delete_ingestion(job_id: str, request: Request) -> dict[str, Any]:
+    """Delete a document and remove it from the live retrieval index."""
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can delete documents.")
+    require_admin_access(request, "knowledge", "manage")
+    deleted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
+    try:
+        job = delete_ingestion_job(job_id, deleted_by=deleted_by)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    record_admin_audit_event(deleted_by, "knowledge.document_deleted", job_id)
+    return _payload({"job": job, "message": "Document deleted from live retrieval and source storage."}, request)
 
 
 class IngestionPreviewTestRequest(BaseModel):

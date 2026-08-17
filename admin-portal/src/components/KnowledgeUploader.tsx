@@ -36,6 +36,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [testResult, setTestResult] = useState<IngestionPreviewTest | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState("");
 
   const refresh = async () => {
     const api = new AdminApi(credentials);
@@ -180,6 +181,25 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     }
   };
 
+  const canDeleteDocuments = config.principal?.role === "super_admin" && mode === "live";
+  const deleteDocument = async (job: IngestionJob) => {
+    if (!canDeleteDocuments || deletingJobId) return;
+    const scope = job.access_scope === "global" ? "all markets" : `${job.country} · ${job.language.toUpperCase()}`;
+    const confirmed = window.confirm(`Delete “${job.filename}” (${job.document_version || "no version"}) from ${scope}?\n\nThis removes it from customer retrieval, the search index, and source storage. This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingJobId(job.job_id);
+    setNotice("");
+    try {
+      const result = await new AdminApi(credentials).deleteIngestion(job.job_id);
+      setNotice(result.message);
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The document could not be deleted.");
+    } finally {
+      setDeletingJobId("");
+    }
+  };
+
   return (
     <section className="page-section" aria-labelledby="knowledge-title">
       <div className="page-heading">
@@ -208,7 +228,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
       <section className="knowledge-existing surface" aria-labelledby="existing-documents-title">
         <div className="section-heading"><div><span className="eyebrow">Current coverage</span><h2 id="existing-documents-title">{showingGlobalCoverage ? "Global documents" : `Documents available for ${selectedMarket?.name || "this market"}`}</h2><p>{showingGlobalCoverage ? "Documents available to every market, including global directories and FAQs." : "Global documents are included. Use names and versions to avoid replacing the wrong document."}</p></div><span className="review-safety">{marketJobs.length} found</span></div>
-        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.length ? <div className="knowledge-existing-list">{marketJobs.map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global · available to all markets" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span></article>)}</div> : <div className="review-empty">No documents are currently available for this coverage.</div>}
+        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.filter((job) => job.status !== "deleted").length ? <div className="knowledge-existing-list">{marketJobs.filter((job) => job.status !== "deleted").map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global · available to all markets" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span>{canDeleteDocuments ? <button className="button danger small" disabled={deletingJobId === job.job_id} onClick={() => void deleteDocument(job)}>{deletingJobId === job.job_id ? "Deleting..." : "Delete"}</button> : null}</article>)}</div> : <div className="review-empty">No documents are currently available for this coverage.</div>}
       </section>
 
       <div className="uploader-layout">
@@ -278,13 +298,14 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
       <div className="jobs-section">
         <div className="section-heading"><div><h2>Document activity</h2><p>Recent ingestion jobs and indexing progress.</p></div><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
         <div className="jobs-table surface">
-          <div className="table-row table-head"><span>Document</span><span>Market</span><span>Type</span><span>Status</span><span>Chunks</span></div>
+          <div className="table-row table-head"><span>Document</span><span>Market</span><span>Type</span><span>Status</span><span>Chunks</span><span>Actions</span></div>
           {marketJobs.length ? marketJobs.map((job) => <div className="table-row" key={job.job_id}>
             <span className="document-cell"><FileIcon /><span><strong>{job.filename}</strong><small>{job.document_version || "No version"}</small></span></span>
             <span>{job.access_scope === "global" ? "Global" : `${job.country} · ${job.language.toUpperCase()}`}</span>
             <span>{readableType(job.document_type)}</span>
             <span><span className={`status-label ${job.status}`}>{job.status}</span>{job.status !== "ready" && job.status !== "failed" ? <span className="mini-progress"><i style={{ width: `${job.progress}%` }} /></span> : null}{job.status === "failed" && job.error_message ? <small className="job-error">{job.error_message}</small> : null}</span>
             <span>{job.section_count || "—"}</span>
+            <span>{canDeleteDocuments && job.status !== "deleted" ? <button className="button danger small" disabled={deletingJobId === job.job_id} onClick={() => void deleteDocument(job)}>{deletingJobId === job.job_id ? "Deleting..." : "Delete"}</button> : job.status === "deleted" ? "Deleted" : ""}</span>
           </div>) : <div className="empty-state">{loadError || "No document activity found."}</div>}
         </div>
       </div>

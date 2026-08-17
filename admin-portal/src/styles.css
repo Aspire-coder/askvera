@@ -217,7 +217,7 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 .knowledge-existing { margin: 14px 0 24px; padding: 22px 24px; }
 .knowledge-existing .section-heading { margin-bottom: 16px; }
 .knowledge-existing-list { display: grid; gap: 8px; }
-.knowledge-existing-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.knowledge-existing-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
 .knowledge-existing-row > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .knowledge-existing-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .knowledge-existing-row small { color: var(--tertiary); }
@@ -255,7 +255,9 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 .section-heading h2 { font-size: 21px; }
 .section-heading p { margin: 5px 0 0; color: var(--secondary); font-size: 11px; }
 .jobs-table { overflow: hidden; }
-.table-row { display: grid; grid-template-columns: minmax(280px, 1.8fr) .65fr .85fr .75fr .3fr; gap: 16px; align-items: center; min-height: 66px; padding: 10px 20px; border-top: 1px solid var(--line); font-size: 11px; }
+.table-row { display: grid; grid-template-columns: minmax(280px, 1.8fr) .65fr .85fr .75fr .3fr auto; gap: 16px; align-items: center; min-height: 66px; padding: 10px 20px; border-top: 1px solid var(--line); font-size: 11px; }
+.button.danger { color: #9f2424; border-color: #f0caca; background: #fff7f7; }
+.button.small { min-height: 30px; padding: 6px 10px; font-size: 11px; }
 .table-row:first-child { border-top: 0; }
 .table-head { min-height: 42px; color: var(--tertiary); text-transform: uppercase; letter-spacing: .07em; font-size: 8px; background: rgba(0,0,0,.018); }
 .document-cell { display: flex; gap: 11px; align-items: center; min-width: 0; }
@@ -399,7 +401,7 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
   .journey-metrics { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .diagnostic-panel dl { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .quality-card { grid-row: span 1; }
-  .table-row { grid-template-columns: minmax(220px,1.5fr) .6fr .8fr .7fr .3fr; }
+  .table-row { grid-template-columns: minmax(220px,1.5fr) .6fr .8fr .7fr .3fr auto; }
 }
 
 @media (max-width: 760px) {

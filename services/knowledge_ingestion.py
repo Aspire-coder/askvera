@@ -1139,6 +1139,105 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
     ]
 
 
+def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
+    """Remove a document from live retrieval and its durable source storage.
+
+    The publication pointer is removed first so a partially completed cleanup
+    can never leave the document eligible for retrieval. OpenSearch chunks and
+    S3 objects are then deleted, while the ingestion and audit records remain
+    as a tombstone for traceability.
+    """
+    job = _ingestion_job(job_id)
+    if job.get("status") == "deleted":
+        raise ValueError("This document has already been deleted.")
+    if job.get("status") in {"queued", "extracting", "indexing", "retryable"}:
+        raise ValueError("Wait until document processing finishes before deleting it.")
+
+    with get_engine().begin() as connection:
+        active = connection.execute(
+            text(
+                """
+                SELECT active_ingestion_id
+                FROM knowledge_active_generations
+                WHERE logical_document_id = :logical_document_id
+                FOR UPDATE
+                """
+            ),
+            {"logical_document_id": str(job.get("logical_document_id") or "")},
+        ).scalar()
+        if active == job_id:
+            connection.execute(
+                text(
+                    """
+                    DELETE FROM knowledge_active_generations
+                    WHERE logical_document_id = :logical_document_id
+                    """
+                ),
+                {"logical_document_id": str(job.get("logical_document_id") or "")},
+            )
+        connection.execute(
+            text(
+                """
+                UPDATE knowledge_document_generations
+                SET status = 'deleted', retired_at = COALESCE(retired_at, now())
+                WHERE ingestion_id = :job_id
+                """
+            ),
+            {"job_id": job_id},
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE knowledge_documents
+                SET status = 'deleted', updated_at = now()
+                WHERE document_id = :job_id
+                """
+            ),
+            {"job_id": job_id},
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs
+                SET status = 'deleting', progress = 10, error_message = '', updated_at = now()
+                WHERE job_id = :job_id
+                """
+            ),
+            {"job_id": job_id},
+        )
+
+    try:
+        client = _client()
+        client.delete_by_query(
+            index=settings.OPENSEARCH_INDEX,
+            body={"query": exact_term_query("ingestion_id", job_id)},
+            conflicts="proceed",
+            refresh=True,
+            wait_for_completion=True,
+        )
+        for uri in (str(job.get("source_uri") or ""), str(job.get("upload_uri") or "")):
+            parsed = urlparse(uri)
+            if parsed.scheme == "s3" and parsed.netloc and parsed.path:
+                get_aws_clients().s3.delete_object(
+                    Bucket=parsed.netloc,
+                    Key=parsed.path.lstrip("/"),
+                )
+        _update_job(job_id, status="deleted", progress=100, completed_at=datetime.now(UTC))
+    except Exception as exc:
+        LOGGER.exception("document_delete_cleanup_failed", job_id=job_id)
+        _update_job(
+            job_id,
+            status="deletion_failed",
+            progress=100,
+            error_message="Document was removed from live retrieval, but storage cleanup needs retry.",
+        )
+        raise RuntimeError("Document cleanup did not complete safely.") from exc
+    finally:
+        clear_active_generation_cache()
+
+    return _ingestion_job(job_id)
+
+
 def summarize_ingestion_chunks(
     chunks: list[dict[str, Any]],
     total_count: int,

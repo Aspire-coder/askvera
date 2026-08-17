@@ -91,6 +91,9 @@ export class AdminApi {
   publishIngestion(jobId: string) {
     return this.request<{ job: IngestionJob; publishedCount: number }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/publish`, { method: "POST" });
   }
+  deleteIngestion(jobId: string) {
+    return this.request<{ job: IngestionJob; message: string }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+  }
   upload(formData: FormData, signal?: AbortSignal) {
     return this.request<{ jobId: string; filename: string; detectedFormat?: { format?: string; media_type?: string }; status: string; message: string }>("/api/admin/documents", {
       method: "POST",
