@@ -52,6 +52,9 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const [selectedStage, setSelectedStage] = useState("request_received");
   const [mode, setMode] = useState<DataMode>("demo");
   const [replayKey, setReplayKey] = useState(0);
+  const [correlationSearch, setCorrelationSearch] = useState("");
+  const [streamStatus, setStreamStatus] = useState<"connecting" | "live" | "polling">("connecting");
+  const [lookupError, setLookupError] = useState("");
 
   const refresh = async () => {
     const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
@@ -62,8 +65,19 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 3000);
-    return () => window.clearInterval(timer);
+    const controller = new AbortController();
+    const api = new AdminApi(credentials);
+    let timer = 0;
+    void api.streamTraces((next) => {
+      setTraces(next.length ? next : demo.traces);
+      setMode("live");
+      setStreamStatus("live");
+    }, controller.signal).catch(() => {
+      if (controller.signal.aborted) return;
+      setStreamStatus("polling");
+      timer = window.setInterval(() => void refresh(), 3000);
+    });
+    return () => { controller.abort(); if (timer) window.clearInterval(timer); };
   }, [credentials.accessToken, credentials.apiKey]);
 
   const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || demo.traces[0], [selectedId, traces]);
@@ -86,6 +100,26 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const servicesTouched = new Set(trace.stages.map((stage) => stationById.get(stage.stage)?.service).filter(Boolean)).size;
 
   const replay = () => setReplayKey((value) => value + 1);
+  const findTrace = async () => {
+    const correlationId = correlationSearch.trim();
+    if (!correlationId) return;
+    setLookupError("");
+    try {
+      const found = await new AdminApi(credentials).trace(correlationId);
+      setTraces((current) => [found, ...current.filter((item) => item.correlation_id !== found.correlation_id)]);
+      setSelectedId(found.correlation_id);
+    } catch (error) {
+      setLookupError(error instanceof Error ? error.message : "Trace could not be found.");
+    }
+  };
+  const exportTrace = () => {
+    const blob = new Blob([JSON.stringify(trace, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `askvera-trace-${trace.correlation_id}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
   const resetView = () => {
     setSelectedStage("request_received");
     setSelectedId(traces[0]?.correlation_id || demo.traces[0].correlation_id);
@@ -107,20 +141,30 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
     <section className="page-section" aria-labelledby="flow-title">
       <div className="page-heading">
         <div><span className="eyebrow">Live service trace</span><h1 id="flow-title">See every answer take shape.</h1><p>Follow the AWS services, decisions, latency, token usage and cache savings behind one response.</p></div>
-        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span><button className="button secondary" onClick={resetView}>Reset view</button><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
+        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{streamStatus === "live" ? "Streaming live" : streamStatus === "polling" ? "Live polling" : mode === "live" ? "Connecting" : "Demo data"}</span><button className="button secondary" onClick={exportTrace}>Export trace</button><button className="button secondary" onClick={resetView}>Reset view</button><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
       </div>
 
       <div className="trace-toolbar surface">
         <label><span>Recent question</span><select value={trace.correlation_id} onChange={(event) => setSelectedId(event.target.value)}>{traces.map((item) => <option key={item.correlation_id} value={item.correlation_id}>{item.question_preview || item.correlation_id}</option>)}</select></label>
+        <form className="trace-search" onSubmit={(event) => { event.preventDefault(); void findTrace(); }}><label><span>Correlation ID</span><input value={correlationSearch} onChange={(event) => setCorrelationSearch(event.target.value)} placeholder="Paste an exact correlation ID" /></label><button className="button secondary" type="submit">Find</button></form>
         <div className="trace-context"><span>{trace.country || "-"}</span><span>{trace.language?.toUpperCase() || "-"}</span><span>{displayTime(trace.started_at)}</span></div>
         <button className="button primary" onClick={replay}>Replay journey</button>
       </div>
+      {lookupError ? <div className="notice error" role="alert">{lookupError}</div> : null}
       <div className={`path-summary ${cacheHit ? "cache" : "generated"}`} role="status">
         <strong>{cacheHit ? "Validated cache path used" : "Grounded generation path used"}</strong>
         <span>{cacheHit
           ? "The approved cached answer was revalidated and returned without a model call."
           : "The request passed safety checks, retrieved approved evidence, generated an answer, and validated it before delivery."}</span>
       </div>
+
+      <section className="trace-waterfall surface" aria-labelledby="waterfall-title">
+        <div className="section-heading"><div><span className="eyebrow">Latency waterfall</span><h2 id="waterfall-title">Where this answer spent its time</h2></div><strong>{Math.round(totalDuration)} ms total work</strong></div>
+        <div className="waterfall-list">{trace.stages.map((stage) => {
+          const width = totalDuration ? Math.max(2, stage.duration_ms / totalDuration * 100) : 2;
+          return <button key={stage.stage} onClick={() => setSelectedStage(stage.stage)}><span>{stationById.get(stage.stage)?.label || titleCase(stage.stage)}</span><i><b style={{ width: `${width}%` }} /></i><em>{Math.round(stage.duration_ms)} ms</em></button>;
+        })}</div>
+      </section>
 
       <div className="journey-metrics">
         <article className="journey-metric surface"><span>End-to-end work</span><strong>{integer.format(Math.round(totalDuration))}<small> ms</small></strong><p>{slowestStage ? `${titleCase(slowestStage.stage)} was the longest stop` : "Waiting for the journey"}</p></article>

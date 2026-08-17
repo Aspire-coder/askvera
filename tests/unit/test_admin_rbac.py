@@ -83,6 +83,18 @@ def test_ingestion_list_includes_local_and_global_records(monkeypatch) -> None:
     assert [item["job_id"] for item in response["data"]] == ["ca", "global"]
 
 
+def test_support_route_list_is_filtered_to_authorized_market(monkeypatch) -> None:
+    principal = _principal({"market": "CA", "section": "support", "permission": "view"})
+    monkeypatch.setattr(admin_routes, "list_support_routes", lambda: [
+        {"country": "CA", "email": "ca@example.com"},
+        {"country": "US", "email": "us@example.com"},
+    ])
+
+    response = admin_routes.support_routes_list(_request(principal))
+
+    assert response["data"] == [{"country": "CA", "email": "ca@example.com"}]
+
+
 def test_country_publisher_cannot_upload_global_content() -> None:
     principal = _principal({"market": "CA", "section": "knowledge", "permission": "publish"})
 

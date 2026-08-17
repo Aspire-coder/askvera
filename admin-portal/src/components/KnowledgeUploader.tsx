@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { demoAllowed } from "../auth";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
-import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest } from "../types";
+import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest, KnowledgeGeneration } from "../types";
 
 const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
@@ -20,6 +20,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [accessScope, setAccessScope] = useState("country");
   const [version, setVersion] = useState("");
   const [effectiveDate, setEffectiveDate] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
   const [logicalDocumentId, setLogicalDocumentId] = useState("");
   const [documentOwner, setDocumentOwner] = useState("");
   const [approvalReference, setApprovalReference] = useState("");
@@ -37,6 +38,10 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [testLoading, setTestLoading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState("");
+  const [historyJob, setHistoryJob] = useState<IngestionJob | null>(null);
+  const [generations, setGenerations] = useState<KnowledgeGeneration[]>([]);
+  const [compareVersions, setCompareVersions] = useState<string[]>([]);
+  const [rollbackLoading, setRollbackLoading] = useState("");
 
   const refresh = async () => {
     const api = new AdminApi(credentials);
@@ -111,6 +116,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     formData.set("access_scope", accessScope);
     formData.set("document_version", version);
     formData.set("effective_date", effectiveDate);
+    formData.set("expiry_date", expiryDate);
     formData.set("logical_document_id", logicalDocumentId);
     formData.set("document_owner", documentOwner);
     formData.set("approval_reference", approvalReference);
@@ -182,6 +188,32 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   };
 
   const canDeleteDocuments = config.principal?.role === "super_admin" && mode === "live";
+  const openHistory = async (job: IngestionJob) => {
+    setHistoryJob(job);
+    setGenerations([]);
+    setCompareVersions([]);
+    try {
+      const result = await new AdminApi(credentials).ingestionGenerations(job.job_id);
+      setGenerations(result);
+      setCompareVersions(result.slice(0, 2).map((item) => item.ingestion_id));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Version history could not be loaded.");
+    }
+  };
+  const rollback = async (target: KnowledgeGeneration) => {
+    if (!historyJob || !window.confirm(`Roll back ${historyJob.filename} to version ${target.document_version || target.ingestion_id}?`)) return;
+    setRollbackLoading(target.ingestion_id);
+    try {
+      await new AdminApi(credentials).rollbackIngestion(historyJob.job_id, target.ingestion_id);
+      setNotice(`${historyJob.filename} was rolled back to ${target.document_version || target.ingestion_id}.`);
+      await openHistory(historyJob);
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The rollback could not be completed.");
+    } finally {
+      setRollbackLoading("");
+    }
+  };
   const deleteDocument = async (job: IngestionJob) => {
     if (!canDeleteDocuments || deletingJobId) return;
     const scope = job.access_scope === "global" ? "all markets" : `${job.country} · ${job.language.toUpperCase()}`;
@@ -228,8 +260,10 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
       <section className="knowledge-existing surface" aria-labelledby="existing-documents-title">
         <div className="section-heading"><div><span className="eyebrow">Current coverage</span><h2 id="existing-documents-title">{showingGlobalCoverage ? "Global documents" : `Documents available for ${selectedMarket?.name || "this market"}`}</h2><p>{showingGlobalCoverage ? "Documents available to every market, including global directories and FAQs." : "Global documents are included. Use names and versions to avoid replacing the wrong document."}</p></div><span className="review-safety">{marketJobs.length} found</span></div>
-        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.filter((job) => job.status !== "deleted").length ? <div className="knowledge-existing-list">{marketJobs.filter((job) => job.status !== "deleted").map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global · available to all markets" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span>{canDeleteDocuments ? <button className="button danger small" disabled={deletingJobId === job.job_id} onClick={() => void deleteDocument(job)}>{deletingJobId === job.job_id ? "Deleting..." : "Delete"}</button> : null}</article>)}</div> : <div className="review-empty">No documents are currently available for this coverage.</div>}
+        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.filter((job) => job.status !== "deleted").length ? <div className="knowledge-existing-list">{marketJobs.filter((job) => job.status !== "deleted").map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global · available to all markets" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}{job.expiry_date ? ` · expires ${new Date(`${job.expiry_date}T00:00:00`).toLocaleDateString()}` : ""}</small><small>{job.malware_scan_status === "clean" ? "Malware scan passed" : job.malware_scan_status === "blocked" ? "Blocked by malware scan" : job.malware_scan_status === "pending" ? "Malware scan pending" : "Preflight complete"} · {job.status === "ready" ? "Indexed in OpenSearch" : "Not active in retrieval"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span><button className="button secondary small" onClick={() => void openHistory(job)}>Versions</button>{canDeleteDocuments ? <button className="button danger small" disabled={deletingJobId === job.job_id} onClick={() => void deleteDocument(job)}>{deletingJobId === job.job_id ? "Deleting..." : "Delete"}</button> : null}</article>)}</div> : <div className="review-empty">No documents are currently available for this coverage.</div>}
       </section>
+
+      {historyJob ? <section className="knowledge-history surface"><div className="section-heading"><div><span className="eyebrow">Version control</span><h2>{historyJob.filename}</h2><p>Compare retained generations and restore a previously verified version.</p></div><button className="button secondary" onClick={() => setHistoryJob(null)}>Close</button></div>{generations.length ? <><div className="version-compare-select"><label>Compare versions<select value={compareVersions[0] || ""} onChange={(event) => setCompareVersions([event.target.value, compareVersions[1] || ""])}>{generations.map((item) => <option key={item.ingestion_id} value={item.ingestion_id}>{item.document_version || item.ingestion_id}</option>)}</select></label><label>With<select value={compareVersions[1] || ""} onChange={(event) => setCompareVersions([compareVersions[0] || "", event.target.value])}>{generations.map((item) => <option key={item.ingestion_id} value={item.ingestion_id}>{item.document_version || item.ingestion_id}</option>)}</select></label></div><div className="version-comparison">{compareVersions.map((id) => generations.find((item) => item.ingestion_id === id)).filter(Boolean).map((item) => <article key={item!.ingestion_id}><strong>{item!.document_version || "Unversioned"}</strong><span className={`status-label ${item!.status}`}>{item!.status}</span><dl><div><dt>Chunks</dt><dd>{item!.section_count}</dd></div><div><dt>Effective</dt><dd>{item!.effective_date || "Not set"}</dd></div><div><dt>Expiry</dt><dd>{item!.expiry_date || "Not set"}</dd></div><div><dt>Malware</dt><dd>{item!.malware_scan_status}</dd></div><div><dt>Activated</dt><dd>{item!.activated_at ? new Date(item!.activated_at).toLocaleString() : "Not activated"}</dd></div></dl>{canDeleteDocuments && item!.status !== "active" ? <button className="button secondary" disabled={rollbackLoading === item!.ingestion_id} onClick={() => void rollback(item!)}>{rollbackLoading === item!.ingestion_id ? "Rolling back..." : "Restore this version"}</button> : null}</article>)}</div></> : <div className="empty-state">No retained version history is available for this document.</div>}</section> : null}
 
       <div className="uploader-layout">
         <div className="upload-card surface">
@@ -258,6 +292,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field"><label htmlFor="scope">Availability</label><select id="scope" value={accessScope} onChange={(event) => setAccessScope(event.target.value)}><option value="country">Selected market only</option><option value="global">All markets</option></select></div>
             <div className="form-field"><label htmlFor="version">Document version</label><input id="version" value={version} onChange={(event) => setVersion(event.target.value)} placeholder="e.g. 2026.3" /></div>
             <div className="form-field"><label htmlFor="effective">Effective date</label><input id="effective" type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></div>
+            <div className="form-field"><label htmlFor="expiry">Review or expiry date</label><input id="expiry" type="date" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} /><small className="field-help">The portal will flag documents approaching this date.</small></div>
             <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder={suggestedDocumentId} /><small className="field-help">Suggested: {suggestedDocumentId}. Keep this stable when replacing the same document.</small></div>
             <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
             <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>

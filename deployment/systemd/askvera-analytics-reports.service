@@ -1,0 +1,30 @@
+[Unit]
+Description=ASK Vera scheduled aggregate analytics reports
+Documentation=https://github.com/Aspire-coder/askvera
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=askvera
+Group=askvera
+WorkingDirectory=/opt/askvera
+EnvironmentFile=/etc/askvera/production.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/askvera/.venv/bin/python -B scripts/run_analytics_reports.py
+RuntimeDirectory=askvera-analytics-reports
+RuntimeDirectoryMode=0750
+SyslogIdentifier=askvera-analytics-reports
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=read-only
+ProtectSystem=strict
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=

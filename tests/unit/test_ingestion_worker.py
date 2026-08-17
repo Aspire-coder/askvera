@@ -211,6 +211,11 @@ def _configure_claimed_malware_scan(monkeypatch, tags: list[dict[str, str]]) -> 
         "claim_ingestion_job",
         lambda *_args, **_kwargs: "claimed",
     )
+    monkeypatch.setattr(
+        run_ingestion_worker,
+        "update_ingestion_malware_status",
+        lambda *_args, **_kwargs: None,
+    )
     return clients
 
 

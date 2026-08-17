@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, CheckIcon, HomeIcon, RefreshIcon } from "../icons";
-import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, IngestionJob, View } from "../types";
+import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, IngestionJob, OperationsStatus, View } from "../types";
 
 type OperationsOverviewProps = {
   credentials: AdminCredentials;
@@ -15,6 +15,7 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
   const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
+  const [operations, setOperations] = useState<OperationsStatus | null>(null);
   const [mode, setMode] = useState<DataMode>("demo");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -31,14 +32,16 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
       const auditRequest = canViewAudit
         ? withDemoFallback(() => api.auditEvents(), [])
         : Promise.resolve({ data: [] as AdminAuditEvent[], mode: "live" as DataMode });
-      const [overviewResult, jobsResult, auditResult] = await Promise.all([
+      const [overviewResult, jobsResult, auditResult, operationsResult] = await Promise.all([
         withDemoFallback(() => api.overview(new URLSearchParams({ days: "1" })), demo.overview),
         withDemoFallback(() => api.ingestions(), demo.jobs),
-        auditRequest
+        auditRequest,
+        withDemoFallback(() => api.operationsStatus(), null)
       ]);
       setOverview(overviewResult.data);
       setJobs(jobsResult.data);
       setAuditEvents(auditResult.data);
+      setOperations(operationsResult.data);
       setMode(overviewResult.mode === "live" || jobsResult.mode === "live" || auditResult.mode === "live" ? "live" : "demo");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Operational data could not be loaded.");
@@ -73,6 +76,19 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
       <article className="overview-metric surface"><span>Helpful answers</span><strong>{Math.round(overview.totals.helpfulRate * 100)}%</strong><small>{formatNumber(overview.totals.helpful + overview.totals.notHelpful)} ratings recorded</small></article>
       <article className="overview-metric surface"><span>Knowledge jobs</span><strong>{activeJobs.length}</strong><small>{failedJobs.length ? `${failedJobs.length} failed job${failedJobs.length === 1 ? "" : "s"} to review` : "No failed jobs"}</small></article>
     </div>
+    <section className="surface operations-health" aria-labelledby="operations-health-title">
+      <div className="section-heading"><div><span className="eyebrow">Production status</span><h2 id="operations-health-title">Service health and deployed versions</h2><p>Live dependency checks, knowledge synchronization and versions reported by the API.</p></div><span className={`status-label ${operations?.status || "unknown"}`}>{operations?.status || "Unavailable"}</span></div>
+      {operations ? <>
+        <div className="health-service-grid">{Object.entries(operations.services).map(([name, service]) => <article key={name}><span className={`attention-dot ${service.status === "healthy" || service.status === "configured" ? "good" : "warning"}`} /><div><strong>{name.replaceAll("_", " ")}</strong><small>{service.detail}</small></div><em>{service.status.replaceAll("_", " ")}</em></article>)}</div>
+        <div className="operations-detail-grid">
+          <div><span>Document synchronization</span><strong>{operations.knowledge_sync.status}</strong><small>{operations.knowledge_sync.active_jobs} active · {operations.knowledge_sync.failed_jobs} failed · {operations.knowledge_sync.expiring_documents} expiring{operations.knowledge_sync.last_change_at ? ` · changed ${new Date(operations.knowledge_sync.last_change_at).toLocaleString()}` : ""}</small></div>
+          <div><span>Application</span><strong>{operations.versions.application}</strong><small>Knowledge {operations.versions.knowledge}</small></div>
+          <div><span>Retrieval pipeline</span><strong>{operations.versions.retrieval_pipeline}</strong><small>Response {operations.versions.response_pipeline}</small></div>
+          <div><span>Operational quality</span><strong>{Math.round(operations.metrics.retrieval_failure_rate * 100)}% retrieval failures</strong><small>{operations.metrics.validation_failures} validation failures · {operations.metrics.audit_queue_depth} audit events queued</small></div>
+        </div>
+      </> : <div className="empty-state compact">Operational status is unavailable.</div>}
+      {operations?.assigned_actions.length ? <div className="assigned-actions"><h3>Assigned actions</h3>{operations.assigned_actions.map((action, index) => <div key={`${action.label}-${index}`}><strong>{action.label}</strong><span>{action.reason}</span><em>{action.owner}</em></div>)}</div> : null}
+    </section>
     <div className="overview-grid">
       <section className="surface overview-panel"><div className="section-heading"><div><h2>Start here</h2><p>The three checks that keep the service healthy.</p></div><HomeIcon /></div><div className="overview-checklist">{checks.map((check) => <button key={check.label} onClick={() => onNavigate(check.view)}><span className={`check-icon ${check.done ? "done" : ""}`}>{check.done ? <CheckIcon /> : <span />}</span><span><strong>{check.label}</strong><small>{check.detail}</small></span><ArrowIcon /></button>)}</div></section>
       <section className="surface overview-panel"><div className="section-heading"><div><h2>Quick actions</h2><p>Jump directly to the task you need.</p></div></div><div className="quick-actions"><button onClick={() => onNavigate("knowledge")}><strong>Upload knowledge</strong><span>Add a policy or global directory document.</span><ArrowIcon /></button><button onClick={() => onNavigate("insights")}><strong>Review answers</strong><span>Inspect feedback, confidence, and retrieval signals.</span><ArrowIcon /></button><button onClick={() => onNavigate("support")}><strong>Manage support</strong><span>Update where customer requests are delivered.</span><ArrowIcon /></button><button onClick={() => onNavigate("widget")}><strong>Manage widgets</strong><span>Configure approved websites and embed code.</span><ArrowIcon /></button></div></section>

@@ -107,6 +107,19 @@ def test_embed_code_contains_public_configuration_only(monkeypatch) -> None:
     assert not any(word in snippet.lower() for word in ("secret", "password", "private_key"))
 
 
+def test_widget_serialization_hides_unpublished_draft() -> None:
+    row = {
+        "id": "widget-1", "public_key": "wgt_public", "position": "bottom-right",
+        "created_at": None, "updated_at": None, "previous_key_expires_at": None,
+        "draft_config": {"greeting": "Unpublished secret draft"},
+    }
+
+    result = widget_configs._serialize(row)
+
+    assert result["has_draft"] is True
+    assert "draft_config" not in result
+
+
 def test_runtime_provider_remains_legacy_when_flag_is_off(monkeypatch) -> None:
     monkeypatch.setattr(settings, "WIDGET_CONFIG_RUNTIME_ENABLED", False)
     monkeypatch.setattr(settings, "WIDGET_REGISTRY_PROVIDER", "json")

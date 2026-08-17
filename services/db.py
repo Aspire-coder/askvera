@@ -93,6 +93,10 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS access_review_due_at DATE"))
+            connection.execute(text("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS access_certified_at TIMESTAMPTZ"))
+            connection.execute(text("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS access_certified_by TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS invite_expires_at TIMESTAMPTZ"))
             connection.execute(text("ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ"))
             connection.execute(
                 text(
@@ -162,6 +166,9 @@ def create_schema(correlation_id: str = "startup") -> None:
                 )
             )
             connection.execute(text("ALTER TABLE widget_configs ADD COLUMN IF NOT EXISTS logo_url TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE widget_configs ADD COLUMN IF NOT EXISTS previous_public_key TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE widget_configs ADD COLUMN IF NOT EXISTS previous_key_expires_at TIMESTAMPTZ"))
+            connection.execute(text("ALTER TABLE widget_configs ADD COLUMN IF NOT EXISTS draft_config JSONB"))
             connection.execute(
                 text(
                     """
@@ -177,6 +184,8 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE support_routes ADD COLUMN IF NOT EXISTS fallback_department TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE support_routes ADD COLUMN IF NOT EXISTS fallback_email TEXT NOT NULL DEFAULT ''"))
             connection.execute(
                 text(
                     """
@@ -275,6 +284,43 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                     CREATE INDEX IF NOT EXISTS idx_chat_analytics_session_source
                     ON chat_analytics (session_id, traffic_source)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS answer_review_cases (
+                        correlation_id TEXT PRIMARY KEY REFERENCES chat_analytics(correlation_id) ON DELETE CASCADE,
+                        status TEXT NOT NULL DEFAULT 'open',
+                        assignee_email TEXT NOT NULL DEFAULT '',
+                        resolution_notes TEXT NOT NULL DEFAULT '',
+                        updated_by TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        resolved_at TIMESTAMPTZ
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX IF NOT EXISTS idx_answer_review_cases_queue ON answer_review_cases (status, assignee_email, updated_at DESC)"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS analytics_saved_views (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        owner_sub TEXT NOT NULL,
+                        filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        schedule TEXT NOT NULL DEFAULT 'none',
+                        report_email TEXT NOT NULL DEFAULT '',
+                        alert_not_helpful_threshold DOUBLE PRECISION,
+                        enabled BOOLEAN NOT NULL DEFAULT true,
+                        last_sent_at TIMESTAMPTZ,
+                        next_run_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
                     """
                 )
             )
@@ -404,6 +450,8 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS document_owner TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS approval_reference TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS effective_date DATE"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS expiry_date DATE"))
+            connection.execute(text("ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS malware_scan_status TEXT NOT NULL DEFAULT 'not_required'"))
             connection.execute(
                 text(
                     """
@@ -431,6 +479,21 @@ def create_schema(correlation_id: str = "startup") -> None:
             connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS document_owner TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS approval_reference TEXT NOT NULL DEFAULT ''"))
             connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS effective_date DATE"))
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS expiry_date DATE"))
+            connection.execute(text("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS malware_scan_status TEXT NOT NULL DEFAULT 'not_required'"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS market_readiness_governance (
+                        country TEXT PRIMARY KEY,
+                        owner_email TEXT NOT NULL DEFAULT '',
+                        deadline DATE,
+                        updated_by TEXT NOT NULL DEFAULT '',
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+            )
             connection.execute(
                 text(
                     """

@@ -13,11 +13,14 @@ import type {
   AdminScope,
   AdminUser,
   AnalyticsOverview,
+  AnalyticsSavedView,
   IngestionJob,
   IngestionPreview,
   IngestionPreviewTest,
+  KnowledgeGeneration,
   InteractionPage,
   MarketReadiness,
+  OperationsStatus,
   PipelineTrace,
   ShadowReport,
   SupportRoute,
@@ -84,9 +87,54 @@ export class AdminApi {
 
   config() { return this.request<AdminConfig>("/api/admin/config"); }
   marketReadiness() { return this.request<MarketReadiness>("/api/admin/market-readiness"); }
+  updateMarketGovernance(country: string, body: { owner_email: string; deadline: string }) {
+    return this.request<{ owner_email: string; deadline: string }>(`/api/admin/market-readiness/${encodeURIComponent(country)}/governance`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  operationsStatus() { return this.request<OperationsStatus>("/api/admin/operations/status"); }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
+  trace(correlationId: string) { return this.request<PipelineTrace>(`/api/admin/traces/${encodeURIComponent(correlationId)}`); }
+  async streamTraces(onTraces: (traces: PipelineTrace[]) => void, signal: AbortSignal): Promise<void> {
+    const response = await fetch(`${API_BASE}/api/admin/traces/stream`, {
+      signal,
+      headers: {
+        Accept: "text/event-stream",
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+      }
+    });
+    if (!response.ok) throw await responseError(response, "Trace stream failed");
+    if (!response.body) throw new AdminApiError("Trace stream is unavailable.", response.status);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        const data = event.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+        if (data) onTraces(JSON.parse(data) as PipelineTrace[]);
+      }
+    }
+  }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
   interactions(filters: URLSearchParams) { return this.request<InteractionPage>(`/api/admin/analytics/interactions?${filters}`); }
+  updateInteractionReview(correlationId: string, body: { status: string; assignee_email: string; resolution_notes: string }) {
+    return this.request<{ status: string; assignee_email: string; resolution_notes: string }>(`/api/admin/analytics/interactions/${encodeURIComponent(correlationId)}/review`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  savedAnalyticsViews() { return this.request<AnalyticsSavedView[]>("/api/admin/analytics/saved-views"); }
+  saveAnalyticsView(body: { id?: string; name: string; filters: Record<string, string>; schedule: string; report_email: string; alert_not_helpful_threshold: number | null }) {
+    return this.request<AnalyticsSavedView>("/api/admin/analytics/saved-views", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  deleteAnalyticsView(id: string) { return this.request<{ deleted: boolean }>(`/api/admin/analytics/saved-views/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   async exportInteractions(filters: URLSearchParams): Promise<Blob> {
     const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.csv?${filters}`, {
       headers: {
@@ -127,6 +175,10 @@ export class AdminApi {
   deleteIngestion(jobId: string) {
     return this.request<{ job: IngestionJob; message: string }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}`, { method: "DELETE" });
   }
+  ingestionGenerations(jobId: string) { return this.request<KnowledgeGeneration[]>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/generations`); }
+  rollbackIngestion(jobId: string, targetIngestionId: string) {
+    return this.request<{ active_ingestion_id: string; previous_ingestion_id: string }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/rollback/${encodeURIComponent(targetIngestionId)}`, { method: "POST" });
+  }
   upload(formData: FormData, signal?: AbortSignal) {
     return this.request<{ jobId: string; filename: string; detectedFormat?: { format?: string; media_type?: string }; status: string; message: string }>("/api/admin/documents", {
       method: "POST",
@@ -156,23 +208,33 @@ export class AdminApi {
   resendInvite(id: string) {
     return this.request<AdminUser>(`/api/admin/users/${id}/resend-invite`, { method: "POST" });
   }
+  certifyUser(id: string) { return this.request<AdminUser>(`/api/admin/users/${id}/certify`, { method: "POST" }); }
   supportRoutes() { return this.request<SupportRoute[]>("/api/admin/support-routes"); }
-  updateSupportRoute(country: string, body: { department: string; email: string; enabled: boolean }) {
+  updateSupportRoute(country: string, body: { department: string; email: string; fallback_department: string; fallback_email: string; enabled: boolean }) {
     return this.request<SupportRoute>(`/api/admin/support-routes/${country}`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
+  bulkUpdateSupportRoutes(countries: string[], route: { department: string; email: string; fallback_department: string; fallback_email: string; enabled: boolean }) {
+    return this.request<SupportRoute[]>("/api/admin/support-routes/bulk", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countries, route }) });
+  }
+  testSupportRoute(country: string) { return this.request<{ status: string; message_id: string }>(`/api/admin/support-routes/${country}/test`, { method: "POST" }); }
+  supportRouteHistory(country: string) { return this.request<AdminAuditEvent[]>(`/api/admin/support-routes/${country}/history`); }
   widgetConfigs() { return this.request<WidgetConfig[]>("/api/admin/widget-configs"); }
-  createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
+  createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
     return this.request<WidgetConfig>("/api/admin/widget-configs", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
-  updateWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
+  updateWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
     return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
+  stageWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
+    return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/draft`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+  publishWidgetConfig(id: string) { return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/publish`, { method: "POST" }); }
   rotateWidgetKey(id: string) {
     return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/rotate-key`, { method: "POST" });
   }

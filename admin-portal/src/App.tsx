@@ -156,7 +156,7 @@ export function App() {
         {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={navigate} /> : null}
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
-        {view === "readiness" ? <MarketReadiness credentials={credentials} config={adminConfig} /> : null}
+        {view === "readiness" ? <MarketReadiness credentials={credentials} config={adminConfig} onNavigate={navigate} /> : null}
         {view === "insights" ? <InsightsDashboard credentials={credentials} /> : null}
         {view === "support" ? <SupportRoutesManager credentials={credentials} config={adminConfig} /> : null}
         {view === "users" ? <UsersManager credentials={credentials} config={adminConfig} /> : null}

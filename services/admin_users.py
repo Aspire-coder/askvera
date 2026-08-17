@@ -76,10 +76,21 @@ def _serialize(row: dict[str, Any], scopes: list[dict[str, str]]) -> dict[str, A
         **row,
         "last_login": row["last_login"].isoformat() if row.get("last_login") else None,
         "disabled_at": row["disabled_at"].isoformat() if row.get("disabled_at") else None,
+        "invite_expires_at": row["invite_expires_at"].isoformat() if row.get("invite_expires_at") else None,
+        "access_review_due_at": row["access_review_due_at"].isoformat() if row.get("access_review_due_at") else None,
+        "access_certified_at": row["access_certified_at"].isoformat() if row.get("access_certified_at") else None,
         "created_at": row["created_at"].isoformat() if row.get("created_at") else "",
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
         "scopes": scopes,
     }
+
+
+def _mfa_status(email: str) -> str:
+    try:
+        result = get_aws_clients().cognito_idp.admin_get_user(UserPoolId=settings.ADMIN_COGNITO_USER_POOL_ID, Username=email)
+    except (BotoCoreError, ClientError):
+        return "unknown"
+    return "enrolled" if result.get("UserMFASettingList") or result.get("PreferredMfaSetting") else "not_enrolled"
 
 
 def _load_scopes(connection: Any, user_ids: list[str]) -> dict[str, list[dict[str, str]]]:
@@ -186,7 +197,7 @@ def list_admin_users() -> list[dict[str, Any]]:
     with get_engine().connect() as connection:
         rows = [dict(row) for row in connection.execute(text("SELECT * FROM admin_users ORDER BY email")).mappings()]
         scopes = _load_scopes(connection, [str(row["id"]) for row in rows])
-    return [_serialize(row, scopes.get(str(row["id"]), [])) for row in rows]
+    return [{**_serialize(row, scopes.get(str(row["id"]), [])), "mfa_status": _mfa_status(str(row["email"]))} for row in rows]
 
 
 def list_admin_audit_events(limit: int = 100) -> list[dict[str, Any]]:
@@ -387,11 +398,14 @@ def create_admin_user(
                 text(
                     """
                     INSERT INTO admin_users (
-                        id, cognito_sub, email, role, status, created_by, created_at, updated_at
-                    ) VALUES (:id, :sub, :email, :role, 'invited', :actor, now(), now())
+                        id, cognito_sub, email, role, status, invite_expires_at,
+                        access_review_due_at, created_by, created_at, updated_at
+                    ) VALUES (:id, :sub, :email, :role, 'invited',
+                        now() + (:invite_days * interval '1 day'),
+                        current_date + (:review_days * interval '1 day'), :actor, now(), now())
                     """
                 ),
-                {"id": user_id, "sub": subject or None, "email": normalized_email, "role": role, "actor": actor_sub},
+                {"id": user_id, "sub": subject or None, "email": normalized_email, "role": role, "actor": actor_sub, "invite_days": settings.ADMIN_INVITE_EXPIRY_DAYS, "review_days": settings.ADMIN_ACCESS_REVIEW_DAYS},
             )
             _replace_scopes(connection, user_id, normalized_scopes)
             _write_audit(connection, actor_sub, "admin_user.created", user_id)
@@ -506,5 +520,18 @@ def resend_admin_invite(user_id: str, actor_sub: str) -> dict[str, Any]:
     )
     _ensure_cognito_admin_group(cognito, user["email"])
     with get_engine().begin() as connection:
+        connection.execute(text("UPDATE admin_users SET invite_expires_at = now() + (:days * interval '1 day'), updated_at = now() WHERE id = :id"), {"days": settings.ADMIN_INVITE_EXPIRY_DAYS, "id": user_id})
         _write_audit(connection, actor_sub, "admin_user.invite_resent", user_id)
-    return user
+    return get_admin_user(user_id) or user
+
+
+def certify_admin_access(user_id: str, actor_sub: str) -> dict[str, Any]:
+    with get_engine().begin() as connection:
+        result = connection.execute(
+            text("UPDATE admin_users SET access_certified_at = now(), access_certified_by = :actor, access_review_due_at = current_date + (:days * interval '1 day'), updated_at = now() WHERE id = :id"),
+            {"id": user_id, "actor": actor_sub, "days": settings.ADMIN_ACCESS_REVIEW_DAYS},
+        )
+        if result.rowcount == 0:
+            raise KeyError(user_id)
+        _write_audit(connection, actor_sub, "admin_user.access_certified", user_id)
+    return get_admin_user(user_id) or {}

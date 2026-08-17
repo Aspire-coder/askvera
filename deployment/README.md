@@ -19,6 +19,7 @@ Production runtime configuration should come from IAM, SSM Parameter Store, and 
 - `systemd/askvera.service` - systemd unit for Uvicorn.
 - `systemd/askvera-ingestion-worker.service` - opt-in durable ingestion worker.
 - `systemd/askvera-retention.service` and `.timer` - daily retention cleanup.
+- `systemd/askvera-analytics-reports.service` and `.timer` - hourly due-report and quality-alert processing.
 - `ingestion-queue.yaml` - encrypted SQS queue, dead-letter queue, and alarms.
 - `ingestion-malware-protection.yaml` - GuardDuty scanning for quarantined portal uploads.
 - `admin-portal.yaml` - private portal hosting, Cognito MFA, WAF, and access logging.

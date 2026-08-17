@@ -140,10 +140,13 @@ def _write_audit(connection: Any, actor_sub: str, action: str, widget_id: str) -
 
 
 def _serialize(row: dict[str, Any]) -> dict[str, Any]:
+    public_row = {key: value for key, value in row.items() if key != "draft_config"}
     return {
-        **row,
+        **public_row,
         "created_at": row["created_at"].isoformat() if row.get("created_at") else "",
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
+        "previous_key_expires_at": row["previous_key_expires_at"].isoformat() if row.get("previous_key_expires_at") else None,
+        "has_draft": bool(row.get("draft_config")),
         "embed_code": widget_embed_code(str(row["public_key"]), str(row.get("position") or "bottom-right")),
     }
 
@@ -167,12 +170,11 @@ def list_widget_configs() -> list[dict[str, Any]]:
 
 
 def get_widget_config(identifier: str, *, public: bool = False) -> dict[str, Any] | None:
-    column = "public_key" if public else "id"
     with get_engine().connect() as connection:
-        row = connection.execute(
-            text(f"SELECT * FROM widget_configs WHERE {column} = :identifier"),
-            {"identifier": identifier},
-        ).mappings().first()
+        if public:
+            row = connection.execute(text("SELECT * FROM widget_configs WHERE public_key = :identifier OR (previous_public_key = :identifier AND previous_key_expires_at > now())"), {"identifier": identifier}).mappings().first()
+        else:
+            row = connection.execute(text("SELECT * FROM widget_configs WHERE id = :identifier"), {"identifier": identifier}).mappings().first()
     return _serialize(dict(row)) if row else None
 
 
@@ -263,16 +265,48 @@ def rotate_widget_key(widget_id: str, actor_sub: str) -> dict[str, Any]:
             text(
                 """
                 UPDATE widget_configs
-                SET public_key = :public_key, key_version = key_version + 1, updated_at = now()
+                SET previous_public_key = public_key,
+                    previous_key_expires_at = now() + (:grace_hours * interval '1 hour'),
+                    public_key = :public_key, key_version = key_version + 1, updated_at = now()
                 WHERE id = :id
                 """
             ),
-            {"id": widget_id, "public_key": _public_key()},
+            {"id": widget_id, "public_key": _public_key(), "grace_hours": settings.WIDGET_KEY_ROTATION_GRACE_HOURS},
         )
         if result.rowcount == 0:
             raise KeyError(widget_id)
         _write_audit(connection, actor_sub, "widget_config.key_rotated", widget_id)
     return get_widget_config(widget_id) or {}
+
+
+def stage_widget_config(widget_id: str, values: dict[str, Any], actor_sub: str) -> dict[str, Any]:
+    current = get_widget_config(widget_id)
+    if not current:
+        raise KeyError(widget_id)
+    clean = validate_widget_config({**current, **values})
+    draft = {key: clean.get(key) for key in ["name", "customer", "allowed_origins", "markets", "languages", "default_market", "default_language", "display_name", "greeting", "logo_url", "accent_color", "position", "legal_version", "rate_limit_tier", "usage_cap"]}
+    with get_engine().begin() as connection:
+        connection.execute(text("UPDATE widget_configs SET draft_config = CAST(:draft AS jsonb), updated_at = now() WHERE id = :id"), {"draft": json.dumps(draft), "id": widget_id})
+        _write_audit(connection, actor_sub, "widget_config.draft_saved", widget_id)
+    return get_widget_config(widget_id) or {}
+
+
+def publish_widget_config(widget_id: str, actor_sub: str) -> dict[str, Any]:
+    with get_engine().connect() as connection:
+        row = connection.execute(
+            text("SELECT draft_config FROM widget_configs WHERE id = :id"),
+            {"id": widget_id},
+        ).mappings().first()
+    if not row:
+        raise KeyError(widget_id)
+    draft = row.get("draft_config")
+    if not isinstance(draft, dict):
+        raise ValueError("This widget does not have a draft to publish.")
+    updated = update_widget_config(widget_id, draft, actor_sub)
+    with get_engine().begin() as connection:
+        connection.execute(text("UPDATE widget_configs SET draft_config = NULL, updated_at = now() WHERE id = :id"), {"id": widget_id})
+        _write_audit(connection, actor_sub, "widget_config.draft_published", widget_id)
+    return {**updated, "has_draft": False}
 
 
 def disable_widget_config(widget_id: str, actor_sub: str) -> dict[str, Any]:

@@ -19,6 +19,16 @@ export type PipelineTrace = {
   stages: TraceStage[];
 };
 
+export type OperationsStatus = {
+  status: "healthy" | "degraded";
+  checked_at: string;
+  services: Record<string, { status: string; detail: string }>;
+  knowledge_sync: { status: string; active_jobs: number; failed_jobs: number; last_change_at: string; expiring_documents: number };
+  assigned_actions: Array<{ label: string; owner: string; reason: string }>;
+  versions: Record<string, string>;
+  metrics: { cache_hit_ratio: number; retrieval_failure_rate: number; validation_failures: number; audit_queue_depth: number };
+};
+
 export type MarketLanguage = { code: string; name: string };
 export type Market = { code: string; name: string; languages: MarketLanguage[] };
 
@@ -59,6 +69,8 @@ export type MarketReadinessMarket = {
   overall: ReadinessCheckStatus;
   languages: MarketReadinessLanguage[];
   checks: MarketReadinessCheck[];
+  owner_email: string;
+  deadline: string;
 };
 export type MarketReadiness = {
   checked_at: string;
@@ -75,6 +87,11 @@ export type AdminUser = {
   created_at: string;
   updated_at: string;
   disabled_at: string | null;
+  invite_expires_at: string | null;
+  access_review_due_at: string | null;
+  access_certified_at: string | null;
+  access_certified_by: string;
+  mfa_status: "enrolled" | "not_enrolled" | "unknown";
   scopes: AdminScope[];
 };
 
@@ -83,6 +100,8 @@ export type SupportRoute = {
   country_name: string;
   department: string;
   email: string;
+  fallback_department: string;
+  fallback_email: string;
   enabled: boolean;
   updated_at: string | null;
   updated_by: string;
@@ -95,6 +114,7 @@ export type AdminAuditEvent = {
   target_type: string;
   target_id: string;
   created_at: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type WidgetConfig = {
@@ -116,6 +136,9 @@ export type WidgetConfig = {
   usage_cap: number | null;
   public_key: string;
   key_version: number;
+  previous_public_key: string;
+  previous_key_expires_at: string | null;
+  has_draft?: boolean;
   status: "active" | "disabled";
   embed_code: string;
   created_at: string;
@@ -130,6 +153,9 @@ export type IngestionJob = {
   document_type: string;
   access_scope: string;
   document_version: string;
+  effective_date?: string;
+  expiry_date?: string;
+  malware_scan_status?: "pending" | "clean" | "blocked" | "not_required";
   status: string;
   progress: number;
   section_count: number;
@@ -180,6 +206,21 @@ export type IngestionPreviewTest = {
   matchCount: number;
 };
 
+export type KnowledgeGeneration = {
+  ingestion_id: string;
+  status: string;
+  filename: string;
+  document_version: string;
+  section_count: number;
+  effective_date: string;
+  expiry_date: string;
+  malware_scan_status: string;
+  activated_at: string;
+  retired_at: string;
+  activated_by: string;
+  created_at: string;
+};
+
 export type AnalyticsOverview = {
   rangeDays: number;
   totals: {
@@ -220,6 +261,21 @@ export type Interaction = {
   comment: string | null;
   expected_answer?: string | null;
   expected_answer_present?: boolean;
+  review_status?: "open" | "investigating" | "resolved" | null;
+  assignee_email?: string | null;
+  resolution_notes?: string | null;
+  review_updated_at?: string | null;
+};
+
+export type AnalyticsSavedView = {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+  schedule: "none" | "daily" | "weekly";
+  report_email: string;
+  alert_not_helpful_threshold: number | null;
+  last_sent_at: string | null;
+  next_run_at: string | null;
 };
 
 export type InteractionPage = {

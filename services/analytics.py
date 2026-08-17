@@ -723,7 +723,9 @@ def interaction_page(
                        c.question, c.answer, c.topic, c.confidence, c.source_count,
                        c.input_tokens + c.output_tokens AS tokens, c.fallback,
                        c.failure_layer, c.traffic_source, c.created_at, f.rating, f.comment,
-                       f.expected_answer, f.expected_answer_present
+                       f.expected_answer, f.expected_answer_present,
+                       rc.status AS review_status, rc.assignee_email,
+                       rc.resolution_notes, rc.updated_at AS review_updated_at
                 FROM chat_analytics c
                 LEFT JOIN LATERAL (
                     SELECT rating, comment, expected_answer, expected_answer_present
@@ -731,6 +733,7 @@ def interaction_page(
                     WHERE correlation_id = c.correlation_id
                     ORDER BY created_at DESC LIMIT 1
                 ) f ON true
+                LEFT JOIN answer_review_cases rc ON rc.correlation_id = c.correlation_id
                 WHERE {where}
                 ORDER BY {sort_sql}, c.correlation_id
                 LIMIT :limit OFFSET :offset
@@ -745,6 +748,9 @@ def interaction_page(
             "created_at": row["created_at"].isoformat() if row["created_at"] else "",
             "contentRedacted": redact_content,
         }
+        item["review_updated_at"] = (
+            item["review_updated_at"].isoformat() if item.get("review_updated_at") else None
+        )
         if redact_content:
             for field in ("question", "answer", "comment", "expected_answer"):
                 item[field] = _redacted_preview(item.get(field))

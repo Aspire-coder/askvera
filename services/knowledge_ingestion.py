@@ -269,6 +269,7 @@ def create_ingestion_job(
     access_scope: str,
     version: str,
     effective_date: str = "",
+    expiry_date: str = "",
     content_hash: str = "",
     accepted_by: str = "",
     logical_document_id: str = "",
@@ -285,15 +286,15 @@ def create_ingestion_job(
                     job_id, filename, country, language, document_type,
                     access_scope, document_version, content_hash, accepted_by,
                     logical_document_id, document_owner, approval_reference,
-                    review_before_publish,
-                    effective_date, status,
+                    review_before_publish, effective_date, expiry_date,
+                    malware_scan_status, status,
                     created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :country, :language, :document_type,
                     :access_scope, :document_version, :content_hash, :accepted_by,
                     :logical_document_id, :document_owner, :approval_reference,
-                    :review_before_publish,
-                    NULLIF(:effective_date, '')::date, 'queued',
+                    :review_before_publish, NULLIF(:effective_date, '')::date,
+                    NULLIF(:expiry_date, '')::date, :malware_scan_status, 'queued',
                     now(), now()
                 )
                 ON CONFLICT (job_id) DO NOTHING
@@ -314,6 +315,8 @@ def create_ingestion_job(
                 "approval_reference": approval_reference,
                 "review_before_publish": review_before_publish,
                 "effective_date": effective_date,
+                "expiry_date": expiry_date,
+                "malware_scan_status": "pending" if settings.ADMIN_INGESTION_MALWARE_SCAN_REQUIRED else "not_required",
             },
         )
     return job_id
@@ -381,6 +384,7 @@ def enqueue_ingestion_job(
     access_scope: str,
     version: str,
     effective_date: str,
+    expiry_date: str = "",
     content_hash: str,
     accepted_by: str = "",
     logical_document_id: str = "",
@@ -405,6 +409,7 @@ def enqueue_ingestion_job(
                 "accessScope": access_scope,
                 "version": version,
                 "effectiveDate": effective_date,
+                "expiryDate": expiry_date,
                 "contentHash": content_hash,
                 "acceptedBy": accepted_by,
                 "logicalDocumentId": logical_document_id,
@@ -444,6 +449,7 @@ def process_ingestion_job(
     access_scope: str,
     version: str,
     effective_date: str,
+    expiry_date: str = "",
     upload_uri: str = "",
     accepted_by: str = "",
     logical_document_id: str = "",
@@ -550,6 +556,8 @@ def process_ingestion_job(
                 document_owner=document_owner,
                 approval_reference=approval_reference,
                 effective_date=effective_date,
+                expiry_date=expiry_date,
+                malware_scan_status="clean" if settings.ADMIN_INGESTION_MALWARE_SCAN_REQUIRED else "not_required",
             )
         _update_job(
             job_id,
@@ -1091,6 +1099,7 @@ def _update_job(job_id: str, **values: Any) -> None:
         "completed_at",
         "accepted_by",
         "review_before_publish",
+        "malware_scan_status",
     }
     updates = {key: value for key, value in values.items() if key in allowed}
     if not updates:
@@ -1115,13 +1124,14 @@ def _record_document(**values: Any) -> None:
                     document_id, filename, source_uri, country, language,
                     document_type, access_scope, document_version, section_count,
                     content_hash, accepted_by, logical_document_id, document_owner,
-                    approval_reference, effective_date, status, created_at, updated_at
+                    approval_reference, effective_date, expiry_date, malware_scan_status,
+                    status, created_at, updated_at
                 ) VALUES (
                     :job_id, :filename, :source_uri, :country, :language,
                     :document_type, :access_scope, :version, :section_count,
                     :content_hash, :accepted_by, :logical_document_id, :document_owner,
                     :approval_reference, NULLIF(:effective_date, '')::date,
-                    'active', now(), now()
+                    NULLIF(:expiry_date, '')::date, :malware_scan_status, 'active', now(), now()
                 )
                 ON CONFLICT (document_id) DO UPDATE SET
                     source_uri = EXCLUDED.source_uri,
@@ -1131,6 +1141,8 @@ def _record_document(**values: Any) -> None:
                     document_owner = EXCLUDED.document_owner,
                     approval_reference = EXCLUDED.approval_reference,
                     effective_date = EXCLUDED.effective_date,
+                    expiry_date = EXCLUDED.expiry_date,
+                    malware_scan_status = EXCLUDED.malware_scan_status,
                     status = 'active',
                     updated_at = now()
                 """
@@ -1156,7 +1168,8 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
                        access_scope, document_version, status, progress,
                        section_count, source_uri, upload_uri, content_hash,
                        accepted_by, review_before_publish, logical_document_id, document_owner,
-                       approval_reference, attempt_count, error_message,
+                       approval_reference, effective_date, expiry_date, malware_scan_status,
+                       attempt_count, error_message,
                        created_at, updated_at
                 FROM ingestion_jobs ORDER BY created_at DESC LIMIT :limit
                 """
@@ -1169,9 +1182,84 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
             "created_at": row["created_at"].isoformat() if row["created_at"] else "",
             "updated_at": row["updated_at"].isoformat() if row["updated_at"] else "",
             "review_before_publish": bool(row.get("review_before_publish", False)),
+            "effective_date": row["effective_date"].isoformat() if row.get("effective_date") else "",
+            "expiry_date": row["expiry_date"].isoformat() if row.get("expiry_date") else "",
         }
         for row in rows
     ]
+
+
+def update_ingestion_malware_status(job_id: str, status: str) -> None:
+    """Persist the GuardDuty decision without storing object tags or scan details."""
+    normalized = status.lower().strip()
+    if normalized not in {"pending", "clean", "blocked", "not_required"}:
+        raise ValueError("Unsupported malware scan status.")
+    _update_job(job_id, malware_scan_status=normalized)
+
+
+def list_document_generations(job_id: str) -> list[dict[str, Any]]:
+    """Return version history for the stable document represented by a job."""
+    job = _ingestion_job(job_id)
+    logical_document_id = str(job.get("logical_document_id") or "")
+    if not logical_document_id:
+        return []
+    with get_engine().connect() as connection:
+        rows = connection.execute(
+            text(
+                """
+                SELECT g.ingestion_id, g.status, g.activated_at, g.retired_at, g.activated_by,
+                       j.filename, j.document_version, j.section_count, j.effective_date,
+                       j.expiry_date, j.malware_scan_status, j.created_at
+                FROM knowledge_document_generations g
+                JOIN ingestion_jobs j ON j.job_id = g.ingestion_id
+                WHERE g.logical_document_id = :logical_document_id
+                  AND g.status <> 'deleted'
+                ORDER BY COALESCE(g.activated_at, j.created_at) DESC
+                """
+            ),
+            {"logical_document_id": logical_document_id},
+        ).mappings().all()
+    date_fields = {"activated_at", "retired_at", "effective_date", "expiry_date", "created_at"}
+    return [
+        {key: value.isoformat() if key in date_fields and value else value for key, value in dict(row).items()}
+        for row in rows
+    ]
+
+
+def rollback_document_generation(job_id: str, target_ingestion_id: str, *, activated_by: str) -> dict[str, Any]:
+    """Atomically reactivate a retained, verified generation for one document."""
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        raise ValueError("Generation rollback is not enabled.")
+    job = _ingestion_job(job_id)
+    logical_document_id = str(job.get("logical_document_id") or "")
+    generations = {str(item["ingestion_id"]): item for item in list_document_generations(job_id)}
+    target = generations.get(target_ingestion_id)
+    if not target:
+        raise ValueError("The selected generation is not available for this document.")
+    client = _client()
+    available = client.count(
+        index=settings.OPENSEARCH_INDEX,
+        body={"query": exact_term_query("ingestion_id", target_ingestion_id)},
+    )
+    if int(available.get("count", 0)) != int(target.get("section_count") or 0) or not int(available.get("count", 0)):
+        raise ValueError("The selected generation is incomplete in the retrieval index.")
+    with get_engine().begin() as connection:
+        connection.execute(text("SELECT pg_advisory_xact_lock(hashtext(:logical_document_id))"), {"logical_document_id": logical_document_id})
+        current = connection.execute(
+            text("SELECT active_ingestion_id FROM knowledge_active_generations WHERE logical_document_id = :logical_document_id FOR UPDATE"),
+            {"logical_document_id": logical_document_id},
+        ).scalar() or ""
+        if current == target_ingestion_id:
+            raise ValueError("That generation is already active.")
+        connection.execute(text("UPDATE knowledge_document_generations SET status = 'retired', retired_at = now() WHERE ingestion_id = :current"), {"current": current})
+        connection.execute(text("UPDATE knowledge_document_generations SET status = 'active', activated_at = now(), retired_at = NULL, activated_by = :actor WHERE ingestion_id = :target"), {"target": target_ingestion_id, "actor": activated_by})
+        connection.execute(
+            text("UPDATE knowledge_active_generations SET previous_ingestion_id = active_ingestion_id, active_ingestion_id = :target, activated_at = now(), activated_by = :actor WHERE logical_document_id = :logical_document_id"),
+            {"target": target_ingestion_id, "actor": activated_by, "logical_document_id": logical_document_id},
+        )
+        connection.execute(text("UPDATE knowledge_documents SET status = CASE WHEN document_id = :target THEN 'active' ELSE 'retired' END, updated_at = now() WHERE logical_document_id = :logical_document_id"), {"target": target_ingestion_id, "logical_document_id": logical_document_id})
+    clear_active_generation_cache()
+    return {"active_ingestion_id": target_ingestion_id, "previous_ingestion_id": current, "logical_document_id": logical_document_id}
 
 
 def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
@@ -1466,7 +1554,9 @@ def publish_ingestion_job(job_id: str, *, accepted_by: str) -> dict[str, Any]:
         logical_document_id=logical_document_id,
         document_owner=str(job.get("document_owner") or ""),
         approval_reference=str(job.get("approval_reference") or ""),
-        effective_date="",
+        effective_date=str(job.get("effective_date") or ""),
+        expiry_date=str(job.get("expiry_date") or ""),
+        malware_scan_status=str(job.get("malware_scan_status") or "not_required"),
     )
     _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
     clear_active_generation_cache()

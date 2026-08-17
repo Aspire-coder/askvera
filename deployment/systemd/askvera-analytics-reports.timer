@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for due ASK Vera analytics reports hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10m
+Persistent=true
+Unit=askvera-analytics-reports.service
+
+[Install]
+WantedBy=timers.target

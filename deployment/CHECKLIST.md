@@ -33,6 +33,7 @@ Use this checklist before sending production traffic to ASK Vera.
 - [ ] `askvera.service` starts successfully.
 - [ ] `askvera-ingestion-worker.service` is enabled and healthy.
 - [ ] `askvera-retention.timer` is enabled and has a successful last run.
+- [ ] `askvera-analytics-reports.timer` is enabled; when reports are enabled, a test aggregate report is delivered.
 - [ ] `journalctl -u askvera` shows no startup errors.
 - [ ] `/health` returns healthy.
 - [ ] `/health/deep` returns healthy.

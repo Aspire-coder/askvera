@@ -30,6 +30,7 @@ from services.knowledge_ingestion import (  # noqa: E402
     create_ingestion_job,
     process_ingestion_job,
     release_ingestion_claim,
+    update_ingestion_malware_status,
     safe_filename,
     validate_document_content,
     validate_upload,
@@ -273,9 +274,11 @@ def process_message(message: dict[str, str]) -> bool:
             guardduty_status = tag_map.get("guarddutymalwarescanstatus")
             legacy_status = tag_map.get("malware-scan-status")
             if guardduty_status != "NO_THREATS_FOUND" and legacy_status != "CLEAN":
+                update_ingestion_malware_status(job_id, "blocked" if guardduty_status == "THREATS_FOUND" else "pending")
                 raise RetryableIngestionError(
                     "Ingestion upload has not passed malware scanning."
                 )
+            update_ingestion_malware_status(job_id, "clean")
         with TemporaryDirectory(prefix=f"askvera-{job_id[:10]}-") as directory:
             local_path = Path(directory) / filename
             get_aws_clients().s3.download_file(bucket, key, str(local_path))
@@ -293,6 +296,7 @@ def process_message(message: dict[str, str]) -> bool:
                 access_scope=command["accessScope"],
                 version=command.get("version", ""),
                 effective_date=command.get("effectiveDate", ""),
+                expiry_date=command.get("expiryDate", ""),
                 upload_uri=command["uploadUri"],
                 accepted_by=command.get("acceptedBy", ""),
                 logical_document_id=command.get("logicalDocumentId", ""),

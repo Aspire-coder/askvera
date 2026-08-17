@@ -14,15 +14,15 @@ class RdsWidgetRegistryProvider:
 
     def get_widget(self, widget_id: str) -> WidgetRegistration | None:
         config = get_widget_config(widget_id, public=True)
-        return self._registration(config) if config else None
+        return self._registration(config, widget_id) if config else None
 
     def list_widgets(self) -> list[WidgetRegistration]:
         return [self._registration(config) for config in list_widget_configs()]
 
     @staticmethod
-    def _registration(config: dict) -> WidgetRegistration:
+    def _registration(config: dict, requested_id: str = "") -> WidgetRegistration:
         return WidgetRegistration(
-            widgetId=config["public_key"],
+            widgetId=requested_id or config["public_key"],
             organizationId=config["id"],
             companyName=config["display_name"],
             allowedOrigins=config["allowed_origins"],

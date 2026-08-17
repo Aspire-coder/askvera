@@ -9,6 +9,8 @@ from typing import Any, Iterable
 from services.market_config import load_market_config, load_policy_locales
 from services.support_routes import list_support_routes
 from services.widget_configs import list_widget_configs
+from services.db import get_engine
+from sqlalchemy import text
 
 CHECK_PASS = "pass"
 CHECK_WARNING = "warning"
@@ -57,6 +59,37 @@ def _enabled_language_codes(market: dict[str, Any]) -> set[str]:
     }
 
 
+def list_market_governance() -> dict[str, dict[str, Any]]:
+    with get_engine().connect() as connection:
+        rows = connection.execute(text("SELECT country, owner_email, deadline, updated_by, updated_at FROM market_readiness_governance")).mappings().all()
+    return {
+        str(row["country"]).upper(): {
+            "owner_email": str(row.get("owner_email") or ""),
+            "deadline": row["deadline"].isoformat() if row.get("deadline") else "",
+            "updated_by": str(row.get("updated_by") or ""),
+            "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
+        }
+        for row in rows
+    }
+
+
+def upsert_market_governance(country: str, owner_email: str, deadline: str, updated_by: str) -> dict[str, Any]:
+    with get_engine().begin() as connection:
+        row = connection.execute(
+            text(
+                """
+                INSERT INTO market_readiness_governance (country, owner_email, deadline, updated_by, updated_at)
+                VALUES (:country, :owner_email, NULLIF(:deadline, '')::date, :updated_by, now())
+                ON CONFLICT (country) DO UPDATE SET owner_email = EXCLUDED.owner_email,
+                    deadline = EXCLUDED.deadline, updated_by = EXCLUDED.updated_by, updated_at = now()
+                RETURNING country, owner_email, deadline, updated_by, updated_at
+                """
+            ),
+            {"country": country.upper(), "owner_email": owner_email.strip().lower(), "deadline": deadline, "updated_by": updated_by},
+        ).mappings().one()
+    return {**dict(row), "deadline": row["deadline"].isoformat() if row.get("deadline") else "", "updated_at": row["updated_at"].isoformat()}
+
+
 def _published_languages(
     policy_locales: dict[str, dict[str, Any]], code: str
 ) -> set[str]:
@@ -86,6 +119,7 @@ def build_market_readiness(
     support_routes: list[dict[str, Any]] | None = None,
     widget_configs: list[dict[str, Any]] | None = None,
     checked_at: str | None = None,
+    governance: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a truthful onboarding checklist without probing the retrieval path."""
     if markets is None:
@@ -109,6 +143,11 @@ def build_market_readiness(
         )
     except Exception:
         widgets = {}
+    if governance is None:
+        try:
+            governance = list_market_governance()
+        except Exception:
+            governance = {}
 
     results: list[dict[str, Any]] = []
     for market in markets:
@@ -205,6 +244,8 @@ def build_market_readiness(
                 "overall": overall,
                 "languages": _language_view(market, published_languages),
                 "checks": checks,
+                "owner_email": str((governance or {}).get(code, {}).get("owner_email") or ""),
+                "deadline": str((governance or {}).get(code, {}).get("deadline") or ""),
             }
         )
 

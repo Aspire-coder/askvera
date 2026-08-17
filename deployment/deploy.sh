@@ -72,6 +72,8 @@ sync_runtime_configuration() {
   install -m 0644 deployment/systemd/askvera-ingestion-worker.service /etc/systemd/system/askvera-ingestion-worker.service
   install -m 0644 deployment/systemd/askvera-retention.service /etc/systemd/system/askvera-retention.service
   install -m 0644 deployment/systemd/askvera-retention.timer /etc/systemd/system/askvera-retention.timer
+  install -m 0644 deployment/systemd/askvera-analytics-reports.service /etc/systemd/system/askvera-analytics-reports.service
+  install -m 0644 deployment/systemd/askvera-analytics-reports.timer /etc/systemd/system/askvera-analytics-reports.timer
 
   if [[ -d /etc/nginx/conf.d ]]; then
     install -m 0644 deployment/nginx/askvera.conf /etc/nginx/conf.d/askvera.conf
@@ -87,6 +89,8 @@ sync_runtime_configuration() {
   systemctl daemon-reload
   systemctl enable askvera-retention.timer
   systemctl restart askvera-retention.timer
+  systemctl enable askvera-analytics-reports.timer
+  systemctl restart askvera-analytics-reports.timer
   if sudo -u "${APP_USER}" .venv/bin/python -c \
     'from config import settings; settings.load_ssm_config(); raise SystemExit(0 if settings.ADMIN_INGESTION_QUEUE_ENABLED else 1)'; then
     systemctl enable askvera-ingestion-worker.service

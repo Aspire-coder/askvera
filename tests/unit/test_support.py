@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from botocore.exceptions import ClientError
+
 import pytest
 
 from services import support
@@ -185,3 +187,30 @@ def test_managed_routes_control_available_support_markets(monkeypatch):
     )
 
     assert support.support_country_codes() == ["GB", "SE"]
+
+
+def test_managed_fallback_is_used_when_primary_delivery_fails(monkeypatch):
+    class FailoverSes:
+        def __init__(self):
+            self.calls = []
+
+        def send_email(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise ClientError({"Error": {"Code": "ServiceUnavailable", "Message": "retry"}}, "SendEmail")
+            return {"MessageId": "fallback"}
+
+    ses = FailoverSes()
+    monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_ENABLED", True)
+    monkeypatch.setattr(support.settings, "SUPPORT_EMAIL_FROM", "askvera@example.com")
+    monkeypatch.setattr(support, "get_session_history", lambda *_: "User: Help")
+    monkeypatch.setattr(support, "get_aws_clients", lambda: SimpleNamespace(ses=ses))
+    monkeypatch.setattr(support, "get_active_support_route", lambda _country: {
+        "department": "Primary", "email": "primary@example.com",
+        "fallback_department": "Fallback", "fallback_email": "fallback@example.com",
+    })
+
+    delivery = support.send_support_request(request(), "cid")
+
+    assert delivery.route_name == "Fallback"
+    assert ses.calls[1]["Destination"] == {"ToAddresses": ["fallback@example.com"]}
