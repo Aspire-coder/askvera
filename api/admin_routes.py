@@ -616,7 +616,13 @@ async def upload_document(
     )
     if settings.ADMIN_INGESTION_QUEUE_ENABLED:
         try:
-            upload_uri = stage_ingestion_upload(job_id, filename, content)
+            upload_uri = stage_ingestion_upload(
+                job_id,
+                filename,
+                content,
+                country=normalized_country,
+                access_scope=access_scope,
+            )
             enqueue_ingestion_job(
                 job_id=job_id,
                 upload_uri=upload_uri,

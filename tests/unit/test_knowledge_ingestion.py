@@ -207,10 +207,81 @@ def test_durable_upload_uses_private_encrypted_s3_object(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_QUARANTINE_PREFIX", "quarantine")
     monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
 
-    uri = stage_ingestion_upload("job-1", "policy.pdf", b"approved")
+    uri = stage_ingestion_upload(
+        "job-1",
+        "policy.pdf",
+        b"approved",
+        country="CA",
+        access_scope="country",
+    )
 
-    assert uri == "s3://knowledge-bucket/quarantine/job-1/policy.pdf"
+    assert uri == "s3://knowledge-bucket/quarantine/countries/CA/job-1/policy.pdf"
     assert s3.put_object.call_args.kwargs["ServerSideEncryption"] == "AES256"
+
+
+def test_global_upload_uses_global_quarantine_folder(monkeypatch) -> None:
+    s3 = MagicMock()
+    monkeypatch.setattr(knowledge_ingestion, "get_aws_clients", lambda: SimpleNamespace(s3=s3))
+    monkeypatch.setattr(knowledge_ingestion.settings, "KNOWLEDGE_UPLOAD_BUCKET", "knowledge-bucket")
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_QUARANTINE_PREFIX", "quarantine")
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+    uri = stage_ingestion_upload(
+        "job-2",
+        "directory.pdf",
+        b"approved",
+        country="US",
+        access_scope="global",
+    )
+
+    assert uri == "s3://knowledge-bucket/quarantine/global/job-2/directory.pdf"
+    assert s3.put_object.call_args.kwargs["Metadata"] == {
+        "job-id": "job-2",
+        "access-scope": "global",
+        "country": "US",
+    }
+
+
+def test_final_source_upload_uses_country_folder(monkeypatch, tmp_path: Path) -> None:
+    s3 = MagicMock()
+    monkeypatch.setattr(knowledge_ingestion, "get_aws_clients", lambda: SimpleNamespace(s3=s3))
+    monkeypatch.setattr(knowledge_ingestion.settings, "KNOWLEDGE_UPLOAD_BUCKET", "knowledge-bucket")
+    source = tmp_path / "policy.pdf"
+    source.write_bytes(b"approved")
+
+    uri = knowledge_ingestion._upload_source(
+        source,
+        source.name,
+        "job-3",
+        country="IT",
+        access_scope="country",
+    )
+
+    assert uri == "s3://knowledge-bucket/approved-knowledge/countries/IT/job-3/policy.pdf"
+    assert s3.upload_file.call_args.args == (
+        str(source),
+        "knowledge-bucket",
+        "approved-knowledge/countries/IT/job-3/policy.pdf",
+    )
+
+
+def test_final_source_upload_uses_global_folder(monkeypatch, tmp_path: Path) -> None:
+    s3 = MagicMock()
+    monkeypatch.setattr(knowledge_ingestion, "get_aws_clients", lambda: SimpleNamespace(s3=s3))
+    monkeypatch.setattr(knowledge_ingestion.settings, "KNOWLEDGE_UPLOAD_BUCKET", "knowledge-bucket")
+    source = tmp_path / "directory.pdf"
+    source.write_bytes(b"approved")
+
+    uri = knowledge_ingestion._upload_source(
+        source,
+        source.name,
+        "job-4",
+        country="US",
+        access_scope="global",
+    )
+
+    assert uri == "s3://knowledge-bucket/approved-knowledge/global/job-4/directory.pdf"
+    assert s3.upload_file.call_args.args[2] == "approved-knowledge/global/job-4/directory.pdf"
 
 
 def test_queue_command_contains_reference_instead_of_document_bytes(monkeypatch) -> None:

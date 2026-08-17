@@ -319,20 +319,40 @@ def create_ingestion_job(
     return job_id
 
 
-def stage_ingestion_upload(job_id: str, filename: str, content: bytes) -> str:
+def _storage_scope_path(*, country: str, access_scope: str) -> str:
+    """Return the durable S3 folder for a global or market-scoped document."""
+    if access_scope not in ACCESS_SCOPES:
+        raise ValueError("Unsupported document access scope.")
+    if access_scope == "global":
+        return "global"
+    normalized_country = country.upper().strip()
+    if not normalized_country:
+        raise ValueError("Country is required for a country-scoped document.")
+    return f"countries/{normalized_country}"
+
+
+def stage_ingestion_upload(
+    job_id: str,
+    filename: str,
+    content: bytes,
+    *,
+    country: str,
+    access_scope: str,
+) -> str:
     """Persist an accepted upload before asynchronous processing begins."""
     bucket = settings.KNOWLEDGE_UPLOAD_BUCKET
     if not bucket:
         raise ValueError("KNOWLEDGE_UPLOAD_BUCKET is required for durable ingestion.")
     prefix = settings.ADMIN_INGESTION_QUARANTINE_PREFIX.strip("/")
-    key = f"{prefix}/{job_id}/{filename}"
+    scope_path = _storage_scope_path(country=country, access_scope=access_scope)
+    key = f"{prefix}/{scope_path}/{job_id}/{filename}"
     get_aws_clients().s3.put_object(
         Bucket=bucket,
         Key=key,
         Body=content,
         ContentType="application/octet-stream",
         ServerSideEncryption="AES256",
-        Metadata={"job-id": job_id},
+        Metadata={"job-id": job_id, "access-scope": access_scope, "country": country.upper()},
     )
     upload_uri = f"s3://{bucket}/{key}"
     _update_job(job_id, upload_uri=upload_uri)
@@ -486,7 +506,13 @@ def process_ingestion_job(
             raise ValueError("No readable text was found in the document.")
 
         _update_job(job_id, status="uploading", progress=35, section_count=len(sections))
-        source_uri = _upload_source(path, filename, job_id)
+        source_uri = _upload_source(
+            path,
+            filename,
+            job_id,
+            country=country,
+            access_scope=access_scope,
+        )
         document_hash = _file_hash(path)
         _update_job(job_id, status="indexing", progress=55, source_uri=source_uri, content_hash=document_hash)
         stable_document_id = build_logical_document_id(
@@ -768,11 +794,20 @@ def _chunk_text(
     return chunks
 
 
-def _upload_source(path: Path, filename: str, job_id: str) -> str:
+def _upload_source(
+    path: Path,
+    filename: str,
+    job_id: str,
+    *,
+    country: str,
+    access_scope: str,
+) -> str:
     bucket = settings.KNOWLEDGE_UPLOAD_BUCKET
     if not bucket:
         return ""
-    key = f"{settings.KNOWLEDGE_UPLOAD_PREFIX.strip('/')}/{job_id}/{filename}"
+    prefix = settings.KNOWLEDGE_UPLOAD_PREFIX.strip("/")
+    scope_path = _storage_scope_path(country=country, access_scope=access_scope)
+    key = f"{prefix}/{scope_path}/{job_id}/{filename}"
     get_aws_clients().s3.upload_file(str(path), bucket, key)
     return f"s3://{bucket}/{key}"
 
