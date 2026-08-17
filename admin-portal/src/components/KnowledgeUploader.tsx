@@ -14,6 +14,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [country, setCountry] = useState("BE");
+  const [coverageSelection, setCoverageSelection] = useState("BE");
   const [language, setLanguage] = useState("nl");
   const [documentType, setDocumentType] = useState("policy");
   const [accessScope, setAccessScope] = useState("country");
@@ -64,11 +65,13 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     setAccessScope(documentType === "office_directory" ? "global" : "country");
   }, [documentType]);
 
-  const selectedMarket = config.countries.find((market) => market.code === country) || config.countries[0];
-  const languages = selectedMarket?.languages || [];
+  const selectedMarket = config.countries.find((market) => market.code === coverageSelection);
+  const uploadMarket = config.countries.find((market) => market.code === country) || config.countries[0];
+  const showingGlobalCoverage = coverageSelection === "GLOBAL";
+  const languages = uploadMarket?.languages || [];
   const marketJobs = useMemo(
-    () => jobs.filter((job) => job.access_scope === "global" || job.country === country),
-    [country, jobs],
+    () => jobs.filter((job) => showingGlobalCoverage ? job.access_scope === "global" : job.access_scope === "global" || job.country === coverageSelection),
+    [coverageSelection, jobs, showingGlobalCoverage],
   );
   const readyDocuments = marketJobs.filter((job) => job.status === "ready").length;
   const inProgressDocuments = marketJobs.filter((job) => !["ready", "failed"].includes(job.status)).length;
@@ -190,12 +193,13 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
       <section className="knowledge-market-summary surface" aria-labelledby="knowledge-market-title">
         <div className="knowledge-market-selector">
-          <label htmlFor="knowledge-market"><span className="eyebrow">Selected market</span><strong id="knowledge-market-title">Where should this document live?</strong></label>
-          <select id="knowledge-market" value={country} onChange={(event) => setCountry(event.target.value)} aria-label="Select knowledge market">
+          <label htmlFor="knowledge-market"><span className="eyebrow">Coverage view</span><strong id="knowledge-market-title">Which documents should we review?</strong></label>
+          <select id="knowledge-market" value={coverageSelection} onChange={(event) => setCoverageSelection(event.target.value)} aria-label="Select knowledge coverage">
+            <option value="GLOBAL">Global documents (all markets)</option>
             {config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}
           </select>
         </div>
-        <div className="knowledge-market-stats" aria-label={`${selectedMarket?.name || "Selected market"} document summary`}>
+        <div className="knowledge-market-stats" aria-label={`${showingGlobalCoverage ? "Global" : selectedMarket?.name || "Selected market"} document summary`}>
           <div><strong>{marketJobs.length}</strong><span>Available here</span></div>
           <div><strong>{readyDocuments}</strong><span>Ready</span></div>
           <div><strong>{inProgressDocuments}</strong><span>In progress</span></div>
@@ -203,8 +207,8 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
       </section>
 
       <section className="knowledge-existing surface" aria-labelledby="existing-documents-title">
-        <div className="section-heading"><div><span className="eyebrow">Current coverage</span><h2 id="existing-documents-title">Documents available for {selectedMarket?.name || "this market"}</h2><p>Global documents are included. Use names and versions to avoid replacing the wrong document.</p></div><span className="review-safety">{marketJobs.length} found</span></div>
-        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.length ? <div className="knowledge-existing-list">{marketJobs.map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span></article>)}</div> : <div className="review-empty">No documents are currently available for {selectedMarket?.name || "this market"}. Upload the first approved document below.</div>}
+        <div className="section-heading"><div><span className="eyebrow">Current coverage</span><h2 id="existing-documents-title">{showingGlobalCoverage ? "Global documents" : `Documents available for ${selectedMarket?.name || "this market"}`}</h2><p>{showingGlobalCoverage ? "Documents available to every market, including global directories and FAQs." : "Global documents are included. Use names and versions to avoid replacing the wrong document."}</p></div><span className="review-safety">{marketJobs.length} found</span></div>
+        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.length ? <div className="knowledge-existing-list">{marketJobs.map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global · available to all markets" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span></article>)}</div> : <div className="review-empty">No documents are currently available for this coverage.</div>}
       </section>
 
       <div className="uploader-layout">
