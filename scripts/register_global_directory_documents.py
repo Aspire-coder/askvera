@@ -46,8 +46,9 @@ def _source_metadata(filename: str, source_uri: str) -> tuple[str, int]:
     response = _client().search(
         index=settings.OPENSEARCH_INDEX,
         body={
-            "size": 0,
+            "size": 1,
             "track_total_hits": True,
+            "_source": ["ingestion_id"],
             "query": {
                 "bool": {
                     "must": [
@@ -56,11 +57,10 @@ def _source_metadata(filename: str, source_uri: str) -> tuple[str, int]:
                     ]
                 }
             },
-            "aggs": {"ingestion_ids": {"terms": {"field": "ingestion_id", "size": 5}}},
         },
     )
-    buckets = response.get("aggregations", {}).get("ingestion_ids", {}).get("buckets", [])
-    ingestion_id = str(buckets[0].get("key") or "") if buckets else ""
+    hits = response.get("hits", {}).get("hits", [])
+    ingestion_id = str((hits[0].get("_source") or {}).get("ingestion_id") or "") if hits else ""
     total = response.get("hits", {}).get("total", 0)
     count = int(total.get("value", 0) if isinstance(total, dict) else total)
     if not ingestion_id:
