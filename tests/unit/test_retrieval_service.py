@@ -792,3 +792,28 @@ def test_unverified_support_intent_fails_closed_to_knowledge(monkeypatch) -> Non
 
     assert plan.conversation_intent == "knowledge"
     assert plan.client_action == ""
+
+
+def test_query_planner_always_includes_global_documents_for_sponsoring_questions(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["international sponsoring Italy"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Who is the sponsor for Italy?", "IT", "en", "sponsor-cid")
+
+    assert plan.include_global_documents is True

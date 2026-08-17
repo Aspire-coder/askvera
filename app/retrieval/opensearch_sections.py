@@ -29,6 +29,11 @@ from .section_index import _character_overlap, _confidence_from_documents, _sour
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
 
+GLOBAL_DIRECTORY_DOCUMENT_TYPES = (
+    "office_directory",
+    "international_sponsoring_directory",
+)
+
 
 def _normalize_text(value: str) -> str:
     """Normalize text for glossary trigger checks."""
@@ -271,12 +276,11 @@ def _directory_text_query(message: str) -> dict[str, Any]:
                 "filter": [
                     _scope_filter("", "", "global"),
                     {"term": {"status": "active"}},
-                    {"term": {"document_type": "office_directory"}},
+                    {"terms": {"document_type": list(GLOBAL_DIRECTORY_DOCUMENT_TYPES)}},
                     *_generation_filters(
                         "",
                         "en",
                         "global",
-                        document_type="office_directory",
                     ),
                 ],
                 "should": [
@@ -312,7 +316,7 @@ def _outline_text_query(message: str, country: str, language: str) -> dict[str, 
 
 def _directory_record_country_score(message: str, row: dict[str, Any]) -> float:
     """Reward directory records whose own country metadata matches the query."""
-    if row.get("document_type") != "office_directory":
+    if row.get("document_type") not in GLOBAL_DIRECTORY_DOCUMENT_TYPES:
         return 0.0
     metadata = dict(row.get("metadata") or {})
     record_country = _normalize_text(str(metadata.get("record_country") or ""))

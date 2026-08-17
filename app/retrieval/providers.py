@@ -88,6 +88,12 @@ CAPITALIZED_STOPWORDS = {
 
 RANK_ANCHOR_TERMS = {"manager", "supervisor"}
 
+SPONSORING_QUESTION_RE = re.compile(
+    r"\b(?:sponsor|sponsors|sponsorship|sponsoring|responsor|responsored|responsoring|"
+    r"international\s+sponsoring)\b",
+    re.IGNORECASE,
+)
+
 
 class RetrievalProvider(Protocol):
     """Interface boundary for retrieval implementations."""
@@ -383,7 +389,8 @@ def _planned_retrieval_plan(
         "Fix obvious typos. If the question is not in English, include English search phrases too. "
         "Also choose document scopes. Use locale_policy for company-policy rules, definitions, fees, returns, "
         "bonuses, ranks, and document-section questions. Add global_directory only when the user asks for an "
-        "office, address, phone number, email address, website, or named staff contact. A market or country name "
+        "office, address, phone number, email address, website, named staff contact, or international sponsoring. "
+        "A market or country name "
         "inside a policy question does not make it a directory question. Do not invent facts, numbers, percentages, "
         "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
@@ -427,6 +434,13 @@ def _planned_retrieval_plan(
             intent_confidence,
             explicit_support,
         ) = _parse_planned_query_plan(text)
+        # Sponsoring-directory records are global documents even when the
+        # question is phrased as a country-specific policy question. Keep the
+        # model planner as a helpful hint, but enforce this scope in code so a
+        # planner omission cannot hide the directory.
+        include_global_documents = include_global_documents or bool(
+            SPONSORING_QUESTION_RE.search(message or "")
+        )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
         # Keep approved terminology expansion even when the optional planner is

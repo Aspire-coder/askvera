@@ -437,7 +437,14 @@ def test_directory_query_filters_to_active_global_directory_records() -> None:
         }
     } in filters
     assert {"term": {"status": "active"}} in filters
-    assert {"term": {"document_type": "office_directory"}} in filters
+    assert {
+        "terms": {
+            "document_type": [
+                "office_directory",
+                "international_sponsoring_directory",
+            ]
+        }
+    } in filters
 
 
 def test_outline_query_is_locale_isolated_and_outline_only() -> None:
@@ -456,3 +463,12 @@ def test_directory_country_score_derives_acronyms_from_record_metadata() -> None
 
     assert _directory_record_country_score("Give me the UK office address", row) == 2.2
     assert _directory_record_country_score("Give me the United Kingdom office address", row) == 2.4
+
+
+def test_sponsoring_directory_country_score_uses_record_metadata() -> None:
+    row = {
+        "document_type": "international_sponsoring_directory",
+        "metadata": {"record_country": "Italy"},
+    }
+
+    assert _directory_record_country_score("Who is the sponsor for Italy?", row) == 2.4
