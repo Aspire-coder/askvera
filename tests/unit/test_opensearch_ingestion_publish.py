@@ -49,3 +49,15 @@ def test_vnext_chunks_can_target_isolated_index(monkeypatch) -> None:
         [{"chunk_profile": "vnext"}],
         "askvera-vnext",
     )
+
+
+def test_index_mapping_does_not_infer_document_version_as_date() -> None:
+    properties = loader._index_body()["mappings"]["properties"]
+
+    assert properties["document_version"]["type"] == "keyword"
+    assert properties["metadata"]["properties"]["document_version"]["type"] == (
+        "keyword"
+    )
+    assert properties["metadata"]["properties"]["effective_date"]["type"] == (
+        "date"
+    )

@@ -367,3 +367,141 @@ def test_vnext_contextual_children_are_bounded_after_expansion() -> None:
     )
     assert all(section.parent_section_id == "1.02" for section in bounded)
     assert bounded[0].section_id == "1.02-definition-1-part-1"
+
+
+def test_r4_rejects_time_values_and_repeated_numbered_list_items() -> None:
+    text = "\n".join(
+        [
+            "1 Definitions",
+            "1.02 Case Credit definition",
+            "2 Marketing Plan",
+            "23.59 local processing time",
+            "1 submit the completed form",
+            "2 retain the confirmation email",
+            "17.01 Application requirements",
+        ]
+    )
+
+    matches = extractor._r4_section_matches(text)
+
+    assert [match.group("section") for match in matches] == [
+        "1",
+        "1.02",
+        "2",
+        "17.01",
+    ]
+
+
+def test_r4_keeps_larger_authoritative_parent_chunks() -> None:
+    content = "1 Definitions\n" + ("Approved policy sentence. " * 250)
+
+    sections = extractor._split_oversized_section(
+        source_file="policy.pdf",
+        country="DE",
+        language="de",
+        section_id="1",
+        title="Definitions",
+        content=content,
+        content_offset=0,
+        page_offsets=[(1, 0, len(content) + 1)],
+        chunk_profile="vnext_r4",
+    )
+    bounded = extractor._bound_vnext_chunks(sections)
+
+    assert len(bounded) == 1
+    assert bounded[0].section_id == "1"
+    assert len(bounded[0].content) > extractor.VNEXT_MAX_SECTION_CHARS
+    assert len(bounded[0].content) <= extractor.VNEXT_R4_MAX_PARENT_CHARS
+
+
+def test_r4_caps_atomic_children_per_authoritative_parent() -> None:
+    definition_lines = [
+        f"Term {number}: Approved definition {number}."
+        for number in range(1, 25)
+    ]
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="DE",
+        language="de",
+        section_id="1.02",
+        title="Definitions",
+        start_page=3,
+        end_page=5,
+        content="1.02 Definitions\n" + "\n".join(definition_lines),
+        chunk_profile="vnext_r4",
+    )
+
+    chunks = extractor._expand_structured_chunks(
+        [parent],
+        chunk_profile="vnext_r4",
+    )
+    children = [chunk for chunk in chunks if chunk.chunk_type != "section"]
+
+    assert chunks[0] == parent
+    assert len(children) <= extractor.VNEXT_R4_MAX_CHILDREN_PER_PARENT
+    assert 1 <= len(
+        [chunk for chunk in children if chunk.chunk_type == "definition"]
+    ) <= extractor.VNEXT_R4_MAX_DEFINITIONS_PER_PARENT
+
+
+def test_r4_uses_one_child_budget_across_parent_parts() -> None:
+    parts = [
+        extractor.PolicySection(
+            source_file="policy.pdf",
+            country="AT",
+            language="de",
+            section_id=f"4.03-part-{part}",
+            title=f"Requirements (part {part})",
+            start_page=part,
+            end_page=part,
+            content="\n".join(
+                f"Item {part}-{number}: Approved requirement."
+                for number in range(1, 15)
+            ),
+            chunk_type="section_part",
+            parent_section_id="4.03",
+            chunk_profile="vnext_r4",
+        )
+        for part in (1, 2)
+    ]
+
+    chunks = extractor._expand_structured_chunks(
+        parts,
+        chunk_profile="vnext_r4",
+    )
+    children = [chunk for chunk in chunks if chunk.chunk_type == "definition"]
+
+    assert 1 <= len(children) <= extractor.VNEXT_R4_MAX_DEFINITIONS_PER_PARENT
+    assert len(chunks) - len(parts) <= extractor.VNEXT_R4_MAX_CHILDREN_PER_PARENT
+    assert all(chunk.parent_section_id == "4.03" for chunk in children)
+
+
+def test_r4_balances_child_types_before_reaching_the_parent_cap() -> None:
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="DE",
+        language="de",
+        section_id="4.03",
+        title="Requirements",
+        start_page=4,
+        end_page=4,
+        content=(
+            "4.03 Requirements\n"
+            "Term A: Approved definition A.\n"
+            "Term B: Approved definition B.\n"
+            "Term C: Approved definition C.\n"
+            "(a) First requirement contains 10 CC.\n"
+            "(b) Second requirement contains 20 CC.\n"
+            "Manager level requires 100 CC\n"
+            "Supervisor level requires 50 CC"
+        ),
+        chunk_profile="vnext_r4",
+    )
+
+    chunks = extractor._expand_structured_chunks(
+        [parent],
+        chunk_profile="vnext_r4",
+    )
+    child_types = {chunk.chunk_type for chunk in chunks[1:]}
+
+    assert child_types == {"definition", "list_item", "numeric_fact"}

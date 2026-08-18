@@ -33,6 +33,7 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_ENDPOINT", "https://example.aoss.amazonaws.com")
     monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "sections")
     monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", False)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RESULT_COUNT", 8)
     monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 60)
     monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 2)
     monkeypatch.setattr(settings, "RETRIEVAL_NEIGHBOR_LIMIT", 2)
@@ -68,6 +69,16 @@ def test_retrieval_experiment_limits_are_validated(monkeypatch) -> None:
     assert "RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE (must be between 0 and 1)" in failures
     assert "RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP (must be between 0 and 1)" in failures
     assert "RETRIEVAL_PROMOTION_MAX_LATENCY_MS (must be greater than 0)" in failures
+
+
+def test_shadow_retrieval_requires_positive_vnext_result_count(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 0.05)
+    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "sections-vnext")
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RESULT_COUNT", 0)
+
+    assert "RETRIEVAL_VNEXT_RESULT_COUNT (must be greater than 0)" in validate()
 
 
 def test_production_restart_validation_rejects_non_production_environment(monkeypatch) -> None:

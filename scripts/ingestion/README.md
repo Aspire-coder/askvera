@@ -80,6 +80,13 @@ python scripts/ingestion/load_policy_sections_to_opensearch.py `
 
 The loader rejects a `vnext` package when its target resolves to the current
 `OPENSEARCH_INDEX`.
+
+`vnext_r4` is also isolated. It preserves larger parent sections, caps
+structured child expansion, and rejects common numeric false headings. The
+2026-08-18 benchmark did not meet the promotion gate, so it must not target the
+production index. See
+`outputs/interaction_quality/VNEXT_R4_RETRIEVAL_FINDINGS.md`.
+
 Before extracting an unfamiliar PDF, run the preflight check:
 
 ```bash

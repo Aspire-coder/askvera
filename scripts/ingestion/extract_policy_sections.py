@@ -53,9 +53,16 @@ SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 MAX_SECTION_CHARS = 8_000
 VNEXT_MAX_SECTION_CHARS = 2_000
 VNEXT_SECTION_OVERLAP_CHARS = 200
+VNEXT_R4_MAX_PARENT_CHARS = MAX_SECTION_CHARS
+VNEXT_R4_MAX_SUBSECTION_NUMBER = 30
+VNEXT_R4_MAX_DEFINITIONS_PER_PARENT = 6
+VNEXT_R4_MAX_LIST_ITEMS_PER_PARENT = 6
+VNEXT_R4_MAX_NUMERIC_FACTS_PER_PARENT = 6
+VNEXT_R4_MAX_CHILDREN_PER_PARENT = 8
 CHUNK_PROFILES = {
     "current": (MAX_SECTION_CHARS, 0),
     "vnext": (VNEXT_MAX_SECTION_CHARS, VNEXT_SECTION_OVERLAP_CHARS),
+    "vnext_r4": (VNEXT_R4_MAX_PARENT_CHARS, 0),
 }
 TEXT_REPLACEMENTS = {
     "â€™": "'",
@@ -100,6 +107,13 @@ class PolicySection:
             "document_type": "policy",
             "access_scope": "country",
             "chunk_type": self.chunk_type,
+            "authority_level": (
+                "governing"
+                if self.chunk_type in {"section", "section_part", "definition"}
+                else "supporting"
+                if self.chunk_type in {"list_item", "numeric_fact", "table_row"}
+                else "navigational"
+            ),
             "parent_section_id": self.parent_section_id,
             "chunk_profile": self.chunk_profile,
         }
@@ -147,7 +161,7 @@ def _read_pdf_pages(
     pages: list[tuple[int, str]] = []
     for index, page in enumerate(reader.pages, start=1):
         raw_text = extract_pdf_page_text(page)
-        if chunk_profile == "vnext":
+        if chunk_profile.startswith("vnext"):
             layout_text = extract_pdf_page_text(page, preserve_layout=True)
             if is_table_like_layout(layout_text):
                 raw_text = layout_text
@@ -206,6 +220,38 @@ def _iter_section_matches(page_text: str) -> Iterable[re.Match[str]]:
             yield match
 
 
+def _uppercase_ratio(value: str) -> float:
+    letters = [character for character in value if character.isalpha()]
+    if not letters:
+        return 0.0
+    return sum(character.isupper() for character in letters) / len(letters)
+
+
+def _r4_section_matches(page_text: str) -> list[re.Match[str]]:
+    """Reject common list-number and time-value false headings.
+
+    The original and r3 profiles intentionally retain their historical parser.
+    r4 only accepts plausible decimal subsection numbers and suppresses repeated
+    top-level numbers unless the repeated heading is visually authoritative.
+    """
+    accepted: list[re.Match[str]] = []
+    seen_top_level: set[str] = set()
+    for match in _iter_section_matches(page_text):
+        section_id = match.group("section")
+        if "." in section_id:
+            _, subsection = section_id.split(".", 1)
+            if int(subsection) > VNEXT_R4_MAX_SUBSECTION_NUMBER:
+                continue
+            accepted.append(match)
+            continue
+
+        if section_id in seen_top_level and _uppercase_ratio(match.group("title")) < 0.75:
+            continue
+        seen_top_level.add(section_id)
+        accepted.append(match)
+    return accepted
+
+
 def extract_sections(
     pdf_path: Path,
     *,
@@ -240,7 +286,11 @@ def extract_sections(
         cursor += 1
 
     full_text = "".join(full_text_parts)
-    matches = list(_iter_section_matches(full_text))
+    matches = (
+        _r4_section_matches(full_text)
+        if chunk_profile == "vnext_r4"
+        else list(_iter_section_matches(full_text))
+    )
     sections: list[PolicySection] = []
 
     for index, match in enumerate(matches):
@@ -291,7 +341,11 @@ def extract_sections(
         status=status,
         chunk_profile=chunk_profile,
     )
-    expanded = [*front_matter, *outlines, *_expand_structured_chunks(sections)]
+    expanded = [
+        *front_matter,
+        *outlines,
+        *_expand_structured_chunks(sections, chunk_profile=chunk_profile),
+    ]
     return _ensure_unique_section_ids(_bound_vnext_chunks(expanded))
 
 
@@ -378,12 +432,17 @@ def _outline_chunks(
     return chunks
 
 
-def _split_vnext_text(content: str) -> list[str]:
+def _split_vnext_text(
+    content: str,
+    *,
+    max_chars: int = VNEXT_MAX_SECTION_CHARS,
+    overlap_chars: int = VNEXT_SECTION_OVERLAP_CHARS,
+) -> list[str]:
     """Split auxiliary policy text with the vNext structural boundaries."""
     chunks: list[str] = []
     start = 0
     while start < len(content):
-        end = min(start + VNEXT_MAX_SECTION_CHARS, len(content))
+        end = min(start + max_chars, len(content))
         if end < len(content):
             boundaries = [
                 (content.rfind("\n\n", start, end), 0),
@@ -391,7 +450,7 @@ def _split_vnext_text(content: str) -> list[str]:
                 (content.rfind(". ", start, end), 2),
             ]
             boundary, suffix_length = max(boundaries)
-            if boundary > start + VNEXT_MAX_SECTION_CHARS // 2:
+            if boundary > start + max_chars // 2:
                 end = boundary + suffix_length
 
         chunk = content[start:end].strip()
@@ -400,7 +459,7 @@ def _split_vnext_text(content: str) -> list[str]:
         if end >= len(content):
             break
 
-        start = max(end - VNEXT_SECTION_OVERLAP_CHARS, start + 1)
+        start = max(end - overlap_chars, start + 1)
         while start < end and not content[start].isspace():
             start += 1
         while start < len(content) and content[start].isspace():
@@ -412,9 +471,15 @@ def _bound_vnext_chunks(sections: list[PolicySection]) -> list[PolicySection]:
     """Apply the vNext size ceiling after contextual child chunks are added."""
     bounded: list[PolicySection] = []
     for section in sections:
+        max_chars = (
+            VNEXT_R4_MAX_PARENT_CHARS
+            if section.chunk_profile == "vnext_r4"
+            and section.chunk_type in {"section", "section_part"}
+            else VNEXT_MAX_SECTION_CHARS
+        )
         if (
-            section.chunk_profile != "vnext"
-            or len(section.content) <= VNEXT_MAX_SECTION_CHARS
+            not section.chunk_profile.startswith("vnext")
+            or len(section.content) <= max_chars
         ):
             bounded.append(section)
             continue
@@ -428,7 +493,11 @@ def _bound_vnext_chunks(sections: list[PolicySection]) -> list[PolicySection]:
                 parent_section_id=parent_section_id,
             )
             for part_number, content in enumerate(
-                _split_vnext_text(section.content),
+                _split_vnext_text(
+                    section.content,
+                    max_chars=max_chars,
+                    overlap_chars=0 if section.chunk_profile == "vnext_r4" else VNEXT_SECTION_OVERLAP_CHARS,
+                ),
                 start=1,
             )
         )
@@ -612,7 +681,58 @@ def _definition_chunks(section: PolicySection) -> list[PolicySection]:
     return chunks
 
 
-def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySection]:
+def _parent_section_id(section: PolicySection) -> str:
+    return section.parent_section_id or section.section_id
+
+
+def _structured_child_parent_id(section: PolicySection, profile: str) -> str:
+    if profile == "vnext_r4":
+        return _parent_section_id(section)
+    return section.section_id
+
+
+def _bounded_children(
+    children: list[PolicySection],
+    *,
+    chunk_type: str,
+    limit: int,
+) -> list[PolicySection]:
+    return [child for child in children if child.chunk_type == chunk_type][:limit]
+
+
+def _balanced_r4_children(children: list[PolicySection]) -> list[PolicySection]:
+    groups = [
+        _bounded_children(
+            children,
+            chunk_type="definition",
+            limit=VNEXT_R4_MAX_DEFINITIONS_PER_PARENT,
+        ),
+        _bounded_children(
+            children,
+            chunk_type="list_item",
+            limit=VNEXT_R4_MAX_LIST_ITEMS_PER_PARENT,
+        ),
+        _bounded_children(
+            children,
+            chunk_type="numeric_fact",
+            limit=VNEXT_R4_MAX_NUMERIC_FACTS_PER_PARENT,
+        ),
+    ]
+    selected: list[PolicySection] = []
+    for position in range(max((len(group) for group in groups), default=0)):
+        for group in groups:
+            if position < len(group):
+                selected.append(group[position])
+                if len(selected) >= VNEXT_R4_MAX_CHILDREN_PER_PARENT:
+                    return selected
+    return selected
+
+
+def _expand_structured_chunks(
+    sections: list[PolicySection],
+    *,
+    chunk_profile: str | None = None,
+) -> list[PolicySection]:
     """Add generic atomic chunks for list items and numeric table rows.
 
     The parent section remains available for context. Child chunks make short
@@ -620,11 +740,15 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
     policy-specific aliases.
     """
 
+    profile = chunk_profile or (sections[0].chunk_profile if sections else "current")
     expanded: list[PolicySection] = []
+    r4_children: dict[str, list[PolicySection]] = {}
     for section in sections:
         expanded.append(section)
-        expanded.extend(_definition_chunks(section))
+        generated: list[PolicySection] = []
+        generated.extend(_definition_chunks(section))
         if section.chunk_type == "section_part" and section.chunk_profile == "current":
+            expanded.extend(generated)
             continue
         matches = list(LIST_ITEM_RE.finditer(section.content))
 
@@ -635,7 +759,7 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
             if len(content) < 24:
                 continue
             label = re.sub(r"[^a-z0-9]+", "", match.group("label").casefold()) or str(index + 1)
-            expanded.append(
+            generated.append(
                 PolicySection(
                     source_file=section.source_file,
                     country=section.country,
@@ -649,7 +773,7 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
                     effective_date=section.effective_date,
                     status=section.status,
                     chunk_type="list_item",
-                    parent_section_id=section.section_id,
+                    parent_section_id=_structured_child_parent_id(section, profile),
                     chunk_profile=section.chunk_profile,
                 )
             )
@@ -661,9 +785,13 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
             if _compact_numeric_fact(line) and not LIST_ITEM_RE.match(line)
         ]
         if len(fact_rows) < 2:
+            if profile == "vnext_r4":
+                r4_children.setdefault(_parent_section_id(section), []).extend(generated)
+            else:
+                expanded.extend(generated)
             continue
         for row_number, line in fact_rows:
-            expanded.append(
+            generated.append(
                 PolicySection(
                     source_file=section.source_file,
                     country=section.country,
@@ -677,10 +805,18 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
                     effective_date=section.effective_date,
                     status=section.status,
                     chunk_type="numeric_fact",
-                    parent_section_id=section.section_id,
+                    parent_section_id=_structured_child_parent_id(section, profile),
                     chunk_profile=section.chunk_profile,
                 )
             )
+        if profile == "vnext_r4":
+            r4_children.setdefault(_parent_section_id(section), []).extend(generated)
+        else:
+            expanded.extend(generated)
+
+    if profile == "vnext_r4":
+        for children in r4_children.values():
+            expanded.extend(_balanced_r4_children(children))
     return expanded
 
 

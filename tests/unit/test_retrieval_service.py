@@ -153,10 +153,10 @@ def test_shadow_orchestration_failure_cannot_fail_primary_retrieval(monkeypatch)
 
 
 def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> None:
-    created: list[tuple[str, str | None, bool]] = []
+    created: list[dict[str, object]] = []
 
-    def recording_factory(provider_name, *, index_name=None, enable_bedrock_rerank=False):
-        created.append((provider_name, index_name, enable_bedrock_rerank))
+    def recording_factory(provider_name, **kwargs):
+        created.append({"provider_name": provider_name, **kwargs})
         return _RecordingProvider(provider_name, f"document-{len(created)}")
 
     monkeypatch.setattr(RetrievalService, "_provider_for_name", staticmethod(recording_factory))
@@ -167,13 +167,22 @@ def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> N
     monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "uat-index")
     monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "vnext-index")
     monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RESULT_COUNT", 8)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_GLOSSARY_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED", True)
     monkeypatch.setattr(retrieval_service_module, "_submit_shadow_task", lambda task: task())
 
     service = RetrievalService()
     service.retrieve("question", "CA", "en", "new_prospect", "cid")
 
-    assert created[0] == ("opensearch_section", None, False)
-    assert created[1] == ("opensearch_section", "vnext-index", True)
+    assert created[0] == {"provider_name": "opensearch_section"}
+    assert created[1]["provider_name"] == "opensearch_section"
+    assert created[1]["index_name"] == "vnext-index"
+    assert created[1]["enable_bedrock_rerank"] is True
+    assert created[1]["experimental_features"] is True
+    assert created[1]["result_count"] == 8
+    assert created[1]["glossary_enabled"] is True
+    assert created[1]["evidence_selector_enabled"] is True
 
 
 def test_provider_result_extracts_api_sources() -> None:
@@ -676,6 +685,67 @@ def test_query_planner_routes_health_statement_without_opening_support(monkeypat
     assert plan.conversation_intent == "medical_claim"
     assert plan.client_action == ""
     assert runtime.converse.call_count == 1
+
+
+def test_query_planner_cannot_route_product_disease_claim_as_off_topic(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"off_topic",'
+                    '"intent_confidence":0.99,"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "Does aloe cure cancer?",
+        "US",
+        "en",
+        "medical-product-cid",
+    )
+
+    assert plan.conversation_intent == "medical_claim"
+    assert plan.intent_confidence == 1.0
+    assert plan.client_action == ""
+
+
+def test_product_claim_fallback_does_not_override_policy_question(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["prohibited product claims"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99,"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "Can an FBO claim that aloe cures cancer?",
+        "US",
+        "en",
+        "medical-policy-cid",
+    )
+
+    assert plan.conversation_intent == "knowledge"
 
 
 def test_query_planner_routes_assistant_capability_without_document_search(monkeypatch) -> None:

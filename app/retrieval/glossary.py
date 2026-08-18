@@ -19,6 +19,7 @@ _MAX_TRIGGERS = 32
 _MAX_QUERIES = 16
 _MAX_TRIGGER_CHARS = 160
 _MAX_QUERY_CHARS = 300
+_MAX_HINT_CHARS = 300
 
 
 def _bounded_strings(value: Any, *, limit: int, max_chars: int) -> tuple[str, ...]:
@@ -65,6 +66,9 @@ def _valid_entries(payload: Any) -> tuple[dict[str, Any], ...]:
         )
         countries = _bounded_strings(entry.get("country", ["*"]), limit=64, max_chars=16)
         languages = _bounded_strings(entry.get("language", ["*"]), limit=64, max_chars=16)
+        answer_hint = re.sub(r"\s+", " ", str(entry.get("answer_hint") or "")).strip()
+        if len(answer_hint) > _MAX_HINT_CHARS:
+            answer_hint = ""
         if triggers and queries and countries and languages:
             entries.append(
                 {
@@ -72,6 +76,7 @@ def _valid_entries(payload: Any) -> tuple[dict[str, Any], ...]:
                     "language": list(languages),
                     "triggers": list(triggers),
                     "queries": list(queries),
+                    "answer_hint": answer_hint,
                 }
             )
     return tuple(entries)
@@ -88,9 +93,16 @@ def load_glossary(path: str) -> tuple[dict[str, Any], ...]:
         return ()
 
 
-def glossary_queries(message: str, country: str, language: str) -> list[str]:
+def glossary_queries(
+    message: str,
+    country: str,
+    language: str,
+    *,
+    enabled: bool | None = None,
+) -> list[str]:
     """Return approved terminology queries applicable to the requested locale."""
-    if not settings.OPENSEARCH_GLOSSARY_ENABLED:
+    glossary_enabled = settings.OPENSEARCH_GLOSSARY_ENABLED if enabled is None else enabled
+    if not glossary_enabled:
         return []
     requested_country = (country or "").upper()
     requested_language = (language or "").split("-", 1)[0].lower()
@@ -112,3 +124,31 @@ def glossary_queries(message: str, country: str, language: str) -> list[str]:
             if len(queries) >= limit:
                 return queries
     return queries
+
+
+def glossary_answer_hints(
+    message: str,
+    country: str,
+    language: str,
+    *,
+    enabled: bool = False,
+) -> list[str]:
+    """Return bounded, reviewed terminology facts for the vNext answer prompt."""
+    if not enabled:
+        return []
+    requested_country = (country or "").upper()
+    requested_language = (language or "").split("-", 1)[0].lower()
+    hints: list[str] = []
+    for entry in load_glossary(settings.OPENSEARCH_GLOSSARY_PATH):
+        countries = {str(value).upper() for value in entry.get("country", ["*"])}
+        languages = {str(value).split("-", 1)[0].lower() for value in entry.get("language", ["*"])}
+        if "*" not in countries and requested_country not in countries:
+            continue
+        if "*" not in languages and requested_language not in languages:
+            continue
+        if not any(_matches_trigger(message, str(trigger)) for trigger in entry.get("triggers", [])):
+            continue
+        hint = str(entry.get("answer_hint") or "").strip()
+        if hint and hint not in hints:
+            hints.append(hint)
+    return hints[:4]

@@ -33,6 +33,8 @@ def _validate_shadow_retrieval(missing: list[str]) -> None:
         missing.append("OPENSEARCH_VNEXT_INDEX (must differ from OPENSEARCH_INDEX)")
     if not 0.0 < settings.RETRIEVAL_SHADOW_SAMPLE_RATE <= 1.0:
         missing.append("RETRIEVAL_SHADOW_SAMPLE_RATE (must be greater than 0 and at most 1)")
+    if settings.RETRIEVAL_VNEXT_RESULT_COUNT <= 0:
+        missing.append("RETRIEVAL_VNEXT_RESULT_COUNT (must be greater than 0)")
     if settings.RETRIEVAL_VNEXT_RERANK_ENABLED:
         _require(missing, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN")
         if settings.RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT < settings.OPENSEARCH_RESULT_COUNT:

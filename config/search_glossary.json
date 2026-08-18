@@ -80,7 +80,8 @@
       "country": ["*"],
       "language": ["*"],
       "triggers": ["fpc", "f.p.c.", "forever preferred customer"],
-      "queries": ["Forever Preferred Customer definition", "Preferred Customer discount and status", "Preferred Customer qualification"]
+      "queries": ["Forever Preferred Customer definition", "Preferred Customer discount and status", "Preferred Customer qualification"],
+      "answer_hint": "FPC is the abbreviation for Forever Preferred Customer; retrieve the market's Preferred Customer definition before answering."
     },
     {
       "id": "forever-business-owner-fbo",
@@ -100,15 +101,15 @@
       "id": "rank-qualification-and-status",
       "country": ["*"],
       "language": ["*"],
-      "triggers": ["recognized manager", "recognised manager", "unrecognized manager", "unrecognised manager", "assistant supervisor", "assistant manager", "supervisor"],
-      "queries": ["rank qualification requirements and Case Credits", "active status during rank qualification", "manager recognition and requalification"]
+      "triggers": ["recognized manager", "recognised manager", "recognizedmanager", "recognzied manager", "recognized maanger", "recognzied maanger", "unrecognized manager", "unrecognised manager", "assistant supervisor", "assistant manager", "assitant manager", "supervisor", "diamond manager", "rm"],
+      "queries": ["rank qualification requirements and Case Credits", "active status during rank qualification", "manager recognition and requalification", "Recognized Manager qualification requirements", "Diamond Manager qualification requirements"]
     },
     {
       "id": "case-credit-activity-rules",
       "country": ["*"],
       "language": ["*"],
-      "triggers": ["personal case credit", "personal cc", "active case credits", "4 cc", "four cc", "operating company"],
-      "queries": ["Case Credit activity and Operating Company requirements", "personal Case Credits qualification", "active FBO requirements during qualification"]
+      "triggers": ["personal case credit", "personal cc", "active case credits", "4 cc", "four cc", "vier cc", "4 case credits", "cc zusammen", "case credits zusammen", "operating company", "aktive fbo", "aktivitäts-qualifikation"],
+      "queries": ["Case Credit activity and Operating Company requirements", "personal Case Credits qualification", "active FBO requirements during qualification", "Aktivitäts-Qualifikation persönliche und Non-Manager Case Credits"]
     },
     {
       "id": "bonus-qualification-rules",
@@ -123,6 +124,20 @@
       "language": ["*"],
       "triggers": ["order deadline", "last day to order", "orders must be placed", "bank transfer", "payment deadline"],
       "queries": ["order submission deadline", "bank transfer payment deadline", "ordering and payment requirements"]
+    },
+    {
+      "id": "fbo-application-and-enrollment",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": ["fbo application", "business owner application", "apply as fbo", "antrag", "anmeldung", "einschreiben", "enrollment"],
+      "queries": ["FBO application enrollment requirements", "application for admission as an FBO", "Antrag auf Zulassung als FBO"]
+    },
+    {
+      "id": "preferred-customer-sponsor-change-localized",
+      "country": ["*"],
+      "language": ["de", "it", "es", "fr", "nl", "en"],
+      "triggers": ["sponsorwechsel", "sponsor wechseln", "responsoring", "risponsorizzazione", "cambio de patrocinador", "changement de sponsor"],
+      "queries": ["Preferred Customer sponsor change waiting period", "6-month Preferred Customer policy", "Sponsorwechsel und Responsoring Voraussetzungen"]
     }
   ]
 }

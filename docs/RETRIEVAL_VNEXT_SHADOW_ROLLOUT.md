@@ -24,6 +24,12 @@ RETRIEVAL_SHADOW_SAMPLE_RATE=0.0
 RETRIEVAL_VNEXT_PROVIDER=opensearch_section
 RETRIEVAL_VNEXT_PIPELINE_VERSION=disabled
 OPENSEARCH_VNEXT_INDEX=
+RETRIEVAL_VNEXT_RESULT_COUNT=8
+RETRIEVAL_VNEXT_GLOSSARY_ENABLED=false
+RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED=false
+RETRIEVAL_VNEXT_RRF_ENABLED=false
+RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED=false
+RETRIEVAL_VNEXT_NEIGHBOR_EXPANSION_ENABLED=false
 RETRIEVAL_VNEXT_RERANK_ENABLED=false
 EMBEDDING_SHARED_CACHE_ENABLED=false
 BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED=false
@@ -204,6 +210,54 @@ alternative chunk sizing must be implemented only in the vNext build/index
 until their evaluation passes the promotion gates. Each behavior should have a
 separate version or feature flag so its effect can be measured independently.
 
+## Historical Interaction Evaluation
+
+Inventory the complete exported interaction table locally before making any
+AWS calls:
+
+```powershell
+python scripts/evaluate_interaction_history.py `
+  --input <interaction-history.md> `
+  --pipeline inventory `
+  --output-dir outputs/interaction_quality
+```
+
+The parser accounts for every source row, reports malformed rows, and creates
+both a lossless inventory and a human-review queue. Historical bot answers are
+not treated as ground truth. Ratings and reviewer comments are preserved, but
+factual correctness requires an approved expected answer or human review.
+
+Run a resumable current-versus-vNext retrieval comparison only after the
+separate vNext index is populated:
+
+```powershell
+python scripts/evaluate_interaction_history.py `
+  --input <interaction-history.md> `
+  --pipeline both `
+  --vnext-profile full `
+  --load-ssm `
+  --output-dir outputs/interaction_quality `
+  --run-name interaction-vnext-evaluation
+```
+
+Add `--generate-answers` only when model-backed answer evaluation is intended.
+The evaluator checkpoints after each question and resumes by default. It
+refuses to evaluate vNext if `OPENSEARCH_VNEXT_INDEX` is blank or equals the
+current index. It instantiates providers directly and does not write chat
+analytics, cache entries, or user-visible answers.
+
+The full vNext profile enables, in the evaluator process only:
+
+- query glossary expansion;
+- reciprocal-rank fusion across query variants;
+- parent-section diversity;
+- bounded neighboring-section expansion; and
+- evidence selection before answer generation.
+
+The primary provider receives none of these experimental options. Production
+defaults remain disabled, so building and testing this evaluator does not alter
+current retrieval.
+
 ## Experiment 1: Smaller Structure-Aware Chunks
 
 The first implemented experiment is an opt-in `vnext` chunk profile:
@@ -250,6 +304,18 @@ The EC2 role needs `bedrock:Rerank` and `bedrock:InvokeModel` for the selected
 reranker. If Bedrock rejects, throttles, or returns an invalid rerank response,
 the provider keeps its original candidate order. A reranker failure cannot
 change or fail the current UAT answer.
+
+For a read-only comparison that isolates reranking from index rebuild effects,
+use the evaluator's `rank-rerank` profile with the production index supplied to
+both sides and `--allow-same-index-rank-ablation`. The profile explicitly
+enables reranking only inside the evaluator, requires a configured rerank model
+ARN, reuses the same query plan and raw OpenSearch responses, and leaves the
+production shadow toggle disabled. `rank-rerank-authority` tests the same
+managed reranker after the optional deterministic authority hint.
+
+The paired candidate latency in this mode measures cached-search plus reranker
+time. It is useful for rejecting a slow ranker, but a passing result still
+requires an independent end-to-end shadow latency run before promotion.
 
 ## Document Preflight
 

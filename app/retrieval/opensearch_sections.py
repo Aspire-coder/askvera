@@ -24,6 +24,7 @@ from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
+from .experiments import diversify_by_parent, reciprocal_rank_fusion
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
 
@@ -39,6 +40,47 @@ def _normalize_text(value: str) -> str:
     """Normalize text for glossary trigger checks."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()
     return " ".join("".join(character if character.isalnum() else " " for character in normalized).split())
+
+
+def _authority_level(chunk_type: str) -> str:
+    """Derive a stable authority class from the structure-aware chunk type."""
+    normalized = str(chunk_type or "section").strip().lower()
+    if normalized in {"section", "section_part", "definition"}:
+        return "governing"
+    if normalized in {"list_item", "numeric_fact", "table_row"}:
+        return "supporting"
+    return "navigational"
+
+
+_DEFINITION_CUES = re.compile(
+    r"\b(?:what\s+is|what\s+are|was\s+ist|was\s+sind|qué\s+es|que\s+es|"
+    r"qu['’]?est[- ]ce|che\s+cos['’]?è|cos['’]?è|wat\s+is|wat\s+zijn)\b",
+    re.IGNORECASE,
+)
+_GOVERNING_CUES = re.compile(
+    r"\b(?:how|requirements?|qualif\w*|must|may|can|muss|darf|voraussetzung\w*|"
+    r"wie|come|cómo|como|comment|hoe)\b",
+    re.IGNORECASE,
+)
+
+
+def _authority_intent_score(message: str, row: dict[str, Any]) -> float:
+    """Apply narrow structural preferences without encoding policy answers."""
+    chunk_type = str(row.get("chunk_type") or "section").lower()
+    level = str(row.get("authority_level") or _authority_level(chunk_type))
+    if _DEFINITION_CUES.search(message or ""):
+        if chunk_type == "definition":
+            return 0.45
+        if level == "governing":
+            return 0.15
+    if _GOVERNING_CUES.search(message or ""):
+        if level == "governing" and chunk_type != "definition":
+            return 0.35
+        if level == "navigational":
+            return -0.35
+    if re.search(r"\d", message or "") and chunk_type in {"numeric_fact", "table_row"}:
+        return 0.2
+    return 0.0
 
 
 @lru_cache(maxsize=1)
@@ -363,6 +405,30 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
     }
 
 
+def _neighbor_query(
+    parent_section_id: str,
+    source_uri: str,
+    country: str,
+    language: str,
+    *,
+    scope: str,
+    size: int,
+) -> dict[str, Any]:
+    """Fetch bounded sibling chunks from the same approved parent section."""
+    filters: list[dict[str, Any]] = [
+        _scope_filter(country, language, scope),
+        {"term": {"status": "active"}},
+        *_generation_filters(country, language, scope),
+        exact_term_query("parent_section_id", parent_section_id),
+    ]
+    if source_uri:
+        filters.append(exact_term_query("source_uri", source_uri))
+    return {
+        "size": max(1, size),
+        "query": {"bool": {"filter": filters}},
+    }
+
+
 def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, Any]:
     """Convert an OpenSearch hit to the row shape used by section scoring."""
     source = hit.get("_source", {}) or {}
@@ -377,6 +443,8 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
         "document_version": source.get("document_version", ""),
         "effective_date": source.get("effective_date", ""),
         "chunk_type": source.get("chunk_type", "section"),
+        "authority_level": source.get("authority_level")
+        or _authority_level(str(source.get("chunk_type") or "section")),
         "parent_section_id": source.get("parent_section_id", ""),
         "section_id": source.get("section_id", ""),
         "section_title": source.get("section_title", ""),
@@ -475,10 +543,22 @@ class OpenSearchSectionProvider:
         self,
         index_name: str | None = None,
         *,
+        search_client: Any | None = None,
+        authority_ranking_enabled: bool = False,
         enable_bedrock_rerank: bool = False,
+        experimental_features: bool = False,
+        result_count: int | None = None,
+        glossary_enabled: bool | None = None,
+        evidence_selector_enabled: bool | None = None,
     ) -> None:
         self.index_name = index_name or settings.OPENSEARCH_INDEX
+        self.search_client = search_client
+        self.authority_ranking_enabled = authority_ranking_enabled
         self.enable_bedrock_rerank = enable_bedrock_rerank
+        self.experimental_features = experimental_features
+        self.result_count = max(1, int(result_count or settings.OPENSEARCH_RESULT_COUNT))
+        self.glossary_enabled = glossary_enabled
+        self.evidence_selector_enabled = evidence_selector_enabled
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
@@ -511,7 +591,7 @@ class OpenSearchSectionProvider:
                         "intent_confidence": search_plan.intent_confidence,
                     },
                 )
-            client = _client()
+            client = self.search_client or _client()
             search_messages = search_plan.queries
             global_search_message = ""
             text_hits: list[dict[str, Any]] = []
@@ -574,36 +654,75 @@ class OpenSearchSectionProvider:
             message,
             prefer_outline=search_plan.prefer_outline,
         )
+        rows = self._apply_candidate_parent_quota(rows)
         if self.enable_bedrock_rerank:
             from .bedrock_reranker import rerank_rows
 
             rows = rerank_rows(message, rows, correlation_id=correlation_id)
         rows = self._select_evidence_rows(message, rows, correlation_id)
+        rows = self._apply_parent_diversity(rows)
+        final_rows = self._expand_neighbor_rows(
+            client,
+            rows,
+            country,
+            language,
+            correlation_id,
+        )
 
         documents = [
             self._document_from_row(row, score)
-            for row, score in rows
+            for row, score in final_rows
             if score >= settings.SECTION_RETRIEVAL_MIN_SCORE
-        ][: settings.OPENSEARCH_RESULT_COUNT]
+        ][: self.result_count]
+        result_metadata = {
+            "provider": "opensearch_section",
+            "candidate_count": len(rows),
+            "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
+            "global_documents_searched": search_plan.include_global_documents,
+            "outline_preferred": search_plan.prefer_outline,
+            "client_action": search_plan.client_action,
+            "conversation_intent": "knowledge",
+            "global_query_translated": bool(global_search_message) and global_search_message != message,
+            "explicit_section_reference": explicit_section_id,
+            "candidate_sources": [
+                self._document_from_row(row, score).to_source()
+                for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
+            ],
+            "candidate_evidence": [
+                {
+                    "rank": rank,
+                    "id": str(row.get("id") or ""),
+                    "source": str(row.get("source_uri") or row.get("source_file") or ""),
+                    "section": str(
+                        row.get("parent_section_id")
+                        or row.get("section_id")
+                        or ""
+                    ),
+                    "chunk_type": str(row.get("chunk_type") or ""),
+                    "score": round(float(score), 6),
+                }
+                for rank, (row, score) in enumerate(
+                    rows[: settings.OPENSEARCH_CANDIDATE_COUNT],
+                    start=1,
+                )
+            ],
+        }
+        if self.experimental_features:
+            result_metadata.update(
+                {
+                    "experimental_features": True,
+                    "rrf_enabled": settings.RETRIEVAL_VNEXT_RRF_ENABLED,
+                    "parent_diversity_enabled": settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
+                    "candidate_parent_quota_enabled": settings.RETRIEVAL_VNEXT_CANDIDATE_PARENT_QUOTA_ENABLED,
+                    "neighbor_expansion_enabled": settings.RETRIEVAL_VNEXT_NEIGHBOR_EXPANSION_ENABLED,
+                    "authority_ranking_enabled": self.authority_ranking_enabled,
+                }
+            )
         result = RetrievalResult(
             documents=documents,
             citations=[document.to_source() for document in documents],
             confidence=_confidence_from_documents(documents),
-            metadata={
-                "provider": "opensearch_section",
-                "candidate_count": len(rows),
-                "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
-                "global_documents_searched": search_plan.include_global_documents,
-                "outline_preferred": search_plan.prefer_outline,
-                "client_action": search_plan.client_action,
-                "conversation_intent": "knowledge",
-                "global_query_translated": bool(global_search_message) and global_search_message != message,
-                "explicit_section_reference": explicit_section_id,
-                "candidate_sources": [
-                    self._document_from_row(row, score).to_source()
-                    for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
-                ],
-            },
+            metadata=result_metadata,
         )
         LOGGER.info(
             "opensearch_section_retrieval_success",
@@ -661,7 +780,13 @@ class OpenSearchSectionProvider:
         original = message.strip()
         if not original:
             return [original]
-        return _planned_retrieval_queries(original, country, language, correlation_id)
+        return _planned_retrieval_queries(
+            original,
+            country,
+            language,
+            correlation_id,
+            glossary_enabled=self.glossary_enabled,
+        )
 
     def _build_search_plan(
         self,
@@ -674,7 +799,13 @@ class OpenSearchSectionProvider:
         original = message.strip()
         if not original:
             return RetrievalQueryPlan([original], include_global_documents=False)
-        return _planned_retrieval_plan(original, country, language, correlation_id)
+        return _planned_retrieval_plan(
+            original,
+            country,
+            language,
+            correlation_id,
+            glossary_enabled=self.glossary_enabled,
+        )
 
     def _merge_hits(
         self,
@@ -705,17 +836,182 @@ class OpenSearchSectionProvider:
             else:
                 existing["rank"] = float(existing.get("rank") or 0.0) + float(row.get("rank") or 0.0)
 
-        self._normalize_opensearch_ranks(list(merged.values()))
+        if self.experimental_features and settings.RETRIEVAL_VNEXT_RRF_ENABLED:
+            text_ranking = self._ranked_hit_ids(text_hits)
+            vector_ranking = self._ranked_hit_ids(vector_hits)
+            fused = reciprocal_rank_fusion(
+                [ranking for ranking in (text_ranking, vector_ranking) if ranking],
+                k=settings.RETRIEVAL_RRF_K,
+            )
+            max_fused = max(fused.values(), default=0.0)
+            if max_fused > 0:
+                for row_id, row in merged.items():
+                    row["rank"] = (fused.get(row_id, 0.0) / max_fused) * 1.25
+            else:
+                self._normalize_opensearch_ranks(list(merged.values()))
+        else:
+            self._normalize_opensearch_ranks(list(merged.values()))
         scored = [
             (
                 row,
                 _source_score(row, message)
                 + _directory_record_country_score(message, row)
+                + (
+                    _authority_intent_score(message, row)
+                    if self.authority_ranking_enabled
+                    else 0.0
+                )
                 + (2.0 if prefer_outline and row.get("chunk_type") == "document_outline" else 0.0),
             )
             for row in merged.values()
         ]
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
+
+    @staticmethod
+    def _ranked_hit_ids(hits: list[dict[str, Any]]) -> list[str]:
+        """Return one score-ordered identifier per hit for RRF input."""
+        ranked: list[str] = []
+        seen: set[str] = set()
+        for hit in sorted(
+            hits,
+            key=lambda candidate: float(candidate.get("_score") or 0.0),
+            reverse=True,
+        ):
+            source = hit.get("_source", {}) or {}
+            row_id = str(source.get("id") or hit.get("_id") or "")
+            if row_id and row_id not in seen:
+                seen.add(row_id)
+                ranked.append(row_id)
+        return ranked
+
+    def _apply_parent_diversity(
+        self,
+        rows: list[tuple[dict[str, Any], float]],
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Prevent one long parent section from crowding out all other evidence."""
+        if not (
+            self.experimental_features
+            and settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED
+        ):
+            return rows
+        wrapped = [
+            {
+                "id": str(row.get("id") or index),
+                "metadata": {
+                    "parent_section_id": row.get("parent_section_id")
+                    or row.get("section_id")
+                    or row.get("id")
+                },
+                "pair": (row, score),
+            }
+            for index, (row, score) in enumerate(rows)
+        ]
+        diversified = diversify_by_parent(
+            wrapped,
+            max_results=len(wrapped),
+            max_per_parent=settings.RETRIEVAL_MAX_RESULTS_PER_PARENT,
+        )
+        return [item["pair"] for item in diversified]
+
+    def _apply_candidate_parent_quota(
+        self,
+        rows: list[tuple[dict[str, Any], float]],
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Diversify the pool before model-based reranking or selection."""
+        if not (
+            self.experimental_features
+            and settings.RETRIEVAL_VNEXT_CANDIDATE_PARENT_QUOTA_ENABLED
+        ):
+            return rows
+        wrapped = [
+            {
+                "id": str(row.get("id") or index),
+                "metadata": {
+                    "parent_section_id": row.get("parent_section_id")
+                    or row.get("section_id")
+                    or row.get("id")
+                },
+                "pair": (row, score),
+            }
+            for index, (row, score) in enumerate(rows)
+        ]
+        diversified = diversify_by_parent(
+            wrapped,
+            max_results=len(wrapped),
+            max_per_parent=settings.RETRIEVAL_MAX_RESULTS_PER_PARENT,
+        )
+        return [item["pair"] for item in diversified]
+
+    def _expand_neighbor_rows(
+        self,
+        client: OpenSearch,
+        rows: list[tuple[dict[str, Any], float]],
+        country: str,
+        language: str,
+        correlation_id: str,
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Append a small number of sibling chunks without changing primary retrieval."""
+        limit = max(0, int(settings.RETRIEVAL_NEIGHBOR_LIMIT))
+        if not (
+            rows
+            and limit
+            and self.experimental_features
+            and settings.RETRIEVAL_VNEXT_NEIGHBOR_EXPANSION_ENABLED
+        ):
+            return rows
+
+        base_limit = max(1, self.result_count - limit)
+        selected = rows[:base_limit]
+        selected_ids = {str(row.get("id") or "") for row, _score in selected}
+        seen_parents: set[tuple[str, str]] = set()
+        neighbors: list[tuple[dict[str, Any], float]] = []
+        try:
+            for row, score in selected:
+                parent = str(row.get("parent_section_id") or "").strip()
+                source_uri = str(row.get("source_uri") or "").strip()
+                parent_key = (source_uri, parent)
+                if not parent or parent_key in seen_parents:
+                    continue
+                seen_parents.add(parent_key)
+                scope = "global" if row.get("access_scope") == "global" else "locale"
+                response = client.search(
+                    index=self.index_name,
+                    body=_neighbor_query(
+                        parent,
+                        source_uri,
+                        country,
+                        language,
+                        scope=scope,
+                        size=limit + 1,
+                    ),
+                )
+                for hit in response.get("hits", {}).get("hits", []):
+                    neighbor = _hit_to_row(hit)
+                    neighbor_id = str(neighbor.get("id") or "")
+                    if not neighbor_id or neighbor_id in selected_ids:
+                        continue
+                    selected_ids.add(neighbor_id)
+                    neighbors.append(
+                        (
+                            neighbor,
+                            max(
+                                settings.SECTION_RETRIEVAL_MIN_SCORE,
+                                float(score) * 0.95,
+                            ),
+                        )
+                    )
+                    if len(neighbors) >= limit:
+                        break
+                if len(neighbors) >= limit:
+                    break
+        except OpenSearchException:
+            LOGGER.exception(
+                "opensearch_neighbor_expansion_failed",
+                correlation_id=correlation_id,
+            )
+            return rows[: self.result_count]
+
+        return [*selected, *neighbors][: self.result_count]
 
     def _select_evidence_rows(
         self,
@@ -724,10 +1020,15 @@ class OpenSearchSectionProvider:
         correlation_id: str,
     ) -> list[tuple[dict[str, Any], float]]:
         """Optionally let a small model choose the best evidence from candidates."""
-        if not settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED or not rows:
+        selector_enabled = (
+            settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
+            if self.evidence_selector_enabled is None
+            else self.evidence_selector_enabled
+        )
+        if not selector_enabled or not rows:
             return rows
 
-        candidate_limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
+        candidate_limit = max(self.result_count, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
         candidates = _selector_candidates(rows, candidate_limit)
         candidate_text = "\n\n".join(
             _selector_candidate_text(row, score, index)
@@ -751,7 +1052,7 @@ class OpenSearchSectionProvider:
         user_prompt = (
             f"User question:\n{message}\n\n"
             f"Candidate sections:\n{candidate_text}\n\n"
-            f"Select up to {settings.OPENSEARCH_RESULT_COUNT} candidate ranks. "
+            f"Select up to {self.result_count} candidate ranks. "
             "Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}."
         )
         try:

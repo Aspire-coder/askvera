@@ -11,6 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
+from services.claim_safety import classify_claim_scope
 from utils.logging import get_logger
 
 from .glossary import glossary_queries
@@ -368,10 +369,17 @@ def _planned_retrieval_plan(
     country: str,
     language: str,
     correlation_id: str,
+    *,
+    glossary_enabled: bool | None = None,
 ) -> RetrievalQueryPlan:
     """Create multilingual search phrases and choose relevant document scopes."""
     base_queries = _retrieval_queries(message)
-    glossary = glossary_queries(message, country, language)
+    glossary = glossary_queries(
+        message,
+        country,
+        language,
+        enabled=glossary_enabled,
+    )
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
         # Preserve directory availability when the planner is intentionally off.
         return RetrievalQueryPlan(
@@ -400,7 +408,9 @@ def _planned_retrieval_plan(
         "AskVera's state such as 'how are you?'. Questions about any other person, family member, "
         "relationship, or identity are not assistant_meta; use knowledge when the approved directory may answer "
         "them and off_topic otherwise. Set intent_subtype to greeting, capability, thanks, or wellbeing. medical_claim covers symptoms, "
-        "illnesses, diagnosis, treatment, medical advice, and health-benefit claims. income_claim covers requests "
+        "illnesses, diagnosis, treatment, medical advice, and health-benefit claims, including questions asking whether "
+        "an aloe or Forever product cures, treats, heals, or prevents cancer or another disease. Do not classify those "
+        "questions as off_topic. income_claim covers requests "
         "for guaranteed or personalized earnings predictions, while factual compensation-plan questions remain "
         "knowledge. Set support_request only when the user directly asks to create, open, or submit a support "
         "request, help-desk ticket, or human handoff; then set explicit_support_request to true. A symptom, a need "
@@ -460,6 +470,21 @@ def _planned_retrieval_plan(
             conversation_intent = "knowledge" if include_global_documents else "off_topic"
             conversation_subtype = ""
 
+    # A planner may occasionally collapse a regulated product/disease question
+    # into the broad off-topic route. Use the reviewed multilingual claim terms
+    # as a narrow safety fallback. Never override a knowledge classification,
+    # because policy questions about what an FBO may claim still require the
+    # approved policy corpus.
+    if (
+        conversation_intent == "off_topic"
+        and classify_claim_scope(message, "medical_claim", language)
+        == "product_disease_claim"
+    ):
+        conversation_intent = "medical_claim"
+        conversation_subtype = ""
+        intent_confidence = 1.0
+        explicit_support = False
+
     client_action = ""
     if (
         conversation_intent == "support_request"
@@ -501,9 +526,22 @@ def _planned_retrieval_plan(
     )
 
 
-def _planned_retrieval_queries(message: str, country: str, language: str, correlation_id: str) -> list[str]:
+def _planned_retrieval_queries(
+    message: str,
+    country: str,
+    language: str,
+    correlation_id: str,
+    *,
+    glossary_enabled: bool | None = None,
+) -> list[str]:
     """Return only query strings for providers without multiple document scopes."""
-    return _planned_retrieval_plan(message, country, language, correlation_id).queries
+    return _planned_retrieval_plan(
+        message,
+        country,
+        language,
+        correlation_id,
+        glossary_enabled=glossary_enabled,
+    ).queries
 
 
 def _phrase_score(message: str, document_text: str) -> float:

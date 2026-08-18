@@ -46,6 +46,10 @@ class RetrievalService:
         *,
         index_name: str | None = None,
         enable_bedrock_rerank: bool = False,
+        experimental_features: bool = False,
+        result_count: int | None = None,
+        glossary_enabled: bool | None = None,
+        evidence_selector_enabled: bool | None = None,
     ) -> RetrievalProvider:
         """Build a provider without changing the established live selection."""
         if provider_name == "section":
@@ -56,6 +60,10 @@ class RetrievalService:
             return OpenSearchSectionProvider(
                 index_name=index_name,
                 enable_bedrock_rerank=enable_bedrock_rerank,
+                experimental_features=experimental_features,
+                result_count=result_count,
+                glossary_enabled=glossary_enabled,
+                evidence_selector_enabled=evidence_selector_enabled,
             )
         return BedrockRetrievalProvider()
 
@@ -137,6 +145,10 @@ class RetrievalService:
             settings.RETRIEVAL_VNEXT_PROVIDER,
             index_name=settings.OPENSEARCH_VNEXT_INDEX,
             enable_bedrock_rerank=settings.RETRIEVAL_VNEXT_RERANK_ENABLED,
+            experimental_features=True,
+            result_count=settings.RETRIEVAL_VNEXT_RESULT_COUNT,
+            glossary_enabled=settings.RETRIEVAL_VNEXT_GLOSSARY_ENABLED,
+            evidence_selector_enabled=settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
         )
 
         def compare() -> None:

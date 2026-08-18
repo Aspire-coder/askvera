@@ -3,6 +3,7 @@
 from app.retrieval import opensearch_sections
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
+    _authority_intent_score,
     _directory_record_country_score,
     _directory_text_query,
     _exact_section_query,
@@ -129,6 +130,23 @@ def test_provider_can_target_an_isolated_vnext_index(monkeypatch) -> None:
 
     assert OpenSearchSectionProvider().index_name == "uat-index"
     assert OpenSearchSectionProvider(index_name="vnext-index").index_name == "vnext-index"
+
+
+def test_authority_intent_score_prefers_structure_matching_question_intent() -> None:
+    assert _authority_intent_score(
+        "What is a Preferred Customer?",
+        {"chunk_type": "definition"},
+    ) > _authority_intent_score(
+        "What is a Preferred Customer?",
+        {"chunk_type": "numeric_fact"},
+    )
+    assert _authority_intent_score(
+        "How do I qualify?",
+        {"chunk_type": "section"},
+    ) > _authority_intent_score(
+        "How do I qualify?",
+        {"chunk_type": "document_outline"},
+    )
 
 
 def test_sponsoring_directory_keeps_source_text_instead_of_office_fields() -> None:
@@ -307,6 +325,111 @@ def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:
     assert rows[0][0]["section_title"] == "Original governing title"
 
 
+def test_rrf_is_applied_only_to_experimental_provider(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RRF_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 10)
+    text_hits = [
+        _hit("text-only", "Policy", 10.0),
+        _hit("shared", "Policy", 9.0),
+    ]
+    vector_hits = [
+        _hit("shared", "Policy", 1.0),
+        _hit("vector-only", "Policy", 0.9),
+    ]
+
+    primary = OpenSearchSectionProvider()._merge_hits(text_hits, vector_hits, "Policy")
+    experimental = OpenSearchSectionProvider(experimental_features=True)._merge_hits(
+        text_hits,
+        vector_hits,
+        "Policy",
+    )
+
+    assert primary[0][0]["id"] == "text-only"
+    assert experimental[0][0]["id"] == "shared"
+
+
+def test_parent_diversity_is_isolated_to_vnext(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 1)
+    rows = [
+        ({"id": "a", "parent_section_id": "parent-1"}, 3.0),
+        ({"id": "b", "parent_section_id": "parent-1"}, 2.0),
+        ({"id": "c", "parent_section_id": "parent-2"}, 1.0),
+    ]
+
+    assert [row["id"] for row, _score in OpenSearchSectionProvider()._apply_parent_diversity(rows)] == [
+        "a",
+        "b",
+        "c",
+    ]
+    assert [
+        row["id"]
+        for row, _score in OpenSearchSectionProvider(experimental_features=True)._apply_parent_diversity(rows)
+    ] == ["a", "c"]
+
+
+def test_neighbor_expansion_appends_bounded_sibling_only_in_vnext(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_NEIGHBOR_EXPANSION_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_NEIGHBOR_LIMIT", 1)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+    provider = OpenSearchSectionProvider(experimental_features=True, result_count=3)
+    selected = [
+        (
+            {
+                "id": "selected",
+                "parent_section_id": "parent-1",
+                "section_id": "1.1-part-1",
+                "source_uri": "s3://policy.pdf",
+                "access_scope": "country",
+            },
+            2.0,
+        ),
+        ({"id": "other", "section_id": "2"}, 1.5),
+    ]
+    client = SourceClient()
+    client.sources = []
+
+    def search(**kwargs):
+        client.calls.append(kwargs)
+        return {
+            "hits": {
+                "hits": [
+                    {
+                        **_hit("sibling", "Sibling condition", 1.0),
+                        "_source": {
+                            **_hit("sibling", "Sibling condition", 1.0)["_source"],
+                            "parent_section_id": "parent-1",
+                            "source_uri": "s3://policy.pdf",
+                        },
+                    }
+                ]
+            }
+        }
+
+    client.search = search
+
+    expanded = provider._expand_neighbor_rows(client, selected, "CA", "en", "cid")
+
+    assert [row["id"] for row, _score in expanded] == ["selected", "other", "sibling"]
+    assert len(client.calls) == 1
+
+
+def test_neighbor_expansion_does_not_truncate_primary_rows(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_NEIGHBOR_EXPANSION_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_NEIGHBOR_LIMIT", 1)
+    rows = [({"id": "first"}, 2.0), ({"id": "second"}, 1.0)]
+
+    unchanged = OpenSearchSectionProvider(result_count=1)._expand_neighbor_rows(
+        SourceClient(),
+        rows,
+        "CA",
+        "en",
+        "cid",
+    )
+
+    assert unchanged is rows
+
+
 def test_selector_candidates_reserve_space_for_global_documents() -> None:
     locale_rows = [
         ({"id": f"locale-{index}", "access_scope": "country"}, 10.0 - index)
@@ -339,7 +462,7 @@ def test_search_queries_use_runtime_planner_instead_of_country_aliases(monkeypat
     monkeypatch.setattr(
         opensearch_sections,
         "_planned_retrieval_queries",
-        lambda message, country, language, correlation_id: [message, "semantic policy query"],
+        lambda message, country, language, correlation_id, **_kwargs: [message, "semantic policy query"],
     )
 
     queries = OpenSearchSectionProvider()._build_search_queries(
@@ -356,7 +479,7 @@ def test_search_plan_carries_runtime_document_scope(monkeypatch) -> None:
     monkeypatch.setattr(
         opensearch_sections,
         "_planned_retrieval_plan",
-        lambda message, country, language, correlation_id: RetrievalQueryPlan(
+        lambda message, country, language, correlation_id, **_kwargs: RetrievalQueryPlan(
             [message, "policy definition"],
             include_global_documents=False,
             prefer_outline=True,
@@ -472,3 +595,23 @@ def test_sponsoring_directory_country_score_uses_record_metadata() -> None:
     }
 
     assert _directory_record_country_score("Who is the sponsor for Italy?", row) == 2.4
+
+
+def test_candidate_parent_quota_runs_before_model_selection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "RETRIEVAL_VNEXT_CANDIDATE_PARENT_QUOTA_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 2)
+    provider = OpenSearchSectionProvider(experimental_features=True)
+    rows = [
+        ({"id": "a-1", "parent_section_id": "a"}, 1.0),
+        ({"id": "a-2", "parent_section_id": "a"}, 0.9),
+        ({"id": "a-3", "parent_section_id": "a"}, 0.8),
+        ({"id": "b-1", "parent_section_id": "b"}, 0.7),
+    ]
+
+    diversified = provider._apply_candidate_parent_quota(rows)
+
+    assert [row["id"] for row, _score in diversified] == ["a-1", "a-2", "b-1"]

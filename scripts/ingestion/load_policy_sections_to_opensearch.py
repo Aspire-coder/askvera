@@ -69,6 +69,7 @@ def _index_body() -> dict[str, Any]:
                 "document_version": {"type": "keyword"},
                 "effective_date": {"type": "date", "ignore_malformed": True},
                 "chunk_type": {"type": "keyword"},
+                "authority_level": {"type": "keyword"},
                 "parent_section_id": {"type": "keyword"},
                 "chunk_profile": {"type": "keyword"},
                 "start_page": {"type": "integer"},
@@ -78,7 +79,36 @@ def _index_body() -> dict[str, Any]:
                 "content_hash": {"type": "keyword"},
                 "ingestion_id": {"type": "keyword"},
                 "logical_document_id": {"type": "keyword"},
-                "metadata": {"type": "object", "enabled": True},
+                "metadata": {
+                    "type": "object",
+                    "enabled": True,
+                    "properties": {
+                        "source_file": {"type": "keyword"},
+                        "country": {"type": "keyword"},
+                        "country_code": {"type": "keyword"},
+                        "language": {"type": "keyword"},
+                        "section_id": {"type": "keyword"},
+                        "section_title": {
+                            "type": "text",
+                            "fields": {"keyword": {"type": "keyword"}},
+                        },
+                        "start_page": {"type": "integer"},
+                        "end_page": {"type": "integer"},
+                        "document_type": {"type": "keyword"},
+                        "access_scope": {"type": "keyword"},
+                        "document_version": {"type": "keyword"},
+                        "effective_date": {
+                            "type": "date",
+                            "ignore_malformed": True,
+                        },
+                        "status": {"type": "keyword"},
+                        "chunk_type": {"type": "keyword"},
+                        "authority_level": {"type": "keyword"},
+                        "parent_section_id": {"type": "keyword"},
+                        "chunk_profile": {"type": "keyword"},
+                        "logical_document_id": {"type": "keyword"},
+                    },
+                },
                 "embedding": {
                     "type": "knn_vector",
                     "dimension": 1024,
@@ -158,6 +188,7 @@ def _document(
         "document_version": section.get("document_version", ""),
         "effective_date": section.get("effective_date", ""),
         "chunk_type": section.get("chunk_type", "section"),
+        "authority_level": section.get("authority_level", "governing"),
         "parent_section_id": section.get("parent_section_id", ""),
         "chunk_profile": section.get("chunk_profile", "current"),
     }
@@ -173,6 +204,7 @@ def _document(
         "document_version": section.get("document_version", ""),
         "effective_date": section.get("effective_date", ""),
         "chunk_type": section.get("chunk_type", "section"),
+        "authority_level": section.get("authority_level", "governing"),
         "parent_section_id": section.get("parent_section_id", ""),
         "chunk_profile": section.get("chunk_profile", "current"),
         "section_id": section["section_id"],
@@ -299,7 +331,7 @@ def _validate_chunk_profile_target(sections: list[dict[str, Any]], index: str) -
         str(section.get("chunk_profile") or section.get("metadata", {}).get("chunk_profile") or "current")
         for section in sections
     }
-    if "vnext" in profiles and index == settings.OPENSEARCH_INDEX:
+    if any(profile.startswith("vnext") for profile in profiles) and index == settings.OPENSEARCH_INDEX:
         raise ValueError(
             "vNext chunks require a separate --index and cannot be loaded into OPENSEARCH_INDEX."
         )
