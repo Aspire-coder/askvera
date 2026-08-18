@@ -15,6 +15,7 @@ from .validators import (
     LengthValidator,
     MetadataValidator,
     NumericGroundingValidator,
+    OutputIntegrityValidator,
 )
 
 
@@ -54,6 +55,7 @@ def default_validators() -> list[ResponseValidator]:
     """Return the default response validator sequence."""
     return [
         AnswerValidator(),
+        OutputIntegrityValidator(),
         ConfidenceValidator(),
         CitationValidator(),
         LanguageValidator(),

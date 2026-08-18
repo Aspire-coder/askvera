@@ -17,6 +17,12 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
+from app.response.quality import (
+    contact_for_country,
+    format_period_not_covered,
+    remove_or_replace_contact_placeholders,
+    unsupported_requested_years,
+)
 from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
@@ -210,6 +216,7 @@ class AIOrchestrator:
             body.language,
             correlation_id,
             user_question=body.message,
+            country=body.country,
         )
         chat_response = self._validate_response(
             chat_response,
@@ -262,6 +269,7 @@ class AIOrchestrator:
         correlation_id: str,
         *,
         user_question: str,
+        country: str = "",
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
         completed_answer, restored_fields = chat_response.answer, []
@@ -287,6 +295,7 @@ class AIOrchestrator:
             language,
             allowed_texts=[
                 *settings.PII_APPROVED_PUBLIC_TERMS,
+                *contact_for_country(country).values(),
                 *(document.content for document in retrieval_result.documents),
             ],
             allowed_name_texts=[user_question],
@@ -294,12 +303,29 @@ class AIOrchestrator:
         if safe_answer != chat_response.answer:
             chat_response = self._replace_answer(chat_response, safe_answer, {"response_pii_scrubbed": True})
 
+        contact_safe_answer, contact_changes = remove_or_replace_contact_placeholders(
+            chat_response.answer,
+            country,
+        )
+        if contact_changes:
+            chat_response = self._replace_answer(
+                chat_response,
+                contact_safe_answer,
+                {"contact_placeholder_actions": contact_changes},
+            )
+
         cleaned_answer = remove_unresolved_pii_placeholders(chat_response.answer)
         if cleaned_answer != chat_response.answer:
             chat_response = self._replace_answer(
                 chat_response,
                 cleaned_answer,
                 {"unresolved_pii_placeholders_removed": True},
+            )
+        if not chat_response.answer.strip():
+            chat_response = self._replace_answer(
+                chat_response,
+                self._insufficient_evidence_message(language),
+                {"empty_after_output_cleanup": True, "fallback": True},
             )
         return chat_response
 
@@ -357,8 +383,16 @@ class AIOrchestrator:
     ) -> ChatResponse | None:
         if not cached:
             return None
+        chat_response = self._secure_and_complete_response(
+            self.response_builder.from_cached(cached, correlation_id),
+            RetrievalResult(documents=[], citations=[], confidence=0.0),
+            body.language,
+            correlation_id,
+            user_question=body.message,
+            country=body.country,
+        )
         chat_response = self._validate_response(
-            self.response_builder.from_cached(cached, correlation_id), body, correlation_id
+            chat_response, body, correlation_id
         )
         chat_response = self._replace_answer(chat_response, chat_response.answer, {"cache": cache_type})
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
@@ -670,7 +704,11 @@ class AIOrchestrator:
             # The planner is advisory. Only reviewed exact phrases may produce
             # assistant identity/capability copy.
             if classify_intent(body.message, body.language) == "assistant_meta":
-                response_key = subtype if subtype in {"greeting", "capability", "thanks", "wellbeing"} else "capability"
+                response_key = (
+                    subtype
+                    if subtype in {"greeting", "capability", "thanks", "wellbeing", "casual"}
+                    else "capability"
+                )
             else:
                 intent = "off_topic"
                 response_key = "off_topic"
@@ -722,6 +760,29 @@ class AIOrchestrator:
         evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
         if evidence_decision.approved:
+            unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
+            if unsupported_years:
+                template = localized_conversation_response("period_not_covered", body.language) or (
+                    "The approved documents available to me do not contain information for {period}. "
+                    "I cannot speculate about policy changes outside the documented period."
+                )
+                answer = format_period_not_covered(template, unsupported_years)
+                fallback = self._validate_response(
+                    self.response_builder.fallback(
+                        answer,
+                        correlation_id,
+                        metadata={
+                            "fallback": False,
+                            "failure_layer": "document_period_not_covered",
+                            "response_source": "period_scope_guard",
+                            "requested_periods": unsupported_years,
+                        },
+                    ),
+                    body,
+                    correlation_id,
+                )
+                append_session_turn(body.sessionId, scrubbed_input, fallback.answer, correlation_id)
+                return fallback, approved_result, evidence_decision
             return None, approved_result, evidence_decision
 
         LOGGER.warning(

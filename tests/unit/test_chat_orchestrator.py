@@ -304,6 +304,67 @@ def test_response_completion_does_not_append_contacts_without_a_citation(monkeyp
     assert "directory_contacts_restored" not in completed.metadata
 
 
+def test_cached_response_runs_country_aware_final_output_cleanup(monkeypatch) -> None:
+    """Legacy cached placeholders cannot bypass the current output gate."""
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="How do I contact Customer Care?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+
+    response = orchestrator._cached_response_value(
+        {"response": "Call **** or visit [URL].", "sources": [], "confidence": 0.9},
+        body,
+        "cid",
+        cache_type="exact",
+    )
+
+    assert response is not None
+    assert response.answer == "Call (888) 440-ALOE (2563) or visit www.foreverliving.com."
+    assert response.metadata["cache"] == "exact"
+
+
+def test_requested_year_outside_approved_document_scope_fails_closed(monkeypatch) -> None:
+    """An explicit unsupported year is acknowledged without model speculation."""
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="What policy changes apply in 2027?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    document = RetrievedDocument(
+        id="us-policy",
+        title="US Company Policy",
+        content="The approved document is effective May 1, 2026.",
+        source="s3://approved/us/policy.pdf",
+        document_version="2026.1",
+        country="US",
+        language="en",
+        score=0.9,
+        metadata={"effective_date": "2026-05-01"},
+    )
+    result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.9)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response, _, decision = orchestrator._route_or_approve_evidence(
+        body.message,
+        result,
+        body.message,
+        body,
+        "cid",
+    )
+
+    assert decision is not None and decision.approved is True
+    assert response is not None
+    assert "2027" in response.answer
+    assert "do not contain information" in response.answer
+    assert response.metadata["failure_layer"] == "document_period_not_covered"
+
+
 def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:
     """Accidentally spaced letters are reconstructed before retrieval."""
     orchestrator = AIOrchestrator()

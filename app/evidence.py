@@ -61,8 +61,11 @@ def assistant_meta_response(message: str, language: str = "") -> str | None:
     if not category:
         return None
     locale = _locale_key(language)
-    routes = _conversation_routes().get(locale, {})
+    all_routes = _conversation_routes()
+    routes = all_routes.get(locale, {})
     response = (routes.get("responses", {}) or {}).get(category)
+    if not response:
+        response = (all_routes.get("en", {}).get("responses", {}) or {}).get(category)
     return str(response).strip() if response else None
 
 
@@ -173,12 +176,20 @@ def _conversation_routes() -> dict[str, dict[str, Any]]:
 def _assistant_meta_category(normalized_message: str, language: str) -> str | None:
     if not normalized_message:
         return None
-    routes = _conversation_routes().get(_locale_key(language), {})
-    patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
-    for category, phrases in patterns.items():
-        normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
-        if normalized_message in normalized_phrases:
-            return str(category)
+    all_routes = _conversation_routes()
+    locale = _locale_key(language)
+    route_candidates = [all_routes.get(locale, {})]
+    # English reviewed phrases are safe to recognize in every market. This
+    # keeps English-language widget traffic consistent even when the market's
+    # configured default language is different.
+    if locale != "en":
+        route_candidates.append(all_routes.get("en", {}))
+    for routes in route_candidates:
+        patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
+        for category, phrases in patterns.items():
+            normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
+            if normalized_message in normalized_phrases:
+                return str(category)
     return None
 
 
