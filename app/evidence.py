@@ -186,11 +186,52 @@ def _assistant_meta_category(normalized_message: str, language: str) -> str | No
         route_candidates.append(all_routes.get("en", {}))
     for routes in route_candidates:
         patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
+        phrase_entries: list[tuple[tuple[str, ...], str]] = []
         for category, phrases in patterns.items():
             normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
             if normalized_message in normalized_phrases:
                 return str(category)
+            phrase_entries.extend(
+                (tuple(phrase.split()), str(category))
+                for phrase in normalized_phrases
+                if phrase
+            )
+        composed_category = _composed_assistant_meta_category(normalized_message, phrase_entries)
+        if composed_category:
+            return composed_category
     return None
+
+
+def _composed_assistant_meta_category(
+    normalized_message: str,
+    phrase_entries: list[tuple[tuple[str, ...], str]],
+) -> str | None:
+    """Recognize messages made entirely from two or three reviewed phrases."""
+    message_tokens = tuple(normalized_message.split())
+    if not message_tokens:
+        return None
+    entries = sorted(phrase_entries, key=lambda item: len(item[0]), reverse=True)
+    joiners = {"and", "askvera", "please", "vera"}
+
+    def match_from(index: int, categories: tuple[str, ...]) -> tuple[str, ...] | None:
+        if index == len(message_tokens):
+            return categories if len(categories) >= 2 else None
+        if len(categories) >= 3:
+            return None
+        if categories and message_tokens[index] in joiners:
+            joined = match_from(index + 1, categories)
+            if joined:
+                return joined
+        for phrase_tokens, category in entries:
+            end = index + len(phrase_tokens)
+            if message_tokens[index:end] == phrase_tokens:
+                matched = match_from(end, (*categories, category))
+                if matched:
+                    return matched
+        return None
+
+    categories = match_from(0, ())
+    return categories[-1] if categories else None
 
 
 def _locale_key(language: str) -> str:

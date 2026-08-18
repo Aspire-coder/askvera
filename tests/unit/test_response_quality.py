@@ -62,6 +62,7 @@ def test_english_small_talk_is_consistent_in_every_configured_market() -> None:
     ]
     for market in markets:
         assert classify_intent("hello", market["defaultLanguage"]) == "assistant_meta"
+        assert classify_intent("hello, how are you?", market["defaultLanguage"]) == "assistant_meta"
         assert classify_intent("what's your name?", market["defaultLanguage"]) == "assistant_meta"
         assert classify_intent("tell me a joke", market["defaultLanguage"]) == "assistant_meta"
         assert assistant_meta_response("hello", market["defaultLanguage"])
