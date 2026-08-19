@@ -71,7 +71,7 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-17.1")
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
-RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-16-atomic-sections-v1")
+RETRIEVAL_PIPELINE_VERSION = "2026-08-19-cross-market-global-v1"
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
 RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-safety-v2")
@@ -276,6 +276,12 @@ BEDROCK_MIN_CONFIDENCE = _env_float("BEDROCK_MIN_CONFIDENCE", 0.47)
 # the blended confidence is slightly below the minimum.
 BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES = _env_int("BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES", 3)
 BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE = _env_float("BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE", 0.45)
+# The evidence-count override is only for borderline results. It must never
+# turn a very low-confidence retrieval into a generated and cacheable answer.
+BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE = _env_float(
+    "BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE",
+    0.35,
+)
 # Retrieval configuration and fallback confidence weighting.
 BEDROCK_RETRIEVAL_RESULT_COUNT = _env_int("BEDROCK_RETRIEVAL_RESULT_COUNT", 5)
 BEDROCK_RETRIEVAL_CANDIDATE_COUNT = _env_int(

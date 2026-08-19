@@ -231,6 +231,38 @@ def test_bedrock_provider_allows_borderline_confidence_with_enough_evidence() ->
     runtime.converse.assert_called_once()
 
 
+def test_bedrock_provider_blocks_very_low_confidence_despite_many_sources() -> None:
+    """Raw source scores cannot override a clearly weak blended confidence."""
+    runtime = MagicMock()
+    clients = SimpleNamespace(bedrock_runtime=runtime)
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id=f"irrelevant-{index}",
+                title="US policy.pdf",
+                content="Unrelated policy text",
+                source="s3://kb/US-policy.pdf",
+                country="US",
+                language="en",
+                score=1.2,
+            )
+            for index in range(5)
+        ],
+        citations=[],
+        confidence=0.185,
+    )
+
+    with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
+        with pytest.raises(LowConfidenceError):
+            BedrockClaudeProvider().generate(
+                build_prompt_package("What are the requirements in Baltics?", "US", "en", "new_prospect", retrieval_result),
+                retrieval_result,
+                "cid",
+            )
+
+    runtime.converse.assert_not_called()
+
+
 def test_bedrock_provider_raises_when_no_sources_are_available() -> None:
     """No citations and no retrieve fallback sources should still produce the fallback."""
     retrieval_result = RetrievalResult(documents=[], citations=[], confidence=0.0)

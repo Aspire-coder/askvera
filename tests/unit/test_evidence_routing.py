@@ -189,3 +189,31 @@ def test_global_document_is_valid_evidence_for_every_locale() -> None:
     )
 
     assert decision.approved
+
+
+def test_raw_score_does_not_approve_very_low_confidence_evidence() -> None:
+    """A high raw OpenSearch score cannot mask weak blended relevance."""
+    document = RetrievedDocument(
+        id="irrelevant-us-policy",
+        title="US policy",
+        content="Unrelated policy content",
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=1.2,
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.185,
+    )
+
+    decision = approve_evidence(
+        "What are the requirements in Baltics?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "insufficient_approved_evidence"

@@ -98,7 +98,10 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     score_margin = top_score - second_score
     current_document = _has_current_locale_document(documents, country, language)
     exact_topic_match = any(_has_topic_match(query, document) for document in documents)
-    enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
+    enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or (
+        retrieval_result.confidence >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE
+        and top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
+    )
 
     # Safety is based on approved document metadata and retrieval confidence,
     # not an English list of business or rule words. Topic overlap is retained

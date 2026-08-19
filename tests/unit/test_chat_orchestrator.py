@@ -192,6 +192,23 @@ def test_guardrail_response_is_not_cacheable() -> None:
     assert orchestrator._should_cache_response(response) is False
 
 
+def test_low_confidence_response_is_not_cacheable(monkeypatch) -> None:
+    """Weak generated answers must not become exact-cache entries."""
+    orchestrator = AIOrchestrator()
+    monkeypatch.setattr(chat_orchestrator.settings, "BEDROCK_MIN_CONFIDENCE", 0.47)
+    response = ChatResponse(
+        answer="Generic contact response.",
+        citations=[{"title": "Unrelated policy"}],
+        suggestions=[],
+        cards=[],
+        confidence=0.185,
+        metadata={"response_source": "model"},
+        correlation_id="cid",
+    )
+
+    assert orchestrator._should_cache_response(response) is False
+
+
 def test_semantic_cache_requires_citations_and_high_confidence(monkeypatch) -> None:
     """Only strong grounded answers can enter semantic reuse."""
     orchestrator = AIOrchestrator()

@@ -11,6 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 from services.aws_clients import get_aws_clients
+from services.market_config import find_market_mentions
 from utils.logging import get_logger
 
 from .glossary import glossary_queries
@@ -388,10 +389,10 @@ def _planned_retrieval_plan(
         "preserves the user's intent. "
         "Fix obvious typos. If the question is not in English, include English search phrases too. "
         "Also choose document scopes. Use locale_policy for company-policy rules, definitions, fees, returns, "
-        "bonuses, ranks, and document-section questions. Add global_directory only when the user asks for an "
-        "office, address, phone number, email address, website, named staff contact, or international sponsoring. "
-        "A market or country name "
-        "inside a policy question does not make it a directory question. Do not invent facts, numbers, percentages, "
+        "bonuses, ranks, and document-section questions. Add global_directory when the user asks for an "
+        "office, address, phone number, email address, website, named staff contact, international sponsoring, "
+        "or operational information about a specifically named market. Keep locale_policy as well when the "
+        "question may involve a policy rule. Do not invent facts, numbers, percentages, "
         "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
         "Classify the conversation intent as knowledge, assistant_meta, medical_claim, income_claim, off_topic, "
@@ -434,12 +435,15 @@ def _planned_retrieval_plan(
             intent_confidence,
             explicit_support,
         ) = _parse_planned_query_plan(text)
-        # Sponsoring-directory records are global documents even when the
-        # question is phrased as a country-specific policy question. Keep the
-        # model planner as a helpful hint, but enforce this scope in code so a
-        # planner omission cannot hide the directory.
-        include_global_documents = include_global_documents or bool(
-            SPONSORING_QUESTION_RE.search(message or "")
+        # Global directories include sponsoring and operational records for
+        # named markets. Keep the model planner as a helpful hint, but enforce
+        # this scope from shared market configuration so planner omissions do
+        # not hide approved cross-market evidence.
+        named_markets = find_market_mentions(message)
+        include_global_documents = (
+            include_global_documents
+            or bool(SPONSORING_QUESTION_RE.search(message or ""))
+            or bool(named_markets)
         )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
@@ -483,6 +487,7 @@ def _planned_retrieval_plan(
         correlation_id=correlation_id,
         planned_query_count=len(planned_queries),
         glossary_query_count=len(glossary),
+        named_market_count=len(find_market_mentions(message)),
         query_count=len(merged),
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,

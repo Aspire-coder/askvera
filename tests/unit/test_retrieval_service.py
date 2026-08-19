@@ -817,3 +817,40 @@ def test_query_planner_always_includes_global_documents_for_sponsoring_questions
     plan = _planned_retrieval_plan("Who is the sponsor for Italy?", "IT", "en", "sponsor-cid")
 
     assert plan.include_global_documents is True
+
+
+@pytest.mark.parametrize(
+    ("question", "selected_market"),
+    [
+        ("What are the legal requirements in Baltics?", "US"),
+        ("How can I become a member in Mexico?", "US"),
+    ],
+)
+def test_query_planner_includes_global_documents_for_named_markets(
+    monkeypatch,
+    question: str,
+    selected_market: str,
+) -> None:
+    """A named market opens global records even if the planner omits them."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["market requirements"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(question, selected_market, "en", "named-market-cid")
+
+    assert plan.include_global_documents is True

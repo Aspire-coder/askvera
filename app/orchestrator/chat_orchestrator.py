@@ -1111,6 +1111,9 @@ class AIOrchestrator:
         if isinstance(validation, dict) and str(validation.get("highestSeverity", "")).upper() == "CRITICAL":
             return False
 
+        if float(chat_response.confidence or 0.0) < settings.BEDROCK_MIN_CONFIDENCE:
+            return False
+
         return bool((chat_response.answer or "").strip())
 
     def _should_semantic_cache_response(self, chat_response: ChatResponse) -> bool:
@@ -1135,7 +1138,7 @@ class AIOrchestrator:
             LOGGER.info(
                 "cache_write_skipped",
                 correlation_id=correlation_id,
-                reason="fallback_or_critical_validation",
+                reason="unsafe_or_low_confidence_response",
             )
             return
         cache_value = chat_response.to_cache_value()

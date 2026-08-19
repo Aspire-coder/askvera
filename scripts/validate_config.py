@@ -59,6 +59,11 @@ def _validate_retrieval_experiments(missing: list[str]) -> None:
             missing.append(f"{name} (must be between 0 and 1)")
     if settings.RETRIEVAL_PROMOTION_MAX_LATENCY_MS <= 0:
         missing.append("RETRIEVAL_PROMOTION_MAX_LATENCY_MS (must be greater than 0)")
+    if not 0.0 <= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE <= settings.BEDROCK_MIN_CONFIDENCE:
+        missing.append(
+            "BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE "
+            "(must be between 0 and BEDROCK_MIN_CONFIDENCE)"
+        )
 
 
 def _validate_semantic_cache(missing: list[str]) -> None:

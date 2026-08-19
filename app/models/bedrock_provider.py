@@ -132,8 +132,8 @@ def _is_transient_bedrock_error(exc: BaseException) -> bool:
     return code in _TRANSIENT_BEDROCK_ERROR_CODES or int(exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode", 0) or 0) >= 500
 
 
-def _has_adequate_evidence(summary: dict[str, object]) -> bool:
-    """Return true when retrieval found enough evidence to attempt generation."""
+def _has_adequate_evidence(summary: dict[str, object], confidence: float) -> bool:
+    """Return true only for borderline retrieval with enough source evidence."""
     top_score = summary.get("top_score")
     source_count = summary.get("source_count")
     try:
@@ -142,7 +142,8 @@ def _has_adequate_evidence(summary: dict[str, object]) -> bool:
     except (TypeError, ValueError):
         return False
     return (
-        normalized_source_count >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES
+        confidence >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE
+        and normalized_source_count >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES
         and normalized_top_score >= settings.BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE
     )
 
@@ -171,7 +172,7 @@ class BedrockClaudeProvider:
             raise RetrievalMissError(FALLBACK_RESPONSES["low_confidence"])
 
         strong_local_match = bool(retrieval_result.metadata.get("strong_local_match"))
-        adequate_evidence = _has_adequate_evidence(summary)
+        adequate_evidence = _has_adequate_evidence(summary, confidence)
         if confidence < settings.BEDROCK_MIN_CONFIDENCE and not strong_local_match and not adequate_evidence:
             LOGGER.warning(
                 "model_low_confidence_blocked",
