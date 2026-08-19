@@ -26,6 +26,7 @@ from .models import RetrievedDocument, RetrievalResult
 from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
+from .typo_safety import safe_typo_ranking_queries
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
 
@@ -568,10 +569,12 @@ class OpenSearchSectionProvider:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
 
+        typo_ranking_queries = safe_typo_ranking_queries(message, search_messages[1:])
         rows = self._merge_hits(
             text_hits,
             vector_hits,
             message,
+            ranking_queries=typo_ranking_queries,
             prefer_outline=search_plan.prefer_outline,
         )
         if self.enable_bedrock_rerank:
@@ -593,6 +596,9 @@ class OpenSearchSectionProvider:
                 "provider": "opensearch_section",
                 "candidate_count": len(rows),
                 "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
+                "typo_ranking_query_count": len(typo_ranking_queries),
+                "typo_ranking_applied": bool(documents and documents[0].metadata.get("typo_ranking_applied")),
+                "ranking_query_used": documents[0].metadata.get("ranking_query_used", "") if documents else "",
                 "global_documents_searched": search_plan.include_global_documents,
                 "outline_preferred": search_plan.prefer_outline,
                 "client_action": search_plan.client_action,
@@ -613,6 +619,9 @@ class OpenSearchSectionProvider:
             source_count=len(result.sources),
             candidate_count=len(rows),
             confidence=result.confidence,
+            typo_ranking_query_count=len(typo_ranking_queries),
+            typo_ranking_applied=result.metadata["typo_ranking_applied"],
+            ranking_query_used=result.metadata["ranking_query_used"],
         )
         return result
 
@@ -682,6 +691,7 @@ class OpenSearchSectionProvider:
         vector_hits: list[dict[str, Any]],
         message: str,
         *,
+        ranking_queries: list[str] | None = None,
         prefer_outline: bool = False,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
@@ -706,15 +716,24 @@ class OpenSearchSectionProvider:
                 existing["rank"] = float(existing.get("rank") or 0.0) + float(row.get("rank") or 0.0)
 
         self._normalize_opensearch_ranks(list(merged.values()))
-        scored = [
-            (
-                row,
-                _source_score(row, message)
-                + _directory_record_country_score(message, row)
-                + (2.0 if prefer_outline and row.get("chunk_type") == "document_outline" else 0.0),
-            )
-            for row in merged.values()
-        ]
+        scored: list[tuple[dict[str, Any], float]] = []
+        for row in merged.values():
+            original_score = _source_score(row, message) + _directory_record_country_score(message, row)
+            best_score = original_score
+            ranking_query_used = message
+            for ranking_query in ranking_queries or []:
+                candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
+                    ranking_query, row
+                )
+                if candidate_score > best_score:
+                    best_score = candidate_score
+                    ranking_query_used = ranking_query
+            if prefer_outline and row.get("chunk_type") == "document_outline":
+                best_score += 2.0
+            row["original_question_score"] = round(original_score, 6)
+            row["ranking_query_used"] = ranking_query_used
+            row["typo_ranking_applied"] = ranking_query_used != message
+            scored.append((row, round(best_score, 6)))
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
 
     def _select_evidence_rows(
@@ -843,6 +862,9 @@ class OpenSearchSectionProvider:
             score=score,
             metadata={
                 **metadata,
+                "ranking_query_used": row.get("ranking_query_used", ""),
+                "typo_ranking_applied": bool(row.get("typo_ranking_applied")),
+                "original_question_score": row.get("original_question_score"),
                 "access_scope": row.get("access_scope", "country"),
                 "document_type": row.get("document_type", ""),
                 "section_id": row.get("section_id", ""),

@@ -48,6 +48,11 @@ jobs:
       - name: Test
         run: python -m pytest tests/unit -q
 
+      - name: Validate retrieval regression gate
+        run: |
+          python -m pytest tests/unit/test_typo_retrieval.py -q
+          python scripts/run_retrieval_canary.py --validate-only
+
       - name: Validate minimum config contract
         env:
           SSM_CONFIG_ENABLED: "false"

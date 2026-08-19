@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "recognized-manager-baseline",
+      "question": "How can I become a recognized manager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Recognized Manager",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "recognized-manager-missing-letter",
+      "question": "How can I become a recognizd manager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Recognized Manager",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "recognized-manager-british-and-typo",
+      "question": "What are the requirments to become a recognised manager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Recognized Manager",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "recognized-manager-joined-word",
+      "question": "How can I become a recognizedmanager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Recognized Manager",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "belgium-minimum-order-typo",
+      "question": "What is the minimun order size for Belgium?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Belgium",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "mexico-sponsoring-multiple-typos",
+      "question": "How can I become a member in Mexcio through internationl sponsring?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Mexico",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    }
+  ]
+}

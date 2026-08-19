@@ -71,7 +71,7 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-17.1")
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
-RETRIEVAL_PIPELINE_VERSION = "2026-08-19-global-evidence-scope-v2"
+RETRIEVAL_PIPELINE_VERSION = "2026-08-19-typo-safe-ranking-v3"
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
 RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-safety-v2")

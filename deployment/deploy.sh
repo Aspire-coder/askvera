@@ -66,6 +66,11 @@ wait_for_local_health() {
   return 1
 }
 
+run_retrieval_canary() {
+  log "Running blocking retrieval-quality canary against the active index."
+  sudo -u "${APP_USER}" .venv/bin/python scripts/run_retrieval_canary.py --load-ssm
+}
+
 sync_runtime_configuration() {
   log "Applying checked-in systemd and Nginx configuration."
   install -m 0644 deployment/systemd/askvera.service /etc/systemd/system/askvera.service
@@ -164,8 +169,9 @@ systemctl restart "${SERVICE_NAME}"
 
 log "Running health checks."
 if ! wait_for_local_health ||
-  ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh"; then
-  echo "Health check failed after deploy." >&2
+  ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh" ||
+  ! run_retrieval_canary; then
+  echo "Health or retrieval-quality check failed after deploy." >&2
   rollback "${PREVIOUS_REV}"
   exit 1
 fi
