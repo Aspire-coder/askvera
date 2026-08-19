@@ -1,5 +1,6 @@
-"""Model routing layer."""
+"""Model provider and generation-risk routing layer."""
 
+from dataclasses import replace
 from time import perf_counter
 
 from app.metrics import STAGE_MODEL_GENERATE
@@ -9,6 +10,7 @@ from app.retrieval import RetrievalResult
 from config import settings
 from utils.logging import get_logger
 
+from .model_routing import decide_model_route
 from .registry import ModelRegistry, model_registry
 from .responses import ModelResponse
 
@@ -28,6 +30,20 @@ class ModelRouter:
         success = False
         provider_name = self.default_provider
         response: ModelResponse | None = None
+        route_decision = decide_model_route(prompt, retrieval_result)
+        route_metadata = route_decision.to_metadata()
+        routed_prompt = replace(
+            prompt,
+            metadata={
+                **(prompt.metadata or {}),
+                **route_metadata,
+                **(
+                    {"generation_model_id": route_decision.target_model_id}
+                    if route_decision.live and route_decision.target in {"fast", "complex"}
+                    else {}
+                ),
+            },
+        )
         try:
             provider = self.registry.get(self.default_provider)
             provider_name = provider.name
@@ -41,8 +57,17 @@ class ModelRouter:
                 role=prompt.role,
                 source_count=len(retrieval_result.documents),
                 confidence=retrieval_result.confidence,
+                **route_metadata,
             )
-            response = provider.generate(prompt, retrieval_result, correlation_id)
+            response = provider.generate(routed_prompt, retrieval_result, correlation_id)
+            response = replace(
+                response,
+                metadata={
+                    **(response.metadata or {}),
+                    **route_metadata,
+                    "model_route_actual_model": response.model_name,
+                },
+            )
             success = True
             return response
         finally:
@@ -59,6 +84,10 @@ class ModelRouter:
                     "inputTokens": int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0),
                     "outputTokens": int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0),
                     "finishReason": response.finish_reason if response else "",
+                    "modelRouteMode": route_decision.mode,
+                    "modelRouteTarget": route_decision.target,
+                    "modelRouteWouldUseFast": route_decision.would_use_fast_model,
+                    "modelRouteLive": route_decision.live,
                 },
             )
 

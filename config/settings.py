@@ -78,6 +78,9 @@ RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-di
 # Code-owned conversation-routing behavior version. Change this when routing
 # semantics change so stale cached answers cannot bypass the new router.
 CONVERSATION_ROUTING_VERSION = "2026-08-19-followup-context-v3"
+# Code-owned model-routing behavior version. It participates in cache keys so
+# routing changes cannot silently reuse answers produced by an older policy.
+MODEL_ROUTING_VERSION = "2026-08-19-risk-router-v1"
 # RDS PostgreSQL database identifier. Found in RDS -> Databases.
 RDS_DB_IDENTIFIER = _env_str("RDS_DB_IDENTIFIER", "")
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
@@ -253,6 +256,21 @@ BEDROCK_MODEL_ARN = _env_str("BEDROCK_MODEL_ARN", "")
 # Optional secondary generation model. Keep empty until the fallback model has
 # passed the same retrieval and validation evaluation suite as the primary.
 BEDROCK_FALLBACK_MODEL_ARN = _env_str("BEDROCK_FALLBACK_MODEL_ARN", "")
+# Risk-aware generation routing. Production begins in shadow mode; live mode is
+# valid only after the same benchmark and evidence-contract checks pass for the
+# fast model. Geographic profiles keep inference within the US geography.
+MODEL_ROUTING_MODE = _env_str("MODEL_ROUTING_MODE", "off").lower()
+BEDROCK_FAST_MODEL_ID = _env_str(
+    "BEDROCK_FAST_MODEL_ID",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+)
+BEDROCK_COMPLEX_MODEL_ID = _env_str(
+    "BEDROCK_COMPLEX_MODEL_ID",
+    "us.anthropic.claude-sonnet-5",
+)
+MODEL_ROUTING_FAST_MIN_CONFIDENCE = _env_float("MODEL_ROUTING_FAST_MIN_CONFIDENCE", 0.75)
+MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES = _env_int("MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES", 1)
+MODEL_ROUTING_FAST_MAX_QUESTION_CHARS = _env_int("MODEL_ROUTING_FAST_MAX_QUESTION_CHARS", 220)
 BEDROCK_CIRCUIT_BREAKER_FAILURE_THRESHOLD = _env_int("BEDROCK_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 3)
 BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS = _env_int("BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS", 60)
 BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED = _env_bool("BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED", False)
@@ -534,6 +552,7 @@ _SSM_CONFIG: dict[str, str] = {}
 _CODE_OWNED_SETTINGS = {
     "RETRIEVAL_PIPELINE_VERSION",
     "CONVERSATION_ROUTING_VERSION",
+    "MODEL_ROUTING_VERSION",
 }
 
 

@@ -148,6 +148,27 @@ def _has_adequate_evidence(summary: dict[str, object], confidence: float) -> boo
     )
 
 
+def _model_attempts(prompt: PromptPackage) -> tuple[str, str, bool, bool, list[str]]:
+    """Return the ordered model attempts without changing evidence or prompts."""
+    primary_model = str(
+        prompt.metadata.get("generation_model_id") or settings.BEDROCK_MODEL_ARN
+    ).strip()
+    fallback_model = str(settings.BEDROCK_FALLBACK_MODEL_ARN or "").strip()
+    if (
+        primary_model == str(settings.BEDROCK_FAST_MODEL_ID or "").strip()
+        and settings.BEDROCK_COMPLEX_MODEL_ID
+    ):
+        fallback_model = str(settings.BEDROCK_COMPLEX_MODEL_ID).strip()
+
+    fallback_enabled = bool(fallback_model and fallback_model != primary_model)
+    circuit_managed = primary_model == settings.BEDROCK_MODEL_ARN
+    circuit_open = fallback_enabled and circuit_managed and _primary_circuit_open()
+    attempts = [fallback_model] if circuit_open else [primary_model]
+    if fallback_enabled and not circuit_open:
+        attempts.append(fallback_model)
+    return primary_model, fallback_model, circuit_managed, circuit_open, attempts
+
+
 class BedrockClaudeProvider:
     """Generate answers with Claude through Bedrock Runtime."""
 
@@ -221,13 +242,8 @@ class BedrockClaudeProvider:
         }
         start = perf_counter()
         runtime = get_aws_clients().bedrock_runtime
-        primary_model = settings.BEDROCK_MODEL_ARN
-        fallback_model = str(settings.BEDROCK_FALLBACK_MODEL_ARN or "").strip()
-        fallback_enabled = bool(fallback_model and fallback_model != primary_model)
-        circuit_open = fallback_enabled and _primary_circuit_open()
-        attempts = [fallback_model] if circuit_open else [primary_model]
-        if fallback_enabled and not circuit_open:
-            attempts.append(fallback_model)
+        primary_model, fallback_model, circuit_managed, circuit_open, attempts = _model_attempts(prompt)
+        fallback_enabled = len(attempts) > 1 or circuit_open
 
         response: dict[str, object] | None = None
         model_used = primary_model
@@ -238,13 +254,14 @@ class BedrockClaudeProvider:
                 response = runtime.converse(modelId=model_id, **params)
                 model_used = model_id
                 fallback_used = model_id == fallback_model
-                if model_id == primary_model:
+                if model_id == primary_model and circuit_managed:
                     _record_primary_success()
                 break
             except (ReadTimeoutError, BotoCoreError, ClientError) as exc:
                 last_error = exc
                 if model_id == primary_model and _is_transient_bedrock_error(exc):
-                    _record_primary_failure()
+                    if circuit_managed:
+                        _record_primary_failure()
                     if fallback_enabled:
                         LOGGER.warning(
                             "model_primary_transient_failure_using_fallback",
@@ -289,6 +306,7 @@ class BedrockClaudeProvider:
                 "failure_layer": failure_layer,
                 "model_fallback_used": fallback_used,
                 "primary_circuit_open": circuit_open,
+                "model_route_requested_model": primary_model,
             },
         )
         LOGGER.info(

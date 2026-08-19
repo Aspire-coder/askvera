@@ -289,3 +289,29 @@ def test_semantic_cache_live_and_shadow_modes_are_mutually_exclusive(monkeypatch
         "SEMANTIC_CACHE_ENABLED and SEMANTIC_CACHE_SHADOW_ENABLED (choose only one mode)"
         in failures
     )
+
+
+def test_model_routing_rejects_invalid_mode(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_MODE", "automatic")
+
+    assert "MODEL_ROUTING_MODE (must be off, shadow, or live)" in validate()
+
+
+def test_model_routing_requires_distinct_models(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_MODE", "shadow")
+    monkeypatch.setattr(settings, "BEDROCK_FAST_MODEL_ID", "same-model")
+    monkeypatch.setattr(settings, "BEDROCK_COMPLEX_MODEL_ID", "same-model")
+
+    assert "BEDROCK_FAST_MODEL_ID and BEDROCK_COMPLEX_MODEL_ID (must differ)" in validate()
+
+
+def test_live_model_routing_requires_evidence_gate(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_MODE", "live")
+    monkeypatch.setattr(settings, "BEDROCK_FAST_MODEL_ID", "fast-model")
+    monkeypatch.setattr(settings, "BEDROCK_COMPLEX_MODEL_ID", "complex-model")
+    monkeypatch.setattr(settings, "EVIDENCE_GATED_OUTPUT_ENABLED", False)
+
+    assert "EVIDENCE_GATED_OUTPUT_ENABLED (must be true for live model routing)" in validate()

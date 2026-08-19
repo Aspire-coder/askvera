@@ -118,6 +118,14 @@ def cache_health() -> str:
 
 def build_cache_key(message: str, country: str, language: str, role: str) -> str:
     """Build a versioned locale-aware SHA256 cache key."""
+    model_routing_versions = ["model-routing-baseline"]
+    if settings.MODEL_ROUTING_MODE == "live":
+        model_routing_versions = [
+            settings.MODEL_ROUTING_VERSION,
+            settings.MODEL_ROUTING_MODE,
+            settings.BEDROCK_FAST_MODEL_ID,
+            settings.BEDROCK_COMPLEX_MODEL_ID,
+        ]
     versions = "|".join(
         [
             settings.CACHE_SCHEMA_VERSION,
@@ -129,6 +137,7 @@ def build_cache_key(message: str, country: str, language: str, role: str) -> str
             settings.BEDROCK_GUARDRAIL_VERSION,
             settings.BEDROCK_MODEL_ARN,
             settings.BEDROCK_FALLBACK_MODEL_ARN,
+            *model_routing_versions,
         ]
     )
     digest = hashlib.sha256(f"{message}|{country}|{language}|{role}|{versions}".encode("utf-8")).hexdigest()

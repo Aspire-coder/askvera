@@ -47,6 +47,24 @@ def test_build_cache_key_rotates_with_response_pipeline(monkeypatch) -> None:
     assert first != second
 
 
+def test_build_cache_key_rotates_with_model_routing_mode(monkeypatch) -> None:
+    """Shadow and live routing cannot reuse answers from another model policy."""
+    monkeypatch.setattr(cache.settings, "MODEL_ROUTING_MODE", "shadow")
+    first = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    monkeypatch.setattr(cache.settings, "MODEL_ROUTING_MODE", "live")
+    second = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    assert first != second
+
+
+def test_shadow_model_routing_preserves_baseline_cache(monkeypatch) -> None:
+    """Observing routes must not force existing production answers to regenerate."""
+    monkeypatch.setattr(cache.settings, "MODEL_ROUTING_MODE", "off")
+    first = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    monkeypatch.setattr(cache.settings, "MODEL_ROUTING_MODE", "shadow")
+    second = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    assert first == second
+
+
 def test_get_and_set_cache_value(monkeypatch) -> None:
     """Cache values are JSON encoded and decoded."""
     client = MagicMock()

@@ -93,6 +93,27 @@ def _validate_semantic_cache(missing: list[str]) -> None:
             missing.append(f"{name} (must be greater than 0)")
 
 
+def _validate_model_routing(missing: list[str]) -> None:
+    """Validate opt-in routing without silently enabling model changes."""
+    if settings.MODEL_ROUTING_MODE not in {"off", "shadow", "live"}:
+        missing.append("MODEL_ROUTING_MODE (must be off, shadow, or live)")
+        return
+    if settings.MODEL_ROUTING_MODE == "off":
+        return
+    _require(missing, "BEDROCK_FAST_MODEL_ID")
+    _require(missing, "BEDROCK_COMPLEX_MODEL_ID")
+    if settings.BEDROCK_FAST_MODEL_ID == settings.BEDROCK_COMPLEX_MODEL_ID:
+        missing.append("BEDROCK_FAST_MODEL_ID and BEDROCK_COMPLEX_MODEL_ID (must differ)")
+    if not 0.0 <= settings.MODEL_ROUTING_FAST_MIN_CONFIDENCE <= 1.0:
+        missing.append("MODEL_ROUTING_FAST_MIN_CONFIDENCE (must be between 0 and 1)")
+    if settings.MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES <= 0:
+        missing.append("MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES (must be greater than 0)")
+    if settings.MODEL_ROUTING_FAST_MAX_QUESTION_CHARS <= 0:
+        missing.append("MODEL_ROUTING_FAST_MAX_QUESTION_CHARS (must be greater than 0)")
+    if settings.MODEL_ROUTING_MODE == "live" and not settings.EVIDENCE_GATED_OUTPUT_ENABLED:
+        missing.append("EVIDENCE_GATED_OUTPUT_ENABLED (must be true for live model routing)")
+
+
 def _validate_production_auth(missing: list[str]) -> None:
     for name in (
         "WIDGET_JWT_SECRET",
@@ -199,6 +220,7 @@ def validate(*, require_production: bool = False) -> list[str]:
     _validate_shadow_retrieval(missing)
     _validate_retrieval_experiments(missing)
     _validate_semantic_cache(missing)
+    _validate_model_routing(missing)
     if settings.APP_ENV == "production":
         _validate_production_auth(missing)
         _validate_production_integrations(missing)
