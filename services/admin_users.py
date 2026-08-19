@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Iterable
 from uuid import uuid4
@@ -128,7 +129,12 @@ def _write_audit(connection: Any, actor_sub: str, action: str, target_id: str) -
     )
 
 
-def record_admin_audit_event(actor_sub: str, action: str, target_id: str) -> None:
+def record_admin_audit_event(
+    actor_sub: str,
+    action: str,
+    target_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     """Record a non-content admin access event for sensitive operational actions."""
     try:
         with get_engine().begin() as connection:
@@ -137,7 +143,10 @@ def record_admin_audit_event(actor_sub: str, action: str, target_id: str) -> Non
                     """
                     INSERT INTO admin_audit_log (
                         event_id, actor_sub, action, target_type, target_id, metadata, created_at
-                    ) VALUES (:event_id, :actor_sub, :action, 'operations', :target_id, '{}'::jsonb, now())
+                    ) VALUES (
+                        :event_id, :actor_sub, :action, 'operations', :target_id,
+                        CAST(:metadata AS jsonb), now()
+                    )
                     """
                 ),
                 {
@@ -145,6 +154,7 @@ def record_admin_audit_event(actor_sub: str, action: str, target_id: str) -> Non
                     "actor_sub": actor_sub,
                     "action": action,
                     "target_id": target_id,
+                    "metadata": json.dumps(metadata or {}, separators=(",", ":")),
                 },
             )
     except SQLAlchemyError:

@@ -21,6 +21,7 @@ import type {
   InteractionPage,
   MarketReadiness,
   OperationsStatus,
+  CacheResetResult,
   PipelineTrace,
   ShadowReport,
   SupportRoute,
@@ -93,6 +94,11 @@ export class AdminApi {
     });
   }
   operationsStatus() { return this.request<OperationsStatus>("/api/admin/operations/status"); }
+  resetAnswerCache(body: { country: string; mode: "exact" | "exact_and_semantic"; reason: string; confirmation: string }) {
+    return this.request<CacheResetResult>("/api/admin/operations/cache/reset", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
   trace(correlationId: string) { return this.request<PipelineTrace>(`/api/admin/traces/${encodeURIComponent(correlationId)}`); }
   async streamTraces(onTraces: (traces: PipelineTrace[]) => void, signal: AbortSignal): Promise<void> {

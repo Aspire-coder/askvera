@@ -29,6 +29,16 @@ export type OperationsStatus = {
   metrics: { cache_hit_ratio: number; retrieval_failure_rate: number; validation_failures: number; audit_queue_depth: number };
 };
 
+export type CacheResetResult = {
+  country: string;
+  mode: "exact" | "exact_and_semantic";
+  exact_deleted: number;
+  semantic_deleted: number;
+  total_deleted: number;
+  completed_at: string;
+  duration_ms: number;
+};
+
 export type MarketLanguage = { code: string; name: string };
 export type Market = { code: string; name: string; languages: MarketLanguage[] };
 

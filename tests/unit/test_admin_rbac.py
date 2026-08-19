@@ -35,6 +35,88 @@ def test_country_scoped_viewer_can_open_section_before_market_filtering() -> Non
     assert admin_users.accessible_markets(principal, "flow", "view") == {"GB"}
 
 
+def test_only_super_admin_can_reset_answer_cache(monkeypatch) -> None:
+    called = False
+
+    def reset_stub(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(admin_routes, "reset_answer_cache", reset_stub)
+    body = admin_routes.CacheResetInput(
+        country="US",
+        mode="exact_and_semantic",
+        reason="Published policy correction",
+        confirmation="RESET US",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.operational_cache_reset(body, _request(_principal()))
+
+    assert exc_info.value.status_code == 403
+    assert not called
+
+
+def test_super_admin_cache_reset_requires_exact_confirmation(monkeypatch) -> None:
+    monkeypatch.setattr(admin_routes, "get_country_codes", lambda: {"US"})
+    monkeypatch.setattr(admin_routes, "get_widget_country_codes", lambda: {"US"})
+    body = admin_routes.CacheResetInput(
+        country="US",
+        mode="exact",
+        reason="Published policy correction",
+        confirmation="RESET ALL",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.operational_cache_reset(
+            body, _request(_principal(role="super_admin"))
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "RESET US" in exc_info.value.detail
+
+
+def test_super_admin_cache_reset_is_audited(monkeypatch) -> None:
+    captured: dict = {}
+    monkeypatch.setattr(admin_routes, "get_country_codes", lambda: {"US"})
+    monkeypatch.setattr(admin_routes, "get_widget_country_codes", lambda: {"US"})
+    monkeypatch.setattr(
+        admin_routes,
+        "reset_answer_cache",
+        lambda *_args, **_kwargs: {
+            "country": "US",
+            "mode": "exact_and_semantic",
+            "exact_deleted": 3,
+            "semantic_deleted": 2,
+            "total_deleted": 5,
+            "completed_at": "2026-08-19T12:00:00+00:00",
+            "duration_ms": 4,
+        },
+    )
+
+    def audit_stub(actor, action, target, metadata=None):
+        captured.update(actor=actor, action=action, target=target, metadata=metadata)
+
+    monkeypatch.setattr(admin_routes, "record_admin_audit_event", audit_stub)
+    body = admin_routes.CacheResetInput(
+        country="us",
+        mode="exact_and_semantic",
+        reason="Published policy correction",
+        confirmation="reset us",
+    )
+
+    response = admin_routes.operational_cache_reset(
+        body, _request(_principal(role="super_admin"))
+    )
+
+    assert response["data"]["total_deleted"] == 5
+    assert captured["action"] == "operations.answer_cache_reset"
+    assert captured["target"] == "US"
+    assert captured["metadata"]["reason"] == "Published policy correction"
+    assert captured["metadata"]["total_deleted"] == 5
+
+
 def test_permission_hierarchy_is_section_specific() -> None:
     principal = _principal(
         {"market": "CA", "section": "knowledge", "permission": "publish"},

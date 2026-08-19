@@ -750,6 +750,14 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 .operations-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .operations-detail-grid > div { display: grid; gap: 5px; padding: 15px; border-radius: 14px; background: var(--soft); }
 .operations-detail-grid span, .operations-detail-grid small { color: var(--muted); }
+.cache-control-panel { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 16px; padding: 16px; border: 1px solid #f0dada; border-radius: 14px; background: #fffafa; }
+.cache-control-panel > div { display: grid; gap: 5px; }
+.cache-control-panel span { max-width: 760px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.cache-result { margin-top: 12px; border-color: #cce7d6; background: #f0faf4; color: #176b43; }
+.cache-reset-fields { display: grid; gap: 14px; }
+.cache-reset-fields label { display: grid; gap: 7px; }
+.cache-reset-fields textarea { min-height: 86px; resize: vertical; }
+.cache-reset-fields small { color: var(--muted); font-size: 10px; }
 .trace-search { display: flex; align-items: end; gap: 8px; min-width: min(520px, 100%); }
 .trace-search label { flex: 1; }
 .trace-waterfall { margin: 16px 0; padding: 22px; }
@@ -765,6 +773,8 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 @media (max-width: 640px) {
   .health-service-grid, .operations-detail-grid { grid-template-columns: 1fr; }
   .waterfall-list button { grid-template-columns: 100px 1fr 60px; }
+  .cache-control-panel { align-items: stretch; flex-direction: column; }
+  .cache-control-panel .button { width: 100%; }
 }
 .compare-field select[multiple] { min-height: 44px; max-height: 110px; }
 .readiness-governance { display: grid; grid-template-columns: minmax(220px, 1fr) 190px auto; gap: 12px; align-items: end; margin: 16px 0; padding: 16px; background: var(--soft); border-radius: 14px; }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, CheckIcon, HomeIcon, RefreshIcon } from "../icons";
-import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, IngestionJob, OperationsStatus, View } from "../types";
+import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, CacheResetResult, IngestionJob, OperationsStatus, View } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 
 type OperationsOverviewProps = {
   credentials: AdminCredentials;
@@ -19,10 +20,45 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
   const [mode, setMode] = useState<DataMode>("demo");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [cacheDialogOpen, setCacheDialogOpen] = useState(false);
+  const [cacheCountry, setCacheCountry] = useState(config.widgetCountries?.[0]?.code || config.countries[0]?.code || "");
+  const [cacheMode, setCacheMode] = useState<"exact" | "exact_and_semantic">("exact_and_semantic");
+  const [cacheReason, setCacheReason] = useState("");
+  const [cacheConfirmation, setCacheConfirmation] = useState("");
+  const [cacheResetting, setCacheResetting] = useState(false);
+  const [cacheError, setCacheError] = useState("");
+  const [cacheResult, setCacheResult] = useState<CacheResetResult | null>(null);
+
+  const closeCacheDialog = () => { if (!cacheResetting) setCacheDialogOpen(false); };
+  const cacheDialogRef = useDialogFocus<HTMLElement>(cacheDialogOpen, closeCacheDialog);
 
   const canViewAudit = !config.rbacEnabled
     || config.principal?.role === "super_admin"
     || Boolean(config.principal?.scopes.some((scope) => scope.section === "audit"));
+  const canResetCache = config.principal?.role === "super_admin";
+  const requiredConfirmation = `RESET ${cacheCountry}`;
+
+  const resetCache = async () => {
+    setCacheResetting(true);
+    setCacheError("");
+    try {
+      const result = await new AdminApi(credentials).resetAnswerCache({
+        country: cacheCountry,
+        mode: cacheMode,
+        reason: cacheReason.trim(),
+        confirmation: cacheConfirmation.trim()
+      });
+      setCacheResult(result);
+      setCacheDialogOpen(false);
+      setCacheReason("");
+      setCacheConfirmation("");
+      await load();
+    } catch (resetError) {
+      setCacheError(resetError instanceof Error ? resetError.message : "The answer cache could not be reset.");
+    } finally {
+      setCacheResetting(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -88,6 +124,11 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
         </div>
       </> : <div className="empty-state compact">Operational status is unavailable.</div>}
       {operations?.assigned_actions.length ? <div className="assigned-actions"><h3>Assigned actions</h3>{operations.assigned_actions.map((action, index) => <div key={`${action.label}-${index}`}><strong>{action.label}</strong><span>{action.reason}</span><em>{action.owner}</em></div>)}</div> : null}
+      {canResetCache ? <div className="cache-control-panel">
+        <div><strong>Answer cache controls</strong><span>Clear stale generated answers for one market or all markets. Login, security, rate limits, widget settings and session data are never affected.</span></div>
+        <button className="button danger" onClick={() => { setCacheError(""); setCacheDialogOpen(true); }}>Reset answer cache</button>
+      </div> : null}
+      {cacheResult ? <div className="notice cache-result" role="status"><strong>Cache reset completed.</strong> Removed {cacheResult.total_deleted} answer cache {cacheResult.total_deleted === 1 ? "entry" : "entries"} for {cacheResult.country === "ALL" ? "all markets" : cacheResult.country} ({cacheResult.exact_deleted} exact, {cacheResult.semantic_deleted} semantic) at {new Date(cacheResult.completed_at).toLocaleString()}.</div> : null}
     </section>
     <div className="overview-grid">
       <section className="surface overview-panel"><div className="section-heading"><div><h2>Start here</h2><p>The three checks that keep the service healthy.</p></div><HomeIcon /></div><div className="overview-checklist">{checks.map((check) => <button key={check.label} onClick={() => onNavigate(check.view)}><span className={`check-icon ${check.done ? "done" : ""}`}>{check.done ? <CheckIcon /> : <span />}</span><span><strong>{check.label}</strong><small>{check.detail}</small></span><ArrowIcon /></button>)}</div></section>
@@ -106,5 +147,27 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
     </div>
     <section className="surface readiness-panel"><div><span className="eyebrow">Coverage and readiness</span><h2>One place to see what is connected.</h2><p>Markets and widget coverage are configured separately. This keeps a new market from appearing in a customer widget before its approved content and support destination are ready.</p></div><div className="readiness-grid"><div><strong>{coverageCount}</strong><span>approved markets</span></div><div><strong>{widgetCoverageCount}</strong><span>widget markets</span></div><div><strong>{config.documentTypes.length}</strong><span>content types</span></div><div><strong>{config.rbacEnabled ? "On" : "Off"}</strong><span>role-based access</span></div></div></section>
     <section className="surface overview-footer"><div><span className="eyebrow">Configured coverage</span><h2>{config.countries.length} approved markets available</h2><p>Keep market policy coverage, global directory content, and support routing aligned from the sections in the left navigation.</p></div><button className="button primary" onClick={() => onNavigate("flow")}>Follow a live answer <ArrowIcon /></button></section>
+    {cacheDialogOpen ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCacheDialog(); }}>
+      <section ref={cacheDialogRef} className="connection-modal cache-reset-modal" role="dialog" aria-modal="true" aria-labelledby="cache-reset-title" tabIndex={-1}>
+        <span className="eyebrow">Super Admin only</span>
+        <h2 id="cache-reset-title">Reset answer cache</h2>
+        <p>Use this after a policy or retrieval correction when an older generated answer may still be cached. New questions will rebuild fresh answers automatically.</p>
+        <div className="cache-reset-fields">
+          <label><span>Scope</span><select value={cacheCountry} onChange={(event) => { setCacheCountry(event.target.value); setCacheConfirmation(""); }} autoFocus>
+            {(config.widgetCountries?.length ? config.widgetCountries : config.countries).map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}
+            <option value="ALL">All markets</option>
+          </select></label>
+          <label><span>Cache type</span><select value={cacheMode} onChange={(event) => setCacheMode(event.target.value as "exact" | "exact_and_semantic")}>
+            <option value="exact_and_semantic">Exact and semantic answers</option>
+            <option value="exact">Exact answers only</option>
+          </select></label>
+          <label><span>Reason</span><textarea value={cacheReason} onChange={(event) => setCacheReason(event.target.value)} maxLength={500} placeholder="Explain why cached answers must be refreshed" /></label>
+          <label><span>Confirmation</span><input value={cacheConfirmation} onChange={(event) => setCacheConfirmation(event.target.value)} placeholder={requiredConfirmation} autoComplete="off" /><small>Type <strong>{requiredConfirmation}</strong> exactly.</small></label>
+        </div>
+        {cacheError ? <div className="notice error" role="alert">{cacheError}</div> : null}
+        <div className="modal-actions"><button className="button secondary" onClick={closeCacheDialog} disabled={cacheResetting}>Cancel</button><button className="button danger" onClick={() => void resetCache()} disabled={cacheResetting || cacheReason.trim().length < 8 || cacheConfirmation.trim().toUpperCase() !== requiredConfirmation}>{cacheResetting ? "Resetting" : "Reset answer cache"}</button></div>
+        <small>This action does not delete documents or change the Bedrock knowledge index. It only removes generated answer entries from Redis/Valkey.</small>
+      </section>
+    </div> : null}
   </section>;
 }

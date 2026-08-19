@@ -9,7 +9,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
@@ -21,6 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.operations import pipeline_trace_store
 from config import settings
 from services.admin_auth import require_admin_identity
+from services.answer_cache_admin import AnswerCacheUnavailable, reset_answer_cache
 from services.admin_users import (
     ADMIN_ROLES,
     ADMIN_SECTIONS,
@@ -200,6 +201,13 @@ class AnalyticsSavedViewInput(BaseModel):
     alert_not_helpful_threshold: float | None = Field(default=None, ge=0, le=1)
 
 
+class CacheResetInput(BaseModel):
+    country: str = Field(min_length=2, max_length=12)
+    mode: Literal["exact", "exact_and_semantic"] = "exact_and_semantic"
+    reason: str = Field(min_length=8, max_length=500)
+    confirmation: str = Field(min_length=5, max_length=32)
+
+
 def _payload(data: Any, request: Request) -> dict[str, Any]:
     return {
         "success": True,
@@ -273,6 +281,46 @@ def operational_status(request: Request) -> dict[str, Any]:
     """Return safe dependency, synchronization and deployed-version signals."""
     require_admin_access(request, "flow", "view")
     return _payload(operations_status(), request)
+
+
+@admin_router.post("/operations/cache/reset")
+def operational_cache_reset(body: CacheResetInput, request: Request) -> dict[str, Any]:
+    """Reset only cached answers after explicit Super Admin confirmation."""
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can reset answer caches.")
+
+    country = body.country.strip().upper()
+    supported = get_country_codes() | get_widget_country_codes()
+    if country != "ALL" and country not in supported:
+        raise HTTPException(status_code=400, detail="Unsupported country.")
+    if body.confirmation.strip().upper() != f"RESET {country}":
+        raise HTTPException(status_code=400, detail=f'Type "RESET {country}" to confirm.')
+
+    correlation_id = str(getattr(request.state, "correlation_id", "admin"))
+    try:
+        result = reset_answer_cache(
+            country,
+            include_semantic=body.mode == "exact_and_semantic",
+            correlation_id=correlation_id,
+        )
+    except AnswerCacheUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    record_admin_audit_event(
+        _actor(request),
+        "operations.answer_cache_reset",
+        country,
+        metadata={
+            "reason": body.reason.strip(),
+            "mode": body.mode,
+            "exact_deleted": result["exact_deleted"],
+            "semantic_deleted": result["semantic_deleted"],
+            "total_deleted": result["total_deleted"],
+            "correlation_id": correlation_id,
+        },
+    )
+    return _payload(result, request)
 
 
 @admin_router.get("/analytics/overview")
