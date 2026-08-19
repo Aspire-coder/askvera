@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import zipfile
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -13,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.response.models import ChatResponse
+from config import settings
 from services.db import get_engine
 from utils.redaction import redact_common_pii
 from utils.logging import get_logger
@@ -143,9 +145,37 @@ def _topic(response: ChatResponse) -> str:
     return "General assistance"
 
 
+def _model_routing_metadata(response: ChatResponse) -> dict[str, Any]:
+    """Normalize privacy-safe routing telemetry before database persistence."""
+    metadata = response.metadata if isinstance(response.metadata, dict) else {}
+    provider = str(metadata.get("provider") or "").strip().lower()
+    cache_state = str(metadata.get("cache") or "").strip().lower()
+    cache_hit = provider == "cache" or cache_state in {"hit", "exact", "semantic"}
+    reasons = metadata.get("model_route_reasons")
+    if not isinstance(reasons, (list, tuple)):
+        reasons = []
+    normalized_reasons = [str(reason)[:80] for reason in reasons if str(reason).strip()][:12]
+    try:
+        latency_ms = max(0, int(metadata.get("latency_ms") or 0))
+    except (TypeError, ValueError):
+        latency_ms = 0
+    actual_model = "" if cache_hit else str(
+        metadata.get("model_route_actual_model") or metadata.get("model_name") or ""
+    )[:500]
+    return {
+        "model_route_mode": str(metadata.get("model_route_mode") or "")[:24],
+        "model_route_target": str(metadata.get("model_route_target") or "")[:24],
+        "model_route_reasons": json.dumps(normalized_reasons),
+        "actual_model": actual_model,
+        "generation_latency_ms": latency_ms,
+        "cache_hit": cache_hit,
+    }
+
+
 def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlation_id: str) -> None:
     """Persist a scrubbed chat outcome for aggregate analytics and QA review."""
     input_tokens, output_tokens = _token_counts(response)
+    routing = _model_routing_metadata(response)
     try:
         with get_engine().begin() as connection:
             connection.execute(
@@ -154,11 +184,16 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                     INSERT INTO chat_analytics (
                         correlation_id, session_id, country, language, question,
                         answer, topic, confidence, source_count, input_tokens,
-                        output_tokens, fallback, failure_layer, traffic_source, created_at
+                        output_tokens, fallback, failure_layer, traffic_source,
+                        model_route_mode, model_route_target, model_route_reasons,
+                        actual_model, generation_latency_ms, cache_hit, created_at
                     ) VALUES (
                         :correlation_id, :session_id, :country, :language, :question,
                         :answer, :topic, :confidence, :source_count, :input_tokens,
-                        :output_tokens, :fallback, :failure_layer, :traffic_source, now()
+                        :output_tokens, :fallback, :failure_layer, :traffic_source,
+                        :model_route_mode, :model_route_target,
+                        CAST(:model_route_reasons AS JSONB), :actual_model,
+                        :generation_latency_ms, :cache_hit, now()
                     )
                     ON CONFLICT (correlation_id) DO UPDATE SET
                         answer = EXCLUDED.answer,
@@ -168,7 +203,13 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                         output_tokens = EXCLUDED.output_tokens,
                         traffic_source = EXCLUDED.traffic_source,
                         fallback = EXCLUDED.fallback,
-                        failure_layer = EXCLUDED.failure_layer
+                        failure_layer = EXCLUDED.failure_layer,
+                        model_route_mode = EXCLUDED.model_route_mode,
+                        model_route_target = EXCLUDED.model_route_target,
+                        model_route_reasons = EXCLUDED.model_route_reasons,
+                        actual_model = EXCLUDED.actual_model,
+                        generation_latency_ms = EXCLUDED.generation_latency_ms,
+                        cache_hit = EXCLUDED.cache_hit
                     """
                 ),
                 {
@@ -186,6 +227,7 @@ def record_chat_interaction(body: ChatRequest, response: ChatResponse, correlati
                     "fallback": bool(response.metadata.get("fallback")),
                     "failure_layer": str(response.metadata.get("failure_layer") or ""),
                     "traffic_source": body.trafficSource,
+                    **routing,
                 },
             )
     except SQLAlchemyError:
@@ -440,6 +482,181 @@ def analytics_overview(
         "topics": [dict(row) for row in topics],
         "countries": [dict(row) for row in countries],
         "languages": [dict(row) for row in languages],
+        "trend": [dict(row) for row in trend],
+    }
+
+
+def _routing_cost_projection(targets: list[dict[str, Any]]) -> dict[str, float | str]:
+    """Estimate shadow-mode savings using configurable per-million-token rates."""
+    fast_input = float(settings.MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION)
+    fast_output = float(settings.MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION)
+    complex_input = float(settings.MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION)
+    complex_output = float(settings.MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION)
+    total_input = sum(int(row.get("input_tokens") or 0) for row in targets)
+    total_output = sum(int(row.get("output_tokens") or 0) for row in targets)
+    baseline = (total_input * complex_input + total_output * complex_output) / 1_000_000
+    projected = 0.0
+    for row in targets:
+        is_fast = str(row.get("target") or "") == "fast"
+        input_rate = fast_input if is_fast else complex_input
+        output_rate = fast_output if is_fast else complex_output
+        projected += (
+            int(row.get("input_tokens") or 0) * input_rate
+            + int(row.get("output_tokens") or 0) * output_rate
+        ) / 1_000_000
+    savings = max(0.0, baseline - projected)
+    return {
+        "baselineUsd": round(baseline, 4),
+        "projectedUsd": round(projected, 4),
+        "projectedSavingsUsd": round(savings, 4),
+        "savingsRate": round(savings / baseline, 4) if baseline else 0.0,
+        "pricingLabel": str(settings.MODEL_ROUTING_PRICING_LABEL),
+    }
+
+
+def model_routing_report(
+    *,
+    days: int = 7,
+    country: str = "",
+    allowed_countries: set[str] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict[str, Any]:
+    """Return durable, RBAC-scoped model-routing telemetry for Operations."""
+    days = max(1, min(int(days), 365))
+    since, until = _analytics_window(days=days, start=start, end=end)
+    filters = ["created_at >= :since", "created_at < :until"]
+    parameters: dict[str, Any] = {"since": since, "until": until}
+    market_filter = _market_scope(
+        column="country",
+        country=country,
+        allowed_countries=allowed_countries,
+        parameters=parameters,
+    )
+    if market_filter:
+        filters.append(market_filter)
+    where = " AND ".join(filters)
+
+    with get_engine().connect() as connection:
+        totals_row = connection.execute(
+            text(
+                f"""
+                SELECT COUNT(*) AS questions,
+                       COUNT(*) FILTER (WHERE cache_hit) AS cached,
+                       COUNT(*) FILTER (
+                           WHERE model_route_target IN ('fast', 'complex')
+                       ) AS evaluated,
+                       COUNT(*) FILTER (WHERE model_route_target = 'fast') AS proposed_fast,
+                       COUNT(*) FILTER (WHERE model_route_target = 'complex') AS proposed_complex,
+                       COALESCE(AVG(generation_latency_ms) FILTER (
+                           WHERE generation_latency_ms > 0
+                       ), 0) AS average_generation_latency_ms
+                FROM chat_analytics WHERE {where}
+                """
+            ),
+            parameters,
+        ).mappings().one()
+        targets = connection.execute(
+            text(
+                f"""
+                SELECT model_route_target AS target,
+                       COUNT(*) AS questions,
+                       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                       COALESCE(AVG(generation_latency_ms) FILTER (
+                           WHERE generation_latency_ms > 0
+                       ), 0) AS average_latency_ms
+                FROM chat_analytics
+                WHERE {where} AND model_route_target IN ('fast', 'complex')
+                GROUP BY model_route_target ORDER BY model_route_target
+                """
+            ),
+            parameters,
+        ).mappings().all()
+        actual_models = connection.execute(
+            text(
+                f"""
+                SELECT actual_model AS label, COUNT(*) AS value
+                FROM chat_analytics
+                WHERE {where} AND actual_model <> ''
+                GROUP BY actual_model ORDER BY value DESC LIMIT 5
+                """
+            ),
+            parameters,
+        ).mappings().all()
+        reasons = connection.execute(
+            text(
+                f"""
+                SELECT reason AS label, COUNT(*) AS value
+                FROM chat_analytics,
+                     LATERAL jsonb_array_elements_text(model_route_reasons)
+                         AS route_reason(reason)
+                WHERE {where}
+                GROUP BY reason ORDER BY value DESC LIMIT 6
+                """
+            ),
+            parameters,
+        ).mappings().all()
+        countries = connection.execute(
+            text(
+                f"""
+                SELECT country AS label,
+                       COUNT(*) FILTER (
+                           WHERE model_route_target IN ('fast', 'complex')
+                       ) AS evaluated,
+                       COUNT(*) FILTER (WHERE model_route_target = 'fast') AS fast,
+                       COUNT(*) FILTER (WHERE model_route_target = 'complex') AS complex
+                FROM chat_analytics WHERE {where}
+                GROUP BY country ORDER BY evaluated DESC
+                """
+            ),
+            parameters,
+        ).mappings().all()
+        trend = connection.execute(
+            text(
+                f"""
+                SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS date,
+                       COUNT(*) FILTER (WHERE model_route_target = 'fast') AS fast,
+                       COUNT(*) FILTER (WHERE model_route_target = 'complex') AS complex,
+                       COUNT(*) FILTER (WHERE cache_hit) AS cached
+                FROM chat_analytics WHERE {where}
+                GROUP BY date_trunc('day', created_at)
+                ORDER BY date_trunc('day', created_at)
+                """
+            ),
+            parameters,
+        ).mappings().all()
+
+    questions = int(totals_row["questions"] or 0)
+    evaluated = int(totals_row["evaluated"] or 0)
+    cached = int(totals_row["cached"] or 0)
+    proposed_fast = int(totals_row["proposed_fast"] or 0)
+    proposed_complex = int(totals_row["proposed_complex"] or 0)
+    target_rows = [dict(row) for row in targets]
+    return {
+        "rangeDays": days,
+        "mode": str(settings.MODEL_ROUTING_MODE),
+        "models": {
+            "fast": str(settings.BEDROCK_FAST_MODEL_ID),
+            "complex": str(settings.BEDROCK_COMPLEX_MODEL_ID),
+        },
+        "totals": {
+            "questions": questions,
+            "evaluated": evaluated,
+            "cached": cached,
+            "unclassified": max(0, questions - cached - evaluated),
+            "proposedFast": proposed_fast,
+            "proposedComplex": proposed_complex,
+            "fastShare": round(proposed_fast / evaluated, 4) if evaluated else 0.0,
+            "averageGenerationLatencyMs": round(
+                float(totals_row["average_generation_latency_ms"] or 0.0), 1
+            ),
+        },
+        "cost": _routing_cost_projection(target_rows),
+        "targets": target_rows,
+        "actualModels": [dict(row) for row in actual_models],
+        "reasons": [dict(row) for row in reasons],
+        "countries": [dict(row) for row in countries],
         "trend": [dict(row) for row in trend],
     }
 

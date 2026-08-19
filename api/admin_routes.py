@@ -41,6 +41,7 @@ from services.analytics import (
     interaction_export_csv,
     interaction_export_xlsx,
     interaction_page,
+    model_routing_report,
     retrieval_shadow_report,
 )
 from services.analytics_governance import (
@@ -345,6 +346,33 @@ def overview(
             country=country,
             language=language,
             traffic_source=traffic_source,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
+            start=start,
+            end=end,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _payload(result, request)
+
+
+@admin_router.get("/analytics/model-routing")
+def model_routing_analytics(
+    request: Request,
+    days: int = 7,
+    country: str = "",
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
+    try:
+        result = model_routing_report(
+            days=days,
+            country=country,
             allowed_countries=None if principal.get("role") == "super_admin" else markets,
             start=start,
             end=end,

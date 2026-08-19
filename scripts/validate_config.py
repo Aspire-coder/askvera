@@ -95,6 +95,14 @@ def _validate_semantic_cache(missing: list[str]) -> None:
 
 def _validate_model_routing(missing: list[str]) -> None:
     """Validate opt-in routing without silently enabling model changes."""
+    for name in (
+        "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION",
+        "MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION",
+        "MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION",
+        "MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION",
+    ):
+        if float(getattr(settings, name)) < 0:
+            missing.append(f"{name} (must not be negative)")
     if settings.MODEL_ROUTING_MODE not in {"off", "shadow", "live"}:
         missing.append("MODEL_ROUTING_MODE (must be off, shadow, or live)")
         return

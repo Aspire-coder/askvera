@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
-import { ArrowIcon, CheckIcon, HomeIcon, RefreshIcon } from "../icons";
-import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, CacheResetResult, IngestionJob, OperationsStatus, View } from "../types";
+import { ArrowIcon, RefreshIcon } from "../icons";
+import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, CacheResetResult, IngestionJob, ModelRoutingReport, OperationsStatus, View } from "../types";
 import { useDialogFocus } from "../useDialogFocus";
 
 type OperationsOverviewProps = {
@@ -14,6 +14,9 @@ const formatNumber = (value: number) => new Intl.NumberFormat("en-US", { notatio
 
 export function OperationsOverview({ credentials, config, onNavigate }: OperationsOverviewProps) {
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
+  const [routing, setRouting] = useState<ModelRoutingReport>(demo.modelRouting);
+  const [routingDays, setRoutingDays] = useState("7");
+  const [routingCountry, setRoutingCountry] = useState("");
   const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [operations, setOperations] = useState<OperationsStatus | null>(null);
@@ -68,17 +71,21 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
       const auditRequest = canViewAudit
         ? withDemoFallback(() => api.auditEvents(), [])
         : Promise.resolve({ data: [] as AdminAuditEvent[], mode: "live" as DataMode });
-      const [overviewResult, jobsResult, auditResult, operationsResult] = await Promise.all([
+      const routingFilters = new URLSearchParams({ days: routingDays });
+      if (routingCountry) routingFilters.set("country", routingCountry);
+      const [overviewResult, routingResult, jobsResult, auditResult, operationsResult] = await Promise.all([
         withDemoFallback(() => api.overview(new URLSearchParams({ days: "1" })), demo.overview),
+        withDemoFallback(() => api.modelRouting(routingFilters), demo.modelRouting),
         withDemoFallback(() => api.ingestions(), demo.jobs),
         auditRequest,
         withDemoFallback(() => api.operationsStatus(), null)
       ]);
       setOverview(overviewResult.data);
+      setRouting(routingResult.data);
       setJobs(jobsResult.data);
       setAuditEvents(auditResult.data);
       setOperations(operationsResult.data);
-      setMode(overviewResult.mode === "live" || jobsResult.mode === "live" || auditResult.mode === "live" ? "live" : "demo");
+      setMode(overviewResult.mode === "live" || routingResult.mode === "live" || jobsResult.mode === "live" || auditResult.mode === "live" ? "live" : "demo");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Operational data could not be loaded.");
     } finally {
@@ -86,19 +93,14 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
     }
   };
 
-  useEffect(() => { void load(); }, [credentials.accessToken, credentials.apiKey, canViewAudit]);
+  useEffect(() => { void load(); }, [credentials.accessToken, credentials.apiKey, canViewAudit, routingDays, routingCountry]);
 
   const activeJobs = jobs.filter((job) => ["queued", "processing", "indexing", "staging"].includes(job.status));
   const failedJobs = jobs.filter((job) => ["failed", "error"].includes(job.status));
-  const pendingJobs = jobs.filter((job) => ["queued", "processing", "indexing", "staging"].includes(job.status));
   const recentAudit = auditEvents.slice(0, 4);
-  const coverageCount = config.countries.length;
-  const widgetCoverageCount = config.widgetCountries?.length ?? coverageCount;
-  const checks = [
-    { label: "Review low-rated answers", detail: `${overview.totals.notHelpful} answers need attention`, view: "insights" as const, done: overview.totals.notHelpful === 0 },
-    { label: "Check knowledge processing", detail: pendingJobs.length ? `${pendingJobs.length} document job${pendingJobs.length === 1 ? "" : "s"} in progress` : "No documents are processing", view: "knowledge" as const, done: pendingJobs.length === 0 },
-    { label: "Confirm support routing", detail: "Market destinations are managed centrally", view: "support" as const, done: true }
-  ];
+  const routingModeLabel = routing.mode === "shadow" ? "Shadow observation" : routing.mode === "live" ? "Live routing" : "Routing off";
+  const actualModel = routing.actualModels[0]?.label || "No generated answers in this range";
+  const fastPercent = Math.round(routing.totals.fastShare * 100);
 
   return <section className="page-section overview-page">
     <div className="page-heading">
@@ -112,6 +114,28 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
       <article className="overview-metric surface"><span>Helpful answers</span><strong>{Math.round(overview.totals.helpfulRate * 100)}%</strong><small>{formatNumber(overview.totals.helpful + overview.totals.notHelpful)} ratings recorded</small></article>
       <article className="overview-metric surface"><span>Knowledge jobs</span><strong>{activeJobs.length}</strong><small>{failedJobs.length ? `${failedJobs.length} failed job${failedJobs.length === 1 ? "" : "s"} to review` : "No failed jobs"}</small></article>
     </div>
+    <section className="surface routing-dashboard" aria-labelledby="routing-dashboard-title">
+      <div className="section-heading routing-heading">
+        <div><span className="eyebrow">Model routing</span><h2 id="routing-dashboard-title">Fast answers without lowering protection.</h2><p>See which fresh answers can use Haiku and which should stay with Sonnet.</p></div>
+        <div className="routing-filters">
+          <label><span>Market</span><select value={routingCountry} onChange={(event) => setRoutingCountry(event.target.value)}><option value="">All markets</option>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}</select></label>
+          <label><span>Period</span><select value={routingDays} onChange={(event) => setRoutingDays(event.target.value)}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+        </div>
+      </div>
+      <div className={`routing-mode-banner ${routing.mode}`}><strong>{routingModeLabel}</strong><span>{routing.mode === "shadow" ? "No customer answers are using Haiku yet. The system is measuring what would happen before activation." : routing.mode === "live" ? "Eligible customer answers are being routed between the configured models." : "Model routing decisions are not active."}</span></div>
+      <div className="routing-metrics">
+        <article><span>Fresh answers evaluated</span><strong>{formatNumber(routing.totals.evaluated)}</strong><small>{formatNumber(routing.totals.cached)} cache hits skipped model generation</small></article>
+        <article><span>Haiku eligible</span><strong>{fastPercent}%</strong><small>{formatNumber(routing.totals.proposedFast)} lower-complexity answers</small></article>
+        <article><span>Sonnet protected</span><strong>{formatNumber(routing.totals.proposedComplex)}</strong><small>Complex or higher-risk answers retained</small></article>
+        <article><span>Projected savings</span><strong>${routing.cost.projectedSavingsUsd.toFixed(2)}</strong><small>{Math.round(routing.cost.savingsRate * 100)}% of evaluated model cost</small></article>
+      </div>
+      <div className="routing-detail-grid">
+        <div className="routing-split-panel"><div className="routing-split-label"><strong>Proposed answer split</strong><span>{routing.totals.evaluated ? `${fastPercent}% Haiku · ${100 - fastPercent}% Sonnet` : "Waiting for fresh answers"}</span></div><div className="routing-split" role="img" aria-label={`${fastPercent}% Haiku eligible and ${100 - fastPercent}% Sonnet protected`}><span style={{ width: `${fastPercent}%` }} /></div><small>Average generation time: {routing.totals.averageGenerationLatencyMs ? `${Math.round(routing.totals.averageGenerationLatencyMs).toLocaleString()} ms` : "not available"}</small></div>
+        <div className="routing-reasons"><strong>Why Sonnet or Haiku was chosen</strong>{routing.reasons.length ? routing.reasons.slice(0, 4).map((reason) => <div key={reason.label}><span>{reason.label.replaceAll("_", " ")}</span><em>{formatNumber(reason.value)}</em></div>) : <small>No routing reasons recorded yet.</small>}</div>
+        <div className="routing-actual"><strong>Actual model used</strong><span>{actualModel}</span><small>{routing.mode === "shadow" ? "Shadow recommendations do not change the production model." : "Based on generated answers in this period."}</small><button className="text-button" onClick={() => onNavigate("flow")}>Inspect individual answers <ArrowIcon /></button></div>
+      </div>
+      <p className="routing-pricing-note">Projection only · {routing.cost.pricingLabel}. Baseline ${routing.cost.baselineUsd.toFixed(2)} → projected ${routing.cost.projectedUsd.toFixed(2)}.</p>
+    </section>
     <section className="surface operations-health" aria-labelledby="operations-health-title">
       <div className="section-heading"><div><span className="eyebrow">Production status</span><h2 id="operations-health-title">Service health and deployed versions</h2><p>Live dependency checks, knowledge synchronization and versions reported by the API.</p></div><span className={`status-label ${operations?.status || "unknown"}`}>{operations?.status || "Unavailable"}</span></div>
       {operations ? <>
@@ -131,22 +155,17 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
       {cacheResult ? <div className="notice cache-result" role="status"><strong>Cache reset completed.</strong> Removed {cacheResult.total_deleted} answer cache {cacheResult.total_deleted === 1 ? "entry" : "entries"} for {cacheResult.country === "ALL" ? "all markets" : cacheResult.country} ({cacheResult.exact_deleted} exact, {cacheResult.semantic_deleted} semantic) at {new Date(cacheResult.completed_at).toLocaleString()}.</div> : null}
     </section>
     <div className="overview-grid">
-      <section className="surface overview-panel"><div className="section-heading"><div><h2>Start here</h2><p>The three checks that keep the service healthy.</p></div><HomeIcon /></div><div className="overview-checklist">{checks.map((check) => <button key={check.label} onClick={() => onNavigate(check.view)}><span className={`check-icon ${check.done ? "done" : ""}`}>{check.done ? <CheckIcon /> : <span />}</span><span><strong>{check.label}</strong><small>{check.detail}</small></span><ArrowIcon /></button>)}</div></section>
       <section className="surface overview-panel"><div className="section-heading"><div><h2>Quick actions</h2><p>Jump directly to the task you need.</p></div></div><div className="quick-actions"><button onClick={() => onNavigate("knowledge")}><strong>Upload knowledge</strong><span>Add a policy or global directory document.</span><ArrowIcon /></button><button onClick={() => onNavigate("insights")}><strong>Review answers</strong><span>Inspect feedback, confidence, and retrieval signals.</span><ArrowIcon /></button><button onClick={() => onNavigate("support")}><strong>Manage support</strong><span>Update where customer requests are delivered.</span><ArrowIcon /></button><button onClick={() => onNavigate("widget")}><strong>Manage widgets</strong><span>Configure approved websites and embed code.</span><ArrowIcon /></button></div></section>
-    </div>
-    <div className="overview-grid overview-secondary-grid">
       <section className="surface overview-panel"><div className="section-heading"><div><span className="eyebrow">Operational signal</span><h2>What needs attention</h2><p>These signals are based on the current selected range.</p></div></div><div className="attention-list">
         <button onClick={() => onNavigate("insights")}><span className={`attention-dot ${overview.totals.notHelpful ? "warning" : "good"}`} /><span><strong>{overview.totals.notHelpful ? `${overview.totals.notHelpful} low-rated answers` : "No low-rated answers"}</strong><small>{overview.totals.notHelpful ? "Open Answer review to inspect them." : "Feedback is not waiting for review."}</small></span><ArrowIcon /></button>
         <button onClick={() => onNavigate("knowledge")}><span className={`attention-dot ${failedJobs.length ? "warning" : "good"}`} /><span><strong>{failedJobs.length ? `${failedJobs.length} failed knowledge jobs` : "Knowledge processing is healthy"}</strong><small>{failedJobs.length ? "Open Knowledge to see the error details." : "No failed jobs in the latest activity window."}</small></span><ArrowIcon /></button>
         <button onClick={() => onNavigate("users")}><span className="attention-dot neutral" /><span><strong>Access is centrally managed</strong><small>Review administrators and audit history in Users.</small></span><ArrowIcon /></button>
       </div></section>
-      <section className="surface overview-panel"><div className="section-heading"><div><span className="eyebrow">Change history</span><h2>Recent admin activity</h2><p>Read-only visibility into configuration changes.</p></div></div><div className="activity-list">
+    </div>
+    <section className="surface overview-panel overview-activity"><div className="section-heading"><div><span className="eyebrow">Change history</span><h2>Recent admin activity</h2><p>Read-only visibility into configuration changes.</p></div></div><div className="activity-list">
         {recentAudit.map((event) => <div className="activity-row" key={event.event_id}><span className="activity-mark" /><span><strong>{event.action.replaceAll(".", " ")}</strong><small>{event.target_type} / {event.target_id}</small></span><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></div>)}
         {!recentAudit.length ? <div className="empty-state compact">No recent administrator changes are available.</div> : null}
       </div></section>
-    </div>
-    <section className="surface readiness-panel"><div><span className="eyebrow">Coverage and readiness</span><h2>One place to see what is connected.</h2><p>Markets and widget coverage are configured separately. This keeps a new market from appearing in a customer widget before its approved content and support destination are ready.</p></div><div className="readiness-grid"><div><strong>{coverageCount}</strong><span>approved markets</span></div><div><strong>{widgetCoverageCount}</strong><span>widget markets</span></div><div><strong>{config.documentTypes.length}</strong><span>content types</span></div><div><strong>{config.rbacEnabled ? "On" : "Off"}</strong><span>role-based access</span></div></div></section>
-    <section className="surface overview-footer"><div><span className="eyebrow">Configured coverage</span><h2>{config.countries.length} approved markets available</h2><p>Keep market policy coverage, global directory content, and support routing aligned from the sections in the left navigation.</p></div><button className="button primary" onClick={() => onNavigate("flow")}>Follow a live answer <ArrowIcon /></button></section>
     {cacheDialogOpen ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCacheDialog(); }}>
       <section ref={cacheDialogRef} className="connection-modal cache-reset-modal" role="dialog" aria-modal="true" aria-labelledby="cache-reset-title" tabIndex={-1}>
         <span className="eyebrow">Super Admin only</span>

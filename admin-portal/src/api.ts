@@ -3,6 +3,7 @@ import {
   demoConfig,
   demoInteractions,
   demoJobs,
+  demoModelRouting,
   demoOverview,
   demoShadowReport,
   demoTrace
@@ -20,6 +21,7 @@ import type {
   KnowledgeGeneration,
   InteractionPage,
   MarketReadiness,
+  ModelRoutingReport,
   OperationsStatus,
   CacheResetResult,
   PipelineTrace,
@@ -128,6 +130,7 @@ export class AdminApi {
     }
   }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
+  modelRouting(filters: URLSearchParams) { return this.request<ModelRoutingReport>(`/api/admin/analytics/model-routing?${filters}`); }
   interactions(filters: URLSearchParams) { return this.request<InteractionPage>(`/api/admin/analytics/interactions?${filters}`); }
   updateInteractionReview(correlationId: string, body: { status: string; assignee_email: string; resolution_notes: string }) {
     return this.request<{ status: string; assignee_email: string; resolution_notes: string }>(`/api/admin/analytics/interactions/${encodeURIComponent(correlationId)}/review`, {
@@ -269,6 +272,7 @@ export const demo = {
   config: demoConfig,
   traces: [demoTrace, demoCachedTrace],
   overview: demoOverview,
+  modelRouting: demoModelRouting,
   shadowReport: demoShadowReport,
   interactions: demoInteractions,
   jobs: demoJobs

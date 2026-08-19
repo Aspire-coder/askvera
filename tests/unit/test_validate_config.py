@@ -315,3 +315,12 @@ def test_live_model_routing_requires_evidence_gate(monkeypatch) -> None:
     monkeypatch.setattr(settings, "EVIDENCE_GATED_OUTPUT_ENABLED", False)
 
     assert "EVIDENCE_GATED_OUTPUT_ENABLED (must be true for live model routing)" in validate()
+
+
+def test_model_routing_rejects_negative_dashboard_pricing(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION", -1.0)
+
+    assert (
+        "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION (must not be negative)" in validate()
+    )

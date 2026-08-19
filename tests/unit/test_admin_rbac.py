@@ -224,6 +224,34 @@ def test_insights_rejects_unassigned_market() -> None:
     assert exc_info.value.status_code == 403
 
 
+def test_model_routing_report_is_limited_to_assigned_markets(monkeypatch) -> None:
+    principal = _principal(
+        {"market": "DE", "section": "insights", "permission": "view"},
+        {"market": "CH", "section": "insights", "permission": "view"},
+    )
+    captured: dict = {}
+
+    def routing_stub(**kwargs):
+        captured.update(kwargs)
+        return {"totals": {"evaluated": 2}}
+
+    monkeypatch.setattr(admin_routes, "model_routing_report", routing_stub)
+
+    response = admin_routes.model_routing_analytics(_request(principal), days=7)
+
+    assert response["data"]["totals"]["evaluated"] == 2
+    assert captured["allowed_countries"] == {"DE", "CH"}
+
+
+def test_model_routing_report_rejects_unassigned_market() -> None:
+    principal = _principal({"market": "CA", "section": "insights", "permission": "view"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.model_routing_analytics(_request(principal), country="US")
+
+    assert exc_info.value.status_code == 403
+
+
 def test_country_admin_can_update_only_assigned_support_route(monkeypatch) -> None:
     principal = _principal(
         {"market": "GB", "section": "support", "permission": "manage"}

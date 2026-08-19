@@ -155,6 +155,9 @@ sudo -u "${APP_USER}" .venv/bin/python -m compileall app api config services uti
 log "Validating production configuration before restart."
 sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm --require-production
 
+log "Applying ordered database migrations."
+sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm --apply
+
 if [[ "${RUN_TESTS}" == "true" ]]; then
   log "Running tests."
   sudo -u "${APP_USER}" .venv/bin/python -m pytest tests -q

@@ -231,6 +231,12 @@ def create_schema(correlation_id: str = "startup") -> None:
                         fallback BOOLEAN NOT NULL DEFAULT false,
                         failure_layer TEXT NOT NULL DEFAULT '',
                         traffic_source TEXT NOT NULL DEFAULT 'legacy',
+                        model_route_mode TEXT NOT NULL DEFAULT '',
+                        model_route_target TEXT NOT NULL DEFAULT '',
+                        model_route_reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        actual_model TEXT NOT NULL DEFAULT '',
+                        generation_latency_ms INTEGER NOT NULL DEFAULT 0,
+                        cache_hit BOOLEAN NOT NULL DEFAULT false,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                     """
@@ -252,6 +258,12 @@ def create_schema(correlation_id: str = "startup") -> None:
                     """
                 )
             )
+            connection.execute(text("ALTER TABLE chat_analytics ADD COLUMN IF NOT EXISTS model_route_mode TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE chat_analytics ADD COLUMN IF NOT EXISTS model_route_target TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE chat_analytics ADD COLUMN IF NOT EXISTS model_route_reasons JSONB NOT NULL DEFAULT '[]'::jsonb"))
+            connection.execute(text("ALTER TABLE chat_analytics ADD COLUMN IF NOT EXISTS actual_model TEXT NOT NULL DEFAULT ''"))
+            connection.execute(text("ALTER TABLE chat_analytics ADD COLUMN IF NOT EXISTS generation_latency_ms INTEGER NOT NULL DEFAULT 0"))
+            connection.execute(text("ALTER TABLE chat_analytics ADD COLUMN IF NOT EXISTS cache_hit BOOLEAN NOT NULL DEFAULT false"))
             connection.execute(
                 text(
                     """

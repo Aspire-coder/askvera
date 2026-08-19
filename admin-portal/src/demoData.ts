@@ -3,6 +3,7 @@ import type {
   AnalyticsOverview,
   IngestionJob,
   Interaction,
+  ModelRoutingReport,
   PipelineTrace,
   ShadowReport
 } from "./types";
@@ -81,6 +82,50 @@ export const demoOverview: AnalyticsOverview = {
     const date = new Date(now.getTime() - (daily.length - index - 1) * 86400000).toISOString().slice(0, 10);
     return { date, questions, users: Math.round(questions * 0.39), tokens: questions * 1320 };
   })
+};
+
+export const demoModelRouting: ModelRoutingReport = {
+  rangeDays: 7,
+  mode: "shadow",
+  models: {
+    fast: "Claude Haiku 4.5",
+    complex: "Claude Sonnet 5"
+  },
+  totals: {
+    questions: 486,
+    evaluated: 352,
+    cached: 118,
+    unclassified: 16,
+    proposedFast: 239,
+    proposedComplex: 113,
+    fastShare: 0.679,
+    averageGenerationLatencyMs: 3218
+  },
+  cost: {
+    baselineUsd: 16.42,
+    projectedUsd: 9.87,
+    projectedSavingsUsd: 6.55,
+    savingsRate: 0.399,
+    pricingLabel: "US geographic on-demand rates configured 2026-08-19"
+  },
+  targets: [
+    { target: "fast", questions: 239, input_tokens: 715000, output_tokens: 69200, average_latency_ms: 2820 },
+    { target: "complex", questions: 113, input_tokens: 421000, output_tokens: 51800, average_latency_ms: 4060 }
+  ],
+  actualModels: [{ label: "Claude Sonnet production model", value: 352 }],
+  reasons: [
+    { label: "low_risk_evidence", value: 239 },
+    { label: "conversation_context", value: 52 },
+    { label: "structured_evidence", value: 31 },
+    { label: "low_confidence", value: 30 }
+  ],
+  countries: [
+    { label: "US", evaluated: 132, fast: 91, complex: 41 },
+    { label: "BE", evaluated: 96, fast: 64, complex: 32 },
+    { label: "CA", evaluated: 73, fast: 51, complex: 22 },
+    { label: "NL", evaluated: 51, fast: 33, complex: 18 }
+  ],
+  trend: []
 };
 
 export const demoShadowReport: ShadowReport = {

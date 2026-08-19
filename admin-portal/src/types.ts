@@ -252,6 +252,40 @@ export type AnalyticsOverview = {
   trend: Array<{ date: string; questions: number; users: number; tokens: number }>;
 };
 
+export type ModelRoutingReport = {
+  rangeDays: number;
+  mode: "off" | "shadow" | "live" | string;
+  models: { fast: string; complex: string };
+  totals: {
+    questions: number;
+    evaluated: number;
+    cached: number;
+    unclassified: number;
+    proposedFast: number;
+    proposedComplex: number;
+    fastShare: number;
+    averageGenerationLatencyMs: number;
+  };
+  cost: {
+    baselineUsd: number;
+    projectedUsd: number;
+    projectedSavingsUsd: number;
+    savingsRate: number;
+    pricingLabel: string;
+  };
+  targets: Array<{
+    target: "fast" | "complex";
+    questions: number;
+    input_tokens: number;
+    output_tokens: number;
+    average_latency_ms: number;
+  }>;
+  actualModels: Array<{ label: string; value: number }>;
+  reasons: Array<{ label: string; value: number }>;
+  countries: Array<{ label: string; evaluated: number; fast: number; complex: number }>;
+  trend: Array<{ date: string; fast: number; complex: number; cached: number }>;
+};
+
 export type Interaction = {
   correlation_id: string;
   session_id: string;
