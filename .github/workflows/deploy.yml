@@ -16,7 +16,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.12"
+          # Match the Python runtime installed on the production EC2 instance.
+          python-version: "3.11"
 
       - name: Install Python dependencies
         run: |
