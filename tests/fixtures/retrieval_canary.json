@@ -22,6 +22,16 @@
       "evidence_must_be_approved": true
     },
     {
+      "id": "recognized-manager-requirements-baseline",
+      "question": "What are the requirements to become a recognized manager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Recognized Manager",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
       "id": "recognized-manager-british-and-typo",
       "question": "What are the requirments to become a recognised manager?",
       "country": "US",

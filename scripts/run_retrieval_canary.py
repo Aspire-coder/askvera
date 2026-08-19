@@ -102,6 +102,7 @@ def run_case(case: dict[str, Any], sequence: int):
         "failure_reasons": failures,
         "typo_ranking_applied": bool(result.metadata.get("typo_ranking_applied")),
         "ranking_query_used": result.metadata.get("ranking_query_used", ""),
+        "document_scores": [round(float(document.score or 0.0), 3) for document in result.documents],
     }
 
 

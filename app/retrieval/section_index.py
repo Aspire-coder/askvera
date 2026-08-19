@@ -148,7 +148,12 @@ def _source_score(row: dict[str, Any], message: str) -> float:
 
 
 def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
-    """Create a conservative confidence value from section scores."""
+    """Create conservative confidence from selected and corroborating evidence.
+
+    An evidence selector may place the governing section ahead of a higher raw
+    lexical score. Preserve that selected order, but grant a small capped bonus
+    when another approved section strongly corroborates the selected result.
+    """
     if not documents:
         return 0.0
     scores = [float(document.score or 0.0) for document in documents]
@@ -156,7 +161,12 @@ def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
     runner_up = scores[1] if len(scores) > 1 else 0.0
     avg_score = sum(scores) / len(scores)
     margin = max(top_score - runner_up, 0.0)
-    normalized = min((top_score / 10.0) + (margin / 10.0) + (avg_score / 30.0), 0.95)
+    strongest_score = max(scores)
+    corroboration = min(max(strongest_score - top_score, 0.0) / 40.0, 0.1)
+    normalized = min(
+        (top_score / 10.0) + (margin / 10.0) + (avg_score / 30.0) + corroboration,
+        0.95,
+    )
     return round(normalized, 3)
 
 
