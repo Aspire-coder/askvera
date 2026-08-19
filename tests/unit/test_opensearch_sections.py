@@ -1,6 +1,8 @@
 """Tests for generic OpenSearch section retrieval behavior."""
 
+from app.evidence import approve_evidence
 from app.retrieval import opensearch_sections
+from app.retrieval.models import RetrievalResult
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
@@ -150,7 +152,42 @@ def test_sponsoring_directory_keeps_source_text_instead_of_office_fields() -> No
     )
 
     assert document.metadata["directory_kind"] == "international_sponsoring"
+    assert document.metadata["access_scope"] == "country"
     assert "directory_fields" not in document.metadata
+
+
+def test_global_sponsoring_document_preserves_scope_for_evidence_gate() -> None:
+    document = OpenSearchSectionProvider()._document_from_row(
+        {
+            "id": "sponsoring-belgium",
+            "section_id": "sponsoring-belgium",
+            "section_title": "Forever Belgium",
+            "content": "Minimum order size FBO: 50,00 in products excluding VAT.",
+            "country": "GLOBAL",
+            "language": "en",
+            "access_scope": "global",
+            "document_type": "international_sponsoring_directory",
+            "metadata": {
+                "directory_kind": "international_sponsoring",
+                "record_country": "Belgium",
+            },
+        },
+        1.0,
+    )
+
+    assert document.metadata["access_scope"] == "global"
+    assert document.metadata["document_type"] == "international_sponsoring_directory"
+    result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.9,
+    )
+    assert approve_evidence(
+        "What is the minimum order size for Belgium?",
+        result,
+        "US",
+        "en",
+    ).approved
 
 
 def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch) -> None:

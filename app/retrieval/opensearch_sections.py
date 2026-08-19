@@ -843,6 +843,8 @@ class OpenSearchSectionProvider:
             score=score,
             metadata={
                 **metadata,
+                "access_scope": row.get("access_scope", "country"),
+                "document_type": row.get("document_type", ""),
                 "section_id": row.get("section_id", ""),
                 "section_title": row.get("section_title", ""),
                 "parent_section_id": row.get("parent_section_id", ""),

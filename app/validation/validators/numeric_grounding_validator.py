@@ -38,8 +38,19 @@ def _normalize(text: str) -> str:
 
 
 def _number_variants(number: str) -> set[str]:
-    """Return notation variants without assuming a language's range word."""
-    return {_normalize(number)}
+    """Return safe decimal notation variants without changing numeric value."""
+    normalized = _normalize(number)
+    variants = {normalized}
+    # A one- or two-digit fractional part is unambiguously decimal in the
+    # policy data we validate. Treat comma and point notation as equivalent so
+    # an English answer can cite a source that uses continental formatting.
+    decimal_match = re.fullmatch(r"(?P<whole>\d+)(?P<separator>[.,])(?P<fraction>\d{1,2})", normalized)
+    if decimal_match:
+        other_separator = "," if decimal_match.group("separator") == "." else "."
+        variants.add(
+            f"{decimal_match.group('whole')}{other_separator}{decimal_match.group('fraction')}"
+        )
+    return variants
 
 
 def _word_tokens(text: str) -> set[str]:
