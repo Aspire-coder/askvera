@@ -71,6 +71,7 @@ def test_accepts_only_bounded_spelling_repairs(
         ("What are FPC requirements?", "preferred customer requirements"),
         ("How can I become a manager?", "leadership bonus qualification criteria"),
         ("How can I become a member?", "membership requirements"),
+        ("What are the requirements?", "That is the requirements section"),
         ("What is the weather today?", "recognized manager qualification"),
         ("What is a recognized manager?", "recognized manager"),
     ],
@@ -129,6 +130,26 @@ def test_approved_evidence_title_can_repair_when_planner_does_not() -> None:
     assert row["ranking_query_used"] == "how can i become a recognized manager"
     assert row["typo_ranking_applied"] is True
     assert final_score > row["original_question_score"]
+
+
+def test_locale_filtered_candidate_vocabulary_repairs_non_top_typo() -> None:
+    provider = OpenSearchSectionProvider()
+    original = "What are the requirments to become a recognised manager?"
+    requirement_hit = _hit("requirements", "Qualification Requirements", 3.0)
+    rows = provider._merge_hits(
+        [
+            _hit("recognized", "Recognized Manager", 6.0),
+            requirement_hit,
+        ],
+        [],
+        original,
+        ranking_queries=[],
+    )
+
+    recognized_row = next(row for row, _score in rows if row["id"] == "recognized")
+    assert "requirements" in recognized_row["ranking_query_used"]
+    assert "recognized manager" in recognized_row["ranking_query_used"]
+    assert recognized_row["typo_ranking_applied"] is True
 
 
 def test_unsafe_semantic_expansion_cannot_change_ranking() -> None:

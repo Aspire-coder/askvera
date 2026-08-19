@@ -716,6 +716,22 @@ class OpenSearchSectionProvider:
                 existing["rank"] = float(existing.get("rank") or 0.0) + float(row.get("rank") or 0.0)
 
         self._normalize_opensearch_ranks(list(merged.values()))
+        shared_evidence_text = [
+            " ".join(
+                [
+                    str(row.get("section_title") or ""),
+                    str(row.get("content") or "")[:500],
+                ]
+            )
+            for row in list(merged.values())[: settings.OPENSEARCH_CANDIDATE_COUNT]
+        ]
+        shared_evidence_repair_queries = safe_typo_ranking_queries(
+            message,
+            shared_evidence_text,
+        )
+        shared_ranking_queries = list(
+            dict.fromkeys([*(ranking_queries or []), *shared_evidence_repair_queries])
+        )
         scored: list[tuple[dict[str, Any], float]] = []
         for row in merged.values():
             original_score = _source_score(row, message) + _directory_record_country_score(message, row)
@@ -731,7 +747,7 @@ class OpenSearchSectionProvider:
                 ],
             )
             candidate_ranking_queries = list(
-                dict.fromkeys([*(ranking_queries or []), *evidence_repair_queries])
+                dict.fromkeys([*shared_ranking_queries, *evidence_repair_queries])
             )
             for ranking_query in candidate_ranking_queries:
                 candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
