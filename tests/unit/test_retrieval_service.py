@@ -29,6 +29,22 @@ def disable_shadow_analytics(monkeypatch):
     monkeypatch.setattr(retrieval_service_module, "record_retrieval_shadow_comparison", MagicMock())
 
 
+def test_retrieval_plan_adds_reviewed_spaced_variant_for_joined_business_term(monkeypatch) -> None:
+    """Joined policy terms get an extra approved query without enabling glossary expansion."""
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", False)
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", False)
+
+    plan = _planned_retrieval_plan(
+        "How can I become a recognizedmanager?",
+        "US",
+        "en",
+        "joined-term-cid",
+    )
+
+    assert plan.queries[0] == "How can I become a recognizedmanager?"
+    assert "recognized manager" in plan.queries
+
+
 class _StaticProvider:
     def __init__(self, provider_name: str) -> None:
         self.provider_name = provider_name

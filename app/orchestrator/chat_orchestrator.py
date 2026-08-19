@@ -132,13 +132,14 @@ class AIOrchestrator:
             return chat_response
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
-        governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
+        request_query = self._build_request_query(scrubbed_input, retrieval_query, history)
+        governance_decision = self._evaluate_governance(request_query, body, correlation_id)
         if not governance_decision.allowed:
             return self._governance_fallback(
                 governance_decision, correlation_id, body.language, body.country, body.message
             )
 
-        cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
+        cache_key = build_cache_key(request_query, body.country, body.language, body.role)
         cached_response = self._cached_response(cache_key, body, correlation_id, scrubbed_input)
         if cached_response:
             return cached_response
@@ -155,7 +156,7 @@ class AIOrchestrator:
             return chat_response
         assert evidence_decision is not None
         cached_response, semantic_candidate, semantic_lookup_ms = self._semantic_cached_response(
-            retrieval_query, retrieval_result, body, correlation_id, scrubbed_input
+            request_query, retrieval_result, body, correlation_id, scrubbed_input
         )
         if cached_response:
             return cached_response
@@ -266,7 +267,7 @@ class AIOrchestrator:
         )
         self._cache_response(
             cache_key,
-            retrieval_query,
+            request_query,
             retrieval_result,
             chat_response,
             body,
@@ -627,7 +628,7 @@ class AIOrchestrator:
         )
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
-        """Expand vague follow-up questions with recent user-message context."""
+        """Return the substantive question used to retrieve follow-up evidence."""
         user_message = self._normalize_malformed_spacing(user_message, correlation_id)
         if not self._needs_history_context(user_message, history):
             return user_message
@@ -637,14 +638,25 @@ class AIOrchestrator:
             return user_message
 
         anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
-        query = f"{anchor}\nFollow-up request: {user_message}"
         LOGGER.info(
             "chat_followup_context_applied",
             correlation_id=correlation_id,
             original_length=len(user_message),
-            contextual_length=len(query),
+            contextual_length=len(anchor),
         )
-        return query
+        return anchor
+
+    def _build_request_query(self, user_message: str, retrieval_query: str, history: str = "") -> str:
+        """Keep follow-up intent in governance and cache keys, outside retrieval."""
+        normalized_message = " ".join((user_message or "").split()).strip()
+        normalized_retrieval = " ".join((retrieval_query or "").split()).strip()
+        if (
+            not self._needs_history_context(normalized_message, history)
+            or not normalized_retrieval
+            or normalized_retrieval == normalized_message
+        ):
+            return normalized_retrieval or normalized_message
+        return f"{normalized_retrieval}\nFollow-up request: {normalized_message}"
 
     def _normalize_malformed_spacing(self, message: str, correlation_id: str) -> str:
         """Repair character-spaced input without using a language vocabulary."""

@@ -102,8 +102,8 @@ def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     router.generate.assert_not_called()
 
 
-def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -> None:
-    """Vague follow-ups are expanded with the referenced prior user question."""
+def test_followup_about_first_question_uses_anchor_for_retrieval(monkeypatch) -> None:
+    """Vague follow-ups retrieve with the original topic, not generic follow-up text."""
     governance = _FakeGovernance()
     retriever = _FakeRetriever()
     orchestrator = AIOrchestrator(
@@ -138,10 +138,11 @@ def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -
     response = orchestrator.handle_chat(body, "cid")
 
     assert response.answer == "Here is more detail about becoming a Recognized Manager."
-    assert retriever.seen_messages == [
-        "how can i become a recognized manager\nFollow-up request: explain me more about my first question"
-    ]
-    assert governance.seen_texts[0] == retriever.seen_messages[0]
+    assert retriever.seen_messages == ["how can i become a recognized manager"]
+    assert governance.seen_texts[0] == (
+        "how can i become a recognized manager\n"
+        "Follow-up request: explain me more about my first question"
+    )
 
 
 def test_more_details_uses_latest_self_contained_question() -> None:
@@ -156,7 +157,10 @@ def test_more_details_uses_latest_self_contained_question() -> None:
 
     query = orchestrator._build_retrieval_query("I need more details", history, "cid")
 
-    assert query == "How can I sign up in Belgium?\nFollow-up request: I need more details"
+    assert query == "How can I sign up in Belgium?"
+    assert orchestrator._build_request_query("I need more details", query, history) == (
+        "How can I sign up in Belgium?\nFollow-up request: I need more details"
+    )
 
 
 def test_chained_followup_skips_prior_vague_followup() -> None:
@@ -173,7 +177,10 @@ def test_chained_followup_skips_prior_vague_followup() -> None:
 
     query = orchestrator._build_retrieval_query("Can you elaborate?", history, "cid")
 
-    assert query == "How can I sign up in Belgium?\nFollow-up request: Can you elaborate?"
+    assert query == "How can I sign up in Belgium?"
+    assert orchestrator._build_request_query("Can you elaborate?", query, history) == (
+        "How can I sign up in Belgium?\nFollow-up request: Can you elaborate?"
+    )
 
 
 def test_short_standalone_question_does_not_inherit_history() -> None:
@@ -664,6 +671,10 @@ def test_character_spaced_question_is_repaired_without_language_dictionary() -> 
     )
 
     assert query.lower() == "how to become a recognized manager"
+    assert orchestrator._build_request_query(
+        "H o W  t o  b e c o m e  a  r e c o g n i z e d  m a n a g e r",
+        query,
+    ) == query
 
 
 def test_normal_sentence_is_not_changed_by_spacing_repair() -> None:

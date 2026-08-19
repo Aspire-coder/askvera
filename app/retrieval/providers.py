@@ -14,7 +14,7 @@ from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions
 from utils.logging import get_logger
 
-from .glossary import glossary_queries
+from .glossary import approved_joined_term_queries, glossary_queries
 from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.providers")
@@ -372,11 +372,12 @@ def _planned_retrieval_plan(
 ) -> RetrievalQueryPlan:
     """Create multilingual search phrases and choose relevant document scopes."""
     base_queries = _retrieval_queries(message)
+    joined_term_queries = approved_joined_term_queries(message, country, language)
     glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
         # Preserve directory availability when the planner is intentionally off.
         return RetrievalQueryPlan(
-            [*base_queries, *glossary],
+            [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
         )
 
@@ -451,7 +452,7 @@ def _planned_retrieval_plan(
         # unavailable. The original query remains first, and all normal locale
         # and document-scope filters still apply downstream.
         return RetrievalQueryPlan(
-            [*base_queries, *glossary],
+            [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
         )
 
@@ -478,7 +479,7 @@ def _planned_retrieval_plan(
         intent_confidence = 0.0
 
     merged: list[str] = []
-    for query in [message, *planned_queries, *base_queries[1:], *glossary]:
+    for query in [message, *joined_term_queries, *planned_queries, *base_queries[1:], *glossary]:
         cleaned = re.sub(r"\s+", " ", query).strip()
         if cleaned and cleaned not in merged:
             merged.append(cleaned)
@@ -486,6 +487,7 @@ def _planned_retrieval_plan(
         "query_planner_success",
         correlation_id=correlation_id,
         planned_query_count=len(planned_queries),
+        joined_term_query_count=len(joined_term_queries),
         glossary_query_count=len(glossary),
         named_market_count=len(find_market_mentions(message)),
         query_count=len(merged),

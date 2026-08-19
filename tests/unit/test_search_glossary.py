@@ -95,3 +95,60 @@ def test_glossary_skips_malformed_and_oversized_entries(tmp_path, monkeypatch):
     assert glossary.glossary_queries("What does PC mean?", "US", "en") == [
         "Preferred Customer definition"
     ]
+
+
+def test_joined_approved_term_adds_only_the_reviewed_spaced_phrase(tmp_path, monkeypatch):
+    path = tmp_path / "glossary.json"
+    path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "country": ["*"],
+                        "language": ["*"],
+                        "triggers": ["recognized manager", "preferred customer"],
+                        "queries": ["broader experimental expansion"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_PATH", str(path))
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_ENABLED", False)
+    glossary.load_glossary.cache_clear()
+
+    assert glossary.approved_joined_term_queries(
+        "How can I become a recognizedmanager?", "US", "en"
+    ) == ["recognized manager"]
+    assert glossary.glossary_queries(
+        "How can I become a recognizedmanager?", "US", "en"
+    ) == []
+
+
+def test_joined_term_matching_does_not_fuzz_or_expand_normal_phrases(tmp_path, monkeypatch):
+    path = tmp_path / "glossary.json"
+    path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "country": ["*"],
+                        "language": ["*"],
+                        "triggers": ["recognized manager"],
+                        "queries": ["unused"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_PATH", str(path))
+    glossary.load_glossary.cache_clear()
+
+    assert glossary.approved_joined_term_queries(
+        "How can I become a recognized manager?", "US", "en"
+    ) == []
+    assert glossary.approved_joined_term_queries(
+        "How can I become a recognizdmanager?", "US", "en"
+    ) == []

@@ -43,6 +43,21 @@ def test_routes_launched_language_greetings_without_model_tokens() -> None:
     assert "ordering" not in capability
 
 
+def test_routes_configured_greeting_even_when_widget_language_differs() -> None:
+    """A visitor may greet in another configured language without changing locale."""
+    assert classify_intent("Hola", "en-US") == "assistant_meta"
+    response = assistant_meta_response("Hola", "en-US") or ""
+    assert response.startswith("Hello")
+
+
+def test_routes_bounded_social_typos_without_fuzzy_policy_routing() -> None:
+    assert classify_intent("goo dmorning", "en") == "assistant_meta"
+    assert classify_intent("byee", "en") == "assistant_meta"
+    assert "Goodbye" in (assistant_meta_response("byee", "en") or "")
+    assert classify_intent("recognizedmanager", "en") == "policy_fact"
+    assert classify_intent("can aloe cur cancer", "en") == "policy_fact"
+
+
 def test_routes_wellbeing_question_without_retrieval() -> None:
     assert classify_intent("How are you?", "en") == "assistant_meta"
     response = assistant_meta_response("How are you?", "en") or ""

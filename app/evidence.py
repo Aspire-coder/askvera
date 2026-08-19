@@ -187,12 +187,25 @@ def _assistant_meta_category(normalized_message: str, language: str) -> str | No
     # configured default language is different.
     if locale != "en":
         route_candidates.append(all_routes.get("en", {}))
+    # Recognize reviewed greetings regardless of the selected response locale.
+    # This supports visitors who greet AskVera in another configured language,
+    # while the response itself remains in the selected widget language.
+    route_candidates.extend(
+        routes
+        for candidate_locale, routes in all_routes.items()
+        if candidate_locale not in {locale, "en"}
+    )
     for routes in route_candidates:
         patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
         phrase_entries: list[tuple[tuple[str, ...], str]] = []
         for category, phrases in patterns.items():
             normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
             if normalized_message in normalized_phrases:
+                return str(category)
+            if any(
+                _safe_short_phrase_variant(normalized_message, phrase, str(category))
+                for phrase in normalized_phrases
+            ):
                 return str(category)
             phrase_entries.extend(
                 (tuple(phrase.split()), str(category))
@@ -203,6 +216,55 @@ def _assistant_meta_category(normalized_message: str, language: str) -> str | No
         if composed_category:
             return composed_category
     return None
+
+
+def _safe_short_phrase_variant(message: str, phrase: str, category: str) -> bool:
+    """Allow only tightly bounded typos for reviewed social phrases."""
+    if category not in {"greeting", "thanks", "farewell"}:
+        return False
+    if not message or not phrase or len(message.split()) > 3 or len(message) > 32:
+        return False
+    compact_message = message.replace(" ", "")
+    compact_phrase = phrase.replace(" ", "")
+    if compact_message == compact_phrase:
+        return True
+    if min(len(compact_message), len(compact_phrase)) < 3:
+        return False
+    if compact_message[:1] != compact_phrase[:1]:
+        return False
+    return _edit_distance_at_most_one(compact_message, compact_phrase)
+
+
+def _edit_distance_at_most_one(left: str, right: str) -> bool:
+    """Return true for one insertion, deletion, substitution, or transposition."""
+    if left == right:
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        differences = [index for index, pair in enumerate(zip(left, right)) if pair[0] != pair[1]]
+        if len(differences) == 1:
+            return True
+        return (
+            len(differences) == 2
+            and differences[1] == differences[0] + 1
+            and left[differences[0]] == right[differences[1]]
+            and left[differences[1]] == right[differences[0]]
+        )
+    shorter, longer = (left, right) if len(left) < len(right) else (right, left)
+    short_index = 0
+    long_index = 0
+    skipped = False
+    while short_index < len(shorter) and long_index < len(longer):
+        if shorter[short_index] == longer[long_index]:
+            short_index += 1
+            long_index += 1
+            continue
+        if skipped:
+            return False
+        skipped = True
+        long_index += 1
+    return True
 
 
 def _composed_assistant_meta_category(
