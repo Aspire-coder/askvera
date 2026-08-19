@@ -13,6 +13,7 @@ def test_trace_store_orders_stages_and_masks_common_pii() -> None:
         question_preview="Email me at user@example.com, +32 470 12 34 56, ID 123-45-6789",
     )
     store.record("trace-1", "retrieval", success=True, duration_ms=91.237)
+    store.record("trace-1", "semantic_cache_lookup", success=True, duration_ms=4.5)
     store.record("trace-1", "governance", success=True, duration_ms=14)
     store.finish("trace-1", success=True, metadata={"source_count": 2})
 
@@ -24,6 +25,7 @@ def test_trace_store_orders_stages_and_masks_common_pii() -> None:
         "request_received",
         "governance",
         "retrieval",
+        "semantic_cache_lookup",
         "response_delivered",
     ]
     assert trace["stages"][2]["duration_ms"] == 91.24

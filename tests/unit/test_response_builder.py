@@ -43,10 +43,24 @@ def test_response_builder_preserves_existing_api_shape() -> None:
         "sources": retrieval_result.sources,
         "confidence": 0.91,
         "correlationId": "cid",
+        "metadata": {"cacheSource": "fresh"},
     }
     assert chat_response.metadata["provider"] == "claude"
     assert chat_response.metadata["retrieved_document_count"] == 1
     assert chat_response.metadata["cache"] == "miss"
+
+
+def test_cached_response_exposes_safe_cache_source() -> None:
+    """QA can distinguish exact and semantic hits without seeing cache internals."""
+    chat_response = ResponseBuilder().from_cached(
+        {"response": "Approved answer", "sources": [], "confidence": 0.9},
+        "cid",
+    )
+    chat_response = type(chat_response)(
+        **{**chat_response.__dict__, "metadata": {**chat_response.metadata, "cache": "semantic"}}
+    )
+
+    assert chat_response.to_api_result()["metadata"]["cacheSource"] == "semantic"
 
 
 def test_response_builder_prefers_answer_supporting_references() -> None:

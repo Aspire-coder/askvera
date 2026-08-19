@@ -52,4 +52,6 @@ class ChatResponse:
             public["validation"] = metadata["validation"]
         if metadata.get("client_action"):
             public["clientAction"] = metadata["client_action"]
+        cache_source = str(metadata.get("cache") or "").lower()
+        public["cacheSource"] = cache_source if cache_source in {"exact", "semantic"} else "fresh"
         return public

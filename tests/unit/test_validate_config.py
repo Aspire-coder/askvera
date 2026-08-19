@@ -260,3 +260,32 @@ def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> Non
         "ADMIN_ANALYTICS_REDACTED_BY_DEFAULT "
         "(must be enabled for the hardened security profile)"
     ) in failures
+
+
+def test_semantic_cache_requires_safe_configuration(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_THRESHOLD", 1.1)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_MIN_SCORE_MARGIN", -0.1)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_MAX_CANDIDATES", 0)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_EMBED_MODEL_ID", "")
+
+    failures = validate()
+
+    assert "SEMANTIC_CACHE_THRESHOLD (must be between 0 and 1)" in failures
+    assert "SEMANTIC_CACHE_MIN_SCORE_MARGIN (must be at least 0 and less than 1)" in failures
+    assert "SEMANTIC_CACHE_MAX_CANDIDATES (must be greater than 0)" in failures
+    assert "SEMANTIC_CACHE_EMBED_MODEL_ID" in failures
+
+
+def test_semantic_cache_live_and_shadow_modes_are_mutually_exclusive(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_SHADOW_ENABLED", True)
+
+    failures = validate()
+
+    assert (
+        "SEMANTIC_CACHE_ENABLED and SEMANTIC_CACHE_SHADOW_ENABLED (choose only one mode)"
+        in failures
+    )

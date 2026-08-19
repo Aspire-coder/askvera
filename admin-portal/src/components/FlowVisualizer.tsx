@@ -19,6 +19,7 @@ const stations: StationDefinition[] = [
   { id: "governance", label: "Guardrails", service: "Amazon Bedrock Guardrails", family: "safety", detail: "Safety policy decides whether processing may continue.", entered: "PII-scrubbed question and market context.", process: "Evaluate denied topics, compliance intent and configured rules.", produced: "Allow, block or review decision with risk classification." },
   { id: "cache_lookup", label: "Cache", service: "ElastiCache for Valkey", family: "cache", detail: "AskVera checks whether an approved answer can be reused.", entered: "Versioned question, market, language and role key.", process: "Look up a validated response without exposing the question in the cache key.", produced: "A cache hit that skips AI work, or a miss that continues to retrieval." },
   { id: "retrieval", label: "Knowledge", service: "OpenSearch Serverless", family: "knowledge", detail: "Hybrid search finds approved, locale-compatible evidence.", entered: "Governed query and country/language access filters.", process: "Combine keyword, vector and structured-section ranking.", produced: "Ranked evidence, source metadata and retrieval confidence." },
+  { id: "semantic_cache_lookup", label: "Semantic shadow", service: "ElastiCache + Bedrock embeddings", family: "cache", detail: "Observe-only matching measures whether a prior grounded answer could be reused.", entered: "Question embedding plus the current approved evidence fingerprint.", process: "Compare only within the same market, language, role and evidence version without serving the cached answer.", produced: "A would-hit decision, similarity, answer agreement and estimated savings for review." },
   { id: "prompt_build", label: "Grounding", service: "AskVera Prompt Builder", family: "context", detail: "Approved evidence is assembled into a grounded model request.", entered: "Question, evidence and limited conversation history.", process: "Apply persona, compliance, role and evidence instructions.", produced: "A constrained prompt ready for model inference." },
   { id: "model_generate", label: "Generate", service: "Amazon Bedrock + Claude", family: "model", detail: "Claude writes an answer using only supplied evidence.", entered: "Grounded prompt and evidence - the input token payload.", process: "Model inference generates the answer and usage telemetry.", produced: "Draft response, finish reason and output token count." },
   { id: "validation", label: "Validate", service: "AskVera Validators", family: "validation", detail: "Independent validators check safety and grounding.", entered: "Draft answer, citations, evidence and locale expectations.", process: "Check language, citations, numbers, claims and response metadata.", produced: "Pass, repaired claim, or a safe blocked response." },
@@ -88,10 +89,13 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const retrievalStage = stageFor(trace, "retrieval");
   const responseStage = stageFor(trace, "response_build");
   const cacheStage = stageFor(trace, "cache_lookup");
+  const semanticStage = stageFor(trace, "semantic_cache_lookup");
   const cacheHit = booleanValue(cacheStage?.metadata?.cacheHit) || booleanValue(deliveredStage?.metadata?.cacheHit);
+  const semanticWouldHit = booleanValue(semanticStage?.metadata?.wouldHit);
   const inputTokens = metadataNumber([deliveredStage, modelStage], "inputTokens", "input_tokens");
   const outputTokens = metadataNumber([deliveredStage, modelStage], "outputTokens", "output_tokens");
   const tokensSaved = metadataNumber([deliveredStage, cacheStage], "tokensSaved", "cache_token_savings");
+  const potentialTokensSaved = metadataNumber([semanticStage], "estimatedTokensSaved");
   const sourceCount = metadataNumber([deliveredStage, responseStage, retrievalStage], "source_count", "sourceCount", "citationCount");
   const confidence = metadataNumber([deliveredStage, responseStage, retrievalStage], "confidence");
   const totalDuration = trace.stages.reduce((sum, stage) => sum + stage.duration_ms, 0);
@@ -152,9 +156,11 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
       </div>
       {lookupError ? <div className="notice error" role="alert">{lookupError}</div> : null}
       <div className={`path-summary ${cacheHit ? "cache" : "generated"}`} role="status">
-        <strong>{cacheHit ? "Validated cache path used" : "Grounded generation path used"}</strong>
+        <strong>{cacheHit ? "Validated cache path used" : semanticWouldHit ? "Semantic shadow match observed" : "Grounded generation path used"}</strong>
         <span>{cacheHit
           ? "The approved cached answer was revalidated and returned without a model call."
+          : semanticWouldHit
+            ? "A semantic answer would have matched, but shadow mode still generated and delivered the normal grounded answer."
           : "The request passed safety checks, retrieved approved evidence, generated an answer, and validated it before delivery."}</span>
       </div>
 
@@ -172,6 +178,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
         <article className="journey-metric token-card surface"><span>Input tokens consumed</span><strong>{inputTokens ? compact.format(inputTokens) : cacheHit ? "0" : "-"}</strong><p>{cacheHit ? "Skipped because Valkey returned a validated answer" : "Instructions, question and evidence sent to Claude"}</p></article>
         <article className="journey-metric token-card returned surface"><span>Output tokens returned</span><strong>{outputTokens ? compact.format(outputTokens) : cacheHit ? "0" : "-"}</strong><p>{cacheHit ? "No generation call was required" : "Generated answer returned by Claude"}</p></article>
         <article className={`journey-metric savings-card surface ${tokensSaved ? "has-savings" : ""}`}><span>Tokens saved by cache</span><strong>{tokensSaved ? compact.format(tokensSaved) : "0"}</strong><p>{cacheHit ? "Estimated tokens avoided on this request" : "This request used the regular AI path"}</p></article>
+        <article className={`journey-metric savings-card surface ${potentialTokensSaved ? "has-savings" : ""}`}><span>Potential semantic savings</span><strong>{potentialTokensSaved ? compact.format(potentialTokensSaved) : "0"}</strong><p>{semanticWouldHit ? "Observed only; Claude still generated the delivered answer" : "No safe semantic match was observed"}</p></article>
       </div>
 
       <div className="flow-stage service-map surface" key={replayKey}>
@@ -187,7 +194,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
             </section>
             <section className={`tree-branch model-branch ${cacheHit ? "inactive-path" : "active-path"}`} aria-label="Generated answer path">
               <header><span>Cache miss</span><strong>{cacheHit ? "Skipped" : "Grounded AI path used"}</strong></header>
-              <div className="model-lane">{renderNode("retrieval")}<span className="lane-link" />{renderNode("prompt_build")}<span className="lane-link" />{renderNode("model_generate")}<span className="lane-link" />{renderNode("validation")}<span className="lane-link" />{renderNode("response_build")}<span className="lane-link" />{renderNode("response_delivered")}</div>
+              <div className="model-lane">{renderNode("retrieval")}<span className="lane-link" />{renderNode("semantic_cache_lookup")}<span className="lane-link" />{renderNode("prompt_build")}<span className="lane-link" />{renderNode("model_generate")}<span className="lane-link" />{renderNode("validation")}<span className="lane-link" />{renderNode("response_build")}<span className="lane-link" />{renderNode("response_delivered")}</div>
             </section>
           </div>
         </div>

@@ -10,9 +10,11 @@ from services import embeddings
 class _Runtime:
     def __init__(self):
         self.calls = 0
+        self.model_ids = []
 
-    def invoke_model(self, **_kwargs):
+    def invoke_model(self, **kwargs):
         self.calls += 1
+        self.model_ids.append(kwargs.get("modelId"))
         return {"body": io.BytesIO(json.dumps({"embedding": [0.1, 0.2]}).encode())}
 
 
@@ -57,3 +59,13 @@ def test_shared_embedding_cache_miss_writes_bedrock_result(monkeypatch) -> None:
     assert embeddings.embed_text("another question") == [0.1, 0.2]
     assert runtime.calls == 1
     assert cache.writes[0][1] == 60
+
+
+def test_embedding_model_can_be_selected_for_semantic_cache(monkeypatch) -> None:
+    runtime = _Runtime()
+    monkeypatch.setattr(settings, "EMBEDDING_SHARED_CACHE_ENABLED", False)
+    monkeypatch.setattr(embeddings, "get_aws_clients", lambda: _Clients(runtime))
+    embeddings.embed_text.cache_clear()
+
+    assert embeddings.embed_text("semantic question", model_id="amazon.example-embed:1") == [0.1, 0.2]
+    assert runtime.model_ids == ["amazon.example-embed:1"]

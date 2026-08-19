@@ -16,11 +16,12 @@ PIPELINE_ORDER = {
     "governance": 1,
     "cache_lookup": 2,
     "retrieval": 3,
-    "prompt_build": 4,
-    "model_generate": 5,
-    "validation": 6,
-    "response_build": 7,
-    "response_delivered": 8,
+    "semantic_cache_lookup": 4,
+    "prompt_build": 5,
+    "model_generate": 6,
+    "validation": 7,
+    "response_build": 8,
+    "response_delivered": 9,
 }
 
 

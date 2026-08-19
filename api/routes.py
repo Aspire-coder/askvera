@@ -295,7 +295,12 @@ def chat(body: ChatRequest, request: Request) -> Envelope | JSONResponse:
                     "model": str(result.metadata.get("model_name") or ""),
                     "inputTokens": int(token_usage.get("inputTokens", token_usage.get("input_tokens", 0)) or 0),
                     "outputTokens": int(token_usage.get("outputTokens", token_usage.get("output_tokens", 0)) or 0),
-                    "cacheHit": str(result.metadata.get("cache") or "").lower() == "hit",
+                    "cacheHit": str(result.metadata.get("cache") or "").lower() in {"hit", "exact", "semantic"},
+                    "cacheSource": (
+                        str(result.metadata.get("cache") or "").lower()
+                        if str(result.metadata.get("cache") or "").lower() in {"exact", "semantic"}
+                        else "fresh"
+                    ),
                     "tokensSaved": int(result.metadata.get("cache_token_savings", 0) or 0),
                 },
             )

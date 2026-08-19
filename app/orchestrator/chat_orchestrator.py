@@ -34,8 +34,12 @@ from services.audit import write_audit_event
 from services.cache import (
     build_cache_key,
     get_cache_value,
-    get_semantic_cache_value,
     set_cache_value,
+)
+from services.semantic_cache import (
+    SemanticCacheHit,
+    get_semantic_cache_value,
+    semantic_cache_active,
     set_semantic_cache_value,
 )
 from services.consent_service import has_valid_consent
@@ -125,14 +129,9 @@ class AIOrchestrator:
             )
 
         cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
-        cached_response = self._cached_response(cache_key, body, correlation_id)
+        cached_response = self._cached_response(cache_key, body, correlation_id, scrubbed_input)
         if cached_response:
             return cached_response
-        semantic_cached = get_semantic_cache_value(
-            retrieval_query, body.country, body.language, body.role, correlation_id
-        )
-        if semantic_cached:
-            return self._cached_response_value(semantic_cached, body, correlation_id, cache_type="semantic")
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
@@ -145,6 +144,11 @@ class AIOrchestrator:
         if chat_response:
             return chat_response
         assert evidence_decision is not None
+        cached_response, semantic_candidate, semantic_lookup_ms = self._semantic_cached_response(
+            retrieval_query, retrieval_result, body, correlation_id, scrubbed_input
+        )
+        if cached_response:
+            return cached_response
         prompt_package = self.prompt_builder.build(
             user_question=scrubbed_input,
             conversation=history,
@@ -230,6 +234,13 @@ class AIOrchestrator:
             return self._governance_fallback(
                 governance_decision, correlation_id, body.language, body.country, body.message
             )
+        self._record_semantic_shadow_result(
+            semantic_candidate,
+            chat_response,
+            body,
+            correlation_id,
+            semantic_lookup_ms,
+        )
         append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
@@ -243,22 +254,14 @@ class AIOrchestrator:
             },
             correlation_id,
         )
-        if self._should_cache_response(chat_response):
-            set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
-            set_semantic_cache_value(
-                retrieval_query,
-                body.country,
-                body.language,
-                body.role,
-                chat_response.to_cache_value(),
-                correlation_id,
-            )
-        else:
-            LOGGER.info(
-                "cache_write_skipped",
-                correlation_id=correlation_id,
-                reason="fallback_or_critical_validation",
-            )
+        self._cache_response(
+            cache_key,
+            retrieval_query,
+            retrieval_result,
+            chat_response,
+            body,
+            correlation_id,
+        )
         return chat_response
 
     def _secure_and_complete_response(
@@ -351,6 +354,7 @@ class AIOrchestrator:
         cache_key: str,
         body: ChatRequest,
         correlation_id: str,
+        session_input: str = "",
     ) -> ChatResponse | None:
         """Read and revalidate a cached response before returning it."""
         cache_started = perf_counter()
@@ -371,7 +375,10 @@ class AIOrchestrator:
                 "outputTokensSaved": saved_output_tokens,
             },
         )
-        return self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+        response = self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+        if response and response.metadata.get("cache") == "exact":
+            append_session_turn(body.sessionId, session_input or body.message, response.answer, correlation_id)
+        return response
 
     def _cached_response_value(
         self,
@@ -409,6 +416,152 @@ class AIOrchestrator:
                 governance_decision, correlation_id, body.language, body.country, body.message
             )
         return chat_response
+
+    def _semantic_cached_response(
+        self,
+        retrieval_query: str,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+        session_input: str = "",
+    ) -> tuple[ChatResponse | None, SemanticCacheHit | None, float]:
+        """Read semantic cache only after current evidence has been approved."""
+        if not semantic_cache_active():
+            return None, None, 0.0
+        started = perf_counter()
+        cached = get_semantic_cache_value(
+            retrieval_query,
+            body.country,
+            body.language,
+            body.role,
+            retrieval_result,
+            correlation_id,
+        )
+        duration_ms = round((perf_counter() - started) * 1000, 2)
+        live_mode = bool(settings.SEMANTIC_CACHE_ENABLED)
+        pipeline_trace_store.record(
+            correlation_id,
+            "semantic_cache_lookup",
+            success=True,
+            duration_ms=duration_ms,
+            metadata={
+                "service": "Amazon ElastiCache for Valkey",
+                "mode": "live" if live_mode else "shadow",
+                "cacheHit": bool(cached and live_mode),
+                "wouldHit": bool(cached),
+                "served": bool(cached and live_mode),
+                "similarity": round(cached.similarity, 4) if cached else 0.0,
+                "candidatesChecked": cached.candidates_checked if cached else 0,
+            },
+        )
+        if not cached or not live_mode:
+            return None, cached, duration_ms
+        response = self._cached_response_value(
+            cached.response,
+            body,
+            correlation_id,
+            cache_type="semantic",
+        )
+        if not response or response.metadata.get("cache") != "semantic":
+            return response, cached, duration_ms
+        response = self._replace_answer(
+            response,
+            response.answer,
+            {
+                "semantic_cache_similarity": round(cached.similarity, 4),
+                "semantic_cache_candidates_checked": cached.candidates_checked,
+            },
+        )
+        append_session_turn(body.sessionId, session_input or body.message, response.answer, correlation_id)
+        return response, cached, duration_ms
+
+    def _record_semantic_shadow_result(
+        self,
+        candidate: SemanticCacheHit | None,
+        fresh_response: ChatResponse,
+        body: ChatRequest,
+        correlation_id: str,
+        lookup_duration_ms: float,
+    ) -> None:
+        """Compare a shadow candidate with the delivered fresh answer without logging either text."""
+        if not settings.SEMANTIC_CACHE_SHADOW_ENABLED or settings.SEMANTIC_CACHE_ENABLED:
+            return
+        fresh_usage = dict((fresh_response.metadata or {}).get("token_usage") or {})
+        input_tokens = int(fresh_usage.get("inputTokens", fresh_usage.get("input_tokens", 0)) or 0)
+        output_tokens = int(fresh_usage.get("outputTokens", fresh_usage.get("output_tokens", 0)) or 0)
+        answer_agreement = (
+            self._text_agreement(str(candidate.response.get("response") or ""), fresh_response.answer)
+            if candidate
+            else 0.0
+        )
+        citation_agreement = (
+            self._citation_agreement(candidate.response.get("sources"), fresh_response.citations)
+            if candidate
+            else 0.0
+        )
+        needs_review = bool(
+            candidate and answer_agreement < settings.SEMANTIC_CACHE_SHADOW_MIN_ANSWER_AGREEMENT
+        )
+        metadata = {
+            "service": "Amazon ElastiCache for Valkey",
+            "mode": "shadow",
+            "cacheHit": False,
+            "wouldHit": bool(candidate),
+            "served": False,
+            "freshGenerated": True,
+            "similarity": round(candidate.similarity, 4) if candidate else 0.0,
+            "candidatesChecked": candidate.candidates_checked if candidate else 0,
+            "answerAgreement": answer_agreement,
+            "citationAgreement": citation_agreement,
+            "reviewRecommended": needs_review,
+            "decision": "review" if needs_review else "agree" if candidate else "miss",
+            "estimatedInputTokensSaved": input_tokens if candidate else 0,
+            "estimatedOutputTokensSaved": output_tokens if candidate else 0,
+            "estimatedTokensSaved": input_tokens + output_tokens if candidate else 0,
+        }
+        pipeline_trace_store.record(
+            correlation_id,
+            "semantic_cache_lookup",
+            success=True,
+            duration_ms=lookup_duration_ms,
+            metadata=metadata,
+        )
+        write_audit_event(
+            {
+                "type": "semantic_cache_shadow",
+                "country": body.country,
+                "language": body.language,
+                **{key: value for key, value in metadata.items() if key != "service"},
+            },
+            correlation_id,
+        )
+
+    @staticmethod
+    def _text_agreement(left: str, right: str) -> float:
+        """Return privacy-safe lexical agreement for two generated answers."""
+        left_tokens = set(re.findall(r"[^\W_]+", left.casefold(), flags=re.UNICODE))
+        right_tokens = set(re.findall(r"[^\W_]+", right.casefold(), flags=re.UNICODE))
+        if not left_tokens or not right_tokens:
+            return 0.0
+        return round(len(left_tokens & right_tokens) / len(left_tokens | right_tokens), 4)
+
+    @staticmethod
+    def _citation_agreement(cached_sources: object, fresh_sources: object) -> float:
+        """Compare source identities without storing source excerpts."""
+        def identities(value: object) -> set[str]:
+            if not isinstance(value, list):
+                return set()
+            return {
+                str(item.get("uri") or item.get("title") or "").strip()
+                for item in value
+                if isinstance(item, dict) and (item.get("uri") or item.get("title"))
+            }
+
+        cached = identities(cached_sources)
+        fresh = identities(fresh_sources)
+        if not cached or not fresh:
+            return 0.0
+        return round(len(cached & fresh) / len(cached | fresh), 4)
 
     def _apply_evidence_contract(
         self,
@@ -959,6 +1112,44 @@ class AIOrchestrator:
             return False
 
         return bool((chat_response.answer or "").strip())
+
+    def _should_semantic_cache_response(self, chat_response: ChatResponse) -> bool:
+        """Require strong, cited evidence before an answer can be reused semantically."""
+        return (
+            self._should_cache_response(chat_response)
+            and bool(chat_response.citations)
+            and float(chat_response.confidence or 0.0) >= settings.SEMANTIC_CACHE_MIN_CONFIDENCE
+        )
+
+    def _cache_response(
+        self,
+        cache_key: str,
+        retrieval_query: str,
+        retrieval_result: RetrievalResult,
+        chat_response: ChatResponse,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> None:
+        """Write exact cache and the more restrictive semantic cache."""
+        if not self._should_cache_response(chat_response):
+            LOGGER.info(
+                "cache_write_skipped",
+                correlation_id=correlation_id,
+                reason="fallback_or_critical_validation",
+            )
+            return
+        cache_value = chat_response.to_cache_value()
+        set_cache_value(cache_key, cache_value, correlation_id)
+        if self._should_semantic_cache_response(chat_response):
+            set_semantic_cache_value(
+                retrieval_query,
+                body.country,
+                body.language,
+                body.role,
+                retrieval_result,
+                cache_value,
+                correlation_id,
+            )
 
 
 ai_orchestrator = AIOrchestrator()

@@ -10,6 +10,7 @@ from app.orchestrator.chat_orchestrator import AIOrchestrator
 from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationResult
+from services.semantic_cache import SemanticCacheHit
 from utils.validators import ChatRequest
 
 
@@ -189,6 +190,226 @@ def test_guardrail_response_is_not_cacheable() -> None:
     )
 
     assert orchestrator._should_cache_response(response) is False
+
+
+def test_semantic_cache_requires_citations_and_high_confidence(monkeypatch) -> None:
+    """Only strong grounded answers can enter semantic reuse."""
+    orchestrator = AIOrchestrator()
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_MIN_CONFIDENCE", 0.75)
+    response = ChatResponse(
+        answer="Approved policy answer.",
+        citations=[{"title": "Policy"}],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={},
+        correlation_id="cid",
+    )
+
+    assert orchestrator._should_semantic_cache_response(response) is True
+    assert orchestrator._should_semantic_cache_response(
+        ChatResponse(**{**response.__dict__, "citations": []})
+    ) is False
+    assert orchestrator._should_semantic_cache_response(
+        ChatResponse(**{**response.__dict__, "confidence": 0.5})
+    ) is False
+
+
+def test_semantic_cache_lookup_uses_current_retrieval_evidence(monkeypatch) -> None:
+    """Semantic lookup receives current evidence and avoids model generation on a hit."""
+    router = MagicMock()
+    orchestrator = AIOrchestrator(router=router, validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="What is a recognised manager?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    result = _FakeRetriever().retrieve("question")
+    seen: list[RetrievalResult] = []
+    appended: list[tuple[object, ...]] = []
+
+    def _semantic(*args: object) -> SemanticCacheHit:
+        seen.append(args[4])
+        return SemanticCacheHit(
+            response={
+                "response": "A grounded cached answer.",
+                "sources": [{"title": "Policy"}],
+                "confidence": 0.9,
+            },
+            similarity=0.98,
+            candidates_checked=3,
+        )
+
+    monkeypatch.setattr(chat_orchestrator, "get_semantic_cache_value", _semantic)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *args: appended.append(args))
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator.pipeline_trace_store, "record", lambda *_args, **_kwargs: None)
+
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_SHADOW_ENABLED", False)
+    monkeypatch.setattr(chat_orchestrator, "semantic_cache_active", lambda: True)
+
+    response, candidate, lookup_ms = orchestrator._semantic_cached_response(
+        "question", result, body, "cid", "scrubbed"
+    )
+
+    assert seen == [result]
+    assert response is not None
+    assert candidate is not None
+    assert lookup_ms >= 0
+    assert response.answer == "A grounded cached answer."
+    assert response.metadata["cache"] == "semantic"
+    assert response.metadata["semantic_cache_similarity"] == 0.98
+    assert appended[0][1] == "scrubbed"
+    router.generate.assert_not_called()
+
+
+def test_semantic_cache_failure_falls_through(monkeypatch) -> None:
+    """A semantic miss leaves the normal answer path available."""
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(message="Question", sessionId="session-1", country="US", language="en")
+    result = _FakeRetriever().retrieve("question")
+    monkeypatch.setattr(chat_orchestrator, "get_semantic_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "semantic_cache_active", lambda: True)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_ENABLED", False)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_SHADOW_ENABLED", True)
+    monkeypatch.setattr(chat_orchestrator.pipeline_trace_store, "record", lambda *_args, **_kwargs: None)
+
+    response, candidate, _ = orchestrator._semantic_cached_response("question", result, body, "cid")
+    assert response is None
+    assert candidate is None
+
+
+def test_shadow_mode_observes_hit_but_always_returns_fresh_path(monkeypatch) -> None:
+    """Shadow candidates are measured and never returned to the user."""
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(message="Question", sessionId="session-1", country="US", language="en")
+    result = _FakeRetriever().retrieve("question")
+    candidate = SemanticCacheHit(
+        response={
+            "response": "Cached policy answer",
+            "sources": [{"uri": "s3://approved/policy.pdf"}],
+            "confidence": 0.9,
+        },
+        similarity=0.98,
+        candidates_checked=2,
+    )
+    traces: list[dict[str, object]] = []
+    monkeypatch.setattr(chat_orchestrator, "semantic_cache_active", lambda: True)
+    monkeypatch.setattr(chat_orchestrator, "get_semantic_cache_value", lambda *_: candidate)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_ENABLED", False)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_SHADOW_ENABLED", True)
+    monkeypatch.setattr(
+        chat_orchestrator.pipeline_trace_store,
+        "record",
+        lambda *_args, **kwargs: traces.append(dict(kwargs.get("metadata") or {})),
+    )
+
+    response, observed, _ = orchestrator._semantic_cached_response("question", result, body, "cid")
+
+    assert response is None
+    assert observed == candidate
+    assert traces[-1]["wouldHit"] is True
+    assert traces[-1]["cacheHit"] is False
+    assert traces[-1]["served"] is False
+
+
+def test_shadow_result_records_privacy_safe_comparison(monkeypatch) -> None:
+    """Shadow reporting contains scores and savings, not answer text."""
+    orchestrator = AIOrchestrator()
+    body = ChatRequest(message="Question", sessionId="session-1", country="US", language="en")
+    candidate = SemanticCacheHit(
+        response={
+            "response": "Become a recognized manager by meeting approved requirements.",
+            "sources": [{"uri": "s3://approved/policy.pdf"}],
+            "confidence": 0.9,
+        },
+        similarity=0.98,
+        candidates_checked=2,
+    )
+    fresh = ChatResponse(
+        answer="Meet the approved requirements to become a recognized manager.",
+        citations=[{"uri": "s3://approved/policy.pdf"}],
+        suggestions=[],
+        cards=[],
+        confidence=0.88,
+        metadata={"token_usage": {"inputTokens": 1200, "outputTokens": 180}},
+        correlation_id="cid",
+    )
+    traces: list[dict[str, object]] = []
+    audits: list[dict[str, object]] = []
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_ENABLED", False)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_SHADOW_ENABLED", True)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_SHADOW_MIN_ANSWER_AGREEMENT", 0.5)
+    monkeypatch.setattr(
+        chat_orchestrator.pipeline_trace_store,
+        "record",
+        lambda *_args, **kwargs: traces.append(dict(kwargs.get("metadata") or {})),
+    )
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda event, *_: audits.append(event))
+
+    orchestrator._record_semantic_shadow_result(candidate, fresh, body, "cid", 12.5)
+
+    assert traces[-1]["estimatedTokensSaved"] == 1380
+    assert traces[-1]["cacheHit"] is False
+    assert traces[-1]["citationAgreement"] == 1.0
+    assert audits[-1]["type"] == "semantic_cache_shadow"
+    serialized = str(traces[-1]) + str(audits[-1])
+    assert candidate.response["response"] not in serialized
+    assert fresh.answer not in serialized
+
+
+def test_shadow_hit_does_not_replace_fresh_answer_in_full_flow(monkeypatch) -> None:
+    """End-to-end orchestration still calls the model and returns its answer in shadow mode."""
+    router = MagicMock()
+    router.generate.return_value = ModelResponse(
+        text="Fresh grounded answer from the normal model path.",
+        citations=[],
+        confidence=0.8,
+        provider="test",
+        model_name="test",
+    )
+    orchestrator = AIOrchestrator(
+        retriever=_FakeRetriever(),
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="What steps are required for Recognized Manager?",
+        sessionId="session-1",
+        country="CA",
+        language="en",
+    )
+    candidate = SemanticCacheHit(
+        response={
+            "response": "Cached answer that must not be delivered.",
+            "sources": [{"uri": "s3://approved/policy.pdf"}],
+            "confidence": 0.9,
+        },
+        similarity=0.99,
+        candidates_checked=1,
+    )
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_ENABLED", False)
+    monkeypatch.setattr(chat_orchestrator.settings, "SEMANTIC_CACHE_SHADOW_ENABLED", True)
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "get_semantic_cache_value", lambda *_: candidate)
+    monkeypatch.setattr(chat_orchestrator, "set_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "set_semantic_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.answer == "Fresh grounded answer from the normal model path."
+    assert response.metadata["cache"] == "miss"
+    assert "Cached answer that must not be delivered." not in response.answer
+    router.generate.assert_called_once()
 
 
 def test_response_completion_restores_only_approved_directory_contacts(monkeypatch) -> None:

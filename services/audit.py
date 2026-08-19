@@ -16,6 +16,8 @@ def _event_type(raw_type: str | None) -> AuditEventType:
     """Map legacy audit type values to the new audit event enum."""
     if raw_type == "chat":
         return AuditEventType.CHAT_RESPONSE
+    if raw_type == "semantic_cache_shadow":
+        return AuditEventType.SEMANTIC_CACHE_SHADOW
     return AuditEventType.ERROR
 
 

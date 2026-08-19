@@ -24,13 +24,14 @@ def _normalize_text(value: str) -> str:
 
 
 @lru_cache(maxsize=2048)
-def embed_text(text: str) -> list[float]:
+def embed_text(text: str, model_id: str | None = None) -> list[float]:
     """Create one semantic embedding using the configured Bedrock model."""
     normalized = _normalize_text(text)
     if not normalized:
         return []
 
-    shared_key = _shared_embedding_key(normalized)
+    selected_model_id = model_id or settings.BEDROCK_EMBED_MODEL_ID
+    shared_key = _shared_embedding_key(normalized, selected_model_id)
     shared_embedding = _get_shared_embedding(shared_key)
     if shared_embedding is not None:
         return shared_embedding
@@ -38,7 +39,7 @@ def embed_text(text: str) -> list[float]:
     payload = {"inputText": normalized}
     try:
         response = get_aws_clients().bedrock_runtime.invoke_model(
-            modelId=settings.BEDROCK_EMBED_MODEL_ID,
+            modelId=selected_model_id,
             body=json.dumps(payload),
             contentType="application/json",
             accept="application/json",
@@ -56,9 +57,10 @@ def embed_text(text: str) -> list[float]:
     return normalized_embedding
 
 
-def _shared_embedding_key(normalized_text: str) -> str:
+def _shared_embedding_key(normalized_text: str, model_id: str | None = None) -> str:
     digest = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
-    model_digest = hashlib.sha256(settings.BEDROCK_EMBED_MODEL_ID.encode("utf-8")).hexdigest()[:16]
+    selected_model_id = model_id or settings.BEDROCK_EMBED_MODEL_ID
+    model_digest = hashlib.sha256(selected_model_id.encode("utf-8")).hexdigest()[:16]
     return f"{settings.EMBEDDING_SHARED_CACHE_PREFIX}:{model_digest}:{digest}"
 
 
