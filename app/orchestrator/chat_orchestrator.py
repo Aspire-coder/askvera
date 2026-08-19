@@ -66,8 +66,18 @@ FOLLOW_UP_CONTEXT_MARKERS = (
     "first question",
     "last question",
     "more about",
+    "more detail",
+    "more details",
+    "more information",
     "explain more",
     "tell me more",
+    "elaborate",
+    "expand on",
+    "go deeper",
+    "what else",
+    "continue",
+    "how so",
+    "why is that",
 )
 
 
@@ -626,7 +636,7 @@ class AIOrchestrator:
         if not user_messages:
             return user_message
 
-        anchor = user_messages[0] if "first question" in user_message.lower() else user_messages[-1]
+        anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
         query = f"{anchor}\nFollow-up request: {user_message}"
         LOGGER.info(
             "chat_followup_context_applied",
@@ -673,7 +683,32 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
-        return word_count <= 14 and any(marker in normalized for marker in FOLLOW_UP_CONTEXT_MARKERS)
+        return word_count <= 14 and self._contains_follow_up_marker(normalized)
+
+    def _contains_follow_up_marker(self, normalized_message: str) -> bool:
+        """Match follow-up words as complete phrases, never inside policy terms."""
+        return any(
+            re.search(
+                rf"(?<!\w){re.escape(marker).replace(r'\ ', r'\s+')}(?!\w)",
+                normalized_message,
+                flags=re.UNICODE,
+            )
+            for marker in FOLLOW_UP_CONTEXT_MARKERS
+        )
+
+    def _latest_context_anchor(self, user_messages: list[str]) -> str:
+        """Return the latest self-contained user question behind chained follow-ups."""
+        for message in reversed(user_messages):
+            if not self._is_context_dependent_message(message):
+                return message
+        return user_messages[-1]
+
+    def _is_context_dependent_message(self, user_message: str) -> bool:
+        """Identify short references that cannot be retrieved safely on their own."""
+        normalized = " ".join(user_message.lower().split())
+        if not normalized:
+            return False
+        return len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized)
 
     def _user_messages_from_history(self, history: str) -> list[str]:
         """Extract prior user messages from compact session history."""

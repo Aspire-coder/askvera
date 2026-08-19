@@ -144,6 +144,56 @@ def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -
     assert governance.seen_texts[0] == retriever.seen_messages[0]
 
 
+def test_more_details_uses_latest_self_contained_question() -> None:
+    """A natural elaboration request reuses the latest substantive question."""
+    orchestrator = AIOrchestrator()
+    history = "\n".join(
+        [
+            "user: How can I sign up in Belgium?",
+            "vera: Use the online registration page.",
+        ]
+    )
+
+    query = orchestrator._build_retrieval_query("I need more details", history, "cid")
+
+    assert query == "How can I sign up in Belgium?\nFollow-up request: I need more details"
+
+
+def test_chained_followup_skips_prior_vague_followup() -> None:
+    """Repeated elaboration requests stay anchored to the substantive topic."""
+    orchestrator = AIOrchestrator()
+    history = "\n".join(
+        [
+            "user: How can I sign up in Belgium?",
+            "vera: Use the online registration page.",
+            "user: I need more details",
+            "vera: Here are additional registration details.",
+        ]
+    )
+
+    query = orchestrator._build_retrieval_query("Can you elaborate?", history, "cid")
+
+    assert query == "How can I sign up in Belgium?\nFollow-up request: Can you elaborate?"
+
+
+def test_short_standalone_question_does_not_inherit_history() -> None:
+    """A complete new topic remains independent even when it is concise."""
+    orchestrator = AIOrchestrator()
+    history = "user: How can I sign up in Belgium?\nvera: Use the online registration page."
+    question = "What is the minimum order size for Belgium?"
+
+    assert orchestrator._build_retrieval_query(question, history, "cid") == question
+
+
+def test_followup_marker_is_not_matched_inside_policy_word() -> None:
+    """The marker 'it' must not make an independent policy question contextual."""
+    orchestrator = AIOrchestrator()
+    history = "user: How can I sign up in Belgium?\nvera: Use the online registration page."
+    question = "What is the refund policy?"
+
+    assert orchestrator._build_retrieval_query(question, history, "cid") == question
+
+
 def test_fallback_responses_are_not_cacheable() -> None:
     """Validation and governance fallbacks should not be reused as normal answers."""
     orchestrator = AIOrchestrator()

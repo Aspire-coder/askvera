@@ -71,13 +71,13 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-17.1")
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
-RETRIEVAL_PIPELINE_VERSION = "2026-08-19-cross-market-global-v1"
+RETRIEVAL_PIPELINE_VERSION = "2026-08-19-global-evidence-scope-v2"
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
 RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-safety-v2")
 # Code-owned conversation-routing behavior version. Change this when routing
 # semantics change so stale cached answers cannot bypass the new router.
-CONVERSATION_ROUTING_VERSION = "2026-07-29-assistant-meta-v2"
+CONVERSATION_ROUTING_VERSION = "2026-08-19-followup-context-v3"
 # RDS PostgreSQL database identifier. Found in RDS -> Databases.
 RDS_DB_IDENTIFIER = _env_str("RDS_DB_IDENTIFIER", "")
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
@@ -533,6 +533,7 @@ _SSM_CONFIG: dict[str, str] = {}
 # continue serving responses created by previous code.
 _CODE_OWNED_SETTINGS = {
     "RETRIEVAL_PIPELINE_VERSION",
+    "CONVERSATION_ROUTING_VERSION",
 }
 
 
