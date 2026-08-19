@@ -27,23 +27,41 @@ def _hit(identifier: str, title: str, score: float = 5.0) -> dict[str, object]:
 
 
 @pytest.mark.parametrize(
-    ("original", "candidate"),
+    ("original", "candidate", "expected"),
     [
-        ("How can I become a recognizd manager?", "become recognized manager"),
+        (
+            "How can I become a recognizd manager?",
+            "recognized manager requirements",
+            "how can i become a recognized manager",
+        ),
         (
             "What are the requirments to become a recognised manager?",
             "requirements to become recognised manager",
+            "what are the requirements to become a recognised manager",
         ),
         (
             "How can I become a member in Mexcio through internationl sponsring?",
             "international sponsoring Mexico membership",
+            "how can i become a member in mexico through international sponsoring",
         ),
-        ("How can I become a recognizedmanager?", "recognized manager"),
-        ("Quelles sont les conditons pour devenir Manager?", "conditions pour devenir Manager"),
+        (
+            "How can I become a recognizedmanager?",
+            "recognized manager",
+            "how can i become a recognized manager",
+        ),
+        (
+            "Quelles sont les conditons pour devenir Manager?",
+            "conditions pour devenir Manager",
+            "quelles sont les conditions pour devenir manager",
+        ),
     ],
 )
-def test_accepts_only_bounded_spelling_repairs(original: str, candidate: str) -> None:
-    assert safe_typo_ranking_queries(original, [candidate]) == [candidate]
+def test_accepts_only_bounded_spelling_repairs(
+    original: str,
+    candidate: str,
+    expected: str,
+) -> None:
+    assert safe_typo_ranking_queries(original, [candidate]) == [expected]
 
 
 @pytest.mark.parametrize(
@@ -75,7 +93,9 @@ def test_generated_deletion_transposition_duplication_and_joined_variants(
     original: str,
     candidate: str,
 ) -> None:
-    assert safe_typo_ranking_queries(original, [candidate]) == [candidate]
+    assert safe_typo_ranking_queries(original, [candidate]) == [
+        "how can i become a recognized manager"
+    ]
 
 
 def test_typo_ranking_uses_safe_repair_without_changing_original_score() -> None:
@@ -89,7 +109,7 @@ def test_typo_ranking_uses_safe_repair_without_changing_original_score() -> None
     )
 
     row, final_score = rows[0]
-    assert row["ranking_query_used"] == "become recognized manager"
+    assert row["ranking_query_used"] == "how can i become a recognized manager"
     assert row["typo_ranking_applied"] is True
     assert final_score > row["original_question_score"]
 

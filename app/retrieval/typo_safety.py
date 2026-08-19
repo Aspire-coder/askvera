@@ -71,83 +71,68 @@ def _token_is_repair(candidate: str, original: str) -> bool:
     return _damerau_levenshtein(candidate, original, max_distance) <= max_distance
 
 
-def _query_is_safe_typo_rewrite(original: str, candidate: str) -> bool:
-    original_tokens = _tokens(original)
-    candidate_tokens = _tokens(candidate)
-    if len(candidate_tokens) < 2 or candidate_tokens == original_tokens:
-        return False
-
-    original_numbers = [token for token in original_tokens if any(character.isdigit() for character in token)]
-    candidate_numbers = [token for token in candidate_tokens if any(character.isdigit() for character in token)]
-    if original_numbers != candidate_numbers:
-        return False
-
-    protected_acronyms = {
-        token.casefold()
-        for token in _raw_tokens(original)
-        if 2 <= len(token) <= 5 and token.isupper() and token.isalpha()
-    }
-    if not protected_acronyms.issubset(set(candidate_tokens)):
-        return False
-
-    # Expand an original joined token only when it is exactly composed of two
-    # or three adjacent candidate tokens. This cannot introduce new letters.
-    joined_repaired = False
-    expanded_original_tokens: list[str] = []
-    for original_token in original_tokens:
-        joined_parts: list[str] = []
-        for start in range(len(candidate_tokens)):
+def _joined_parts(token: str, planned_token_groups: list[list[str]]) -> list[str]:
+    for group in planned_token_groups:
+        for start in range(len(group)):
             for size in (2, 3):
-                parts = candidate_tokens[start : start + size]
-                if len(parts) == size and "".join(parts) == original_token:
-                    joined_parts = parts
-                    break
-            if joined_parts:
-                break
-        if joined_parts:
-            expanded_original_tokens.extend(joined_parts)
-            joined_repaired = True
-        else:
-            expanded_original_tokens.append(original_token)
-    original_tokens = expanded_original_tokens
+                parts = group[start : start + size]
+                if len(parts) == size and "".join(parts) == token:
+                    return parts
+    return []
 
-    repaired = joined_repaired
-    matched_original_indices: set[int] = set()
-    for candidate_token in candidate_tokens:
-        exact_index = next(
-            (
-                index
-                for index, original_token in enumerate(original_tokens)
-                if index not in matched_original_indices and candidate_token == original_token
-            ),
-            None,
-        )
-        if exact_index is not None:
-            matched_original_indices.add(exact_index)
-            continue
-        repair_index = next(
-            (
-                index
-                for index, original_token in enumerate(original_tokens)
-                if index not in matched_original_indices
-                and _token_is_repair(candidate_token, original_token)
-            ),
-            None,
-        )
-        if repair_index is None:
-            return False
-        matched_original_indices.add(repair_index)
-        repaired = True
-    return repaired
+
+def _repair_token(token: str, planned_tokens: list[str]) -> str:
+    candidates = {
+        candidate
+        for candidate in planned_tokens
+        if candidate != token and _token_is_repair(candidate, token)
+    }
+    if not candidates:
+        return token
+    return min(
+        candidates,
+        key=lambda candidate: (
+            _damerau_levenshtein(candidate, token, 2),
+            abs(len(candidate) - len(token)),
+            candidate,
+        ),
+    )
 
 
 def safe_typo_ranking_queries(original: str, planned_queries: list[str], *, limit: int = 4) -> list[str]:
-    """Return only planner queries proven to be bounded spelling repairs."""
-    safe: list[str] = []
-    for candidate in planned_queries:
-        cleaned = " ".join((candidate or "").split()).strip()
-        if cleaned and cleaned not in safe and _query_is_safe_typo_rewrite(original, cleaned):
-            safe.append(cleaned)
-        if len(safe) >= limit:
-            break
-    return safe
+    """Rebuild the original query using only bounded token-level repairs.
+
+    Extra words from planner output are never copied. Numbers and uppercase
+    business acronyms are immutable. The return type remains a list for the
+    scorer API, but at most one sanitized query is produced.
+    """
+    del limit
+    original_tokens = _tokens(original)
+    raw_tokens = _raw_tokens(original)
+    if not original_tokens or len(raw_tokens) != len(original_tokens):
+        return []
+    planned_token_groups = [_tokens(query) for query in planned_queries if query]
+    planned_tokens = [token for group in planned_token_groups for token in group]
+    if not planned_tokens:
+        return []
+
+    repaired_tokens: list[str] = []
+    repaired = False
+    for index, token in enumerate(original_tokens):
+        raw_token = raw_tokens[index]
+        protected = any(character.isdigit() for character in token) or (
+            2 <= len(raw_token) <= 5 and raw_token.isupper() and raw_token.isalpha()
+        )
+        if protected or token in planned_tokens:
+            repaired_tokens.append(token)
+            continue
+        parts = _joined_parts(token, planned_token_groups)
+        if parts:
+            repaired_tokens.extend(parts)
+            repaired = True
+            continue
+        repaired_token = _repair_token(token, planned_tokens)
+        repaired_tokens.append(repaired_token)
+        repaired = repaired or repaired_token != token
+
+    return [" ".join(repaired_tokens)] if repaired else []
