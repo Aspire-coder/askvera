@@ -64,9 +64,6 @@ def _damerau_levenshtein(left: str, right: str, max_distance: int) -> int:
 def _token_is_repair(candidate: str, original: str) -> bool:
     if candidate == original:
         return False
-    shorter, longer = sorted((candidate, original), key=len)
-    if len(shorter) >= 5 and longer.startswith(shorter) and len(longer) - len(shorter) <= 4:
-        return True
     max_distance = 1 if max(len(candidate), len(original)) < 10 else 2
     return _damerau_levenshtein(candidate, original, max_distance) <= max_distance
 

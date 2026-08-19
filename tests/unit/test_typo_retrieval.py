@@ -70,6 +70,7 @@ def test_accepts_only_bounded_spelling_repairs(
         ("What is the minimum order of 50 CC?", "minimum order 500 CC"),
         ("What are FPC requirements?", "preferred customer requirements"),
         ("How can I become a manager?", "leadership bonus qualification criteria"),
+        ("How can I become a member?", "membership requirements"),
         ("What is the weather today?", "recognized manager qualification"),
         ("What is a recognized manager?", "recognized manager"),
     ],
