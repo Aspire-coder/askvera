@@ -79,6 +79,8 @@ def _joined_parts(token: str, planned_token_groups: list[list[str]]) -> list[str
 
 
 def _repair_token(token: str, planned_tokens: list[str]) -> str:
+    if len(token) < 4:
+        return token
     candidates = {
         candidate
         for candidate in planned_tokens

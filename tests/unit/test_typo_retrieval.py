@@ -115,6 +115,22 @@ def test_typo_ranking_uses_safe_repair_without_changing_original_score() -> None
     assert final_score > row["original_question_score"]
 
 
+def test_approved_evidence_title_can_repair_when_planner_does_not() -> None:
+    provider = OpenSearchSectionProvider()
+    original = "How can I become a recognizd manager?"
+    rows = provider._merge_hits(
+        [_hit("recognized", "Recognized Manager")],
+        [],
+        original,
+        ranking_queries=[],
+    )
+
+    row, final_score = rows[0]
+    assert row["ranking_query_used"] == "how can i become a recognized manager"
+    assert row["typo_ranking_applied"] is True
+    assert final_score > row["original_question_score"]
+
+
 def test_unsafe_semantic_expansion_cannot_change_ranking() -> None:
     provider = OpenSearchSectionProvider()
     original = "How can I become a manager?"

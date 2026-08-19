@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -125,6 +126,7 @@ def main() -> int:
 
     if args.load_ssm:
         settings.load_ssm_config()
+    logging.disable(logging.INFO)
     results = [run_case(case, index) for index, case in enumerate(cases, start=1)]
     summary = {
         "status": "passed" if all(result["passed"] for result in results) else "failed",

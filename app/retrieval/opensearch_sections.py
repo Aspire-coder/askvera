@@ -721,7 +721,19 @@ class OpenSearchSectionProvider:
             original_score = _source_score(row, message) + _directory_record_country_score(message, row)
             best_score = original_score
             ranking_query_used = message
-            for ranking_query in ranking_queries or []:
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            evidence_repair_queries = safe_typo_ranking_queries(
+                message,
+                [
+                    str(row.get("section_title") or ""),
+                    str(row.get("content") or "")[:1500],
+                    str(metadata.get("record_country") or ""),
+                ],
+            )
+            candidate_ranking_queries = list(
+                dict.fromkeys([*(ranking_queries or []), *evidence_repair_queries])
+            )
+            for ranking_query in candidate_ranking_queries:
                 candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
                     ranking_query, row
                 )
