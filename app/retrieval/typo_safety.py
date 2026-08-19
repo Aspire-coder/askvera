@@ -90,13 +90,28 @@ def _query_is_safe_typo_rewrite(original: str, candidate: str) -> bool:
     if not protected_acronyms.issubset(set(candidate_tokens)):
         return False
 
-    # Exact joined-word repairs are safe even when individual words cannot be
-    # aligned to the original compact token.
-    compact_candidate = "".join(candidate_tokens)
-    if compact_candidate in original_tokens:
-        return True
+    # Expand an original joined token only when it is exactly composed of two
+    # or three adjacent candidate tokens. This cannot introduce new letters.
+    joined_repaired = False
+    expanded_original_tokens: list[str] = []
+    for original_token in original_tokens:
+        joined_parts: list[str] = []
+        for start in range(len(candidate_tokens)):
+            for size in (2, 3):
+                parts = candidate_tokens[start : start + size]
+                if len(parts) == size and "".join(parts) == original_token:
+                    joined_parts = parts
+                    break
+            if joined_parts:
+                break
+        if joined_parts:
+            expanded_original_tokens.extend(joined_parts)
+            joined_repaired = True
+        else:
+            expanded_original_tokens.append(original_token)
+    original_tokens = expanded_original_tokens
 
-    repaired = False
+    repaired = joined_repaired
     matched_original_indices: set[int] = set()
     for candidate_token in candidate_tokens:
         exact_index = next(
