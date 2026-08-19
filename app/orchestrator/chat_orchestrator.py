@@ -687,14 +687,15 @@ class AIOrchestrator:
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
-        return any(
-            re.search(
-                rf"(?<!\w){re.escape(marker).replace(r'\ ', r'\s+')}(?!\w)",
+        for marker in FOLLOW_UP_CONTEXT_MARKERS:
+            escaped_marker = re.escape(marker).replace(r"\ ", r"\s+")
+            if re.search(
+                rf"(?<!\w){escaped_marker}(?!\w)",
                 normalized_message,
                 flags=re.UNICODE,
-            )
-            for marker in FOLLOW_UP_CONTEXT_MARKERS
-        )
+            ):
+                return True
+        return False
 
     def _latest_context_anchor(self, user_messages: list[str]) -> str:
         """Return the latest self-contained user question behind chained follow-ups."""
