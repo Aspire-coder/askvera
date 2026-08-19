@@ -124,4 +124,3 @@ def test_deployment_canary_fixture_is_versioned_and_complete() -> None:
         "belgium-minimum-order-typo",
         "mexico-sponsoring-multiple-typos",
     }
-

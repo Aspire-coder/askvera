@@ -92,9 +92,8 @@ def _query_is_safe_typo_rewrite(original: str, candidate: str) -> bool:
 
     # Exact joined-word repairs are safe even when individual words cannot be
     # aligned to the original compact token.
-    compact_original = "".join(original_tokens)
     compact_candidate = "".join(candidate_tokens)
-    if compact_original == compact_candidate:
+    if compact_candidate in original_tokens:
         return True
 
     repaired = False
@@ -137,4 +136,3 @@ def safe_typo_ranking_queries(original: str, planned_queries: list[str], *, limi
         if len(safe) >= limit:
             break
     return safe
-
