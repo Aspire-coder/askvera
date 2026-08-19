@@ -528,6 +528,12 @@ MARKETS_CONFIG_PATH = os.environ.get("MARKETS_CONFIG_PATH", str(Path(__file__).w
 SSM_PARAMETER_PATH = os.environ.get("SSM_PARAMETER_PATH", "/askverachat/prod/")
 SSM_CONFIG_ENABLED = os.environ.get("SSM_CONFIG_ENABLED", "true").lower() == "true"
 _SSM_CONFIG: dict[str, str] = {}
+# These values describe deployed source behavior and participate in cache keys.
+# Letting an older SSM value override them can make a successful deployment
+# continue serving responses created by previous code.
+_CODE_OWNED_SETTINGS = {
+    "RETRIEVAL_PIPELINE_VERSION",
+}
 
 
 def _coerce_value(current_value: Any, raw_value: str) -> Any:
@@ -551,6 +557,17 @@ def _coerce_value(current_value: Any, raw_value: str) -> Any:
     return raw_value
 
 
+def _apply_ssm_values(loaded: dict[str, str]) -> None:
+    """Apply runtime-owned SSM values while preserving code-owned versions."""
+    for key, raw_value in loaded.items():
+        if key in _CODE_OWNED_SETTINGS:
+            continue
+        if key in globals():
+            globals()[key] = _coerce_value(globals()[key], raw_value)
+        else:
+            globals()[key] = raw_value
+
+
 def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
     """Load config overrides from SSM Parameter Store and apply them to this module."""
     global _SSM_CONFIG
@@ -566,11 +583,7 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
         for parameter in page.get("Parameters", []):
             loaded[parameter["Name"].split("/")[-1]] = parameter["Value"]
 
-    for key, raw_value in loaded.items():
-        if key in globals():
-            globals()[key] = _coerce_value(globals()[key], raw_value)
-        else:
-            globals()[key] = raw_value
+    _apply_ssm_values(loaded)
 
     if "REDIS_HOST" in loaded:
         globals()["ELASTICACHE_REDIS_HOST"] = globals()["REDIS_HOST"]
