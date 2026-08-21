@@ -660,6 +660,40 @@ def test_requested_year_outside_approved_document_scope_fails_closed(monkeypatch
     assert response.metadata["failure_layer"] == "document_period_not_covered"
 
 
+def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> None:
+    """Ambiguous directory requests should invite clarification, not dead-end."""
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="Can you help me with the Cameroon office?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    document = RetrievedDocument(
+        id="cameroon-directory",
+        title="International Sponsoring Directory - Cameroon",
+        content="Cameroon office directory record.",
+        source="s3://approved/global/directory.pdf",
+        country="",
+        language="en",
+        score=0.2,
+        metadata={"access_scope": "global", "directory_kind": "international_sponsoring"},
+    )
+    result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.2,
+        metadata={"global_documents_searched": True, "candidate_count": 3},
+    )
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator._directory_clarification_response(result, body, "cid", body.message)
+
+    assert response is not None
+    assert "telephone number" in response.answer
+    assert response.metadata["response_source"] == "directory_clarification"
+
+
 def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:
     """Accidentally spaced letters are reconstructed before retrieval."""
     orchestrator = AIOrchestrator()

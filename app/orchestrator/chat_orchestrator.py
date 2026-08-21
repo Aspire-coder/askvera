@@ -79,6 +79,10 @@ FOLLOW_UP_CONTEXT_MARKERS = (
     "how so",
     "why is that",
 )
+DIRECTORY_DETAIL_TERMS = re.compile(
+    r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
+    re.IGNORECASE,
+)
 
 
 class ConsentRequiredError(Exception):
@@ -994,6 +998,14 @@ class AIOrchestrator:
             role=body.role,
             **evidence_decision.to_metadata(),
         )
+        clarification = self._directory_clarification_response(
+            retrieval_result,
+            body,
+            correlation_id,
+            scrubbed_input,
+        )
+        if clarification:
+            return clarification, approved_result, evidence_decision
         fallback = self._validate_response(
             self.response_builder.fallback(
                 self._insufficient_evidence_message(body.language),
@@ -1008,6 +1020,42 @@ class AIOrchestrator:
             retrieval_result=approved_result,
         )
         return fallback, approved_result, evidence_decision
+
+    def _directory_clarification_response(
+        self,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+        scrubbed_input: str,
+    ) -> ChatResponse | None:
+        """Ask for the missing directory detail when approved evidence is ambiguous.
+
+        This is deliberately narrow: governance has already run, and the response
+        is used only when the planner searched global directory content but could
+        not approve a sufficiently clear answer. It never weakens guardrails or
+        invents a country, office, phone number, or other contact value.
+        """
+        metadata = retrieval_result.metadata or {}
+        if not metadata.get("global_documents_searched"):
+            return None
+        if not metadata.get("candidate_count") or not DIRECTORY_DETAIL_TERMS.search(body.message or ""):
+            return None
+        answer = (
+            "I found approved directory information, but I need one more detail to answer accurately. "
+            "Are you asking for the telephone number, business hours, email address, office address, "
+            "website, or sponsoring information?"
+        )
+        response = self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "failure_layer": "directory_clarification",
+                "response_source": "directory_clarification",
+                "fallback": False,
+            },
+        )
+        append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
+        return response
 
     def _validate_response(
         self,

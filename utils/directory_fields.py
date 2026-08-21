@@ -7,29 +7,50 @@ from collections.abc import Iterable
 
 
 _FIELD_LABEL_RE = re.compile(
-    r"(?:country|name|address|phone(?:\s*\d+)?|fax|toll[ -]?free|mailbox|website|"
+    r"(?:country|name|address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
+    r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|fax|toll[ -]?free|mailbox|website|"
     r"contact|title|email|cell#?|territor(?:y|ies)|region|office|product center)$",
     re.IGNORECASE,
 )
 _CONTACT_FIELD_RE = re.compile(
-    r"(?:address|phone(?:\s*\d+)?|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)$",
+    r"(?:address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
+    r"fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)$",
+    re.IGNORECASE,
+)
+_INLINE_FIELD_RE = re.compile(
+    r"^(?P<label>business\s+hours\s+(?:office|product\s+(?:centre|center))|"
+    r"telephone(?:\s+(?:for\s+orders|office))?|phone(?:\s*\d+)?|"
+    r"office\s*(?:&|and)\s*product\s+center\s+address|"
+    r"address|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)"
+    r"\s*[:#-]?\s+(?P<value>.+)$",
     re.IGNORECASE,
 )
 
 
 def parse_directory_fields(content: str) -> dict[str, str]:
     """Parse the directory's repeated labels while preserving exact field values."""
-    lines = [" ".join(line.split()) for line in (content or "").splitlines() if line.strip()]
+    lines = [
+        " ".join(line.replace("\ufffd", " ").split())
+        for line in (content or "").splitlines()
+        if line.strip()
+    ]
     fields: dict[str, str] = {}
     index = 1  # The first line is the record title, not a field label.
     while index < len(lines):
         label = lines[index]
+        inline = _INLINE_FIELD_RE.match(label)
+        if inline:
+            fields[" ".join(inline.group("label").split())] = inline.group("value").strip()
+            index += 1
+            continue
         if not _is_field_label(label):
             index += 1
             continue
         index += 1
         values: list[str] = []
-        while index < len(lines) and not _is_field_label(lines[index]):
+        while index < len(lines) and not (
+            _is_field_label(lines[index]) or _INLINE_FIELD_RE.match(lines[index])
+        ):
             values.append(lines[index])
             index += 1
         value = " ".join(values).strip()

@@ -463,7 +463,7 @@ def test_outline_chunks_are_prioritized_only_for_structure_questions() -> None:
 
 
 def test_directory_query_filters_to_active_global_directory_records() -> None:
-    filters = _directory_text_query("Where is the India office?")["query"]["bool"]["filter"]
+    filters = _directory_text_query("Where is the India office?", {"India"})["query"]["bool"]["filter"]
 
     assert {
         "bool": {
@@ -473,6 +473,11 @@ def test_directory_query_filters_to_active_global_directory_records() -> None:
             ]
         }
     } in filters
+    assert {
+        "match_phrase": {
+            "metadata.record_country": {"query": "India", "boost": 40}
+        }
+    } in _directory_text_query("Where is the India office?", {"India"})["query"]["bool"]["should"]
     assert {"term": {"status": "active"}} in filters
     assert {
         "terms": {
@@ -509,3 +514,28 @@ def test_sponsoring_directory_country_score_uses_record_metadata() -> None:
     }
 
     assert _directory_record_country_score("Who is the sponsor for Italy?", row) == 2.4
+
+
+def test_target_country_score_separates_global_directory_records() -> None:
+    cameroon = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Cameroon"},
+    }
+    nigeria = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Nigeria"},
+    }
+
+    assert _directory_record_country_score("What are the business hours?", cameroon, {"Cameroon"}) == 8.0
+    assert _directory_record_country_score("What are the business hours?", nigeria, {"Cameroon"}) == -4.0
+
+
+def test_explicit_unknown_directory_country_beats_selected_market() -> None:
+    gambia = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Gambia"},
+    }
+
+    assert _directory_record_country_score(
+        "What is Gambia's telephone number?", gambia, {"United States"}
+    ) == 6.0

@@ -18,7 +18,7 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
-from services.market_config import get_document_country_codes
+from services.market_config import find_market_mentions, get_countries, get_document_country_codes
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
@@ -33,6 +33,10 @@ LOGGER = get_logger("app.retrieval.opensearch_sections")
 GLOBAL_DIRECTORY_DOCUMENT_TYPES = (
     "office_directory",
     "international_sponsoring_directory",
+)
+_DIRECTORY_DETAIL_RE = re.compile(
+    r"\b(?:address|business\s+hours?|email|office|phone|telephone|website|contact)\b",
+    re.IGNORECASE,
 )
 
 
@@ -268,8 +272,33 @@ def _exact_section_query(section_id: str, country: str, language: str) -> dict[s
     }
 
 
-def _directory_text_query(message: str) -> dict[str, Any]:
+def _directory_text_query(
+    message: str,
+    target_country_names: set[str] | None = None,
+) -> dict[str, Any]:
     """Build a metadata-aware query for globally available directory records."""
+    should_queries: list[dict[str, Any]] = [
+        {
+            "multi_match": {
+                "query": message,
+                "fields": [
+                    "metadata.record_country^12",
+                    "section_title^10",
+                    "content^4",
+                    "search_text^2",
+                ],
+                "type": "best_fields",
+                "operator": "or",
+                "fuzziness": "AUTO",
+            }
+        },
+        {"match_phrase": {"metadata.record_country": {"query": message, "boost": 18}}},
+        {"match_phrase": {"section_title": {"query": message, "boost": 8}}},
+    ]
+    for name in sorted(target_country_names or set()):
+        should_queries.append(
+            {"match_phrase": {"metadata.record_country": {"query": name, "boost": 40}}}
+        )
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
@@ -284,24 +313,7 @@ def _directory_text_query(message: str) -> dict[str, Any]:
                         "global",
                     ),
                 ],
-                "should": [
-                    {
-                        "multi_match": {
-                            "query": message,
-                            "fields": [
-                                "metadata.record_country^12",
-                                "section_title^10",
-                                "content^4",
-                                "search_text^2",
-                            ],
-                            "type": "best_fields",
-                            "operator": "or",
-                            "fuzziness": "AUTO",
-                        }
-                    },
-                    {"match_phrase": {"metadata.record_country": {"query": message, "boost": 18}}},
-                    {"match_phrase": {"section_title": {"query": message, "boost": 8}}},
-                ],
+                "should": should_queries,
                 "minimum_should_match": 1,
             }
         },
@@ -315,7 +327,11 @@ def _outline_text_query(message: str, country: str, language: str) -> dict[str, 
     return query
 
 
-def _directory_record_country_score(message: str, row: dict[str, Any]) -> float:
+def _directory_record_country_score(
+    message: str,
+    row: dict[str, Any],
+    target_country_names: set[str] | None = None,
+) -> float:
     """Reward directory records whose own country metadata matches the query."""
     if row.get("document_type") not in GLOBAL_DIRECTORY_DOCUMENT_TYPES:
         return 0.0
@@ -324,6 +340,16 @@ def _directory_record_country_score(message: str, row: dict[str, Any]) -> float:
     normalized_message = _normalize_text(message)
     if not record_country or not normalized_message:
         return 0.0
+    if target_country_names:
+        normalized_targets = {_normalize_text(name) for name in target_country_names}
+        if record_country in normalized_targets:
+            return 8.0
+        # A country explicitly named in the question outranks the selected
+        # widget market. This matters for global-directory questions such as
+        # "What is Gambia's telephone number?" asked from a US widget.
+        if record_country in normalized_message:
+            return 6.0
+        return -4.0
     if record_country in normalized_message:
         return 2.4
 
@@ -360,7 +386,20 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
                     },
                 }
             }
-        },
+        }
+    }
+
+
+def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
+    """Return the named market(s) whose global directory record should lead."""
+    mentioned_codes = find_market_mentions(message)
+    if not mentioned_codes and not _DIRECTORY_DETAIL_RE.search(message or ""):
+        return set()
+    target_codes = mentioned_codes or {str(selected_country or "").upper()}
+    return {
+        str(country.get("name") or "")
+        for country in get_countries()
+        if str(country.get("code") or "").upper() in target_codes
     }
 
 
@@ -515,6 +554,7 @@ class OpenSearchSectionProvider:
             client = _client()
             search_messages = search_plan.queries
             global_search_message = ""
+            target_country_names = _directory_target_country_names(message, country)
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
             explicit_section_id = _section_reference(message)
@@ -557,7 +597,7 @@ class OpenSearchSectionProvider:
                 global_search_message = self._global_search_query(message, language, correlation_id)
                 global_text_response = client.search(
                     index=self.index_name,
-                    body=_directory_text_query(global_search_message),
+                    body=_directory_text_query(global_search_message, target_country_names),
                 )
                 global_vector_response = client.search(
                     index=self.index_name,
@@ -576,6 +616,7 @@ class OpenSearchSectionProvider:
             message,
             ranking_queries=typo_ranking_queries,
             prefer_outline=search_plan.prefer_outline,
+            target_country_names=target_country_names,
         )
         if self.enable_bedrock_rerank:
             from .bedrock_reranker import rerank_rows
@@ -693,6 +734,7 @@ class OpenSearchSectionProvider:
         *,
         ranking_queries: list[str] | None = None,
         prefer_outline: bool = False,
+        target_country_names: set[str] | None = None,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
         for hit in text_hits:
@@ -734,7 +776,10 @@ class OpenSearchSectionProvider:
         )
         scored: list[tuple[dict[str, Any], float]] = []
         for row in merged.values():
-            original_score = _source_score(row, message) + _directory_record_country_score(message, row)
+            original_score = (
+                _source_score(row, message)
+                + _directory_record_country_score(message, row, target_country_names)
+            )
             best_score = original_score
             ranking_query_used = message
             metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
@@ -751,7 +796,7 @@ class OpenSearchSectionProvider:
             )
             for ranking_query in candidate_ranking_queries:
                 candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
-                    ranking_query, row
+                    ranking_query, row, target_country_names
                 )
                 if candidate_score > best_score:
                     best_score = candidate_score

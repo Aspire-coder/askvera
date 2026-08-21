@@ -1,6 +1,40 @@
 """Tests for generic structured directory response completion."""
 
-from utils.directory_fields import restore_missing_directory_contacts
+from utils.directory_fields import parse_directory_fields, restore_missing_directory_contacts
+
+
+def test_parses_same_line_directory_fields_from_pdf_layout() -> None:
+    content = """Welcome to Forever Cameroon!
+    Forever Living Products Cameroon S.A.R.L.
+    Business Hours Office 08.30 am - 17.30 pm (Mon - Fri)
+    Business Hours Product Centre 08.30 am - 17.30 pm (Mon - Fri)
+    Telephone Office +237 233 472 448
+    Telephone for Orders (see above)
+    Email info@example.test
+    Website www.example.test
+    """
+
+    fields = parse_directory_fields(content)
+
+    assert fields["Business Hours Office"] == "08.30 am - 17.30 pm (Mon - Fri)"
+    assert fields["Business Hours Product Centre"] == "08.30 am - 17.30 pm (Mon - Fri)"
+    assert fields["Telephone Office"] == "+237 233 472 448"
+    assert fields["Telephone for Orders"] == "(see above)"
+    assert fields["Email"] == "info@example.test"
+
+
+def test_parses_multiline_directory_fields_without_mixing_next_label() -> None:
+    content = """Example market
+    Address
+    10 Example Road
+    Capital City
+    Business Hours Office 09.00 am - 17.00 pm
+    """
+
+    fields = parse_directory_fields(content)
+
+    assert fields["Address"] == "10 Example Road Capital City"
+    assert fields["Business Hours Office"] == "09.00 am - 17.00 pm"
 
 
 def test_restores_exact_missing_contact_fields_for_any_country() -> None:
