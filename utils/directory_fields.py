@@ -192,6 +192,15 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
         allowed = r"(?:office\s*(?:&|and)\s*product\s+center\s+)?address"
     elif re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
         allowed = r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?"
+    elif re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
+        cleaned, replacements = re.subn(
+            r"(?:payment\s+methods?\s+accepted|delivery\s+cost|delivery\s+charge|"
+            r"average\s+lead\s+time|business\s+hours?)[^.!?]*(?:[.!?]|$)\s*",
+            "",
+            answer or "",
+            flags=re.IGNORECASE,
+        )
+        return cleaned.strip(), replacements > 0
     else:
         return answer, False
 
@@ -208,6 +217,32 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned, replacements > 0
+
+
+def restore_missing_requested_order_size(
+    answer: str,
+    source_texts: Iterable[str],
+    question: str,
+) -> tuple[str, bool]:
+    """Restore an explicit minimum-order value when another FAQ row was selected."""
+    if not re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question or "", re.IGNORECASE):
+        return answer, False
+    corrected = answer or ""
+    for source in source_texts:
+        match = re.search(
+            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.\n]+)",
+            source or "",
+            re.IGNORECASE,
+        )
+        if not match:
+            continue
+        value = " ".join(match.group("value").split()).strip()
+        if value and _normalize_for_comparison(value) not in _normalize_for_comparison(corrected):
+            separator = "\n\n" if corrected.strip() else ""
+            corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
+            return corrected, True
+        return corrected, False
+    return corrected, False
 
 
 def correct_directory_source_contradictions(

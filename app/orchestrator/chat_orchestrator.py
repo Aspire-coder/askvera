@@ -56,6 +56,7 @@ from utils.directory_fields import (
     remove_unrequested_directory_fields,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
+    restore_missing_requested_order_size,
 )
 from utils.logging import get_logger
 from utils.validators import ChatRequest
@@ -349,6 +350,18 @@ class AIOrchestrator:
                 chat_response,
                 focused_answer,
                 {"unrequested_directory_fields_removed": True},
+            )
+
+        order_safe_answer, order_restored = restore_missing_requested_order_size(
+            chat_response.answer,
+            (document.content for document in retrieval_result.documents),
+            user_question,
+        )
+        if order_restored:
+            chat_response = self._replace_answer(
+                chat_response,
+                order_safe_answer,
+                {"directory_order_size_restored": True},
             )
 
         source_safe_answer, source_contradiction_corrected = correct_directory_source_contradictions(

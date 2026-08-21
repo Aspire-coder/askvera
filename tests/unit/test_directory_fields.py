@@ -5,6 +5,7 @@ from utils.directory_fields import (
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
     remove_unrequested_directory_fields,
+    restore_missing_requested_order_size,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
 )
@@ -190,4 +191,30 @@ def test_corrects_directory_values_that_contradict_explicit_source() -> None:
     assert "After sponsorship: there is no minimum order." in corrected
     assert "600 MAD" not in corrected
     assert "500 DH minimum" not in corrected
+    assert changed is True
+
+
+def test_restores_minimum_order_size_when_model_answers_nearby_faq() -> None:
+    answer = "Payment methods accepted are Bank Transfer, Cash, and there is no delivery charge."
+    source = "Minimum order size FBO: €81. Payment methods accepted: Bank Transfer, Cash."
+
+    corrected, changed = restore_missing_requested_order_size(
+        answer,
+        [source],
+        "what is the minimum ordering size for Niger",
+    )
+
+    assert "Minimum order size FBO: €81." in corrected
+    assert changed is True
+
+
+def test_focus_minimum_order_answer_removes_payment_and_delivery_claims() -> None:
+    answer = "Payment methods accepted are Bank Transfer, Cash, and there is no delivery charge."
+
+    focused, changed = remove_unrequested_directory_fields(
+        answer,
+        "what is the minimum order size for Niger",
+    )
+
+    assert focused == ""
     assert changed is True
