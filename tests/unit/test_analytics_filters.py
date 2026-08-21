@@ -150,11 +150,12 @@ def test_model_routing_metadata_marks_cache_without_inventing_a_route() -> None:
     assert metadata["actual_model"] == ""
 
 
-def test_routing_cost_projection_compares_against_all_complex(monkeypatch) -> None:
+def test_routing_cost_projection_compares_against_current_primary(monkeypatch) -> None:
     monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION", 1.0)
     monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION", 5.0)
     monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION", 3.0)
     monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION", 15.0)
+    monkeypatch.setattr("services.analytics.settings.BEDROCK_MODEL_ARN", "global.claude-haiku-4-5")
     targets = [
         {"target": "fast", "input_tokens": 1_000_000, "output_tokens": 100_000},
         {"target": "complex", "input_tokens": 1_000_000, "output_tokens": 100_000},
@@ -162,6 +163,8 @@ def test_routing_cost_projection_compares_against_all_complex(monkeypatch) -> No
 
     result = _routing_cost_projection(targets)
 
-    assert result["baselineUsd"] == 9.0
+    assert result["baselineUsd"] == 3.0
+    assert result["currentUsd"] == 3.0
     assert result["projectedUsd"] == 6.0
-    assert result["projectedSavingsUsd"] == 3.0
+    assert result["projectedDeltaUsd"] == 3.0
+    assert result["projectedSavingsUsd"] == 0.0

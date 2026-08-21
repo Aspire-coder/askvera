@@ -487,14 +487,20 @@ def analytics_overview(
 
 
 def _routing_cost_projection(targets: list[dict[str, Any]]) -> dict[str, float | str]:
-    """Estimate shadow-mode savings using configurable per-million-token rates."""
+    """Compare proposed routing with the model that currently serves production."""
     fast_input = float(settings.MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION)
     fast_output = float(settings.MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION)
     complex_input = float(settings.MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION)
     complex_output = float(settings.MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION)
     total_input = sum(int(row.get("input_tokens") or 0) for row in targets)
     total_output = sum(int(row.get("output_tokens") or 0) for row in targets)
-    baseline = (total_input * complex_input + total_output * complex_output) / 1_000_000
+    primary_model = str(settings.BEDROCK_MODEL_ARN or "").lower()
+    current_is_fast = "haiku" in primary_model
+    current_input_rate = fast_input if current_is_fast else complex_input
+    current_output_rate = fast_output if current_is_fast else complex_output
+    current = (
+        total_input * current_input_rate + total_output * current_output_rate
+    ) / 1_000_000
     projected = 0.0
     for row in targets:
         is_fast = str(row.get("target") or "") == "fast"
@@ -504,12 +510,15 @@ def _routing_cost_projection(targets: list[dict[str, Any]]) -> dict[str, float |
             int(row.get("input_tokens") or 0) * input_rate
             + int(row.get("output_tokens") or 0) * output_rate
         ) / 1_000_000
-    savings = max(0.0, baseline - projected)
+    delta = projected - current
+    savings = max(0.0, -delta)
     return {
-        "baselineUsd": round(baseline, 4),
+        "baselineUsd": round(current, 4),
+        "currentUsd": round(current, 4),
         "projectedUsd": round(projected, 4),
+        "projectedDeltaUsd": round(delta, 4),
         "projectedSavingsUsd": round(savings, 4),
-        "savingsRate": round(savings / baseline, 4) if baseline else 0.0,
+        "savingsRate": round(savings / current, 4) if current else 0.0,
         "pricingLabel": str(settings.MODEL_ROUTING_PRICING_LABEL),
     }
 
@@ -637,6 +646,7 @@ def model_routing_report(
         "rangeDays": days,
         "mode": str(settings.MODEL_ROUTING_MODE),
         "models": {
+            "primary": str(settings.BEDROCK_MODEL_ARN),
             "fast": str(settings.BEDROCK_FAST_MODEL_ID),
             "complex": str(settings.BEDROCK_COMPLEX_MODEL_ID),
         },

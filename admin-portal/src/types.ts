@@ -255,7 +255,7 @@ export type AnalyticsOverview = {
 export type ModelRoutingReport = {
   rangeDays: number;
   mode: "off" | "shadow" | "live" | string;
-  models: { fast: string; complex: string };
+  models: { primary: string; fast: string; complex: string };
   totals: {
     questions: number;
     evaluated: number;
@@ -268,7 +268,9 @@ export type ModelRoutingReport = {
   };
   cost: {
     baselineUsd: number;
+    currentUsd: number;
     projectedUsd: number;
+    projectedDeltaUsd: number;
     projectedSavingsUsd: number;
     savingsRate: number;
     pricingLabel: string;

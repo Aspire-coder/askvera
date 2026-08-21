@@ -11,6 +11,12 @@ type OperationsOverviewProps = {
 };
 
 const formatNumber = (value: number) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+const modelName = (value: string) => {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("haiku-4-5")) return "Claude Haiku 4.5";
+  if (normalized.includes("sonnet-5")) return "Claude Sonnet 5";
+  return value || "Not configured";
+};
 
 export function OperationsOverview({ credentials, config, onNavigate }: OperationsOverviewProps) {
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
@@ -99,8 +105,9 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
   const failedJobs = jobs.filter((job) => ["failed", "error"].includes(job.status));
   const recentAudit = auditEvents.slice(0, 4);
   const routingModeLabel = routing.mode === "shadow" ? "Shadow observation" : routing.mode === "live" ? "Live routing" : "Routing off";
-  const actualModel = routing.actualModels[0]?.label || "No generated answers in this range";
+  const actualModel = modelName(routing.actualModels[0]?.label || routing.models.primary);
   const fastPercent = Math.round(routing.totals.fastShare * 100);
+  const projectedDelta = routing.cost.projectedDeltaUsd;
 
   return <section className="page-section overview-page">
     <div className="page-heading">
@@ -116,25 +123,25 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
     </div>
     <section className="surface routing-dashboard" aria-labelledby="routing-dashboard-title">
       <div className="section-heading routing-heading">
-        <div><span className="eyebrow">Model routing</span><h2 id="routing-dashboard-title">Fast answers without lowering protection.</h2><p>See which fresh answers can use Haiku and which should stay with Sonnet.</p></div>
+        <div><span className="eyebrow">Model routing</span><h2 id="routing-dashboard-title">Measure where Sonnet adds value.</h2><p>Haiku serves customers today. Shadow routing identifies answers that may benefit from Sonnet.</p></div>
         <div className="routing-filters">
           <label><span>Market</span><select value={routingCountry} onChange={(event) => setRoutingCountry(event.target.value)}><option value="">All markets</option>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}</select></label>
           <label><span>Period</span><select value={routingDays} onChange={(event) => setRoutingDays(event.target.value)}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
         </div>
       </div>
-      <div className={`routing-mode-banner ${routing.mode}`}><strong>{routingModeLabel}</strong><span>{routing.mode === "shadow" ? "No customer answers are using Haiku yet. The system is measuring what would happen before activation." : routing.mode === "live" ? "Eligible customer answers are being routed between the configured models." : "Model routing decisions are not active."}</span></div>
+      <div className={`routing-mode-banner ${routing.mode}`}><strong>{routingModeLabel}</strong><span>{routing.mode === "shadow" ? `${modelName(routing.models.primary)} is serving customer answers now. Shadow mode only measures which complex answers would move to Sonnet.` : routing.mode === "live" ? "Customer answers are being routed between Haiku and Sonnet." : `${modelName(routing.models.primary)} is serving customer answers without dynamic routing.`}</span></div>
       <div className="routing-metrics">
         <article><span>Fresh answers evaluated</span><strong>{formatNumber(routing.totals.evaluated)}</strong><small>{formatNumber(routing.totals.cached)} cache hits skipped model generation</small></article>
-        <article><span>Haiku eligible</span><strong>{fastPercent}%</strong><small>{formatNumber(routing.totals.proposedFast)} lower-complexity answers</small></article>
-        <article><span>Sonnet protected</span><strong>{formatNumber(routing.totals.proposedComplex)}</strong><small>Complex or higher-risk answers retained</small></article>
-        <article><span>Projected savings</span><strong>${routing.cost.projectedSavingsUsd.toFixed(2)}</strong><small>{Math.round(routing.cost.savingsRate * 100)}% of evaluated model cost</small></article>
+        <article><span>Remain on Haiku</span><strong>{fastPercent}%</strong><small>{formatNumber(routing.totals.proposedFast)} lower-complexity answers</small></article>
+        <article><span>Would move to Sonnet</span><strong>{formatNumber(routing.totals.proposedComplex)}</strong><small>Complex or higher-risk answers in live mode</small></article>
+        <article><span>Projected cost change</span><strong>{projectedDelta >= 0 ? "+" : "−"}${Math.abs(projectedDelta).toFixed(2)}</strong><small>{projectedDelta >= 0 ? "Additional cost for Sonnet-protected answers" : "Lower cost than the current model baseline"}</small></article>
       </div>
       <div className="routing-detail-grid">
         <div className="routing-split-panel"><div className="routing-split-label"><strong>Proposed answer split</strong><span>{routing.totals.evaluated ? `${fastPercent}% Haiku · ${100 - fastPercent}% Sonnet` : "Waiting for fresh answers"}</span></div><div className="routing-split" role="img" aria-label={`${fastPercent}% Haiku eligible and ${100 - fastPercent}% Sonnet protected`}><span style={{ width: `${fastPercent}%` }} /></div><small>Average generation time: {routing.totals.averageGenerationLatencyMs ? `${Math.round(routing.totals.averageGenerationLatencyMs).toLocaleString()} ms` : "not available"}</small></div>
         <div className="routing-reasons"><strong>Why Sonnet or Haiku was chosen</strong>{routing.reasons.length ? routing.reasons.slice(0, 4).map((reason) => <div key={reason.label}><span>{reason.label.replaceAll("_", " ")}</span><em>{formatNumber(reason.value)}</em></div>) : <small>No routing reasons recorded yet.</small>}</div>
-        <div className="routing-actual"><strong>Actual model used</strong><span>{actualModel}</span><small>{routing.mode === "shadow" ? "Shadow recommendations do not change the production model." : "Based on generated answers in this period."}</small><button className="text-button" onClick={() => onNavigate("flow")}>Inspect individual answers <ArrowIcon /></button></div>
+        <div className="routing-actual"><strong>Actual production model</strong><span>{actualModel}</span><small>{routing.mode === "shadow" ? "All shadow recommendations leave the current production model unchanged." : "Based on generated answers in this period."}</small><button className="text-button" onClick={() => onNavigate("flow")}>Inspect individual answers <ArrowIcon /></button></div>
       </div>
-      <p className="routing-pricing-note">Projection only · {routing.cost.pricingLabel}. Baseline ${routing.cost.baselineUsd.toFixed(2)} → projected ${routing.cost.projectedUsd.toFixed(2)}.</p>
+      <p className="routing-pricing-note">Projection only · {routing.cost.pricingLabel}. Current {modelName(routing.models.primary)} cost ${routing.cost.currentUsd.toFixed(2)} → proposed routed cost ${routing.cost.projectedUsd.toFixed(2)}.</p>
     </section>
     <section className="surface operations-health" aria-labelledby="operations-health-title">
       <div className="section-heading"><div><span className="eyebrow">Production status</span><h2 id="operations-health-title">Service health and deployed versions</h2><p>Live dependency checks, knowledge synchronization and versions reported by the API.</p></div><span className={`status-label ${operations?.status || "unknown"}`}>{operations?.status || "Unavailable"}</span></div>

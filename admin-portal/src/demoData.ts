@@ -88,6 +88,7 @@ export const demoModelRouting: ModelRoutingReport = {
   rangeDays: 7,
   mode: "shadow",
   models: {
+    primary: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
     fast: "Claude Haiku 4.5",
     complex: "Claude Sonnet 5"
   },
@@ -102,10 +103,12 @@ export const demoModelRouting: ModelRoutingReport = {
     averageGenerationLatencyMs: 3218
   },
   cost: {
-    baselineUsd: 16.42,
+    baselineUsd: 5.49,
+    currentUsd: 5.49,
     projectedUsd: 9.87,
-    projectedSavingsUsd: 6.55,
-    savingsRate: 0.399,
+    projectedDeltaUsd: 4.38,
+    projectedSavingsUsd: 0,
+    savingsRate: 0,
     pricingLabel: "US geographic on-demand rates configured 2026-08-19"
   },
   targets: [
