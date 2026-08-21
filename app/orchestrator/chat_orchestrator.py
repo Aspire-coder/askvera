@@ -1053,6 +1053,14 @@ class AIOrchestrator:
                 "response_source": "directory_clarification",
                 "fallback": False,
             },
+            cards=[
+                {"id": "directory-telephone", "label": "Telephone number", "prompt": "What is the telephone number for that country?"},
+                {"id": "directory-hours", "label": "Business hours", "prompt": "What are the business hours for that country?"},
+                {"id": "directory-email", "label": "Email address", "prompt": "What is the email address for that country?"},
+                {"id": "directory-address", "label": "Office address", "prompt": "What is the office address for that country?"},
+                {"id": "directory-website", "label": "Website", "prompt": "What is the website for that country?"},
+                {"id": "directory-sponsoring", "label": "Sponsoring information", "prompt": "What sponsoring information is available for that country?"},
+            ],
         )
         append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
         return response

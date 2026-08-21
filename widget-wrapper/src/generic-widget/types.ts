@@ -41,6 +41,12 @@ export type WidgetMessage = {
   metadata?: Record<string, unknown>;
 };
 
+export type WidgetQuickReply = {
+  id: string;
+  label: string;
+  prompt: string;
+};
+
 export type WidgetTheme = {
   accentColor?: string;
   accentTextColor?: string;

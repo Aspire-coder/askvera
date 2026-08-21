@@ -692,6 +692,7 @@ def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> N
     assert response is not None
     assert "telephone number" in response.answer
     assert response.metadata["response_source"] == "directory_clarification"
+    assert response.cards[0]["prompt"] == "What is the telephone number for that country?"
 
 
 def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:

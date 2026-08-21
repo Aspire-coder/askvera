@@ -27,6 +27,8 @@ class ChatResponse:
         public_metadata = self._public_metadata()
         if public_metadata:
             result["metadata"] = public_metadata
+        if self.cards:
+            result["cards"] = self.cards
         return result
 
     def to_cache_value(self) -> dict[str, Any]:

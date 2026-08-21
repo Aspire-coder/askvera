@@ -672,6 +672,7 @@ export function WidgetRuntime({
         content: envelope.data?.response || localized.unavailable,
         metadata: {
           sources: envelope.data?.sources || [],
+          quickReplies: envelope.data?.cards || [],
           confidence: envelope.data?.confidence,
           correlationId,
           responseMetadata: envelope.data?.metadata,

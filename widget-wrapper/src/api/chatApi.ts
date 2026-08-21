@@ -22,12 +22,19 @@ export type ChatSource = {
   score?: number;
 };
 
+export type ChatCard = {
+  id: string;
+  label: string;
+  prompt: string;
+};
+
 export type ChatResponseData = {
   response: string;
   sources?: ChatSource[];
   confidence?: number;
   correlationId?: string;
   metadata?: Record<string, unknown>;
+  cards?: ChatCard[];
 };
 
 export function sendMessage(client: ApiClient, request: ChatRequest) {

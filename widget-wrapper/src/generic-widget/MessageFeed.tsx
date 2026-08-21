@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingTimingMs } from "../constants";
 import { CitationRenderer, MarkdownRenderer } from "../renderers";
-import type { GenericWidgetConfig, GenericWidgetRenderState, WidgetMessage } from "./types";
+import type { GenericWidgetConfig, GenericWidgetRenderState, WidgetMessage, WidgetQuickReply } from "./types";
 
 type MessageRole = WidgetMessage["role"];
 export type LoadingDisplayState = "hidden" | "typing" | "skeleton" | "slow" | "reconnecting";
@@ -23,6 +23,27 @@ function AssistantAvatar({ config }: { config: GenericWidgetConfig }) {
   }
 
   return <span>{assistantMark(config)}</span>;
+}
+
+function QuickReplyCards({
+  cards,
+  state,
+  onQuickReply
+}: {
+  cards: WidgetQuickReply[];
+  state: GenericWidgetRenderState;
+  onQuickReply?: (prompt: string, state: GenericWidgetRenderState) => void;
+}) {
+  if (!cards.length || !onQuickReply) return null;
+  return (
+    <div className="gw-quick-replies" aria-label="Choose what you want to know">
+      {cards.map((card) => (
+        <button key={card.id} type="button" className="gw-quick-reply" onClick={() => onQuickReply(card.prompt, state)}>
+          {card.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function messageCopyText(message: WidgetMessage): string {
@@ -201,6 +222,7 @@ function MessageCard({
   onMessageFeedback,
   onRequestSupport,
   onOpenSource
+  ,onQuickReply
 }: {
   message: WidgetMessage;
   config: GenericWidgetConfig;
@@ -213,6 +235,7 @@ function MessageCard({
     page: string | undefined,
     state: GenericWidgetRenderState
   ) => void | Promise<void>;
+  onQuickReply?: (prompt: string, state: GenericWidgetRenderState) => void;
 }) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -232,6 +255,7 @@ function MessageCard({
           <span className="gw-message-author">{label}</span>
         </header>
         <div className="gw-message-body">{content}</div>
+        {isAssistant ? <QuickReplyCards cards={(message.metadata?.quickReplies as WidgetQuickReply[] | undefined) || []} state={state} onQuickReply={onQuickReply} /> : null}
         {isAssistant ? <CitationRenderer sources={message.metadata?.sources} labels={config.citationLabels} onOpenSource={onOpenSource ? (uri, page) => onOpenSource(uri, page, state) : undefined} /> : null}
         {isAssistant ? (
           <MessageActions
@@ -295,6 +319,7 @@ export function MessageFeed({
   onMessageFeedback,
   onRequestSupport,
   onOpenSource
+  ,onQuickReply
 }: {
   config: GenericWidgetConfig;
   messages: WidgetMessage[];
@@ -306,6 +331,7 @@ export function MessageFeed({
   onMessageFeedback?: (message: WidgetMessage, rating: number, state: GenericWidgetRenderState, expectedAnswer?: string) => void | Promise<void>;
   onRequestSupport?: (message: WidgetMessage, state: GenericWidgetRenderState) => void | Promise<void>;
   onOpenSource?: (uri: string, page: string | undefined, state: GenericWidgetRenderState) => void | Promise<void>;
+  onQuickReply?: (prompt: string, state: GenericWidgetRenderState) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const previousLoadingState = useRef(loadingState);
@@ -333,6 +359,7 @@ export function MessageFeed({
           onMessageFeedback={onMessageFeedback}
           onRequestSupport={onRequestSupport}
           onOpenSource={onOpenSource}
+          onQuickReply={onQuickReply}
         />
       ))}
       {loadingState !== "hidden" ? <LoadingMessage config={config} state={loadingState} label={loadingLabel || config.loadingText} /> : null}

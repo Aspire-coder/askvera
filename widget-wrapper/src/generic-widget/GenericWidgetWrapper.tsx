@@ -567,6 +567,25 @@ export function GenericWidgetWrapper({
     onSendMessage?.(payload);
   };
 
+  const handleQuickReply = (prompt: string, renderState: GenericWidgetRenderState) => {
+    const trimmed = prompt.trim();
+    if (!trimmed || composerDisabled || submitLockRef.current || !onSendMessage) return;
+    submitLockRef.current = true;
+    setLocalRequestPending(true);
+    const payload: MessageEventPayload = {
+      visitorId: renderState.visitorId,
+      sessionId: renderState.sessionId,
+      message: trimmed,
+      selectedCountry: renderState.selectedCountry?.code || "",
+      selectedLanguage: renderState.selectedLanguage?.code || "",
+      widgetProviderName: config.provider.name,
+      widgetProviderType: config.provider.type,
+    };
+    touchSession();
+    events.emit(widgetEventTypes.MESSAGE_SENT, { visitorId, sessionId, message: payload });
+    onSendMessage(payload);
+  };
+
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
@@ -739,6 +758,7 @@ export function GenericWidgetWrapper({
                 onMessageFeedback={handleMessageFeedback}
                 onRequestSupport={onRequestSupport}
                 onOpenSource={onOpenSource}
+                onQuickReply={handleQuickReply}
               />
             ) : null}
             {chatContentVisible && suggestedTopics.length ? (

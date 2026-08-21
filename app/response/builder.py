@@ -151,13 +151,14 @@ class ResponseBuilder:
         answer: str,
         correlation_id: str,
         metadata: dict[str, Any] | None = None,
+        cards: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
         """Build a canonical low-confidence fallback response."""
         chat_response = ChatResponse(
             answer=answer,
             citations=[],
             suggestions=[],
-            cards=[],
+            cards=list(cards or []),
             confidence=0.0,
             correlation_id=correlation_id,
             metadata={"fallback": True, "correlation_id": correlation_id, **(metadata or {})},
