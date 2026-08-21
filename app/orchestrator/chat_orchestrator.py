@@ -49,7 +49,10 @@ from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
-from utils.directory_fields import restore_missing_directory_contacts
+from utils.directory_fields import (
+    restore_missing_directory_contacts,
+    restore_missing_requested_directory_fields,
+)
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 
@@ -292,14 +295,24 @@ class AIOrchestrator:
         """Restore approved directory fields, then enforce outbound PII safety."""
         completed_answer, restored_fields = chat_response.answer, []
         if chat_response.citations:
+            completed_answer, restored_requested_fields = restore_missing_requested_directory_fields(
+                completed_answer,
+                (
+                    document.metadata.get("directory_fields", {})
+                    for document in retrieval_result.documents
+                    if isinstance(document.metadata.get("directory_fields"), dict)
+                ),
+                user_question,
+            )
             completed_answer, restored_fields = restore_missing_directory_contacts(
-                chat_response.answer,
+                completed_answer,
                 (
                     document.metadata.get("directory_fields", {})
                     for document in retrieval_result.documents
                     if isinstance(document.metadata.get("directory_fields"), dict)
                 ),
             )
+            restored_fields = [*restored_requested_fields, *restored_fields]
         if restored_fields:
             chat_response = self._replace_answer(
                 chat_response,

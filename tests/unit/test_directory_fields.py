@@ -1,6 +1,10 @@
 """Tests for generic structured directory response completion."""
 
-from utils.directory_fields import parse_directory_fields, restore_missing_directory_contacts
+from utils.directory_fields import (
+    parse_directory_fields,
+    restore_missing_directory_contacts,
+    restore_missing_requested_directory_fields,
+)
 
 
 def test_parses_same_line_directory_fields_from_pdf_layout() -> None:
@@ -105,3 +109,21 @@ def test_never_mixes_contacts_from_secondary_directory_records() -> None:
     assert "+52 55 3300 9400" not in completed
     assert "support-mx@example.test" not in completed
     assert restored == ["Office Phone"]
+
+
+def test_restores_requested_business_hours_when_model_leaves_value_blank() -> None:
+    answer = "Here are the business hours for the Kenya office.\n\nOffice Hours:"
+    fields = {
+        "Country": "Kenya",
+        "Business Hours Office": "09:00 - 17:00 (Mon - Fri); 10:00 - 14:00 (Sat)",
+        "Telephone Office": "+254 712 434 328",
+    }
+
+    completed, restored = restore_missing_requested_directory_fields(
+        answer,
+        [fields],
+        "what are the business hours for Kenya",
+    )
+
+    assert "Business Hours Office: 09:00 - 17:00 (Mon - Fri); 10:00 - 14:00 (Sat)" in completed
+    assert restored == ["Business Hours Office"]

@@ -115,6 +115,43 @@ def restore_missing_directory_contacts(
     return f"{original}{separator}{exact_fields}", [label for label, _ in missing]
 
 
+def restore_missing_requested_directory_fields(
+    answer: str,
+    field_sets: Iterable[dict[str, object]],
+    question: str,
+) -> tuple[str, list[str]]:
+    """Restore the exact structured directory field explicitly requested.
+
+    Directory prompts can contain a complete field while the generated answer
+    accidentally leaves its value blank. Only the requested field is eligible
+    here, and only from the highest-ranked record, so unrelated fields and
+    neighboring countries cannot be appended.
+    """
+    original = (answer or "").strip()
+    question_text = (question or "").casefold()
+    requested_patterns: list[re.Pattern[str]] = []
+    if re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
+        requested_patterns.append(re.compile(r"^business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?$", re.IGNORECASE))
+    if not requested_patterns:
+        return original, []
+
+    primary_fields = next((fields for fields in field_sets if fields), {})
+    missing: list[tuple[str, str]] = []
+    for raw_label, raw_value in primary_fields.items():
+        label = str(raw_label).strip()
+        value = str(raw_value).strip()
+        if not label or not value or not any(pattern.search(label) for pattern in requested_patterns):
+            continue
+        if not _value_is_present(original, value):
+            missing.append((label, value))
+
+    if not missing:
+        return original, []
+    exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
+    separator = "\n\n" if original else ""
+    return f"{original}{separator}{exact_fields}", [label for label, _ in missing]
+
+
 def _is_field_label(value: str) -> bool:
     return len(value) <= 80 and bool(_FIELD_LABEL_RE.search(value.strip()))
 
