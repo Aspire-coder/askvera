@@ -3,6 +3,7 @@
 from utils.directory_fields import (
     parse_directory_fields,
     preserve_directory_role_labels,
+    remove_unrequested_directory_fields,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
 )
@@ -153,4 +154,20 @@ def test_preserves_fbo_minimum_order_label_when_answer_shortens_it() -> None:
     corrected, changed = preserve_directory_role_labels(answer, [source])
 
     assert corrected == "The FBO minimum order size is $100 worth of products when joining."
+    assert changed is True
+
+
+def test_removes_unrequested_directory_fields_from_phone_answer() -> None:
+    answer = (
+        "The office telephone is +223 44 90 05 41.\n"
+        "Telephone for Orders: (see above) Email: contact@example.test\n"
+        "Website: www.example.com"
+    )
+
+    focused, changed = remove_unrequested_directory_fields(
+        answer,
+        "what is the telephone number for Mali",
+    )
+
+    assert focused == "The office telephone is +223 44 90 05 41."
     assert changed is True

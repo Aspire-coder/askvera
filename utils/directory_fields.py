@@ -176,6 +176,40 @@ def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> 
     return corrected, replacements > 0
 
 
+def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str, bool]:
+    """Remove extra labelled directory fields when one field was requested."""
+    question_text = (question or "").casefold()
+    if re.search(r"\b(all|every|complete)\s+(contact|directory)|\bcontact details?\b", question_text):
+        return answer, False
+
+    if re.search(r"\b(phone|telephone)\b", question_text):
+        allowed = r"telephone(?!\s+for\s+orders)(?:\s+office)?|phone(?:\s*\d+)?"
+    elif re.search(r"\b(email|e-mail)\b", question_text):
+        allowed = r"email|e-mail"
+    elif re.search(r"\b(website|web site|url)\b", question_text):
+        allowed = r"website|web site|url"
+    elif re.search(r"\b(address|located|location)\b", question_text):
+        allowed = r"(?:office\s*(?:&|and)\s*product\s+center\s+)?address"
+    elif re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
+        allowed = r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?"
+    else:
+        return answer, False
+
+    labels = (
+        r"telephone\s+for\s+orders|telephone(?:\s+office)?|phone(?:\s*\d+)?|"
+        r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|"
+        r"office\s*(?:&|and)\s*product\s+center\s+address|address|fax|email|website"
+    )
+    pattern = re.compile(
+        rf"(?<!\w)(?!{allowed}\b)(?P<label>{labels})\s*:\s*[^\n]*(?:\n|$)",
+        re.IGNORECASE,
+    )
+    cleaned, replacements = pattern.subn("", answer or "")
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, replacements > 0
+
+
 def _is_field_label(value: str) -> bool:
     return len(value) <= 80 and bool(_FIELD_LABEL_RE.search(value.strip()))
 
