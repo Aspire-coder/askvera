@@ -210,6 +210,51 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     return cleaned, replacements > 0
 
 
+def correct_directory_source_contradictions(
+    answer: str,
+    source_texts: Iterable[str],
+) -> tuple[str, bool]:
+    """Correct generated directory claims that contradict explicit source text."""
+    corrected = answer or ""
+    changed = False
+    for source in source_texts:
+        source_text = source or ""
+        order_match = re.search(
+            r"(?P<cc>\d+(?:[.,]\d+)?\s*CC).*?(?:around|approximately)\s*"
+            r"(?P<amount>[\d.,]+)\s*(?P<currency>[A-Z]{3})\b",
+            source_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if order_match and re.search(re.escape(order_match.group("cc")), corrected, re.IGNORECASE):
+            amount = order_match.group("amount")
+            currency = order_match.group("currency").upper()
+            corrected, replacements = re.subn(
+                rf"({re.escape(order_match.group('cc'))}.*?\b(?:around|approximately)\s+)"
+                rf"[\d.,]+\s+{re.escape(currency)}\b",
+                rf"\g<1>{amount} {currency}",
+                corrected,
+                count=1,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            changed = changed or replacements > 0
+
+        if re.search(
+            r"after\s+sponsorship\s*[:\-]?\s*(?:we\s+)?(?:do\s+not|don't|do\s+not)\s+have\s+a\s+minimum\s+order",
+            source_text,
+            re.IGNORECASE,
+        ):
+            corrected, replacements = re.subn(
+                r"after\s+sponsorship\s*[:\-]?\s*[^.\n]+(?:\.|$)",
+                "After sponsorship: there is no minimum order.",
+                corrected,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            changed = changed or replacements > 0
+
+    return corrected, changed
+
+
 def _is_field_label(value: str) -> bool:
     return len(value) <= 80 and bool(_FIELD_LABEL_RE.search(value.strip()))
 

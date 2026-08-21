@@ -3,6 +3,7 @@
 from utils.directory_fields import (
     parse_directory_fields,
     preserve_directory_role_labels,
+    correct_directory_source_contradictions,
     remove_unrequested_directory_fields,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
@@ -170,4 +171,23 @@ def test_removes_unrequested_directory_fields_from_phone_answer() -> None:
     )
 
     assert focused == "The office telephone is +223 44 90 05 41."
+    assert changed is True
+
+
+def test_corrects_directory_values_that_contradict_explicit_source() -> None:
+    answer = (
+        "For Morocco, the minimum order is 0.200 CC (approximately 600 MAD).\n\n"
+        "After sponsorship: 500 DH minimum."
+    )
+    source = (
+        "Minimum order size FBO: sponsorship, the first order must be equal or greater than "
+        "0.200 CC (around 750 MAD). After sponsorship: we don't have a minimum order."
+    )
+
+    corrected, changed = correct_directory_source_contradictions(answer, [source])
+
+    assert "approximately 750 MAD" in corrected
+    assert "After sponsorship: there is no minimum order." in corrected
+    assert "600 MAD" not in corrected
+    assert "500 DH minimum" not in corrected
     assert changed is True

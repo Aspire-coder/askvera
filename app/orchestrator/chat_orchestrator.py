@@ -52,6 +52,7 @@ from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, Re
 from utils.directory_fields import (
     parse_directory_fields,
     preserve_directory_role_labels,
+    correct_directory_source_contradictions,
     remove_unrequested_directory_fields,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
@@ -348,6 +349,17 @@ class AIOrchestrator:
                 chat_response,
                 focused_answer,
                 {"unrequested_directory_fields_removed": True},
+            )
+
+        source_safe_answer, source_contradiction_corrected = correct_directory_source_contradictions(
+            chat_response.answer,
+            (document.content for document in retrieval_result.documents),
+        )
+        if source_contradiction_corrected:
+            chat_response = self._replace_answer(
+                chat_response,
+                source_safe_answer,
+                {"directory_source_contradiction_corrected": True},
             )
 
         safe_answer = scrub_pii(
