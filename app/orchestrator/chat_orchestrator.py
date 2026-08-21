@@ -50,6 +50,7 @@ from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.directory_fields import (
+    preserve_directory_role_labels,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
 )
@@ -318,6 +319,17 @@ class AIOrchestrator:
                 chat_response,
                 completed_answer,
                 {"directory_contacts_restored": restored_fields},
+            )
+
+        role_safe_answer, role_label_corrected = preserve_directory_role_labels(
+            chat_response.answer,
+            (document.content for document in retrieval_result.documents),
+        )
+        if role_label_corrected:
+            chat_response = self._replace_answer(
+                chat_response,
+                role_safe_answer,
+                {"directory_role_label_corrected": True},
             )
 
         safe_answer = scrub_pii(

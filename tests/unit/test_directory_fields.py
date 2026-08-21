@@ -2,6 +2,7 @@
 
 from utils.directory_fields import (
     parse_directory_fields,
+    preserve_directory_role_labels,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
 )
@@ -127,3 +128,13 @@ def test_restores_requested_business_hours_when_model_leaves_value_blank() -> No
 
     assert "Business Hours Office: 09:00 - 17:00 (Mon - Fri); 10:00 - 14:00 (Sat)" in completed
     assert restored == ["Business Hours Office"]
+
+
+def test_preserves_fbo_minimum_order_label_when_answer_shortens_it() -> None:
+    answer = "The minimum order size is $100 worth of products when joining."
+    source = "Minimum order size FBO: $100 worth of products when joining."
+
+    corrected, changed = preserve_directory_role_labels(answer, [source])
+
+    assert corrected == "The FBO minimum order size is $100 worth of products when joining."
+    assert changed is True

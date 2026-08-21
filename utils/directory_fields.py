@@ -152,6 +152,26 @@ def restore_missing_requested_directory_fields(
     return f"{original}{separator}{exact_fields}", [label for label, _ in missing]
 
 
+def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> tuple[str, bool]:
+    """Keep an explicit directory role label when generation drops it.
+
+    Some country records distinguish an FBO minimum order from a separate
+    Preferred Customer first-order statement. If the approved source contains
+    the explicit FBO label and the answer shortens it to a generic minimum
+    order, restore only that source-backed label.
+    """
+    if not any(re.search(r"minimum\s+order\s+size\s+fbo\b", text or "", re.IGNORECASE) for text in source_texts):
+        return answer, False
+    corrected, replacements = re.subn(
+        r"(?<!fbo\s)(minimum\s+order\s+size)(?=\s+(?:is|for)\b)",
+        r"FBO \1",
+        answer or "",
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return corrected, replacements > 0
+
+
 def _is_field_label(value: str) -> bool:
     return len(value) <= 80 and bool(_FIELD_LABEL_RE.search(value.strip()))
 

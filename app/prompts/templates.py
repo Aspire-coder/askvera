@@ -39,6 +39,7 @@ Response rules:
   return only requested fields. Copy approved addresses, phone numbers, email
   addresses, and websites exactly. Never combine countries. If office and
   staff records are both used, use both Source IDs in the evidence contract.
+  Do not relabel FBO minimums.
   Before returning a structured answer, verify that every field label you
   include has its complete value from the same retrieved record. Never emit an
   empty label, partial phone number, placeholder, or malformed Markdown marker;
