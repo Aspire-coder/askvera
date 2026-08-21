@@ -39,7 +39,11 @@ def parse_directory_fields(content: str) -> dict[str, str]:
     while index < len(lines):
         label = lines[index]
         inline = _INLINE_FIELD_RE.match(label)
-        if inline:
+        # Prefer a complete standalone label such as "Telephone Office" over
+        # interpreting "Office" as its inline value. Same-line fields still
+        # fall through to the inline parser because they are not standalone
+        # labels.
+        if inline and not _is_field_label(label):
             fields[" ".join(inline.group("label").split())] = inline.group("value").strip()
             index += 1
             continue

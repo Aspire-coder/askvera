@@ -28,6 +28,22 @@ def test_parses_same_line_directory_fields_from_pdf_layout() -> None:
     assert fields["Email"] == "info@example.test"
 
 
+def test_parses_sponsoring_directory_record_fields_without_country_metadata() -> None:
+    content = """Welcome to Forever Kenya/East Africa!
+    General Information
+    Business Hours Office
+    09:00 - 17:00 (Mon - Fri)
+    10:00 - 14:00 (Sat)
+    Telephone Office
+    +254 712 434 328
+    """
+
+    fields = parse_directory_fields(content)
+
+    assert fields["Business Hours Office"] == "09:00 - 17:00 (Mon - Fri) 10:00 - 14:00 (Sat)"
+    assert fields["Telephone Office"] == "+254 712 434 328"
+
+
 def test_parses_multiline_directory_fields_without_mixing_next_label() -> None:
     content = """Example market
     Address

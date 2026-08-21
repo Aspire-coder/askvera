@@ -50,6 +50,7 @@ from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.directory_fields import (
+    parse_directory_fields,
     preserve_directory_role_labels,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
@@ -296,22 +297,27 @@ class AIOrchestrator:
         """Restore approved directory fields, then enforce outbound PII safety."""
         completed_answer, restored_fields = chat_response.answer, []
         if chat_response.citations:
+            directory_field_sets = [
+                fields
+                for document in retrieval_result.documents
+                for fields in [
+                    document.metadata.get("directory_fields", {})
+                    if isinstance(document.metadata.get("directory_fields"), dict)
+                    else parse_directory_fields(document.content)
+                    if document.metadata.get("directory_kind")
+                    or document.metadata.get("directory_section")
+                    else {}
+                ]
+                if fields
+            ]
             completed_answer, restored_requested_fields = restore_missing_requested_directory_fields(
                 completed_answer,
-                (
-                    document.metadata.get("directory_fields", {})
-                    for document in retrieval_result.documents
-                    if isinstance(document.metadata.get("directory_fields"), dict)
-                ),
+                directory_field_sets,
                 user_question,
             )
             completed_answer, restored_fields = restore_missing_directory_contacts(
                 completed_answer,
-                (
-                    document.metadata.get("directory_fields", {})
-                    for document in retrieval_result.documents
-                    if isinstance(document.metadata.get("directory_fields"), dict)
-                ),
+                directory_field_sets,
             )
             restored_fields = [*restored_requested_fields, *restored_fields]
         if restored_fields:
