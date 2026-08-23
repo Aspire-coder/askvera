@@ -74,12 +74,12 @@ def is_origin_allowed(origin: str | None, allowed_origins: list[str]) -> OriginV
     if not normalized_origin:
         return OriginValidation(False, reason="missing_or_invalid_origin")
 
-    if _is_localhost(normalized_origin) and not settings.WIDGET_ALLOW_LOCALHOST_ORIGINS:
-        return OriginValidation(False, normalized_origin, "localhost_not_allowed")
-
     normalized_allowed = {normalize_origin(value) for value in allowed_origins if not value.strip().startswith("*.")}
     if normalized_origin in normalized_allowed:
         return OriginValidation(True, normalized_origin)
+
+    if _is_localhost(normalized_origin) and not settings.WIDGET_ALLOW_LOCALHOST_ORIGINS:
+        return OriginValidation(False, normalized_origin, "localhost_not_allowed")
 
     for allowed_origin in allowed_origins:
         if _wildcard_matches(allowed_origin, normalized_origin):
