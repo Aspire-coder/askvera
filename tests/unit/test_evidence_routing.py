@@ -232,3 +232,35 @@ def test_raw_score_does_not_approve_very_low_confidence_evidence() -> None:
 
     assert decision.approved is False
     assert decision.reason == "insufficient_approved_evidence"
+
+
+def test_selector_verified_strong_local_match_can_approve_normalized_opensearch_score() -> None:
+    """A selector-verified direct clause is not blocked by legacy score calibration."""
+    document = RetrievedDocument(
+        id="bonus-payment-clause",
+        title="US policy - Sec 4.04(d)",
+        content="Bonuses are paid on the fifteenth of the following month.",
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=1.48,
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.2,
+        metadata={
+            "evidence_selector_applied": True,
+            "max_local_relevance": 0.61,
+            "strong_local_match": True,
+        },
+    )
+
+    decision = approve_evidence(
+        "When are bonuses paid each month?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is True

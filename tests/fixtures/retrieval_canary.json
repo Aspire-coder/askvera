@@ -70,6 +70,89 @@
       "expected_title_contains": "Forever Mexico",
       "minimum_confidence": 0.35,
       "evidence_must_be_approved": true
+    },
+    {
+      "id": "preferred-customer-discount-release-gate",
+      "question": "What discount does a Preferred Customer get off the SRP?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Preferred Customer",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "monthly-bonus-payment-release-gate",
+      "question": "When are bonuses paid each month?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Sec 4.04-d",
+      "expected_section_contains": "4.04-d",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "supervisor-case-credits-release-gate",
+      "question": "How many Case Credits do I need to reach Supervisor?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Supervisor is achieved",
+      "expected_section_contains": "4.01-b",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "us-payment-methods-release-gate",
+      "question": "What payment methods are accepted for orders in the U.S.?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "13.01",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "thailand-minimum-order-release-gate",
+      "question": "What is the minimum order size for Forever Thailand?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Thailand",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "kyrgyzstan-foreign-fbo-bonus-release-gate",
+      "question": "How are foreign FBOs paid their bonus in Kyrgyzstan?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Kyrgyzstan",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "unopened-product-return-window-release-gate",
+      "question": "Can I return an unopened product, and within what window?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "21.05",
+      "expected_section_contains": "21.05",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "uruguay-phone-release-gate",
+      "question": "What is the phone number for Forever Uruguay?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Uruguay",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true
     }
   ]
 }

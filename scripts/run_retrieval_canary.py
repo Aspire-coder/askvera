@@ -124,6 +124,12 @@ def main() -> int:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        default=[],
+        help="Run only the named case. Repeat this option to run a bounded subset.",
+    )
     args = parser.parse_args()
 
     try:
@@ -135,6 +141,15 @@ def main() -> int:
     if args.validate_only:
         print(json.dumps({"status": "valid", "cases": len(cases), "fixture_sha256": fixture_hash}))
         return 0
+
+    if args.case_id:
+        requested_ids = set(args.case_id)
+        available_ids = {str(case["id"]) for case in cases}
+        unknown_ids = sorted(requested_ids - available_ids)
+        if unknown_ids:
+            print(f"Unknown retrieval canary case IDs: {', '.join(unknown_ids)}", file=sys.stderr)
+            return 2
+        cases = [case for case in cases if str(case["id"]) in requested_ids]
 
     from config import settings
 

@@ -23,7 +23,12 @@ from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
-from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
+from .providers import (
+    RetrievalQueryPlan,
+    _document_relevance,
+    _planned_retrieval_plan,
+    _planned_retrieval_queries,
+)
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
 from .typo_safety import safe_typo_ranking_queries
@@ -653,6 +658,12 @@ class OpenSearchSectionProvider:
             for row, score in rows
             if score >= settings.SECTION_RETRIEVAL_MIN_SCORE
         ][: settings.OPENSEARCH_RESULT_COUNT]
+        selector_applied = bool(rows and rows[0][0].get("evidence_selector_selected"))
+        max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
+        strong_local_match = bool(
+            selector_applied
+            and max_local_relevance >= settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
+        )
         result = RetrievalResult(
             documents=documents,
             citations=[document.to_source() for document in documents],
@@ -671,6 +682,9 @@ class OpenSearchSectionProvider:
                 "global_query_translated": bool(global_search_message) and global_search_message != message,
                 "explicit_section_reference": explicit_section_id,
                 "evidence_selector_rejected": selector_rejected,
+                "evidence_selector_applied": selector_applied,
+                "max_local_relevance": round(max_local_relevance, 6),
+                "strong_local_match": strong_local_match,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
                     for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
@@ -863,6 +877,8 @@ class OpenSearchSectionProvider:
             "Do not substitute a selected-market policy section that merely mentions generic customer care when a matching "
             "global office or staff record directly contains the requested contact information. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
+            "When a return question says a product is unopened, unused, unsold, or salable and asks for a time window, "
+            "prefer the FBO buy-back or unsold-salable-product clause over a general Retail/Preferred Customer satisfaction clause. "
         )
         if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
             system_prompt += (
@@ -922,6 +938,7 @@ class OpenSearchSectionProvider:
                 candidate = candidates[rank - 1]
                 row_id = str(candidate[0].get("id") or "")
                 if row_id not in selected_ids:
+                    candidate[0]["evidence_selector_selected"] = True
                     selected.append(candidate)
                     selected_ids.add(row_id)
 
