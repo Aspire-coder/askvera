@@ -36,6 +36,17 @@ def test_split_intent_requires_both_the_policy_answer_and_refusal() -> None:
     assert failures == []
 
 
+def test_split_intent_accepts_explicit_create_refusal() -> None:
+    failures = _behavior_failures(
+        "split_intent",
+        "The discount is 5%. I can't create marketing or sales copy for you.",
+        {"intent": "knowledge"},
+        [{"title": "Policy"}],
+    )
+
+    assert failures == []
+
+
 def test_split_intent_fails_if_promotional_request_is_answered() -> None:
     failures = _behavior_failures(
         "split_intent",

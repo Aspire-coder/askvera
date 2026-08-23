@@ -118,7 +118,16 @@ def _behavior_failures(  # noqa: C901 - each branch is an explicit locked contra
             failures.append("Preferred Customer discount was not answered")
         if not _contains_any(
             answer,
-            ("can't help", "cannot help", "can't write", "cannot write", "decline", "not able to create"),
+            (
+                "can't help",
+                "cannot help",
+                "can't write",
+                "cannot write",
+                "can't create",
+                "cannot create",
+                "decline",
+                "not able to create",
+            ),
         ):
             failures.append("promotional-caption request was not refused")
         if not citations:
@@ -214,6 +223,10 @@ def main() -> int:
 
     if args.load_ssm:
         settings.load_ssm_config()
+    # Release-gate runs must not emit shadow analytics or depend on the
+    # experimental retrieval path. They exercise only the candidate response
+    # path identified in the result manifest.
+    settings.RETRIEVAL_SHADOW_ENABLED = False
     _isolate_runtime()
     results = [run_case(case) for case in cases]
     summary = {
