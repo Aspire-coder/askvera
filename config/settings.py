@@ -74,10 +74,10 @@ KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 RETRIEVAL_PIPELINE_VERSION = "2026-08-19-typo-safe-ranking-v3"
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
-RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-safety-v2")
+RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-08-22-legal-output-integrity-v3")
 # Code-owned conversation-routing behavior version. Change this when routing
 # semantics change so stale cached answers cannot bypass the new router.
-CONVERSATION_ROUTING_VERSION = "2026-08-19-followup-context-v3"
+CONVERSATION_ROUTING_VERSION = "2026-08-22-verified-risk-routing-v4"
 # Code-owned model-routing behavior version. It participates in cache keys so
 # routing changes cannot silently reuse answers produced by an older policy.
 MODEL_ROUTING_VERSION = "2026-08-19-risk-router-v1"
@@ -370,6 +370,10 @@ OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file_
 OPENSEARCH_EVIDENCE_SELECTOR_ENABLED = _env_bool("OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
 OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS", 512)
+# Ranking and evidence-coverage protections are evaluated as one reversible
+# profile. Keep this off by default so a code deployment cannot silently change
+# live retrieval before the locked benchmark and locale gates pass.
+OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
 RETRIEVAL_RRF_ENABLED = _env_bool("RETRIEVAL_RRF_ENABLED", False)
 RETRIEVAL_RRF_K = _env_int("RETRIEVAL_RRF_K", 60)
 RETRIEVAL_PARENT_DIVERSITY_ENABLED = _env_bool("RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)

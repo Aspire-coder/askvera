@@ -9,6 +9,8 @@ from typing import Any, Protocol
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.risk.models import RiskContext
+from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions
@@ -88,12 +90,86 @@ CAPITALIZED_STOPWORDS = {
 }
 
 RANK_ANCHOR_TERMS = {"manager", "supervisor"}
+RANK_MODIFIER_TERMS = {
+    "assistant",
+    "inherited",
+    "recognized",
+    "recognised",
+    "sponsored",
+    "transferred",
+    "unrecognized",
+    "unrecognised",
+}
+REQUIREMENT_INTENT_TERMS = {
+    "achieve",
+    "achieved",
+    "become",
+    "condition",
+    "conditions",
+    "criteria",
+    "qualification",
+    "qualifications",
+    "qualify",
+    "requirement",
+    "requirements",
+}
+PURCHASE_INTENT_TERMS = {"buy", "purchase", "purchasing", "shop"}
 
 SPONSORING_QUESTION_RE = re.compile(
     r"\b(?:sponsor|sponsors|sponsorship|sponsoring|responsor|responsored|responsoring|"
     r"international\s+sponsoring)\b",
     re.IGNORECASE,
 )
+
+
+def _verified_conversation_intent(
+    intent: str,
+    message: str,
+    country: str,
+    language: str,
+    correlation_id: str,
+    runtime: Any,
+) -> tuple[str, bool]:
+    """Require deterministic policy confirmation for high-impact refusals.
+
+    The query planner is an advisory semantic classifier. A false-positive
+    income label must never prevent retrieval of an ordinary policy question.
+    """
+    if intent != "income_claim":
+        return intent, False
+    context = RiskContext(
+        user_message=message,
+        country=country,
+        language=language,
+        role="",
+        correlation_id=correlation_id,
+    )
+    if IncomeClaimPolicy().evaluate(context):
+        return intent, False
+    system_prompt = (
+        "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
+        "income or earnings outcome. Factual questions about published compensation, bonuses, discounts, "
+        "returns, purchases, rank qualifications, or company policy are not income claims. Apply the same "
+        "rule in every language. Do not answer the user. Return only JSON."
+    )
+    user_prompt = (
+        f"Requested language: {language}\nUser message:\n{message}\n\n"
+        'Return exactly: {"income_claim":true} or {"income_claim":false}.'
+    )
+    try:
+        response = runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_SUPPORT_ROUTE_MAX_OUTPUT_TOKENS},
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        json_match = re.search(r"\{.*\}", text.strip(), flags=re.S)
+        payload = json.loads(json_match.group(0) if json_match else text)
+        return (intent, False) if payload.get("income_claim") is True else ("knowledge", True)
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("income_intent_verification_failed", correlation_id=correlation_id)
+        return intent, False
 
 
 class RetrievalProvider(Protocol):
@@ -234,6 +310,7 @@ def _retrieval_queries(message: str) -> list[str]:
     additions: list[str] = []
     priority_additions: list[str] = []
     message_terms = _tokens(message)
+    all_message_terms = set(_ordered_tokens_including_stopwords(message))
     phrases = _query_phrases(message)
 
     for phrase in phrases:
@@ -246,6 +323,14 @@ def _retrieval_queries(message: str) -> list[str]:
                 priority_additions.append(f"{phrase} is achieved by generating open group case credits")
             if len(phrase.split()) > 1 and any(term in phrase.split() for term in {"manager", "supervisor"}):
                 priority_additions.append(f"{phrase} is achieved by generating open group case credits")
+
+    if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED and all_message_terms & REQUIREMENT_INTENT_TERMS:
+        governing_query = _governing_requirement_query(message)
+        if governing_query:
+            priority_additions.append(governing_query)
+
+    if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED and _is_purchase_channel_question(message):
+        priority_additions.append("selling products online personal Forever web shop approved FBO website")
 
     if {"bonus", "bonuses"} & message_terms:
         additions.extend(
@@ -263,6 +348,30 @@ def _retrieval_queries(message: str) -> list[str]:
     if not unique_additions:
         return [message]
     return [message, *unique_additions[:4]]
+
+
+def _ordered_tokens_including_stopwords(text: str) -> list[str]:
+    """Return folded Unicode tokens without removing intent words."""
+    return re.findall(r"[^\W_]+", _fold_search_text(text), flags=re.UNICODE)
+
+
+def _governing_requirement_query(message: str) -> str:
+    """Build one bounded, country-neutral query for a named rank requirement."""
+    tokens = _ordered_tokens_including_stopwords(message)
+    for index, token in enumerate(tokens):
+        if token not in RANK_ANCHOR_TERMS:
+            continue
+        anchor = token
+        if index > 0 and tokens[index - 1] in RANK_MODIFIER_TERMS:
+            anchor = f"{tokens[index - 1]} {token}"
+        return f"{anchor} is achieved by generating"
+    return ""
+
+
+def _is_purchase_channel_question(message: str) -> bool:
+    """Identify questions asking where products may be purchased."""
+    terms = set(_ordered_tokens_including_stopwords(message))
+    return bool(terms & PURCHASE_INTENT_TERMS) or ({"where", "order"} <= terms)
 
 
 def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool]:
@@ -454,6 +563,23 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(
             [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
+        )
+
+    conversation_intent, intent_overridden = _verified_conversation_intent(
+        conversation_intent,
+        message,
+        country,
+        language,
+        correlation_id,
+        runtime,
+    )
+    if intent_overridden:
+        conversation_subtype = ""
+        LOGGER.warning(
+            "query_planner_intent_overridden",
+            correlation_id=correlation_id,
+            planner_intent="income_claim",
+            verified_intent=conversation_intent,
         )
 
     if conversation_intent == "assistant_meta":

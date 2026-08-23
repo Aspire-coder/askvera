@@ -455,6 +455,34 @@ def test_retrieval_query_expands_case_credit_rank_terms() -> None:
     assert "supervisor is achieved by generating open group case credits" in queries
 
 
+def test_hardened_query_expands_generic_manager_qualification(monkeypatch) -> None:
+    monkeypatch.setattr(
+        retrieval_providers.settings,
+        "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED",
+        True,
+    )
+
+    queries = _retrieval_queries(
+        "What does the company policy say about manager qualifications?"
+    )
+
+    assert "manager is achieved by generating" in queries
+
+
+def test_hardened_query_expands_purchase_channel(monkeypatch) -> None:
+    monkeypatch.setattr(
+        retrieval_providers.settings,
+        "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED",
+        True,
+    )
+
+    queries = _retrieval_queries(
+        "Where can I buy Forever products in the United States?"
+    )
+
+    assert "selling products online personal Forever web shop approved FBO website" in queries
+
+
 def test_retrieval_query_expands_bonus_terms() -> None:
     """Bonus questions should include the exact business phrase for retrieval."""
     query = _expanded_retrieval_query("What is the Personal Retail Bonus %?")
@@ -692,6 +720,60 @@ def test_query_planner_routes_health_statement_without_opening_support(monkeypat
     assert plan.conversation_intent == "medical_claim"
     assert plan.client_action == ""
     assert runtime.converse.call_count == 1
+
+
+def test_query_planner_cannot_misroute_return_policy_as_income_claim(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        {
+            "output": {
+                "message": {
+                    "content": [{
+                        "text": '{"queries":["return and refund policy"],'
+                        '"document_scopes":["locale_policy"],"intent":"income_claim",'
+                        '"intent_confidence":0.99,"explicit_support_request":false}'
+                    }]
+                }
+            }
+        },
+        {"output": {"message": {"content": [{"text": '{"income_claim":false}'}]}}},
+    ]
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("What is the return policy?", "US", "en", "returns-cid")
+
+    assert plan.conversation_intent == "knowledge"
+    assert plan.client_action == ""
+    assert runtime.converse.call_count == 2
+
+
+def test_query_planner_preserves_confirmed_income_claim(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"income_claim",'
+                    '"intent_confidence":0.99,"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Can this replace my salary?", "US", "en", "income-cid")
+
+    assert plan.conversation_intent == "income_claim"
 
 
 def test_query_planner_routes_assistant_capability_without_document_search(monkeypatch) -> None:

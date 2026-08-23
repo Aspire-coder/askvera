@@ -168,6 +168,14 @@ def test_semantic_cache_isolated_by_country_language_role_and_versions(
     assert semantic_cache._namespace("US", "en", "guest") != us
 
 
+def test_semantic_cache_namespace_rotates_with_retrieval_hardening(monkeypatch) -> None:
+    monkeypatch.setattr(semantic_cache.settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+    baseline = semantic_cache._namespace("US", "en", "guest")
+    monkeypatch.setattr(semantic_cache.settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+
+    assert semantic_cache._namespace("US", "en", "guest") != baseline
+
+
 def test_semantic_cache_rejects_low_score_and_ambiguous_answers(monkeypatch) -> None:
     client = _FakeRedis()
     _enable(monkeypatch, client)

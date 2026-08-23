@@ -82,22 +82,35 @@ def run_case(case: dict[str, Any], sequence: int):
         str(case["language"]),
     )
     top_title = result.documents[0].title if result.documents else ""
+    top_section = (
+        str(result.documents[0].metadata.get("section_id") or "")
+        if result.documents
+        else ""
+    )
     confidence = float(result.confidence)
     failures: list[str] = []
     expected_title = str(case["expected_title_contains"])
-    if expected_title.casefold() not in top_title.casefold():
+    if expected_title and expected_title.casefold() not in top_title.casefold():
         failures.append(f"top title {top_title!r} does not contain {expected_title!r}")
+    expected_section = str(case.get("expected_section_contains") or "")
+    if expected_section and expected_section.casefold() not in top_section.casefold():
+        failures.append(
+            f"top section {top_section!r} does not contain {expected_section!r}"
+        )
     if confidence < float(case["minimum_confidence"]):
         failures.append(
             f"confidence {confidence:.3f} is below {float(case['minimum_confidence']):.3f}"
         )
     if bool(case["evidence_must_be_approved"]) and not decision.approved:
         failures.append(f"evidence rejected: {decision.reason}")
+    if bool(case.get("evidence_must_be_absent")) and result.documents:
+        failures.append(f"expected no evidence but received {len(result.documents)} documents")
     return {
         "id": case["id"],
         "passed": not failures,
         "confidence": round(confidence, 3),
         "top_title": top_title,
+        "top_section": top_section,
         "evidence_approved": decision.approved,
         "failure_reasons": failures,
         "typo_ranking_applied": bool(result.metadata.get("typo_ranking_applied")),

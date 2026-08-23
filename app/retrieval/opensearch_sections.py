@@ -508,6 +508,28 @@ def _parse_selector_ranks(text: str) -> list[int]:
     return parsed
 
 
+def _parse_selector_decision(text: str) -> tuple[list[int], bool | None] | None:
+    """Parse a selector decision while distinguishing rejection from failure."""
+    stripped = text.strip()
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            payload = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    relevant = payload.get("relevant_evidence")
+    if relevant is not True and relevant is not False and relevant is not None:
+        return None
+    return _parse_selector_ranks(json.dumps(payload)), relevant
+
+
 class OpenSearchSectionProvider:
     """Retrieve approved document sections from an OpenSearch section index."""
 
@@ -622,7 +644,9 @@ class OpenSearchSectionProvider:
             from .bedrock_reranker import rerank_rows
 
             rows = rerank_rows(message, rows, correlation_id=correlation_id)
+        raw_rows = rows
         rows = self._select_evidence_rows(message, rows, correlation_id)
+        selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
 
         documents = [
             self._document_from_row(row, score)
@@ -635,7 +659,7 @@ class OpenSearchSectionProvider:
             confidence=_confidence_from_documents(documents),
             metadata={
                 "provider": "opensearch_section",
-                "candidate_count": len(rows),
+                "candidate_count": len(raw_rows),
                 "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
                 "typo_ranking_query_count": len(typo_ranking_queries),
                 "typo_ranking_applied": bool(documents and documents[0].metadata.get("typo_ranking_applied")),
@@ -646,9 +670,10 @@ class OpenSearchSectionProvider:
                 "conversation_intent": "knowledge",
                 "global_query_translated": bool(global_search_message) and global_search_message != message,
                 "explicit_section_reference": explicit_section_id,
+                "evidence_selector_rejected": selector_rejected,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
-                    for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
+                    for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
                 ],
             },
         )
@@ -658,7 +683,7 @@ class OpenSearchSectionProvider:
             country=country,
             language=language,
             source_count=len(result.sources),
-            candidate_count=len(rows),
+            candidate_count=len(raw_rows),
             confidence=result.confidence,
             typo_ranking_query_count=len(typo_ranking_queries),
             typo_ranking_applied=result.metadata["typo_ranking_applied"],
@@ -838,13 +863,28 @@ class OpenSearchSectionProvider:
             "Do not substitute a selected-market policy section that merely mentions generic customer care when a matching "
             "global office or staff record directly contains the requested contact information. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
-            "Return only JSON."
+        )
+        if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+            system_prompt += (
+                "A candidate is relevant only when its text contains the requested fact or a governing rule that directly answers it; "
+                "sharing a product, company, person, rank, or country name is not enough. "
+                "For a question about where or how to buy something, prefer a section that states a permitted purchase or sales channel, "
+                "not a general company description or an unrelated product rule. "
+                "For qualifications or requirements, prefer the clause that states how the exact named level is achieved, not a different "
+                "type of manager or a later benefit that assumes qualification already happened. "
+                "If none of the candidates directly supports an answer, mark relevant_evidence false and select no ranks. "
+            )
+        system_prompt += "Return only JSON."
+        response_example = (
+            '{"relevant_evidence":true,"selected_ranks":[1,2,3],"reason":"short reason"}'
+            if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            else '{"selected_ranks":[1,2,3],"reason":"short reason"}'
         )
         user_prompt = (
             f"User question:\n{message}\n\n"
             f"Candidate sections:\n{candidate_text}\n\n"
             f"Select up to {settings.OPENSEARCH_RESULT_COUNT} candidate ranks. "
-            "Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}."
+            f"Return JSON exactly like this: {response_example}."
         )
         try:
             response = get_aws_clients().bedrock_runtime.converse(
@@ -854,10 +894,26 @@ class OpenSearchSectionProvider:
                 inferenceConfig={"maxTokens": settings.OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS},
             )
             text = response["output"]["message"]["content"][0].get("text", "")
-            ranks = _parse_selector_ranks(text)
+            decision = _parse_selector_decision(text)
         except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
             LOGGER.exception("opensearch_evidence_selector_failed", correlation_id=correlation_id)
             return rows
+
+        if decision is None:
+            LOGGER.warning("opensearch_evidence_selector_invalid", correlation_id=correlation_id)
+            return rows
+        ranks, relevant_evidence = decision
+        if (
+            settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            and relevant_evidence is False
+            and not ranks
+        ):
+            LOGGER.info(
+                "opensearch_evidence_selector_no_relevant_evidence",
+                correlation_id=correlation_id,
+                candidate_count=len(candidates),
+            )
+            return []
 
         selected: list[tuple[dict[str, Any], float]] = []
         selected_ids: set[str] = set()

@@ -1,6 +1,10 @@
 """Reject broken or placeholder-bearing user-visible answers."""
 
-from app.response.quality import contains_unresolved_placeholder, has_incomplete_ending
+from app.response.quality import (
+    contains_internal_retrieval_language,
+    contains_unresolved_placeholder,
+    has_incomplete_ending,
+)
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
 
 
@@ -25,6 +29,15 @@ class OutputIntegrityValidator:
                 ValidationIssue(
                     code="INCOMPLETE_OUTPUT",
                     message="Chat response appears truncated or structurally incomplete.",
+                    severity=ValidationSeverity.CRITICAL,
+                    field="answer",
+                )
+            )
+        if contains_internal_retrieval_language(answer):
+            result.add_issue(
+                ValidationIssue(
+                    code="INTERNAL_RETRIEVAL_LANGUAGE",
+                    message="Chat response exposes internal retrieval terminology.",
                     severity=ValidationSeverity.CRITICAL,
                     field="answer",
                 )

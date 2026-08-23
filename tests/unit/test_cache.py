@@ -47,6 +47,15 @@ def test_build_cache_key_rotates_with_response_pipeline(monkeypatch) -> None:
     assert first != second
 
 
+def test_build_cache_key_rotates_with_retrieval_hardening(monkeypatch) -> None:
+    monkeypatch.setattr(cache.settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+    first = cache.build_cache_key("hello", "US", "en", "new_prospect")
+    monkeypatch.setattr(cache.settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    second = cache.build_cache_key("hello", "US", "en", "new_prospect")
+
+    assert first != second
+
+
 def test_build_cache_key_rotates_with_model_routing_mode(monkeypatch) -> None:
     """Shadow and live routing cannot reuse answers from another model policy."""
     monkeypatch.setattr(cache.settings, "MODEL_ROUTING_MODE", "shadow")
