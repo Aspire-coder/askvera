@@ -6,6 +6,8 @@
 
 Commit `069b2d0ed42f17ba449f46418a74471626a729d9` satisfies the locked retrieval and safety-boundary gates. It does not yet satisfy the complete release contract because Legal wording completeness remains open.
 
+**Engineering freeze recorded 2026-08-23:** Runtime gates closed against code commit `069b2d0`; the documentation handoff was recorded at commit `7c0c5c7`. The Legal packet was prepared on 2026-08-23. Delivery and approval have not yet been recorded.
+
 Scope note for the pull request:
 
 > Scope: This PR closes the retrieval, evidence-approval, and safety-boundary gates. Legal-approved medical, income, and current-fact wording completeness remains open and must be green before release-ready status.
@@ -110,7 +112,7 @@ $env:AWS_REGION='us-east-1'
 2. Replace the six `PASS*` outcomes with those approved responses and permanent regression assertions.
 3. Run all twenty frozen questions after the Legal-controlled response changes and report in-scope retrieval, safety-boundary behavior, and Legal completeness separately.
 4. Require `8/8`, `12/12`, and `12/12` before marking the release ready.
-5. Immediately before deployment, compare the production commit, index generation, model, flags, thresholds, cache namespace, and document hashes with this manifest. Stop on any drift and rerun the gates.
+5. Execute `docs/releases/PRODUCTION_PARITY_CHECKLIST.md` immediately before and after deployment. Stop on any drift and rerun the gates.
 
 ## Pull request verification text
 
