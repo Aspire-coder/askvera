@@ -455,6 +455,34 @@ def test_retrieval_query_expands_case_credit_rank_terms() -> None:
     assert "supervisor is achieved by generating open group case credits" in queries
 
 
+def test_hardened_query_expands_generic_manager_qualification(monkeypatch) -> None:
+    monkeypatch.setattr(
+        retrieval_providers.settings,
+        "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED",
+        True,
+    )
+
+    queries = _retrieval_queries(
+        "What does the company policy say about manager qualifications?"
+    )
+
+    assert "manager is achieved by generating" in queries
+
+
+def test_hardened_query_expands_purchase_channel(monkeypatch) -> None:
+    monkeypatch.setattr(
+        retrieval_providers.settings,
+        "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED",
+        True,
+    )
+
+    queries = _retrieval_queries(
+        "Where can I buy Forever products in the United States?"
+    )
+
+    assert "selling products online personal Forever web shop approved FBO website" in queries
+
+
 def test_retrieval_query_expands_bonus_terms() -> None:
     """Bonus questions should include the exact business phrase for retrieval."""
     query = _expanded_retrieval_query("What is the Personal Retail Bonus %?")

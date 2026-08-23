@@ -216,6 +216,7 @@ def _namespace(country: str, language: str, role: str) -> str:
             settings.CACHE_SCHEMA_VERSION,
             settings.KB_VERSION,
             settings.RETRIEVAL_PIPELINE_VERSION,
+            "retrieval-hardened" if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED else "retrieval-baseline",
             settings.CONVERSATION_ROUTING_VERSION,
             settings.RESPONSE_PIPELINE_VERSION,
             settings.PROMPT_VERSION,

@@ -90,6 +90,30 @@ CAPITALIZED_STOPWORDS = {
 }
 
 RANK_ANCHOR_TERMS = {"manager", "supervisor"}
+RANK_MODIFIER_TERMS = {
+    "assistant",
+    "inherited",
+    "recognized",
+    "recognised",
+    "sponsored",
+    "transferred",
+    "unrecognized",
+    "unrecognised",
+}
+REQUIREMENT_INTENT_TERMS = {
+    "achieve",
+    "achieved",
+    "become",
+    "condition",
+    "conditions",
+    "criteria",
+    "qualification",
+    "qualifications",
+    "qualify",
+    "requirement",
+    "requirements",
+}
+PURCHASE_INTENT_TERMS = {"buy", "purchase", "purchasing", "shop"}
 
 SPONSORING_QUESTION_RE = re.compile(
     r"\b(?:sponsor|sponsors|sponsorship|sponsoring|responsor|responsored|responsoring|"
@@ -286,6 +310,7 @@ def _retrieval_queries(message: str) -> list[str]:
     additions: list[str] = []
     priority_additions: list[str] = []
     message_terms = _tokens(message)
+    all_message_terms = set(_ordered_tokens_including_stopwords(message))
     phrases = _query_phrases(message)
 
     for phrase in phrases:
@@ -298,6 +323,14 @@ def _retrieval_queries(message: str) -> list[str]:
                 priority_additions.append(f"{phrase} is achieved by generating open group case credits")
             if len(phrase.split()) > 1 and any(term in phrase.split() for term in {"manager", "supervisor"}):
                 priority_additions.append(f"{phrase} is achieved by generating open group case credits")
+
+    if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED and all_message_terms & REQUIREMENT_INTENT_TERMS:
+        governing_query = _governing_requirement_query(message)
+        if governing_query:
+            priority_additions.append(governing_query)
+
+    if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED and _is_purchase_channel_question(message):
+        priority_additions.append("selling products online personal Forever web shop approved FBO website")
 
     if {"bonus", "bonuses"} & message_terms:
         additions.extend(
@@ -315,6 +348,30 @@ def _retrieval_queries(message: str) -> list[str]:
     if not unique_additions:
         return [message]
     return [message, *unique_additions[:4]]
+
+
+def _ordered_tokens_including_stopwords(text: str) -> list[str]:
+    """Return folded Unicode tokens without removing intent words."""
+    return re.findall(r"[^\W_]+", _fold_search_text(text), flags=re.UNICODE)
+
+
+def _governing_requirement_query(message: str) -> str:
+    """Build one bounded, country-neutral query for a named rank requirement."""
+    tokens = _ordered_tokens_including_stopwords(message)
+    for index, token in enumerate(tokens):
+        if token not in RANK_ANCHOR_TERMS:
+            continue
+        anchor = token
+        if index > 0 and tokens[index - 1] in RANK_MODIFIER_TERMS:
+            anchor = f"{tokens[index - 1]} {token}"
+        return f"{anchor} is achieved by generating"
+    return ""
+
+
+def _is_purchase_channel_question(message: str) -> bool:
+    """Identify questions asking where products may be purchased."""
+    terms = set(_ordered_tokens_including_stopwords(message))
+    return bool(terms & PURCHASE_INTENT_TERMS) or ({"where", "order"} <= terms)
 
 
 def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool]:
