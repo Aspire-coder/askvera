@@ -146,6 +146,44 @@ FOREVER_NAMED_RECORD_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Preserve an approved policy clause when the same message also asks AskVera to
+# create promotional content. This is intentionally narrower than changing the
+# off-topic threshold: a compound connector, a reviewed policy/glossary match,
+# and a separate creation clause must all be present.
+COMPOUND_REQUEST_SPLIT_RE = re.compile(
+    r"\s+(?:and|also|plus|but|et|y|und|en|e|og|och|i|и)\s+|[;&]",
+    re.IGNORECASE | re.UNICODE,
+)
+PROMOTIONAL_CREATION_RE = re.compile(
+    r"\b(?:caption|marketing\s+email|marketing\s+copy|social\s+media\s+post|"
+    r"instagram\s+(?:caption|post)|facebook\s+(?:caption|post)|tiktok\s+(?:caption|post)|"
+    r"advertisement|advertising\s+copy|ad\s+copy|recruiting\s+(?:email|copy|post)|"
+    r"write|draft|compose|create|generate)\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _approved_clause_from_compound_request(
+    message: str,
+    country: str,
+    language: str,
+) -> str:
+    """Return the answerable clause from a mixed policy/content request."""
+    segments = [
+        re.sub(r"\s+", " ", segment).strip(" ,.!?")
+        for segment in COMPOUND_REQUEST_SPLIT_RE.split(message or "")
+    ]
+    segments = [segment for segment in segments if segment]
+    if len(segments) < 2 or not any(PROMOTIONAL_CREATION_RE.search(segment) for segment in segments):
+        return ""
+    answerable = [
+        segment
+        for segment in segments
+        if not PROMOTIONAL_CREATION_RE.search(segment)
+        and bool(glossary_queries(segment, country, language))
+    ]
+    return answerable[0] if len(answerable) == 1 else ""
+
 
 def _verified_conversation_intent(
     intent: str,
@@ -609,6 +647,21 @@ def _planned_retrieval_plan(
             verified_intent=conversation_intent,
         )
 
+    approved_compound_clause = _approved_clause_from_compound_request(
+        message,
+        country,
+        language,
+    )
+    if conversation_intent == "off_topic" and approved_compound_clause:
+        conversation_intent = "knowledge"
+        conversation_subtype = ""
+        LOGGER.warning(
+            "query_planner_compound_intent_preserved",
+            correlation_id=correlation_id,
+            original_intent="off_topic",
+            verified_intent="knowledge",
+        )
+
     if conversation_intent == "assistant_meta":
         # Exact, reviewed phrases are already handled before retrieval. Do not let
         # a broad semantic "who" classification impersonate that trusted route.
@@ -632,7 +685,10 @@ def _planned_retrieval_plan(
         intent_confidence = 0.0
 
     merged: list[str] = []
-    for query in [message, *joined_term_queries, *planned_queries, *base_queries[1:], *glossary]:
+    query_inputs = [message, *joined_term_queries, *planned_queries, *base_queries[1:], *glossary]
+    if approved_compound_clause:
+        query_inputs.insert(0, approved_compound_clause)
+    for query in query_inputs:
         cleaned = re.sub(r"\s+", " ", query).strip()
         if cleaned and cleaned not in merged:
             merged.append(cleaned)

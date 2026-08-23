@@ -9,6 +9,7 @@ from app.retrieval import service as retrieval_service_module
 from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
+    _approved_clause_from_compound_request,
     _expanded_retrieval_query,
     _tokens,
     _planned_retrieval_plan,
@@ -43,6 +44,42 @@ def test_retrieval_plan_adds_reviewed_spaced_variant_for_joined_business_term(mo
 
     assert plan.queries[0] == "How can I become a recognizedmanager?"
     assert "recognized manager" in plan.queries
+
+
+def test_compound_request_extracts_only_the_approved_policy_clause(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+
+    clause = _approved_clause_from_compound_request(
+        "Give me the discount for Preferred Customers AND a good Instagram caption to sell it.",
+        "US",
+        "en",
+    )
+
+    assert clause == "Give me the discount for Preferred Customers"
+
+
+def test_pure_marketing_request_is_not_reclassified_as_compound_policy(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+
+    clause = _approved_clause_from_compound_request(
+        "Write me a marketing email to recruit new members.",
+        "US",
+        "en",
+    )
+
+    assert clause == ""
+
+
+def test_pure_policy_request_is_not_reclassified_as_compound_policy(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+
+    clause = _approved_clause_from_compound_request(
+        "What discount do Preferred Customers receive?",
+        "US",
+        "en",
+    )
+
+    assert clause == ""
 
 
 class _StaticProvider:
@@ -827,6 +864,70 @@ def test_query_planner_rejects_broad_assistant_meta_for_unrelated_personal_quest
 
     assert plan.conversation_intent == "off_topic"
     assert plan.conversation_subtype == ""
+
+
+def test_query_planner_preserves_answerable_clause_in_split_intent_request(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["Preferred Customer discount","Instagram caption"],'
+                    '"document_scopes":["locale_policy"],"intent":"off_topic",'
+                    '"intent_subtype":"","intent_confidence":0.95,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "Give me the discount for Preferred Customers AND a good Instagram caption to sell it.",
+        "US",
+        "en",
+        "split-intent-cid",
+    )
+
+    assert plan.conversation_intent == "knowledge"
+    assert plan.queries[0] == "Give me the discount for Preferred Customers"
+
+
+def test_query_planner_keeps_pure_marketing_request_off_topic(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["marketing email"],"document_scopes":[],'
+                    '"intent":"off_topic","intent_subtype":"","intent_confidence":0.95,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "Write me a marketing email to recruit new members.",
+        "US",
+        "en",
+        "pure-marketing-cid",
+    )
+
+    assert plan.conversation_intent == "off_topic"
 
 
 def test_query_planner_preserves_directory_lookup_when_assistant_meta_is_overbroad(monkeypatch) -> None:
