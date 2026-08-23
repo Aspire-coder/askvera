@@ -101,7 +101,7 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or (
         retrieval_result.confidence >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE
         and top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
-    )
+    ) or bool(retrieval_result.metadata.get("strong_local_match"))
 
     # Safety is based on approved document metadata and retrieval confidence,
     # not an English list of business or rule words. Topic overlap is retained

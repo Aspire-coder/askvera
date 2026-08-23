@@ -952,3 +952,65 @@ def test_query_planner_includes_global_documents_for_named_markets(
     plan = _planned_retrieval_plan(question, selected_market, "en", "named-market-cid")
 
     assert plan.include_global_documents is True
+
+
+def test_query_planner_includes_global_documents_for_unknown_directory_country(monkeypatch) -> None:
+    """Operational directory intent must not depend on a configured widget market."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["Thailand minimum order size"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "What is the minimum order size for Forever Thailand?",
+        "US",
+        "en",
+        "unknown-directory-market-cid",
+    )
+
+    assert plan.include_global_documents is True
+
+
+def test_operational_policy_question_does_not_open_global_scope_without_named_record(monkeypatch) -> None:
+    """An operational phrase alone must not mix global records into local policy evidence."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["United States accepted order payment methods"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "What payment methods are accepted for orders in the U.S.?",
+        "US",
+        "en",
+        "local-payment-method-cid",
+    )
+
+    assert plan.include_global_documents is False

@@ -458,6 +458,37 @@ def test_hardened_selector_can_reject_unrelated_candidates(monkeypatch) -> None:
     assert selected == []
 
 
+def test_successful_selector_marks_selected_evidence(monkeypatch) -> None:
+    """Only a successful selector decision can activate strong-local approval."""
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {
+                "output": {
+                    "message": {
+                        "content": [{"text": '{"selected_ranks":[2],"reason":"direct clause"}'}]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [
+        ({"id": "nearby", "metadata": {}, "content": "Nearby evidence."}, 2.0),
+        ({"id": "direct", "metadata": {}, "content": "Direct evidence."}, 1.5),
+    ]
+
+    selected = OpenSearchSectionProvider()._select_evidence_rows("Question", rows, "cid")
+
+    assert selected[0][0]["id"] == "direct"
+    assert selected[0][0]["evidence_selector_selected"] is True
+    assert "evidence_selector_selected" not in selected[1][0]
+
+
 def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None:
     class Runtime:
         def converse(self, **_kwargs):

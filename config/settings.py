@@ -71,7 +71,7 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-17.1")
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
-RETRIEVAL_PIPELINE_VERSION = "2026-08-19-typo-safe-ranking-v3"
+RETRIEVAL_PIPELINE_VERSION = "2026-08-23-selector-calibration-v4"
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
 RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-08-22-legal-output-integrity-v3")
@@ -370,6 +370,10 @@ OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file_
 OPENSEARCH_EVIDENCE_SELECTOR_ENABLED = _env_bool("OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
 OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS", 512)
+OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD = _env_float(
+    "OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD",
+    0.44,
+)
 # Ranking and evidence-coverage protections are evaluated as one reversible
 # profile. Keep this off by default so a code deployment cannot silently change
 # live retrieval before the locked benchmark and locale gates pass.

@@ -121,6 +121,31 @@ SPONSORING_QUESTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Global directories also contain operational facts that are not limited to
+# office contact details. The runtime planner normally chooses this scope, but
+# this deterministic backstop prevents a planner omission from hiding an
+# approved record. It is intentionally phrased by intent rather than country,
+# so newly indexed directory countries work without source-code aliases.
+DIRECTORY_OPERATIONAL_QUESTION_RE = re.compile(
+    r"\b(?:minimum|first)\s+order(?:ing)?(?:\s+size)?\b|"
+    r"\bdelivery\s+(?:cost|charge|fee|time)\b|"
+    r"\b(?:average\s+)?lead\s+time\b|"
+    r"\bpayment\s+methods?\b|"
+    r"\bproduct\s+cent(?:er|re)s?\b|"
+    r"\b(?:sign\s*up|registration|register)\b|"
+    r"\bonline\s+(?:purchase|shop|shopping)\b|"
+    r"\bbusiness\s+hours?\b|"
+    r"\btelephone(?:\s+(?:number|office|orders))?\b|"
+    r"\bphone\s+number\b",
+    re.IGNORECASE,
+)
+FOREVER_NAMED_RECORD_RE = re.compile(
+    r"\bforever(?:\s+living(?:\s+products)?)?\s+"
+    r"(?!business\b|focus\b|fbo\b|living\b|policy\b|policies\b|product\b|products\b)"
+    r"[^\W\d_][\w'’-]*\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
 
 def _verified_conversation_intent(
     intent: str,
@@ -554,6 +579,8 @@ def _planned_retrieval_plan(
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
             or bool(named_markets)
+            or bool(DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries])))
+            and bool(FOREVER_NAMED_RECORD_RE.search(message or ""))
         )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)

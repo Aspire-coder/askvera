@@ -181,4 +181,10 @@ def test_deployment_canary_fixture_is_versioned_and_complete() -> None:
         "recognized-manager-missing-letter",
         "belgium-minimum-order-typo",
         "mexico-sponsoring-multiple-typos",
+        "monthly-bonus-payment-release-gate",
+        "supervisor-case-credits-release-gate",
+        "us-payment-methods-release-gate",
+        "thailand-minimum-order-release-gate",
+        "unopened-product-return-window-release-gate",
+        "uruguay-phone-release-gate",
     }
