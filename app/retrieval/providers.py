@@ -9,6 +9,8 @@ from typing import Any, Protocol
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.risk.models import RiskContext
+from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions
@@ -94,6 +96,56 @@ SPONSORING_QUESTION_RE = re.compile(
     r"international\s+sponsoring)\b",
     re.IGNORECASE,
 )
+
+
+def _verified_conversation_intent(
+    intent: str,
+    message: str,
+    country: str,
+    language: str,
+    correlation_id: str,
+    runtime: Any,
+) -> tuple[str, bool]:
+    """Require deterministic policy confirmation for high-impact refusals.
+
+    The query planner is an advisory semantic classifier. A false-positive
+    income label must never prevent retrieval of an ordinary policy question.
+    """
+    if intent != "income_claim":
+        return intent, False
+    context = RiskContext(
+        user_message=message,
+        country=country,
+        language=language,
+        role="",
+        correlation_id=correlation_id,
+    )
+    if IncomeClaimPolicy().evaluate(context):
+        return intent, False
+    system_prompt = (
+        "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
+        "income or earnings outcome. Factual questions about published compensation, bonuses, discounts, "
+        "returns, purchases, rank qualifications, or company policy are not income claims. Apply the same "
+        "rule in every language. Do not answer the user. Return only JSON."
+    )
+    user_prompt = (
+        f"Requested language: {language}\nUser message:\n{message}\n\n"
+        'Return exactly: {"income_claim":true} or {"income_claim":false}.'
+    )
+    try:
+        response = runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_SUPPORT_ROUTE_MAX_OUTPUT_TOKENS},
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        json_match = re.search(r"\{.*\}", text.strip(), flags=re.S)
+        payload = json.loads(json_match.group(0) if json_match else text)
+        return (intent, False) if payload.get("income_claim") is True else ("knowledge", True)
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("income_intent_verification_failed", correlation_id=correlation_id)
+        return intent, False
 
 
 class RetrievalProvider(Protocol):
@@ -454,6 +506,23 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(
             [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
+        )
+
+    conversation_intent, intent_overridden = _verified_conversation_intent(
+        conversation_intent,
+        message,
+        country,
+        language,
+        correlation_id,
+        runtime,
+    )
+    if intent_overridden:
+        conversation_subtype = ""
+        LOGGER.warning(
+            "query_planner_intent_overridden",
+            correlation_id=correlation_id,
+            planner_intent="income_claim",
+            verified_intent=conversation_intent,
         )
 
     if conversation_intent == "assistant_meta":

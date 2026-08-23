@@ -6,6 +6,7 @@ from pathlib import Path
 from app.evidence import assistant_meta_response, classify_intent
 from app.response.models import ChatResponse
 from app.response.quality import (
+    contains_internal_retrieval_language,
     contains_unresolved_placeholder,
     contact_for_country,
     has_incomplete_ending,
@@ -109,6 +110,19 @@ def test_incomplete_sentence_and_placeholder_are_critical() -> None:
 def test_complete_sentence_is_not_rejected() -> None:
     assert has_incomplete_ending("No, you cannot sponsor new FBOs in the United States.", "en") is False
     assert contains_unresolved_placeholder("Visit www.foreverliving.com.") is False
+
+
+def test_known_truncated_endings_are_rejected_without_blocking_complete_sentences() -> None:
+    assert has_incomplete_ending("You can enroll online at.", "en") is True
+    assert has_incomplete_ending("The requirements include.", "en") is True
+    assert has_incomplete_ending("Complete the form in the", "en") is True
+    assert has_incomplete_ending("You can enroll online at foreverliving.com.", "en") is False
+
+
+def test_internal_retrieval_language_is_not_customer_safe() -> None:
+    assert contains_internal_retrieval_language("The retrieved directory records do not show a date.") is True
+    assert contains_internal_retrieval_language("The retrieved authorised chunks do not show a price.") is True
+    assert contains_internal_retrieval_language("The approved policy does not show a date.") is False
 
 
 def test_output_validator_rejects_any_remaining_contact_placeholder() -> None:

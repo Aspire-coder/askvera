@@ -23,7 +23,15 @@ _WEBSITE_PLACEHOLDER_RE = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
-_INCOMPLETE_ENGLISH_END_RE = re.compile(r"\b(?:a|an|the)\s*[.!?]?\s*$", re.IGNORECASE)
+_INCOMPLETE_ENGLISH_END_RE = re.compile(
+    r"\b(?:a|an|the|at|include|including|in\s+the)\s*[,:;.!?]?\s*$",
+    re.IGNORECASE,
+)
+_INTERNAL_RETRIEVAL_LANGUAGE_RE = re.compile(
+    r"\b(?:retrieved|approved)\s+(?:(?:authori[sz]ed|approved)\s+)?"
+    r"(?:chunks?|directory\s+records?|evidence\s+chunks?)\b",
+    re.IGNORECASE,
+)
 
 
 @lru_cache(maxsize=1)
@@ -97,6 +105,11 @@ def has_incomplete_ending(answer: str, language: str = "") -> bool:
         return True
     locale = (language or "en").split("-", 1)[0].lower()
     return locale == "en" and bool(_INCOMPLETE_ENGLISH_END_RE.search(text))
+
+
+def contains_internal_retrieval_language(answer: str) -> bool:
+    """Return whether implementation jargon leaked into customer-facing copy."""
+    return bool(_INTERNAL_RETRIEVAL_LANGUAGE_RE.search(answer or ""))
 
 
 def unsupported_requested_years(question: str, documents: Iterable[RetrievedDocument]) -> list[int]:
