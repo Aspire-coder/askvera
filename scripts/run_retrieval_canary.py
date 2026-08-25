@@ -27,6 +27,28 @@ REQUIRED_CASE_FIELDS = {
     "minimum_confidence",
     "evidence_must_be_approved",
 }
+VNEXT_FACTORS = {
+    "rrf": "RETRIEVAL_VNEXT_RRF_ENABLED",
+    "parent-diversity": "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED",
+    "evidence-selector": "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED",
+    "hardening": "RETRIEVAL_VNEXT_HARDENING_ENABLED",
+    "rerank": "RETRIEVAL_VNEXT_RERANK_ENABLED",
+}
+
+
+def _mirror_current_retrieval_factors() -> None:
+    """Make the isolated provider behave like the live provider before adding a delta."""
+    from config import settings
+
+    settings.RETRIEVAL_VNEXT_RRF_ENABLED = False
+    settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED = False
+    settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED = bool(
+        settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
+    )
+    settings.RETRIEVAL_VNEXT_HARDENING_ENABLED = bool(
+        settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+    )
+    settings.RETRIEVAL_VNEXT_RERANK_ENABLED = False
 
 
 def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
@@ -60,6 +82,29 @@ def _git_commit() -> str:
         text=True,
     )
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
+
+
+def configure_vnext_experiment(
+    *,
+    index_name: str = "",
+    factor: str = "configured",
+) -> None:
+    """Apply explicit candidate overrides after SSM has loaded."""
+    from config import settings
+
+    if index_name:
+        settings.OPENSEARCH_VNEXT_INDEX = index_name
+    if factor == "configured":
+        return
+    if factor not in {"none", "parity", *VNEXT_FACTORS}:
+        raise ValueError(f"Unsupported vNext factor: {factor}")
+    if factor == "none":
+        for setting_name in VNEXT_FACTORS.values():
+            setattr(settings, setting_name, False)
+        return
+    _mirror_current_retrieval_factors()
+    if factor != "parity":
+        setattr(settings, VNEXT_FACTORS[factor], True)
 
 
 def _provider_for_profile(profile: str):
@@ -160,6 +205,17 @@ def main() -> int:
         help="Evaluate Current or the isolated vNext candidate. Current remains the default.",
     )
     parser.add_argument(
+        "--vnext-index",
+        default="",
+        help="Override OPENSEARCH_VNEXT_INDEX after SSM loads.",
+    )
+    parser.add_argument(
+        "--vnext-factor",
+        choices=("configured", "none", "parity", *VNEXT_FACTORS),
+        default="configured",
+        help="Enable exactly one candidate factor, or none, after SSM loads.",
+    )
+    parser.add_argument(
         "--case-id",
         action="append",
         default=[],
@@ -190,6 +246,10 @@ def main() -> int:
 
     if args.load_ssm:
         settings.load_ssm_config()
+    configure_vnext_experiment(
+        index_name=args.vnext_index,
+        factor=args.vnext_factor,
+    )
     logging.disable(logging.INFO)
     try:
         provider = _provider_for_profile(args.profile)
@@ -216,6 +276,7 @@ def main() -> int:
         "profile": args.profile,
         "index": evaluated_index,
         "pipeline_version": pipeline_version,
+        "vnext_factor": args.vnext_factor,
         "fixture_sha256": fixture_hash,
         "passed": sum(result["passed"] for result in results),
         "total": len(results),

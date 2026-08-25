@@ -16,7 +16,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.run_retrieval_canary import (  # noqa: E402
     DEFAULT_FIXTURE,
+    VNEXT_FACTORS,
     _provider_for_profile,
+    configure_vnext_experiment,
     load_fixture,
     run_case,
 )
@@ -103,12 +105,22 @@ def main() -> int:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--load-ssm", action="store_true")
+    parser.add_argument("--vnext-index", default="")
+    parser.add_argument(
+        "--vnext-factor",
+        choices=("configured", "none", "parity", *VNEXT_FACTORS),
+        default="configured",
+    )
     args = parser.parse_args()
 
     from config import settings
 
     if args.load_ssm:
         settings.load_ssm_config()
+    configure_vnext_experiment(
+        index_name=args.vnext_index,
+        factor=args.vnext_factor,
+    )
     cases, fixture_hash = load_fixture(args.fixture)
     logging.disable(logging.INFO)
     try:
@@ -135,6 +147,11 @@ def main() -> int:
             "vnext_index": settings.OPENSEARCH_VNEXT_INDEX,
             "current_pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
             "vnext_pipeline_version": settings.RETRIEVAL_VNEXT_PIPELINE_VERSION,
+            "vnext_factor": args.vnext_factor,
+            "vnext_factor_state": {
+                name: bool(getattr(settings, setting_name))
+                for name, setting_name in VNEXT_FACTORS.items()
+            },
         }
     )
 

@@ -1,6 +1,7 @@
 """Tests for exact case-level Current versus vNext reporting."""
 
 from scripts.compare_retrieval_profiles import comparison_summary
+from scripts.run_retrieval_canary import configure_vnext_experiment
 
 
 def test_comparison_summary_reports_exact_improvements_and_regressions() -> None:
@@ -32,3 +33,43 @@ def test_comparison_summary_passes_only_without_regression() -> None:
     assert summary["status"] == "passed"
     assert summary["current_passed"] == 1
     assert summary["vnext_passed"] == 2
+
+
+def test_vnext_experiment_adds_requested_factor_to_current_parity(monkeypatch) -> None:
+    from config import settings
+
+    for name in (
+        "RETRIEVAL_VNEXT_RRF_ENABLED",
+        "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED",
+        "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED",
+        "RETRIEVAL_VNEXT_HARDENING_ENABLED",
+        "RETRIEVAL_VNEXT_RERANK_ENABLED",
+    ):
+        monkeypatch.setattr(settings, name, True)
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+
+    configure_vnext_experiment(index_name="isolated", factor="rrf")
+
+    assert settings.OPENSEARCH_VNEXT_INDEX == "isolated"
+    assert settings.RETRIEVAL_VNEXT_RRF_ENABLED is True
+    assert settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED is True
+    assert settings.RETRIEVAL_VNEXT_HARDENING_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_RERANK_ENABLED is False
+
+
+def test_vnext_parity_mirrors_live_provider_behavior(monkeypatch) -> None:
+    from config import settings
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+
+    configure_vnext_experiment(index_name="isolated", factor="parity")
+
+    assert settings.OPENSEARCH_VNEXT_INDEX == "isolated"
+    assert settings.RETRIEVAL_VNEXT_RRF_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED is True
+    assert settings.RETRIEVAL_VNEXT_HARDENING_ENABLED is True
+    assert settings.RETRIEVAL_VNEXT_RERANK_ENABLED is False
