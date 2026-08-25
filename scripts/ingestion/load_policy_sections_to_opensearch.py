@@ -71,6 +71,7 @@ def _index_body() -> dict[str, Any]:
                 "chunk_type": {"type": "keyword"},
                 "parent_section_id": {"type": "keyword"},
                 "chunk_profile": {"type": "keyword"},
+                "embedding_text_profile": {"type": "keyword"},
                 "start_page": {"type": "integer"},
                 "end_page": {"type": "integer"},
                 "content": {"type": "text"},
@@ -117,6 +118,22 @@ def _search_text(section: dict[str, Any]) -> str:
     )
 
 
+def _embedding_text(section: dict[str, Any], profile: str) -> str:
+    """Build embedding input independently from lexical-search metadata."""
+    if profile == "semantic-v2":
+        return "\n".join(
+            value
+            for value in (
+                str(section.get("title", "")).strip(),
+                str(section.get("content", "")).strip(),
+            )
+            if value
+        )
+    if profile == "current":
+        return _search_text(section)
+    raise ValueError(f"Unsupported embedding text profile: {profile}")
+
+
 def _load_sections(path: Path) -> list[dict[str, Any]]:
     sections: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -139,9 +156,11 @@ def _document(
     ingestion_id: str,
     document_type: str,
     access_scope: str,
+    embedding_text_profile: str = "current",
 ) -> dict[str, Any]:
     content = str(section["content"])
     search_text = _search_text(section)
+    embedding_text = _embedding_text(section, embedding_text_profile)
     source_file = str(section["source_file"])
     source_uri = source_uri_prefix.rstrip("/") + "/" + source_file if source_uri_prefix else ""
     metadata = {
@@ -160,6 +179,7 @@ def _document(
         "chunk_type": section.get("chunk_type", "section"),
         "parent_section_id": section.get("parent_section_id", ""),
         "chunk_profile": section.get("chunk_profile", "current"),
+        "embedding_text_profile": embedding_text_profile,
     }
     return {
         "id": _section_id(section),
@@ -175,6 +195,7 @@ def _document(
         "chunk_type": section.get("chunk_type", "section"),
         "parent_section_id": section.get("parent_section_id", ""),
         "chunk_profile": section.get("chunk_profile", "current"),
+        "embedding_text_profile": embedding_text_profile,
         "section_id": section["section_id"],
         "section_title": section["title"],
         "start_page": section["start_page"],
@@ -184,7 +205,7 @@ def _document(
         "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
         "ingestion_id": ingestion_id,
         "metadata": metadata,
-        "embedding": embed_text(search_text),
+        "embedding": embed_text(embedding_text),
     }
 
 
@@ -197,6 +218,7 @@ def _actions(
     ingestion_id: str,
     document_type: str,
     access_scope: str,
+    embedding_text_profile: str = "current",
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -209,6 +231,7 @@ def _actions(
                 ingestion_id=ingestion_id,
                 document_type=document_type,
                 access_scope=access_scope,
+                embedding_text_profile=embedding_text_profile,
             ),
         }
         for section in sections
@@ -227,6 +250,15 @@ def parse_args() -> argparse.Namespace:
         choices=("country", "global"),
         default="country",
         help="Country records obey locale filters; global records are available in every market.",
+    )
+    parser.add_argument(
+        "--embedding-text-profile",
+        choices=("auto", "current", "semantic-v2"),
+        default="auto",
+        help=(
+            "Embedding input profile. 'auto' uses semantic-v2 only for vNext chunks; "
+            "lexical search_text remains unchanged."
+        ),
     )
     parser.add_argument(
         "--replace-source",
@@ -305,6 +337,26 @@ def _validate_chunk_profile_target(sections: list[dict[str, Any]], index: str) -
         )
 
 
+def _resolve_embedding_text_profile(
+    sections: list[dict[str, Any]],
+    requested_profile: str,
+    index: str,
+) -> str:
+    """Select semantic-only embeddings exclusively for an isolated vNext index."""
+    profiles = {
+        str(section.get("chunk_profile") or section.get("metadata", {}).get("chunk_profile") or "current")
+        for section in sections
+    }
+    resolved = "semantic-v2" if requested_profile == "auto" and profiles == {"vnext"} else requested_profile
+    if resolved == "auto":
+        resolved = "current"
+    if resolved == "semantic-v2" and (profiles != {"vnext"} or index == settings.OPENSEARCH_INDEX):
+        raise ValueError(
+            "semantic-v2 embeddings require only vNext chunks and a separate OpenSearch index."
+        )
+    return resolved
+
+
 def _older_source_actions(
     client: OpenSearch,
     *,
@@ -345,6 +397,11 @@ def main() -> int:
     if not sections:
         raise ValueError(f"No sections found in {args.jsonl}")
     _validate_chunk_profile_target(sections, index)
+    embedding_text_profile = _resolve_embedding_text_profile(
+        sections,
+        args.embedding_text_profile,
+        index,
+    )
 
     client = _client()
     if args.recreate_index and client.indices.exists(index=index):
@@ -369,6 +426,7 @@ def main() -> int:
             ingestion_id=ingestion_id,
             document_type=args.document_type,
             access_scope=args.access_scope,
+            embedding_text_profile=embedding_text_profile,
         ),
         raise_on_error=False,
     )

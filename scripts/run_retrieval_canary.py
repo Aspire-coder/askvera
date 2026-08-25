@@ -62,13 +62,36 @@ def _git_commit() -> str:
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
 
 
-def run_case(case: dict[str, Any], sequence: int):
-    from app.evidence import approve_evidence
+def _provider_for_profile(profile: str):
+    """Build one explicit provider so a canary never starts background Shadow work."""
     from app.retrieval.service import RetrievalService
+    from config import settings
 
-    service = RetrievalService()
+    if profile == "current":
+        return RetrievalService._provider_for_name(settings.RETRIEVAL_PROVIDER)
+    if (
+        not settings.OPENSEARCH_VNEXT_INDEX
+        or settings.OPENSEARCH_VNEXT_INDEX == settings.OPENSEARCH_INDEX
+    ):
+        raise ValueError("The vNext canary requires an isolated OPENSEARCH_VNEXT_INDEX.")
+    return RetrievalService._provider_for_name(
+        settings.RETRIEVAL_VNEXT_PROVIDER,
+        index_name=settings.OPENSEARCH_VNEXT_INDEX,
+        enable_bedrock_rerank=settings.RETRIEVAL_VNEXT_RERANK_ENABLED,
+        enable_rrf=settings.RETRIEVAL_VNEXT_RRF_ENABLED,
+        enable_parent_diversity=settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
+        enable_evidence_selector=settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
+        enable_retrieval_hardening=settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
+        profile_name="vnext",
+    )
+
+
+def run_case(case: dict[str, Any], sequence: int, provider=None):
+    from app.evidence import approve_evidence
+
+    provider = provider or _provider_for_profile("current")
     question = str(case["question"])
-    result = service.retrieve(
+    result = provider.retrieve(
         question,
         str(case["country"]),
         str(case["language"]),
@@ -115,6 +138,12 @@ def run_case(case: dict[str, Any], sequence: int):
         "failure_reasons": failures,
         "typo_ranking_applied": bool(result.metadata.get("typo_ranking_applied")),
         "ranking_query_used": result.metadata.get("ranking_query_used", ""),
+        "retrieval_profile": result.metadata.get("retrieval_profile", "current"),
+        "fusion_strategy": result.metadata.get("fusion_strategy", ""),
+        "candidate_count": int(result.metadata.get("candidate_count") or 0),
+        "selected_candidate_count": int(result.metadata.get("selected_candidate_count") or 0),
+        "threshold_eligible_count": int(result.metadata.get("threshold_eligible_count") or 0),
+        "selector_rejected": bool(result.metadata.get("evidence_selector_rejected")),
         "document_scores": [round(float(document.score or 0.0), 3) for document in result.documents],
     }
 
@@ -124,6 +153,12 @@ def main() -> int:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument(
+        "--profile",
+        choices=("current", "vnext"),
+        default="current",
+        help="Evaluate Current or the isolated vNext candidate. Current remains the default.",
+    )
     parser.add_argument(
         "--case-id",
         action="append",
@@ -156,12 +191,31 @@ def main() -> int:
     if args.load_ssm:
         settings.load_ssm_config()
     logging.disable(logging.INFO)
-    results = [run_case(case, index) for index, case in enumerate(cases, start=1)]
+    try:
+        provider = _provider_for_profile(args.profile)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    results = [
+        run_case(case, index, provider)
+        for index, case in enumerate(cases, start=1)
+    ]
+    evaluated_index = (
+        settings.OPENSEARCH_VNEXT_INDEX
+        if args.profile == "vnext"
+        else settings.OPENSEARCH_INDEX
+    )
+    pipeline_version = (
+        settings.RETRIEVAL_VNEXT_PIPELINE_VERSION
+        if args.profile == "vnext"
+        else settings.RETRIEVAL_PIPELINE_VERSION
+    )
     summary = {
         "status": "passed" if all(result["passed"] for result in results) else "failed",
         "commit": _git_commit(),
-        "index": settings.OPENSEARCH_INDEX,
-        "pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
+        "profile": args.profile,
+        "index": evaluated_index,
+        "pipeline_version": pipeline_version,
         "fixture_sha256": fixture_hash,
         "passed": sum(result["passed"] for result in results),
         "total": len(results),

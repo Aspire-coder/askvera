@@ -47,6 +47,11 @@ class RetrievalService:
         *,
         index_name: str | None = None,
         enable_bedrock_rerank: bool = False,
+        enable_rrf: bool = False,
+        enable_parent_diversity: bool = False,
+        enable_evidence_selector: bool | None = None,
+        enable_retrieval_hardening: bool | None = None,
+        profile_name: str = "current",
     ) -> RetrievalProvider:
         """Build a provider without changing the established live selection."""
         if provider_name == "section":
@@ -57,6 +62,11 @@ class RetrievalService:
             return OpenSearchSectionProvider(
                 index_name=index_name,
                 enable_bedrock_rerank=enable_bedrock_rerank,
+                enable_rrf=enable_rrf,
+                enable_parent_diversity=enable_parent_diversity,
+                enable_evidence_selector=enable_evidence_selector,
+                enable_retrieval_hardening=enable_retrieval_hardening,
+                profile_name=profile_name,
             )
         return BedrockRetrievalProvider()
 
@@ -139,6 +149,11 @@ class RetrievalService:
             settings.RETRIEVAL_VNEXT_PROVIDER,
             index_name=settings.OPENSEARCH_VNEXT_INDEX,
             enable_bedrock_rerank=settings.RETRIEVAL_VNEXT_RERANK_ENABLED,
+            enable_rrf=settings.RETRIEVAL_VNEXT_RRF_ENABLED,
+            enable_parent_diversity=settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
+            enable_evidence_selector=settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
+            enable_retrieval_hardening=settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
+            profile_name="vnext",
         )
 
         def compare() -> None:
@@ -222,6 +237,17 @@ class RetrievalService:
             "vnext_count": len(shadow_result.documents),
             "vnext_confidence": round(float(shadow_result.confidence), 4),
             "vnext_top_id": _top_document_key(shadow_result),
+            "vnext_fusion_strategy": shadow_result.metadata.get("fusion_strategy", ""),
+            "vnext_candidate_count": int(shadow_result.metadata.get("candidate_count") or 0),
+            "vnext_selected_candidate_count": int(
+                shadow_result.metadata.get("selected_candidate_count") or 0
+            ),
+            "vnext_threshold_eligible_count": int(
+                shadow_result.metadata.get("threshold_eligible_count") or 0
+            ),
+            "vnext_selector_rejected": bool(
+                shadow_result.metadata.get("evidence_selector_rejected")
+            ),
             "top_result_matches": _top_document_key(primary_result) == _top_document_key(shadow_result),
             "shared_result_count": len(shared_keys),
             "result_overlap": round(len(shared_keys) / len(union_keys), 4) if union_keys else 1.0,

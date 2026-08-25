@@ -116,9 +116,17 @@ def _exact_topic_score(message: str, title: str, content: str) -> float:
     return score
 
 
-def _governing_requirement_score(message: str, title: str, content: str) -> float:
+def _governing_requirement_score(
+    message: str,
+    title: str,
+    content: str,
+    *,
+    hardening_enabled: bool | None = None,
+) -> float:
     """Prefer a governing qualification clause over nearby rank mentions."""
-    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+    if hardening_enabled is None:
+        hardening_enabled = settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+    if not hardening_enabled:
         return 0.0
     normalized_message = _normalize_text(message)
     intent_terms = {
@@ -176,9 +184,16 @@ def _governing_requirement_score(message: str, title: str, content: str) -> floa
     return 1.8 if any(re.search(pattern, evidence) for pattern in governing_patterns) else 0.0
 
 
-def _fragment_quality_score(row: dict[str, Any], message: str) -> float:
+def _fragment_quality_score(
+    row: dict[str, Any],
+    message: str,
+    *,
+    hardening_enabled: bool | None = None,
+) -> float:
     """Reduce detached numeric fragments unless the user asks for a value."""
-    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+    if hardening_enabled is None:
+        hardening_enabled = settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+    if not hardening_enabled:
         return 0.0
     if str(row.get("chunk_type") or "") != "numeric_fact":
         return 0.0
@@ -190,9 +205,17 @@ def _fragment_quality_score(row: dict[str, Any], message: str) -> float:
     return 0.1 if numeric_intent else -0.35
 
 
-def _purchase_channel_score(message: str, title: str, content: str) -> float:
+def _purchase_channel_score(
+    message: str,
+    title: str,
+    content: str,
+    *,
+    hardening_enabled: bool | None = None,
+) -> float:
     """Prefer clauses that explicitly identify a permitted sales channel."""
-    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+    if hardening_enabled is None:
+        hardening_enabled = settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+    if not hardening_enabled:
         return 0.0
     message_terms = set(_tokens(message))
     asks_where_to_order = "where" in message_terms and "order" in message_terms
@@ -209,9 +232,17 @@ def _purchase_channel_score(message: str, title: str, content: str) -> float:
     return 1.8 if any(channel in evidence for channel in direct_channels) else 0.0
 
 
-def _return_policy_score(message: str, title: str, content: str) -> float:
+def _return_policy_score(
+    message: str,
+    title: str,
+    content: str,
+    *,
+    hardening_enabled: bool | None = None,
+) -> float:
     """Prefer clauses that directly state product-return rights or conditions."""
-    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+    if hardening_enabled is None:
+        hardening_enabled = settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+    if not hardening_enabled:
         return 0.0
     message_terms = set(_tokens(message))
     if not ({"return", "returns", "refund", "refunds"} & message_terms):
@@ -227,7 +258,12 @@ def _return_policy_score(message: str, title: str, content: str) -> float:
     return 1.8 if any(term in evidence for term in direct_terms) else 0.0
 
 
-def _source_score(row: dict[str, Any], message: str) -> float:
+def _source_score(
+    row: dict[str, Any],
+    message: str,
+    *,
+    hardening_enabled: bool | None = None,
+) -> float:
     """Blend search rank with generic, document-derived lexical alignment."""
     base_score = float(row.get("rank") or 0.0)
     section_id = str(row.get("section_id") or "").lower()
@@ -250,10 +286,29 @@ def _source_score(row: dict[str, Any], message: str) -> float:
     if message_tokens:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
     score += _exact_topic_score(message, title, content)
-    score += _governing_requirement_score(message, title, content)
-    score += _fragment_quality_score(row, message)
-    score += _purchase_channel_score(message, title, content)
-    score += _return_policy_score(message, title, content)
+    score += _governing_requirement_score(
+        message,
+        title,
+        content,
+        hardening_enabled=hardening_enabled,
+    )
+    score += _fragment_quality_score(
+        row,
+        message,
+        hardening_enabled=hardening_enabled,
+    )
+    score += _purchase_channel_score(
+        message,
+        title,
+        content,
+        hardening_enabled=hardening_enabled,
+    )
+    score += _return_policy_score(
+        message,
+        title,
+        content,
+        hardening_enabled=hardening_enabled,
+    )
     for phrase in phrases:
         if phrase in _normalize_text(title):
             score += 0.35

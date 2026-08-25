@@ -192,10 +192,21 @@ def retrieval_profile_status(*, check_index: bool = True) -> dict[str, Any]:
             "ready": ready,
             "readiness_error": readiness_error,
             "reranking_enabled": bool(settings.RETRIEVAL_VNEXT_RERANK_ENABLED),
+            "rrf_enabled": bool(settings.RETRIEVAL_VNEXT_RRF_ENABLED),
+            "parent_diversity_enabled": bool(
+                settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED
+            ),
+            "evidence_selector_enabled": bool(
+                settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED
+            ),
+            "hardening_enabled": bool(settings.RETRIEVAL_VNEXT_HARDENING_ENABLED),
+            "embedding_text_profile": "semantic-v2",
         },
         "parsing": {
             "runtime_switch_reprocesses_documents": False,
             "current_chunk_profile": settings.ADMIN_INGESTION_CHUNK_PROFILE,
             "candidate_chunk_profile": "vnext",
+            "candidate_embedding_text_profile": "semantic-v2",
+            "candidate_uses_layout_preserving_tables": True,
         },
     }

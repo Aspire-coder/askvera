@@ -25,6 +25,10 @@ RETRIEVAL_VNEXT_PROVIDER=opensearch_section
 RETRIEVAL_VNEXT_PIPELINE_VERSION=disabled
 OPENSEARCH_VNEXT_INDEX=
 RETRIEVAL_VNEXT_RERANK_ENABLED=false
+RETRIEVAL_VNEXT_RRF_ENABLED=false
+RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED=false
+RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED=false
+RETRIEVAL_VNEXT_HARDENING_ENABLED=false
 EMBEDDING_SHARED_CACHE_ENABLED=false
 BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED=false
 ADMIN_DOCUMENT_PREFLIGHT_ENABLED=false
@@ -224,10 +228,50 @@ versions, effective dates, country/language metadata, and the existing atomic
 definition/list/numeric-fact chunks. Every generated record carries a
 `chunk_profile` value.
 
+The isolated vNext loader also uses an `embedding_text_profile` of
+`semantic-v2`. Its vectors are generated from the section title and content,
+while country, language, source, version, and access metadata remain available
+as OpenSearch filters and lexical fields. Current packages continue to embed
+the established metadata-rich `search_text`. The loader rejects
+`semantic-v2` for the current index or for a non-vNext package.
+
 The normal admin ingestion path continues to call the default `current`
 profile. It cannot select `vnext` from the admin UI. vNext packages are created
 offline with `--chunk-profile vnext`, reviewed, and loaded only into the
 separate experimental index.
+
+When loading a reviewed vNext JSONL package, `--embedding-text-profile auto`
+is the safe default and resolves to `semantic-v2`. Use the explicit value in a
+reproducibility manifest:
+
+```text
+--chunk-profile vnext
+--index <isolated-vnext-index>
+--embedding-text-profile semantic-v2
+```
+
+The vNext provider then applies Reciprocal Rank Fusion to the independently
+ranked lexical and vector channels. This avoids comparing raw BM25 and cosine
+scores. Optional Bedrock reranking follows fusion, parent diversity prevents
+one long section from filling the leading candidate window, and the evidence
+selector remains fail-open to the candidate order if its model call fails.
+
+The current provider receives none of these candidate-only flags. The runtime
+switch starts content-free Shadow comparisons only; it never changes customer
+answers and never reprocesses documents.
+
+Do not enable all candidate flags together for the first comparison. Create an
+exact clone of the current index and enable one factor at a time. This keeps
+documents, chunks, metadata, and embeddings constant while measuring ranking:
+
+```text
+python scripts/ingestion/clone_opensearch_index.py \
+  --destination <isolated-ranking-index>
+```
+
+Use a separate vNext chunk index only for the parsing and embedding experiment.
+Results from the exact clone and the vNext chunk index must not be combined into
+one causal claim.
 
 Use `scripts/ingestion/compare_chunk_packages.py` to compare current and vNext
 JSONL packages before embedding. Smaller chunks are not promoted based only on

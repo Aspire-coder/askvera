@@ -345,6 +345,76 @@ def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:
     assert rows[0][0]["section_title"] == "Original governing title"
 
 
+def test_current_provider_keeps_weighted_score_fusion_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_RRF_ENABLED", True)
+
+    provider = OpenSearchSectionProvider()
+    rows = provider._merge_hits(
+        [_hit("lexical", "Lexical match", 8.0)],
+        [_hit("vector", "Vector match", 1.0)],
+        "unrelated question",
+    )
+
+    assert provider.enable_rrf is False
+    assert all(row.get("fusion_strategy") != "rrf" for row, _score in rows)
+
+
+def test_current_provider_keeps_dynamic_live_selector_and_hardening_flags(monkeypatch) -> None:
+    provider = OpenSearchSectionProvider()
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+    assert provider.evidence_selector_enabled is False
+    assert provider.retrieval_hardening_enabled is False
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    assert provider.evidence_selector_enabled is True
+    assert provider.retrieval_hardening_enabled is True
+
+
+def test_vnext_rrf_keeps_vector_only_candidates_competitive() -> None:
+    provider = OpenSearchSectionProvider(
+        index_name="askvera-vnext",
+        enable_rrf=True,
+        profile_name="vnext",
+    )
+    lexical = _hit("lexical", "General policy", 80.0)
+    vector = _hit("semantic", "Recognized Manager qualification", 0.95)
+    vector["_source"]["content"] = "Recognized Manager qualification requirements."
+    vector["_source"]["search_text"] = vector["_source"]["content"]
+
+    rows = provider._merge_hits(
+        [lexical],
+        [vector],
+        "recognized manager qualification requirements",
+    )
+    by_id = {row["id"]: (row, score) for row, score in rows}
+
+    assert by_id["semantic"][0]["vector_rank"] == 1
+    assert by_id["semantic"][0]["lexical_rank"] is None
+    assert by_id["semantic"][0]["fusion_strategy"] == "rrf"
+    assert by_id["semantic"][1] >= by_id["lexical"][1]
+
+
+def test_parent_diversity_defers_repeated_children_without_dropping_them() -> None:
+    provider = OpenSearchSectionProvider(enable_parent_diversity=True)
+    rows = []
+    for row_id, parent, score in (
+        ("a-1", "a", 5.0),
+        ("a-2", "a", 4.0),
+        ("a-3", "a", 3.0),
+        ("b-1", "b", 2.0),
+    ):
+        row = _hit(row_id, row_id, score)["_source"]
+        row["parent_section_id"] = parent
+        rows.append((row, score))
+
+    diversified = provider._diversify_rows(rows)
+
+    assert [row["id"] for row, _score in diversified] == ["a-1", "a-2", "b-1", "a-3"]
+    assert len(diversified) == len(rows)
+
+
 def test_hardened_ranking_prefers_governing_manager_requirement(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
     direct = _hit("manager-requirement", "Manager is achieved by generating Case Credits", 2.0)

@@ -30,6 +30,7 @@ from .providers import (
     _planned_retrieval_queries,
 )
 from utils.directory_fields import parse_directory_fields
+from .experiments import reciprocal_rank_fusion
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
 from .typo_safety import safe_typo_ranking_queries
 
@@ -442,6 +443,37 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
     }
 
 
+def _ranked_hit_ids(hits: list[dict[str, Any]]) -> list[str]:
+    """Return unique hit IDs ordered by each retrieval channel's own score."""
+    ranked: list[str] = []
+    seen: set[str] = set()
+    for hit in sorted(hits, key=lambda item: float(item.get("_score") or 0.0), reverse=True):
+        row_id = str((hit.get("_source") or {}).get("id") or hit.get("_id") or "")
+        if row_id and row_id not in seen:
+            seen.add(row_id)
+            ranked.append(row_id)
+    return ranked
+
+
+def _candidate_stage(rows: list[tuple[dict[str, Any], float]], limit: int) -> list[dict[str, Any]]:
+    """Create content-free candidate diagnostics safe for analytics and QA."""
+    return [
+        {
+            "rank": index,
+            "id": str(row.get("id") or ""),
+            "source_file": str(row.get("source_file") or ""),
+            "section_id": str(row.get("section_id") or ""),
+            "document_type": str(row.get("document_type") or ""),
+            "country": str(row.get("country") or ""),
+            "language": str(row.get("language") or ""),
+            "score": round(float(score), 6),
+            "lexical_rank": row.get("lexical_rank"),
+            "vector_rank": row.get("vector_rank"),
+        }
+        for index, (row, score) in enumerate(rows[: max(0, limit)], start=1)
+    ]
+
+
 def _selector_candidate_text(row: dict[str, Any], score: float, index: int) -> str:
     """Format one candidate for the evidence selector."""
     content = str(row.get("content") or "")
@@ -551,9 +583,33 @@ class OpenSearchSectionProvider:
         index_name: str | None = None,
         *,
         enable_bedrock_rerank: bool = False,
+        enable_rrf: bool = False,
+        enable_parent_diversity: bool = False,
+        enable_evidence_selector: bool | None = None,
+        enable_retrieval_hardening: bool | None = None,
+        profile_name: str = "current",
     ) -> None:
         self.index_name = index_name or settings.OPENSEARCH_INDEX
         self.enable_bedrock_rerank = enable_bedrock_rerank
+        self.enable_rrf = enable_rrf
+        self.enable_parent_diversity = enable_parent_diversity
+        self.enable_evidence_selector = enable_evidence_selector
+        self.enable_retrieval_hardening = enable_retrieval_hardening
+        self.profile_name = profile_name
+
+    @property
+    def evidence_selector_enabled(self) -> bool:
+        """Preserve live dynamic settings while allowing a fixed Shadow profile."""
+        if self.enable_evidence_selector is None:
+            return bool(settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED)
+        return bool(self.enable_evidence_selector)
+
+    @property
+    def retrieval_hardening_enabled(self) -> bool:
+        """Preserve live dynamic settings while allowing a fixed Shadow profile."""
+        if self.enable_retrieval_hardening is None:
+            return bool(settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED)
+        return bool(self.enable_retrieval_hardening)
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
@@ -653,19 +709,26 @@ class OpenSearchSectionProvider:
             prefer_outline=search_plan.prefer_outline,
             target_country_names=target_country_names,
         )
+        fused_rows = rows
         if self.enable_bedrock_rerank:
             from .bedrock_reranker import rerank_rows
 
             rows = rerank_rows(message, rows, correlation_id=correlation_id)
+        reranked_rows = rows
+        if self.enable_parent_diversity:
+            rows = self._diversify_rows(rows)
         raw_rows = rows
         rows = self._select_evidence_rows(message, rows, correlation_id)
-        selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
+        selector_rejected = bool(raw_rows) and not rows and self.evidence_selector_enabled
 
         documents = [
             self._document_from_row(row, score)
             for row, score in rows
             if score >= settings.SECTION_RETRIEVAL_MIN_SCORE
         ][: settings.OPENSEARCH_RESULT_COUNT]
+        threshold_eligible_count = sum(
+            score >= settings.SECTION_RETRIEVAL_MIN_SCORE for _row, score in rows
+        )
         selector_applied = bool(rows and rows[0][0].get("evidence_selector_selected"))
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
         strong_local_match = bool(
@@ -678,7 +741,16 @@ class OpenSearchSectionProvider:
             confidence=_confidence_from_documents(documents),
             metadata={
                 "provider": "opensearch_section",
+                "retrieval_profile": self.profile_name,
+                "fusion_strategy": "rrf" if self.enable_rrf else "weighted_score",
+                "bedrock_rerank_enabled": self.enable_bedrock_rerank,
+                "parent_diversity_enabled": self.enable_parent_diversity,
+                "evidence_selector_enabled": self.evidence_selector_enabled,
+                "retrieval_hardening_enabled": self.retrieval_hardening_enabled,
                 "candidate_count": len(raw_rows),
+                "selected_candidate_count": len(rows),
+                "threshold_eligible_count": threshold_eligible_count,
+                "below_threshold_count": len(rows) - threshold_eligible_count,
                 "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
                 "typo_ranking_query_count": len(typo_ranking_queries),
                 "typo_ranking_applied": bool(documents and documents[0].metadata.get("typo_ranking_applied")),
@@ -697,6 +769,12 @@ class OpenSearchSectionProvider:
                     self._document_from_row(row, score).to_source()
                     for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
                 ],
+                "candidate_stages": {
+                    "fused": _candidate_stage(fused_rows, settings.OPENSEARCH_CANDIDATE_COUNT),
+                    "reranked": _candidate_stage(reranked_rows, settings.OPENSEARCH_CANDIDATE_COUNT),
+                    "diversified": _candidate_stage(raw_rows, settings.OPENSEARCH_CANDIDATE_COUNT),
+                    "selected": _candidate_stage(rows, settings.OPENSEARCH_RESULT_COUNT),
+                },
             },
         )
         LOGGER.info(
@@ -783,6 +861,15 @@ class OpenSearchSectionProvider:
         prefer_outline: bool = False,
         target_country_names: set[str] | None = None,
     ) -> list[tuple[dict[str, Any], float]]:
+        if self.enable_rrf:
+            return self._merge_hits_with_rrf(
+                text_hits,
+                vector_hits,
+                message,
+                ranking_queries=ranking_queries,
+                prefer_outline=prefer_outline,
+                target_country_names=target_country_names,
+            )
         merged: dict[str, dict[str, Any]] = {}
         for hit in text_hits:
             row = _hit_to_row(hit)
@@ -824,7 +911,11 @@ class OpenSearchSectionProvider:
         scored: list[tuple[dict[str, Any], float]] = []
         for row in merged.values():
             original_score = (
-                _source_score(row, message)
+                _source_score(
+                    row,
+                    message,
+                    hardening_enabled=self.retrieval_hardening_enabled,
+                )
                 + _directory_record_country_score(message, row, target_country_names)
             )
             best_score = original_score
@@ -842,7 +933,11 @@ class OpenSearchSectionProvider:
                 dict.fromkeys([*shared_ranking_queries, *evidence_repair_queries])
             )
             for ranking_query in candidate_ranking_queries:
-                candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
+                candidate_score = _source_score(
+                    row,
+                    ranking_query,
+                    hardening_enabled=self.retrieval_hardening_enabled,
+                ) + _directory_record_country_score(
                     ranking_query, row, target_country_names
                 )
                 if candidate_score > best_score:
@@ -856,6 +951,118 @@ class OpenSearchSectionProvider:
             scored.append((row, round(best_score, 6)))
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
 
+    def _merge_hits_with_rrf(
+        self,
+        text_hits: list[dict[str, Any]],
+        vector_hits: list[dict[str, Any]],
+        message: str,
+        *,
+        ranking_queries: list[str] | None = None,
+        prefer_outline: bool = False,
+        target_country_names: set[str] | None = None,
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Fuse lexical and vector channels without comparing raw score scales."""
+        lexical_ids = _ranked_hit_ids(text_hits)
+        vector_ids = _ranked_hit_ids(vector_hits)
+        fusion_scores = reciprocal_rank_fusion(
+            [lexical_ids, vector_ids],
+            k=settings.RETRIEVAL_RRF_K,
+        )
+        lexical_ranks = {row_id: rank for rank, row_id in enumerate(lexical_ids, start=1)}
+        vector_ranks = {row_id: rank for rank, row_id in enumerate(vector_ids, start=1)}
+
+        merged: dict[str, dict[str, Any]] = {}
+        for hit in [*text_hits, *vector_hits]:
+            row = _hit_to_row(hit)
+            row_id = str(row.get("id") or "")
+            if not row_id:
+                continue
+            existing = merged.get(row_id)
+            if existing is None or float(row.get("rank") or 0.0) > float(existing.get("raw_channel_score") or 0.0):
+                row["raw_channel_score"] = float(row.get("rank") or 0.0)
+                merged[row_id] = row
+
+        max_fusion_score = max(fusion_scores.values(), default=0.0)
+        for row_id, row in merged.items():
+            normalized_fusion_score = (
+                (fusion_scores.get(row_id, 0.0) / max_fusion_score) * 1.25
+                if max_fusion_score > 0.0
+                else 0.0
+            )
+            row["rank"] = normalized_fusion_score
+            row["lexical_rank"] = lexical_ranks.get(row_id)
+            row["vector_rank"] = vector_ranks.get(row_id)
+            row["fusion_score"] = round(fusion_scores.get(row_id, 0.0), 8)
+            row["fusion_strategy"] = "rrf"
+
+        return self._score_merged_rows(
+            list(merged.values()),
+            message,
+            ranking_queries=ranking_queries,
+            prefer_outline=prefer_outline,
+            target_country_names=target_country_names,
+        )
+
+    def _score_merged_rows(
+        self,
+        rows: list[dict[str, Any]],
+        message: str,
+        *,
+        ranking_queries: list[str] | None,
+        prefer_outline: bool,
+        target_country_names: set[str] | None,
+    ) -> list[tuple[dict[str, Any], float]]:
+        shared_evidence_text = [
+            " ".join([str(row.get("section_title") or ""), str(row.get("content") or "")[:500]])
+            for row in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
+        ]
+        repair_queries = safe_typo_ranking_queries(message, shared_evidence_text)
+        shared_queries = list(dict.fromkeys([*(ranking_queries or []), *repair_queries]))
+        scored: list[tuple[dict[str, Any], float]] = []
+        for row in rows:
+            original_score = _source_score(
+                row,
+                message,
+                hardening_enabled=self.retrieval_hardening_enabled,
+            ) + _directory_record_country_score(message, row, target_country_names)
+            best_score = original_score
+            ranking_query_used = message
+            for ranking_query in shared_queries:
+                candidate_score = _source_score(
+                    row,
+                    ranking_query,
+                    hardening_enabled=self.retrieval_hardening_enabled,
+                ) + _directory_record_country_score(ranking_query, row, target_country_names)
+                if candidate_score > best_score:
+                    best_score = candidate_score
+                    ranking_query_used = ranking_query
+            if prefer_outline and row.get("chunk_type") == "document_outline":
+                best_score += 2.0
+            row["original_question_score"] = round(original_score, 6)
+            row["ranking_query_used"] = ranking_query_used
+            row["typo_ranking_applied"] = ranking_query_used != message
+            scored.append((row, round(best_score, 6)))
+        return sorted(scored, key=lambda pair: pair[1], reverse=True)
+
+    def _diversify_rows(
+        self,
+        rows: list[tuple[dict[str, Any], float]],
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Limit repeated child chunks from one parent without dropping candidates."""
+        leading: list[tuple[dict[str, Any], float]] = []
+        deferred: list[tuple[dict[str, Any], float]] = []
+        counts: dict[str, int] = {}
+        per_parent = max(1, settings.RETRIEVAL_MAX_RESULTS_PER_PARENT)
+        for candidate in rows:
+            row = candidate[0]
+            parent = str(row.get("parent_section_id") or row.get("section_id") or row.get("id") or "")
+            if counts.get(parent, 0) >= per_parent:
+                deferred.append(candidate)
+                continue
+            counts[parent] = counts.get(parent, 0) + 1
+            leading.append(candidate)
+        return [*leading, *deferred]
+
     def _select_evidence_rows(
         self,
         message: str,
@@ -863,7 +1070,7 @@ class OpenSearchSectionProvider:
         correlation_id: str,
     ) -> list[tuple[dict[str, Any], float]]:
         """Optionally let a small model choose the best evidence from candidates."""
-        if not settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED or not rows:
+        if not self.evidence_selector_enabled or not rows:
             return rows
 
         candidate_limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
@@ -888,7 +1095,7 @@ class OpenSearchSectionProvider:
             "When a return question says a product is unopened, unused, unsold, or salable and asks for a time window, "
             "prefer the FBO buy-back or unsold-salable-product clause over a general Retail/Preferred Customer satisfaction clause. "
         )
-        if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+        if self.retrieval_hardening_enabled:
             system_prompt += (
                 "A candidate is relevant only when its text contains the requested fact or a governing rule that directly answers it; "
                 "sharing a product, company, person, rank, or country name is not enough. "
@@ -901,7 +1108,7 @@ class OpenSearchSectionProvider:
         system_prompt += "Return only JSON."
         response_example = (
             '{"relevant_evidence":true,"selected_ranks":[1,2,3],"reason":"short reason"}'
-            if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            if self.retrieval_hardening_enabled
             else '{"selected_ranks":[1,2,3],"reason":"short reason"}'
         )
         user_prompt = (
@@ -928,7 +1135,7 @@ class OpenSearchSectionProvider:
             return rows
         ranks, relevant_evidence = decision
         if (
-            settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            self.retrieval_hardening_enabled
             and relevant_evidence is False
             and not ranks
         ):

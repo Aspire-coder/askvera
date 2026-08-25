@@ -197,8 +197,22 @@ def test_shadow_orchestration_failure_cannot_fail_primary_retrieval(monkeypatch)
 def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> None:
     created: list[tuple[str, str | None, bool]] = []
 
-    def recording_factory(provider_name, *, index_name=None, enable_bedrock_rerank=False):
+    def recording_factory(
+        provider_name,
+        *,
+        index_name=None,
+        enable_bedrock_rerank=False,
+        **kwargs,
+    ):
         created.append((provider_name, index_name, enable_bedrock_rerank))
+        if index_name == "vnext-index":
+            assert kwargs == {
+                "enable_rrf": settings.RETRIEVAL_VNEXT_RRF_ENABLED,
+                "enable_parent_diversity": settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
+                "enable_evidence_selector": settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
+                "enable_retrieval_hardening": settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
+                "profile_name": "vnext",
+            }
         return _RecordingProvider(provider_name, f"document-{len(created)}")
 
     monkeypatch.setattr(RetrievalService, "_provider_for_name", staticmethod(recording_factory))
