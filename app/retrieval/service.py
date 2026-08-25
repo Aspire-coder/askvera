@@ -8,6 +8,7 @@ from app.metrics import STAGE_RETRIEVAL
 from app.metrics.pipeline import record_pipeline_metric
 from config import settings
 from services.analytics import record_retrieval_shadow_comparison
+from services.retrieval_runtime import get_retrieval_runtime_control
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
@@ -117,7 +118,8 @@ class RetrievalService:
         primary_result: RetrievalResult,
     ) -> None:
         """Launch an isolated comparison while preserving the primary result."""
-        if not settings.RETRIEVAL_SHADOW_ENABLED or not self._sampled_for_shadow(correlation_id):
+        control = get_retrieval_runtime_control()
+        if control.mode != "shadow" or not self._sampled_for_shadow(correlation_id, control.sample_rate):
             return
         if (
             settings.RETRIEVAL_VNEXT_PROVIDER != "opensearch_section"
@@ -156,9 +158,12 @@ class RetrievalService:
             LOGGER.exception("retrieval_shadow_submit_failed", correlation_id=correlation_id)
 
     @staticmethod
-    def _sampled_for_shadow(correlation_id: str) -> bool:
+    def _sampled_for_shadow(correlation_id: str, sample_rate: float | None = None) -> bool:
         """Select a stable request sample without storing or inspecting its text."""
-        sample_rate = max(0.0, min(float(settings.RETRIEVAL_SHADOW_SAMPLE_RATE), 1.0))
+        sample_rate = max(
+            0.0,
+            min(float(settings.RETRIEVAL_SHADOW_SAMPLE_RATE if sample_rate is None else sample_rate), 1.0),
+        )
         if sample_rate <= 0.0:
             return False
         if sample_rate >= 1.0:

@@ -73,6 +73,14 @@ def _client() -> OpenSearch:
     )
 
 
+def opensearch_index_exists(index_name: str) -> bool:
+    """Return whether a named retrieval index exists without exposing client details."""
+    normalized = str(index_name or "").strip()
+    if not normalized:
+        return False
+    return bool(_client().indices.exists(index=normalized))
+
+
 def _language_filter(language: str) -> dict[str, Any]:
     """Filter to the requested language, with an explicit optional English fallback."""
     normalized = (language or "en").split("-", 1)[0].lower()
