@@ -23,6 +23,7 @@ import type {
   MarketReadiness,
   ModelRoutingReport,
   OperationsStatus,
+  RetrievalProfileStatus,
   CacheResetResult,
   PipelineTrace,
   ShadowReport,
@@ -96,6 +97,12 @@ export class AdminApi {
     });
   }
   operationsStatus() { return this.request<OperationsStatus>("/api/admin/operations/status"); }
+  retrievalProfile() { return this.request<RetrievalProfileStatus>("/api/admin/operations/retrieval-profile"); }
+  updateRetrievalProfile(body: { mode: "current" | "shadow"; sample_rate: number; reason: string; confirmation: string }) {
+    return this.request<RetrievalProfileStatus>("/api/admin/operations/retrieval-profile", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
   resetAnswerCache(body: { country: string; mode: "exact" | "exact_and_semantic"; reason: string; confirmation: string }) {
     return this.request<CacheResetResult>("/api/admin/operations/cache/reset", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)

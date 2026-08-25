@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, RefreshIcon } from "../icons";
-import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, CacheResetResult, IngestionJob, ModelRoutingReport, OperationsStatus, View } from "../types";
+import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, CacheResetResult, IngestionJob, ModelRoutingReport, OperationsStatus, RetrievalProfileStatus, View } from "../types";
 import { useDialogFocus } from "../useDialogFocus";
 
 type OperationsOverviewProps = {
@@ -26,6 +26,7 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
   const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [operations, setOperations] = useState<OperationsStatus | null>(null);
+  const [retrievalProfile, setRetrievalProfile] = useState<RetrievalProfileStatus | null>(null);
   const [mode, setMode] = useState<DataMode>("demo");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -37,15 +38,55 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
   const [cacheResetting, setCacheResetting] = useState(false);
   const [cacheError, setCacheError] = useState("");
   const [cacheResult, setCacheResult] = useState<CacheResetResult | null>(null);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [profileMode, setProfileMode] = useState<"current" | "shadow">("current");
+  const [profileSampleRate, setProfileSampleRate] = useState("0.1");
+  const [profileReason, setProfileReason] = useState("");
+  const [profileConfirmation, setProfileConfirmation] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
 
   const closeCacheDialog = () => { if (!cacheResetting) setCacheDialogOpen(false); };
   const cacheDialogRef = useDialogFocus<HTMLElement>(cacheDialogOpen, closeCacheDialog);
+  const closeProfileDialog = () => { if (!profileSaving) setProfileDialogOpen(false); };
+  const profileDialogRef = useDialogFocus<HTMLElement>(profileDialogOpen, closeProfileDialog);
 
   const canViewAudit = !config.rbacEnabled
     || config.principal?.role === "super_admin"
     || Boolean(config.principal?.scopes.some((scope) => scope.section === "audit"));
   const canResetCache = config.principal?.role === "super_admin";
   const requiredConfirmation = `RESET ${cacheCountry}`;
+  const profileRequiredConfirmation = profileMode === "shadow" ? "ENABLE SHADOW" : "USE CURRENT";
+
+  const openProfileDialog = () => {
+    const selectedMode = retrievalProfile?.control.mode || "current";
+    setProfileMode(selectedMode);
+    setProfileSampleRate(String(retrievalProfile?.control.sample_rate || 0.1));
+    setProfileReason("");
+    setProfileConfirmation("");
+    setProfileError("");
+    setProfileDialogOpen(true);
+  };
+
+  const saveRetrievalProfile = async () => {
+    setProfileSaving(true);
+    setProfileError("");
+    try {
+      const result = await new AdminApi(credentials).updateRetrievalProfile({
+        mode: profileMode,
+        sample_rate: profileMode === "shadow" ? Number(profileSampleRate) : 0,
+        reason: profileReason.trim(),
+        confirmation: profileConfirmation.trim()
+      });
+      setRetrievalProfile(result);
+      setProfileDialogOpen(false);
+      await load();
+    } catch (saveError) {
+      setProfileError(saveError instanceof Error ? saveError.message : "The retrieval profile could not be updated.");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const resetCache = async () => {
     setCacheResetting(true);
@@ -79,18 +120,20 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
         : Promise.resolve({ data: [] as AdminAuditEvent[], mode: "live" as DataMode });
       const routingFilters = new URLSearchParams({ days: routingDays });
       if (routingCountry) routingFilters.set("country", routingCountry);
-      const [overviewResult, routingResult, jobsResult, auditResult, operationsResult] = await Promise.all([
+      const [overviewResult, routingResult, jobsResult, auditResult, operationsResult, retrievalProfileResult] = await Promise.all([
         withDemoFallback(() => api.overview(new URLSearchParams({ days: "1" })), demo.overview),
         withDemoFallback(() => api.modelRouting(routingFilters), demo.modelRouting),
         withDemoFallback(() => api.ingestions(), demo.jobs),
         auditRequest,
-        withDemoFallback(() => api.operationsStatus(), null)
+        withDemoFallback(() => api.operationsStatus(), null),
+        api.retrievalProfile()
       ]);
       setOverview(overviewResult.data);
       setRouting(routingResult.data);
       setJobs(jobsResult.data);
       setAuditEvents(auditResult.data);
       setOperations(operationsResult.data);
+      setRetrievalProfile(retrievalProfileResult);
       setMode(overviewResult.mode === "live" || routingResult.mode === "live" || jobsResult.mode === "live" || auditResult.mode === "live" ? "live" : "demo");
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Operational data could not be loaded.");
@@ -155,6 +198,16 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
         </div>
       </> : <div className="empty-state compact">Operational status is unavailable.</div>}
       {operations?.assigned_actions.length ? <div className="assigned-actions"><h3>Assigned actions</h3>{operations.assigned_actions.map((action, index) => <div key={`${action.label}-${index}`}><strong>{action.label}</strong><span>{action.reason}</span><em>{action.owner}</em></div>)}</div> : null}
+      {retrievalProfile ? <div className="retrieval-profile-panel">
+        <div className="retrieval-profile-heading"><div><strong>Retrieval comparison control</strong><span>Customer answers always use Current. Shadow evaluates the isolated candidate in the background and records comparison metrics only.</span></div><span className={`status-label ${retrievalProfile.control.mode === "shadow" ? "configured" : "healthy"}`}>{retrievalProfile.control.mode === "shadow" ? `Shadow ${Math.round(retrievalProfile.control.sample_rate * 100)}%` : "Current only"}</span></div>
+        <div className="retrieval-profile-grid">
+          <div><span>Customer serving</span><strong>Current</strong><small>{retrievalProfile.primary.pipeline_version}</small></div>
+          <div><span>Candidate readiness</span><strong>{retrievalProfile.candidate.ready ? "Ready" : "Not ready"}</strong><small>{retrievalProfile.candidate.ready ? retrievalProfile.candidate.pipeline_version : retrievalProfile.candidate.readiness_error}</small></div>
+          <div><span>Current index</span><strong>{retrievalProfile.primary.index || "Not configured"}</strong><small>Chunk profile: {retrievalProfile.primary.chunk_profile}</small></div>
+          <div><span>Candidate index</span><strong>{retrievalProfile.candidate.index || "Not configured"}</strong><small>Chunk profile: {retrievalProfile.candidate.chunk_profile}</small></div>
+        </div>
+        <div className="retrieval-profile-footer"><span>This control does not reparse, rechunk, publish or delete documents.</span>{canResetCache ? <button className="button secondary" onClick={openProfileDialog}>Change comparison mode</button> : null}</div>
+      </div> : null}
       {canResetCache ? <div className="cache-control-panel">
         <div><strong>Answer cache controls</strong><span>Clear stale generated answers for one market or all markets. Login, security, rate limits, widget settings and session data are never affected.</span></div>
         <button className="button danger" onClick={() => { setCacheError(""); setCacheDialogOpen(true); }}>Reset answer cache</button>
@@ -193,6 +246,23 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
         {cacheError ? <div className="notice error" role="alert">{cacheError}</div> : null}
         <div className="modal-actions"><button className="button secondary" onClick={closeCacheDialog} disabled={cacheResetting}>Cancel</button><button className="button danger" onClick={() => void resetCache()} disabled={cacheResetting || cacheReason.trim().length < 8 || cacheConfirmation.trim().toUpperCase() !== requiredConfirmation}>{cacheResetting ? "Resetting" : "Reset answer cache"}</button></div>
         <small>This action does not delete documents or change the Bedrock knowledge index. It only removes generated answer entries from Redis/Valkey.</small>
+      </section>
+    </div> : null}
+    {profileDialogOpen ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeProfileDialog(); }}>
+      <section ref={profileDialogRef} className="connection-modal retrieval-profile-modal" role="dialog" aria-modal="true" aria-labelledby="retrieval-profile-title" tabIndex={-1}>
+        <span className="eyebrow">Super Admin only</span>
+        <h2 id="retrieval-profile-title">Retrieval comparison mode</h2>
+        <p>Current always serves customers. Shadow sends a sampled copy to the isolated candidate and stores only comparison telemetry.</p>
+        <div className="cache-reset-fields">
+          <label><span>Mode</span><select value={profileMode} onChange={(event) => { setProfileMode(event.target.value as "current" | "shadow"); setProfileConfirmation(""); }} autoFocus><option value="current">Current only</option><option value="shadow" disabled={!retrievalProfile?.candidate.ready}>Shadow comparison</option></select></label>
+          {profileMode === "shadow" ? <label><span>Traffic sample</span><select value={profileSampleRate} onChange={(event) => setProfileSampleRate(event.target.value)}><option value="0.05">5%</option><option value="0.1">10%</option><option value="0.25">25%</option><option value="1">100%</option></select></label> : null}
+          <label><span>Reason</span><textarea value={profileReason} onChange={(event) => setProfileReason(event.target.value)} maxLength={500} placeholder="Explain why this comparison mode is changing" /></label>
+          <label><span>Confirmation</span><input value={profileConfirmation} onChange={(event) => setProfileConfirmation(event.target.value)} placeholder={profileRequiredConfirmation} autoComplete="off" /><small>Type <strong>{profileRequiredConfirmation}</strong> exactly.</small></label>
+        </div>
+        {profileMode === "shadow" && !retrievalProfile?.candidate.ready ? <div className="notice error" role="alert">{retrievalProfile?.candidate.readiness_error || "The isolated candidate is not ready."}</div> : null}
+        {profileError ? <div className="notice error" role="alert">{profileError}</div> : null}
+        <div className="modal-actions"><button className="button secondary" onClick={closeProfileDialog} disabled={profileSaving}>Cancel</button><button className="button" onClick={() => void saveRetrievalProfile()} disabled={profileSaving || profileReason.trim().length < 8 || profileConfirmation.trim().toUpperCase() !== profileRequiredConfirmation || (profileMode === "shadow" && !retrievalProfile?.candidate.ready)}>{profileSaving ? "Saving" : "Apply mode"}</button></div>
+        <small>No candidate answer is returned to a customer in Shadow mode. Live candidate serving is intentionally unavailable.</small>
       </section>
     </div> : null}
   </section>;

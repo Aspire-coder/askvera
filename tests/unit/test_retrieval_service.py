@@ -27,6 +27,14 @@ from config import settings
 def disable_shadow_analytics(monkeypatch):
     """Retrieval unit tests must not connect to operational analytics storage."""
     monkeypatch.setattr(retrieval_service_module, "record_retrieval_shadow_comparison", MagicMock())
+    monkeypatch.setattr(
+        retrieval_service_module,
+        "get_retrieval_runtime_control",
+        lambda: SimpleNamespace(
+            mode="shadow" if settings.RETRIEVAL_SHADOW_ENABLED else "current",
+            sample_rate=settings.RETRIEVAL_SHADOW_SAMPLE_RATE,
+        ),
+    )
 
 
 def test_retrieval_plan_adds_reviewed_spaced_variant_for_joined_business_term(monkeypatch) -> None:
@@ -106,6 +114,24 @@ def test_shadow_retrieval_is_inert_by_default(monkeypatch) -> None:
         retrieval_service_module,
         "_submit_shadow_task",
         lambda task: (_ for _ in ()).throw(AssertionError("shadow task must not run")),
+    )
+
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
+
+    assert result.documents[0].id == "primary-document"
+    assert shadow.calls == []
+
+
+def test_runtime_current_mode_suppresses_configured_shadow(monkeypatch) -> None:
+    primary = _RecordingProvider("primary", "primary-document")
+    shadow = _RecordingProvider("shadow", "shadow-document")
+    service = RetrievalService(provider=primary, shadow_provider=shadow)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 1.0)
+    monkeypatch.setattr(
+        retrieval_service_module,
+        "get_retrieval_runtime_control",
+        lambda: SimpleNamespace(mode="current", sample_rate=0.0),
     )
 
     result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
