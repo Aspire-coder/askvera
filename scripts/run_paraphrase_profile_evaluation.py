@@ -16,6 +16,7 @@ import logging
 import re
 import subprocess
 import sys
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
@@ -36,6 +37,7 @@ MARKET_ALIASES = {"UK": "GB"}
 DOCUMENT_COUNTRY_ALIASES = {"GB": {"GB", "UK"}}
 DIRECTORY_HOST_MARKET = "CA"
 RETRIEVAL_DEPTHS = (1, 5, 10, 20)
+EXPECTED_BEHAVIORS = {"answer", "abstain"}
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,17 @@ def fixture_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _normalized_string_list(
+    case: dict[str, Any],
+    field: str,
+    identifier: str,
+) -> list[str]:
+    values = case.get(field) or []
+    if not isinstance(values, list):
+        raise ValueError(f"Case {identifier} {field} must be a list.")
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
 def normalize_fixture(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """Normalize source-oriented labels into valid runtime evaluation inputs."""
     from services.market_config import find_market_mentions
@@ -72,6 +85,14 @@ def normalize_fixture(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str
     normalized_cases: list[dict[str, Any]] = []
     changes: list[str] = []
     seen: set[str] = set()
+    fixture_answer_phrases = payload.get("expected_answer_any") or []
+    if not isinstance(fixture_answer_phrases, list):
+        raise ValueError("Fixture expected_answer_any must be a list.")
+    fixture_answer_phrases = [
+        str(value).strip().casefold()
+        for value in fixture_answer_phrases
+        if str(value).strip()
+    ]
     for position, original in enumerate(cases, start=1):
         if not isinstance(original, dict):
             raise ValueError(f"Case {position} must be an object.")
@@ -90,6 +111,22 @@ def normalize_fixture(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str
         case["country"] = runtime_country
         case["role"] = str(case.get("role") or "new_prospect")
         case["target_country"] = str(case.get("target_country") or "").upper()
+        default_behavior = "abstain" if str(case.get("scope") or "") == "out_of_scope" else "answer"
+        expected_behavior = str(case.get("expected_behavior") or default_behavior).strip().lower()
+        if expected_behavior not in EXPECTED_BEHAVIORS:
+            raise ValueError(
+                f"Case {identifier} expected_behavior must be one of "
+                f"{', '.join(sorted(EXPECTED_BEHAVIORS))}."
+            )
+        case["expected_behavior"] = expected_behavior
+        answer_phrases = case.get("expected_answer_any", fixture_answer_phrases) or []
+        if not isinstance(answer_phrases, list):
+            raise ValueError(f"Case {identifier} expected_answer_any must be a list.")
+        case["expected_answer_any"] = [
+            str(value).strip().casefold()
+            for value in answer_phrases
+            if str(value).strip()
+        ]
 
         if source_country != runtime_country:
             changes.append(f"{identifier}: normalized market {source_country} to {runtime_country}.")
@@ -108,10 +145,15 @@ def normalize_fixture(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str
                     f"{identifier}: derived directory target {case['target_country']} from the question."
                 )
 
-        relevant = case.get("relevant_sections") or []
-        if not isinstance(relevant, list):
-            raise ValueError(f"Case {identifier} relevant_sections must be a list.")
-        case["relevant_sections"] = [str(value).strip() for value in relevant if str(value).strip()]
+        case["relevant_sections"] = _normalized_string_list(
+            case, "relevant_sections", identifier
+        )
+        case["relevant_section_ids"] = _normalized_string_list(
+            case, "relevant_section_ids", identifier
+        )
+        case["required_source_files"] = _normalized_string_list(
+            case, "required_source_files", identifier
+        )
         governing = case.get("governing_section")
         case["governing_section"] = str(governing).strip() if governing else None
         normalized_cases.append(case)
@@ -142,19 +184,74 @@ def _allowed_document_countries(country: str) -> set[str]:
     return DOCUMENT_COUNTRY_ALIASES.get(normalized, {normalized})
 
 
+def _normalized_country_label(value: str) -> str:
+    """Normalize country codes and names for directory ground-truth checks."""
+    normalized = unicodedata.normalize("NFKD", str(value or "")).casefold()
+    return " ".join(
+        "".join(character if character.isalnum() else " " for character in normalized).split()
+    )
+
+
+def _directory_target_aliases(country_code: str, relevant_sections: list[str]) -> set[str]:
+    """Return data-driven code/name aliases for one directory target country."""
+    from services.market_config import load_market_config
+
+    code = str(country_code or "").strip().upper()
+    aliases = {_normalized_country_label(code)} if code else set()
+    for market in load_market_config().get("markets", []):
+        if str(market.get("code") or "").strip().upper() != code:
+            continue
+        aliases.add(_normalized_country_label(str(market.get("name") or "")))
+        aliases.update(
+            _normalized_country_label(str(alias))
+            for alias in market.get("aliases", [])
+            if str(alias).strip()
+        )
+        break
+    for section_id in relevant_sections:
+        normalized_section = _normalized_country_label(section_id)
+        for prefix in ("sponsoring directory ", "directory "):
+            if normalized_section.startswith(prefix):
+                aliases.add(normalized_section.removeprefix(prefix).strip())
+    return {alias for alias in aliases if alias}
+
+
 def candidate_is_relevant(candidate: dict[str, Any], case: dict[str, Any]) -> bool:
     """Apply locale-aware section or directory-record ground truth."""
     scope = str(case.get("scope") or "")
-    if scope == "out_of_scope":
+    if scope == "out_of_scope" or case.get("expected_behavior") == "abstain":
+        return False
+    required_sources = {
+        str(value).strip().casefold()
+        for value in case.get("required_source_files") or []
+        if str(value).strip()
+    }
+    if (
+        required_sources
+        and str(candidate.get("source_file") or "").strip().casefold()
+        not in required_sources
+    ):
         return False
     if scope == "global_directory" and case.get("target_country"):
-        return str(candidate.get("record_country") or "").upper() == str(case["target_country"]).upper()
+        record_country = _normalized_country_label(str(candidate.get("record_country") or ""))
+        return record_country in _directory_target_aliases(
+            str(case["target_country"]),
+            list(case.get("relevant_sections") or []),
+        )
 
     if str(candidate.get("access_scope") or "country").lower() != "global":
         if str(candidate.get("country") or "").upper() not in _allowed_document_countries(str(case["country"])):
             return False
+    actual_section = str(candidate.get("section_id") or "").strip().casefold()
+    exact_ids = {
+        str(value).strip().casefold()
+        for value in case.get("relevant_section_ids") or []
+        if str(value).strip()
+    }
+    if actual_section in exact_ids:
+        return True
     relevant_sections = case.get("relevant_sections") or []
-    return any(_section_matches(str(candidate.get("section_id") or ""), section) for section in relevant_sections)
+    return any(_section_matches(actual_section, section) for section in relevant_sections)
 
 
 def score_candidates(result: Any, case: dict[str, Any]) -> dict[str, Any]:
@@ -329,33 +426,57 @@ def generate_profile_answer(
     try:
         model_response = BedrockClaudeProvider().generate(prompt, approved_result, correlation_base)
     except Exception as exc:  # Evaluation must preserve the failure instead of hiding the row.
-        response = _fallback_answer(orchestrator, body.language, correlation_base, type(exc).__name__)
-        return ProfileAnswer(
-            answer=response.answer,
-            citations=[],
-            model_name="error",
-            answer_status="generation_error",
-            failure_layer=type(exc).__name__,
-            evidence_approved=True,
-            evidence_reason=decision.reason,
-            confidence=round(float(first_result.confidence or 0.0), 6),
-            candidate_metrics=metrics,
-            selector_success=selector_success,
-            answer_delivered=False,
-            retrieval_repeats=snapshots,
-        )
-
-    if model_response.finish_reason == "guardrail_intervened":
-        response = orchestrator.response_builder.fallback(
-            "The answer was blocked by the configured Bedrock guardrail.",
+        contracted = orchestrator._deterministic_joining_cost_repair(
+            prompt,
+            approved_result,
             correlation_base,
-            metadata={"failure_layer": "aws_guardrail"},
         )
-    else:
-        contracted = orchestrator._apply_evidence_contract(model_response, approved_result, correlation_base)
         if contracted is None:
-            response = _fallback_answer(orchestrator, body.language, correlation_base, "evidence_contract")
+            response = _fallback_answer(orchestrator, body.language, correlation_base, type(exc).__name__)
+            return ProfileAnswer(
+                answer=response.answer,
+                citations=[],
+                model_name="error",
+                answer_status="generation_error",
+                failure_layer=type(exc).__name__,
+                evidence_approved=True,
+                evidence_reason=decision.reason,
+                confidence=round(float(first_result.confidence or 0.0), 6),
+                candidate_metrics=metrics,
+                selector_success=selector_success,
+                answer_delivered=False,
+                retrieval_repeats=snapshots,
+            )
+        model_response, approved_result = contracted
+    else:
+        if model_response.finish_reason == "guardrail_intervened":
+            response = orchestrator.response_builder.fallback(
+                "The answer was blocked by the configured Bedrock guardrail.",
+                correlation_base,
+                metadata={"failure_layer": "aws_guardrail"},
+            )
+            contracted = None
         else:
+            contracted = orchestrator._apply_evidence_contract(model_response, approved_result, correlation_base)
+            deterministic_evidence = contracted[1] if contracted is not None else approved_result
+            deterministic = orchestrator._deterministic_joining_cost_repair(
+                prompt,
+                deterministic_evidence,
+                correlation_base,
+            )
+            if deterministic is not None:
+                contracted = deterministic
+            elif contracted is None:
+                contracted = orchestrator._repair_joining_cost_contract(
+                    prompt,
+                    approved_result,
+                    correlation_base,
+                    generator=BedrockClaudeProvider().generate,
+                )
+            if contracted is None:
+                response = _fallback_answer(orchestrator, body.language, correlation_base, "evidence_contract")
+
+        if contracted is not None:
             model_response, approved_result = contracted
             response = orchestrator.response_builder.build(
                 model_response=model_response,
@@ -380,7 +501,13 @@ def generate_profile_answer(
             )
 
     failure_layer = str(response.metadata.get("failure_layer") or "")
-    delivered = bool(response.answer.strip() and response.citations and not failure_layer)
+    insufficient_answer = orchestrator._insufficient_evidence_message(body.language).strip()
+    delivered = bool(
+        response.answer.strip()
+        and response.answer.strip() != insufficient_answer
+        and response.citations
+        and not failure_layer
+    )
     return ProfileAnswer(
         answer=response.answer,
         citations=response.citations,
@@ -399,14 +526,38 @@ def generate_profile_answer(
 
 def summarize_profile(rows: list[dict[str, Any]], profile: str) -> dict[str, Any]:
     """Summarize only eligible retrieval cases; safety remains a separate gate."""
+    def expectation_met(row: dict[str, Any]) -> bool:
+        explicit_key = f"{profile}_expectation_met"
+        if explicit_key in row:
+            return bool(row[explicit_key])
+        delivered = bool((row.get(profile) or {}).get("answer_delivered"))
+        behavior = str(row.get("expected_behavior") or "answer")
+        return not delivered if behavior == "abstain" else delivered
+
     answers = [row[profile] for row in rows]
-    eligible = [row[profile] for row in rows if row["scope"] != "out_of_scope"]
+    eligible = [
+        row[profile]
+        for row in rows
+        if row["scope"] != "out_of_scope"
+        and str(row.get("expected_behavior") or "answer") == "answer"
+    ]
+    answer_rows = [
+        row for row in rows if str(row.get("expected_behavior") or "answer") == "answer"
+    ]
+    abstain_rows = [
+        row for row in rows if str(row.get("expected_behavior") or "answer") == "abstain"
+    ]
     summary: dict[str, Any] = {
         "cases": len(answers),
         "retrieval_eligible_cases": len(eligible),
         "answers_delivered": sum(bool(answer["answer_delivered"]) for answer in answers),
         "evidence_approved": sum(bool(answer["evidence_approved"]) for answer in answers),
         "selector_successes": sum(answer["selector_success"] is True for answer in eligible),
+        "must_answer_cases": len(answer_rows),
+        "must_answer_passes": sum(expectation_met(row) for row in answer_rows),
+        "must_abstain_cases": len(abstain_rows),
+        "must_abstain_passes": sum(expectation_met(row) for row in abstain_rows),
+        "expectation_passes": sum(expectation_met(row) for row in rows),
     }
     for depth in RETRIEVAL_DEPTHS:
         values = [bool(answer["candidate_metrics"].get(f"recall_at_{depth}")) for answer in eligible]
@@ -414,6 +565,23 @@ def summarize_profile(rows: list[dict[str, Any]], profile: str) -> dict[str, Any
     reciprocal_ranks = [float(answer["candidate_metrics"].get("reciprocal_rank") or 0.0) for answer in eligible]
     summary["mrr"] = round(mean(reciprocal_ranks), 6) if reciprocal_ranks else 0.0
     return summary
+
+
+def profile_meets_expectation(answer: ProfileAnswer, case: dict[str, Any]) -> bool:
+    """Apply the fixture's answer-versus-abstain release expectation."""
+    if case.get("expected_behavior") == "abstain":
+        return not answer.answer_delivered
+    expected_answer_any = case.get("expected_answer_any") or []
+    normalized_answer = str(answer.answer or "").casefold()
+    contains_required_answer = not expected_answer_any or any(
+        phrase in normalized_answer for phrase in expected_answer_any
+    )
+    return bool(
+        answer.answer_delivered
+        and answer.selector_success is True
+        and answer.candidate_metrics.get("recall_at_20")
+        and contains_required_answer
+    )
 
 
 def _citation_text(citations: list[dict[str, Any]]) -> str:
@@ -446,6 +614,7 @@ def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
                 "id": row["id"],
                 "category": row["category"],
                 "scope": row["scope"],
+                "expected_behavior": row["expected_behavior"],
                 "country": row["country"],
                 "target_country": row.get("target_country", ""),
                 "language": row["language"],
@@ -460,6 +629,8 @@ def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
                 "candidate_first_relevant_rank": row["candidate"]["candidate_metrics"].get("first_relevant_rank"),
                 "current_selector_success": row["current"]["selector_success"],
                 "candidate_selector_success": row["candidate"]["selector_success"],
+                "current_expectation_met": row["current_expectation_met"],
+                "candidate_expectation_met": row["candidate_expectation_met"],
                 "human_current_score": "",
                 "human_candidate_score": "",
                 "reviewer_notes": "",
@@ -484,6 +655,8 @@ def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
         f"- Retrieval repeats: {report['manifest']['retrieval_repeats']}",
         f"- Current Recall@1: {report['summary']['current']['recall_at_1']:.2%}",
         f"- Candidate Recall@1: {report['summary']['candidate']['recall_at_1']:.2%}",
+        f"- Current expectation gate: {report['summary']['current']['expectation_passes']}/{report['summary']['current']['cases']}",
+        f"- Candidate expectation gate: {report['summary']['candidate']['expectation_passes']}/{report['summary']['candidate']['cases']}",
         "",
         "## Case-by-case answers",
         "",
@@ -494,6 +667,8 @@ def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
                 f"### {row['id']} - {row['category']}",
                 "",
                 f"**Question:** {row['question']}",
+                "",
+                f"**Expected behavior:** {row['expected_behavior']}",
                 "",
                 f"**Runtime locale:** {row['country']}/{row['language']}" + (f"; target country: {row['target_country']}" if row.get("target_country") else ""),
                 "",
@@ -509,6 +684,7 @@ def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
                 f"{row['current']['candidate_metrics'].get('recall_at_20')}; "
                 f"selector: {row['current']['selector_success']}; evidence: {row['current']['evidence_approved']}; "
                 f"delivered: {row['current']['answer_delivered']}",
+                f"; expectation met: {row['current_expectation_met']}",
                 "",
                 "**Candidate answer**",
                 "",
@@ -522,6 +698,7 @@ def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
                 f"{row['candidate']['candidate_metrics'].get('recall_at_20')}; "
                 f"selector: {row['candidate']['selector_success']}; evidence: {row['candidate']['evidence_approved']}; "
                 f"delivered: {row['candidate']['answer_delivered']}",
+                f"; expectation met: {row['candidate_expectation_met']}",
                 "",
             ]
         )
@@ -608,6 +785,7 @@ def main() -> int:
                 "id": case["id"],
                 "category": case.get("category", ""),
                 "scope": case["scope"],
+                "expected_behavior": case["expected_behavior"],
                 "country": case["country"],
                 "source_country": case.get("source_country", case["country"]),
                 "target_country": case.get("target_country", ""),
@@ -617,6 +795,8 @@ def main() -> int:
                 "governing_section": case.get("governing_section"),
                 "current": asdict(current),
                 "candidate": asdict(candidate),
+                "current_expectation_met": profile_meets_expectation(current, case),
+                "candidate_expectation_met": profile_meets_expectation(candidate, case),
             }
         )
 

@@ -1,0 +1,70 @@
+{
+  "version": "4.0",
+  "purpose": "Verified source labels plus exact live-index representation aliases for the Phase 0 paraphrase benchmark.",
+  "corrections": {
+    "PARA-LVL-CA-005": {
+      "relevant_section_ids": ["4.01-part-1-a"],
+      "notes": "The canonical source passage is 4.01-a. The Candidate index stores the same list item as 4.01-part-1-a. The alias is exact so neighboring 4.01 subsections are not counted."
+    },
+    "PARA-LB-CA-009": {
+      "relevant_section_ids": ["6.03"],
+      "notes": "The canonical source passage is 6.03-a. Both live indexes also contain the complete governing passage as the exact parent section 6.03."
+    },
+    "PARA-RESP-CA-017": {
+      "relevant_section_ids": ["14.01"],
+      "notes": "The canonical source passage is 14.01-a. Both live indexes also contain the complete governing passage as the exact parent section 14.01."
+    },
+    "PARA-EAGLE-CA-018": {
+      "relevant_section_ids": ["8.04-part-1-a"],
+      "notes": "The canonical source passage is 8.04-a. The Candidate index stores the same list item as 8.04-part-1-a."
+    },
+    "PARA-F2D-CA-019": {
+      "relevant_section_ids": ["10.01-part-1-c"],
+      "notes": "The canonical governing passage is 10.01-c. The Candidate index stores the same duration and payment-level passage as 10.01-part-1-c."
+    },
+    "PARA-RALLY-CA-020": {
+      "relevant_sections": ["12.01-part-1"],
+      "governing_section": "12.01-part-1",
+      "scope": "locale_policy",
+      "notes": "Verified against the extracted Canada policy. The Global Rally qualification is in the first structure-aware part of section 12.01."
+    },
+    "PARA-INTL-UK-026": {
+      "relevant_sections": ["15"],
+      "governing_section": "15",
+      "scope": "locale_policy",
+      "notes": "Verified against the UK policy. Section 15 governs the international-sponsoring procedure; the global directory contains country records, not this procedure."
+    },
+    "PARA-INTL-DIR-034": {
+      "relevant_sections": ["15.01-b", "15.01"],
+      "governing_section": "15.01-b",
+      "scope": "locale_policy",
+      "notes": "Verified against the Canada policy. Section 15.01(b) gives the procedure for sponsorship outside the Home Country."
+    },
+    "PARA-INTL-DIR-035": {
+      "relevant_sections": ["15.01-b", "15.01"],
+      "governing_section": "15.01-b",
+      "scope": "locale_policy",
+      "notes": "Verified against the Canada policy. Section 15.01(b)(4)-(5) governs sales-level recognition across countries."
+    },
+    "PARA-INTL-DIR-036": {
+      "relevant_sections": ["15.01-b", "15.01"],
+      "governing_section": "15.01-b",
+      "scope": "locale_policy",
+      "notes": "Verified against the Canada policy. Section 15.01(b)(2) states that the original ID number is used in internationally sponsored countries."
+    },
+    "PARA-INTL-DIR-037": {
+      "required_source_files": ["International-Sponsoring-Directory.pdf"],
+      "verified_against": "International-Sponsoring-Directory.pdf",
+      "notes": "The country-list ground truth is the sponsoring directory country-index record. Office-directory records must not satisfy this case."
+    },
+    "PARA-INTL-DIR-038": {
+      "relevant_sections": ["sponsoring-029-china"],
+      "relevant_section_ids": ["sponsoring-029-china"],
+      "governing_section": "sponsoring-029-china",
+      "required_source_files": ["International-Sponsoring-Directory.pdf"],
+      "target_country": "China",
+      "verified_against": "International-Sponsoring-Directory.pdf",
+      "notes": "The sponsoring directory's China record explicitly excludes mainland China from International Sponsoring. An office-directory China record is not governing evidence."
+    }
+  }
+}

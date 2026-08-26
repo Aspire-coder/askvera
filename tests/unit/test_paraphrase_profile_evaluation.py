@@ -5,10 +5,13 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.run_paraphrase_profile_evaluation import (
+    ProfileAnswer,
     _conversation_for_case,
     candidate_is_relevant,
     normalize_fixture,
+    profile_meets_expectation,
     score_candidates,
+    summarize_profile,
 )
 
 
@@ -78,6 +81,27 @@ def test_locale_isolation_rejects_same_section_from_wrong_market() -> None:
     )
 
 
+def test_exact_index_alias_does_not_broaden_to_neighboring_subsections() -> None:
+    case = normalize_fixture(
+        {
+            "cases": [
+                _fixture_case(
+                    country="CA",
+                    relevant_sections=["14.01-a"],
+                    relevant_section_ids=["14.01"],
+                )
+            ]
+        }
+    )[0]["cases"][0]
+
+    assert candidate_is_relevant(
+        {"section_id": "14.01", "country": "CA", "access_scope": "country"}, case
+    )
+    assert not candidate_is_relevant(
+        {"section_id": "14.01-b", "country": "CA", "access_scope": "country"}, case
+    )
+
+
 def test_global_directory_ground_truth_uses_record_country() -> None:
     case = normalize_fixture(
         {"cases": [_fixture_case(country="NG", scope="global_directory", relevant_sections=["placeholder"])]}
@@ -88,6 +112,79 @@ def test_global_directory_ground_truth_uses_record_country() -> None:
     )
     assert not candidate_is_relevant(
         {"section_id": "p87", "record_country": "NE", "access_scope": "global"}, case
+    )
+
+
+@pytest.mark.parametrize(
+    ("target_code", "record_country"),
+    (("DZ", "Algeria"), ("NG", "Nigeria"), ("BD", "Bangladesh")),
+)
+def test_global_directory_ground_truth_matches_configured_country_name(
+    target_code: str,
+    record_country: str,
+) -> None:
+    case = normalize_fixture(
+        {
+            "cases": [
+                _fixture_case(
+                    country=target_code,
+                    scope="global_directory",
+                    relevant_sections=[f"directory-{record_country.casefold()}"],
+                )
+            ]
+        }
+    )[0]["cases"][0]
+
+    assert candidate_is_relevant(
+        {
+            "section_id": f"directory-{record_country.casefold()}",
+            "record_country": record_country,
+            "access_scope": "global",
+        },
+        case,
+    )
+    assert not candidate_is_relevant(
+        {
+            "section_id": "directory-neighbor",
+            "record_country": "Niger",
+            "access_scope": "global",
+        },
+        case,
+    )
+
+
+def test_global_directory_ground_truth_can_require_the_governing_directory() -> None:
+    case = normalize_fixture(
+        {
+            "cases": [
+                _fixture_case(
+                    country="CA",
+                    scope="global_directory",
+                    target_country="China",
+                    relevant_sections=["sponsoring-029-china"],
+                    required_source_files=["International-Sponsoring-Directory.pdf"],
+                )
+            ]
+        }
+    )[0]["cases"][0]
+
+    assert candidate_is_relevant(
+        {
+            "section_id": "sponsoring-029-china",
+            "source_file": "International-Sponsoring-Directory.pdf",
+            "record_country": "China",
+            "access_scope": "global",
+        },
+        case,
+    )
+    assert not candidate_is_relevant(
+        {
+            "section_id": "office-019-china",
+            "source_file": "International-Office-Directory-April-2026.pdf",
+            "record_country": "China",
+            "access_scope": "global",
+        },
+        case,
     )
 
 
@@ -136,3 +233,104 @@ def test_follow_up_requires_prior_generated_answer() -> None:
 
     with pytest.raises(ValueError, match="requires the generated answer"):
         _conversation_for_case(follow_up, {"PRIOR": _fixture_case(id="PRIOR")})
+
+
+def _profile_answer(*, delivered: bool, selector_success=True, recall_at_20=True):
+    return ProfileAnswer(
+        answer="A grounded answer." if delivered else "I do not have enough approved information.",
+        citations=[{"section": "1.01"}] if delivered else [],
+        model_name="test",
+        answer_status="delivered" if delivered else "insufficient_evidence",
+        failure_layer="" if delivered else "evidence_gate",
+        evidence_approved=delivered,
+        evidence_reason="test",
+        confidence=0.9 if delivered else 0.0,
+        candidate_metrics={"recall_at_20": recall_at_20},
+        selector_success=selector_success,
+        answer_delivered=delivered,
+        retrieval_repeats=[],
+    )
+
+
+def test_fixture_normalization_defaults_to_answer_expectation() -> None:
+    normalized, _changes = normalize_fixture({"cases": [_fixture_case()]})
+
+    assert normalized["cases"][0]["expected_behavior"] == "answer"
+
+
+def test_fixture_normalization_defaults_out_of_scope_to_abstention() -> None:
+    normalized, _changes = normalize_fixture(
+        {"cases": [_fixture_case(scope="out_of_scope", relevant_sections=[])]}
+    )
+
+    assert normalized["cases"][0]["expected_behavior"] == "abstain"
+
+
+def test_fixture_normalization_rejects_unknown_expectation() -> None:
+    with pytest.raises(ValueError, match="expected_behavior"):
+        normalize_fixture({"cases": [_fixture_case(expected_behavior="guess")]})
+
+
+def test_must_abstain_case_passes_only_when_no_answer_is_delivered() -> None:
+    case = normalize_fixture(
+        {"cases": [_fixture_case(expected_behavior="abstain", relevant_sections=[])]}
+    )[0]["cases"][0]
+
+    assert profile_meets_expectation(_profile_answer(delivered=False), case)
+    assert not profile_meets_expectation(_profile_answer(delivered=True), case)
+
+
+def test_must_answer_case_requires_relevant_selected_evidence() -> None:
+    case = normalize_fixture({"cases": [_fixture_case()]})[0]["cases"][0]
+
+    assert profile_meets_expectation(_profile_answer(delivered=True), case)
+    assert not profile_meets_expectation(
+        _profile_answer(delivered=True, selector_success=False), case
+    )
+    assert not profile_meets_expectation(
+        _profile_answer(delivered=True, recall_at_20=False), case
+    )
+
+
+def test_must_answer_case_requires_expected_answer_phrase() -> None:
+    case = normalize_fixture(
+        {
+            "expected_answer_any": ["no minimum capital investment"],
+            "cases": [_fixture_case()],
+        }
+    )[0]["cases"][0]
+
+    assert not profile_meets_expectation(_profile_answer(delivered=True), case)
+    matching_answer = _profile_answer(delivered=True)
+    object.__setattr__(
+        matching_answer,
+        "answer",
+        "The policy states that no minimum capital investment is required.",
+    )
+    assert profile_meets_expectation(matching_answer, case)
+
+
+def test_summary_reports_answer_and_abstention_gates_separately() -> None:
+    answer = _profile_answer(delivered=True)
+    abstention = _profile_answer(delivered=False, selector_success=None, recall_at_20=False)
+    rows = [
+        {
+            "scope": "locale_policy",
+            "expected_behavior": "answer",
+            "current": answer.__dict__,
+            "current_expectation_met": True,
+        },
+        {
+            "scope": "locale_policy",
+            "expected_behavior": "abstain",
+            "current": abstention.__dict__,
+            "current_expectation_met": True,
+        },
+    ]
+
+    summary = summarize_profile(rows, "current")
+
+    assert summary["must_answer_passes"] == 1
+    assert summary["must_abstain_passes"] == 1
+    assert summary["expectation_passes"] == 2
+    assert summary["retrieval_eligible_cases"] == 1
