@@ -23,6 +23,7 @@ from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
+from .confidence_signals import signal_confidence
 from .providers import (
     RetrievalQueryPlan,
     _document_relevance,
@@ -594,6 +595,7 @@ class OpenSearchSectionProvider:
         enable_parent_diversity: bool = False,
         enable_authority_ranking: bool | None = None,
         enable_parent_child: bool | None = None,
+        enable_signal_confidence: bool | None = None,
         enable_evidence_selector: bool | None = None,
         enable_retrieval_hardening: bool | None = None,
         profile_name: str = "current",
@@ -604,6 +606,7 @@ class OpenSearchSectionProvider:
         self.enable_parent_diversity = enable_parent_diversity
         self.enable_authority_ranking = enable_authority_ranking
         self.enable_parent_child = enable_parent_child
+        self.enable_signal_confidence = enable_signal_confidence
         self.enable_evidence_selector = enable_evidence_selector
         self.enable_retrieval_hardening = enable_retrieval_hardening
         self.profile_name = profile_name
@@ -635,6 +638,13 @@ class OpenSearchSectionProvider:
         if self.enable_parent_child is None:
             return bool(settings.RETRIEVAL_PARENT_CHILD_ENABLED)
         return bool(self.enable_parent_child)
+
+    @property
+    def signal_confidence_enabled(self) -> bool:
+        """Keep the established score confidence unless the candidate opts in."""
+        if self.enable_signal_confidence is None:
+            return bool(settings.RETRIEVAL_SIGNAL_CONFIDENCE_ENABLED)
+        return bool(self.enable_signal_confidence)
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
@@ -767,10 +777,19 @@ class OpenSearchSectionProvider:
             selector_applied
             and max_local_relevance >= settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
         )
+        confidence_assessment = (
+            signal_confidence(documents, message, country, language)
+            if self.signal_confidence_enabled
+            else None
+        )
         result = RetrievalResult(
             documents=documents,
             citations=[document.to_source() for document in documents],
-            confidence=_confidence_from_documents(documents),
+            confidence=(
+                confidence_assessment.confidence
+                if confidence_assessment is not None
+                else _confidence_from_documents(documents)
+            ),
             metadata={
                 "provider": "opensearch_section",
                 "retrieval_profile": self.profile_name,
@@ -782,6 +801,10 @@ class OpenSearchSectionProvider:
                 "authority_ranking_enabled": self.authority_ranking_enabled,
                 "parent_child_enabled": self.parent_child_enabled,
                 "parent_expansion_count": parent_expansion_count,
+                "signal_confidence_enabled": self.signal_confidence_enabled,
+                "confidence_signals": (
+                    confidence_assessment.signals if confidence_assessment is not None else {}
+                ),
                 "candidate_count": len(raw_rows),
                 "selected_candidate_count": len(rows),
                 "threshold_eligible_count": threshold_eligible_count,

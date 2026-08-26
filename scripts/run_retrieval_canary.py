@@ -30,6 +30,7 @@ REQUIRED_CASE_FIELDS = {
 VNEXT_FACTORS = {
     "authority": "RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED",
     "parent-child": "RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED",
+    "signal-confidence": "RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED",
     "rrf": "RETRIEVAL_VNEXT_RRF_ENABLED",
     "parent-diversity": "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED",
     "evidence-selector": "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED",
@@ -49,6 +50,9 @@ def _mirror_current_retrieval_factors() -> None:
     )
     settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED = bool(
         settings.RETRIEVAL_PARENT_CHILD_ENABLED
+    )
+    settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED = bool(
+        settings.RETRIEVAL_SIGNAL_CONFIDENCE_ENABLED
     )
     settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED = bool(
         settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
@@ -135,6 +139,7 @@ def _provider_for_profile(profile: str):
         enable_parent_diversity=settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
         enable_authority_ranking=settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED,
         enable_parent_child=settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED,
+        enable_signal_confidence=settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED,
         enable_evidence_selector=settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
         enable_retrieval_hardening=settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
         profile_name="vnext",

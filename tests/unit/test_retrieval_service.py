@@ -211,6 +211,7 @@ def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> N
                 "enable_parent_diversity": settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
                 "enable_authority_ranking": settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED,
                 "enable_parent_child": settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED,
+                "enable_signal_confidence": settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED,
                 "enable_evidence_selector": settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
                 "enable_retrieval_hardening": settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
                 "profile_name": "vnext",
