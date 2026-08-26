@@ -432,6 +432,9 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
         "effective_date": source.get("effective_date", ""),
         "chunk_type": source.get("chunk_type", "section"),
         "parent_section_id": source.get("parent_section_id", ""),
+        "entity_tags": source.get("entity_tags", []),
+        "question_type_tags": source.get("question_type_tags", []),
+        "section_authority": source.get("section_authority", ""),
         "section_id": source.get("section_id", ""),
         "section_title": source.get("section_title", ""),
         "start_page": source.get("start_page", ""),
@@ -471,6 +474,8 @@ def _candidate_stage(rows: list[tuple[dict[str, Any], float]], limit: int) -> li
             "score": round(float(score), 6),
             "lexical_rank": row.get("lexical_rank"),
             "vector_rank": row.get("vector_rank"),
+            "section_authority": str(row.get("section_authority") or ""),
+            "authority_alignment_score": row.get("authority_alignment_score", 0.0),
         }
         for index, (row, score) in enumerate(rows[: max(0, limit)], start=1)
     ]
@@ -587,6 +592,7 @@ class OpenSearchSectionProvider:
         enable_bedrock_rerank: bool = False,
         enable_rrf: bool = False,
         enable_parent_diversity: bool = False,
+        enable_authority_ranking: bool | None = None,
         enable_evidence_selector: bool | None = None,
         enable_retrieval_hardening: bool | None = None,
         profile_name: str = "current",
@@ -595,6 +601,7 @@ class OpenSearchSectionProvider:
         self.enable_bedrock_rerank = enable_bedrock_rerank
         self.enable_rrf = enable_rrf
         self.enable_parent_diversity = enable_parent_diversity
+        self.enable_authority_ranking = enable_authority_ranking
         self.enable_evidence_selector = enable_evidence_selector
         self.enable_retrieval_hardening = enable_retrieval_hardening
         self.profile_name = profile_name
@@ -612,6 +619,13 @@ class OpenSearchSectionProvider:
         if self.enable_retrieval_hardening is None:
             return bool(settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED)
         return bool(self.enable_retrieval_hardening)
+
+    @property
+    def authority_ranking_enabled(self) -> bool:
+        """Keep Current unchanged while allowing an isolated authority candidate."""
+        if self.enable_authority_ranking is None:
+            return bool(settings.RETRIEVAL_AUTHORITY_RANKING_ENABLED)
+        return bool(self.enable_authority_ranking)
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
@@ -749,6 +763,7 @@ class OpenSearchSectionProvider:
                 "parent_diversity_enabled": self.enable_parent_diversity,
                 "evidence_selector_enabled": self.evidence_selector_enabled,
                 "retrieval_hardening_enabled": self.retrieval_hardening_enabled,
+                "authority_ranking_enabled": self.authority_ranking_enabled,
                 "candidate_count": len(raw_rows),
                 "selected_candidate_count": len(rows),
                 "threshold_eligible_count": threshold_eligible_count,
@@ -917,6 +932,7 @@ class OpenSearchSectionProvider:
                     row,
                     message,
                     hardening_enabled=self.retrieval_hardening_enabled,
+                    authority_ranking_enabled=self.authority_ranking_enabled,
                 )
                 + _directory_record_country_score(message, row, target_country_names)
             )
@@ -939,6 +955,7 @@ class OpenSearchSectionProvider:
                     row,
                     ranking_query,
                     hardening_enabled=self.retrieval_hardening_enabled,
+                    authority_ranking_enabled=self.authority_ranking_enabled,
                 ) + _directory_record_country_score(
                     ranking_query, row, target_country_names
                 )
@@ -1026,6 +1043,7 @@ class OpenSearchSectionProvider:
                 row,
                 message,
                 hardening_enabled=self.retrieval_hardening_enabled,
+                authority_ranking_enabled=self.authority_ranking_enabled,
             ) + _directory_record_country_score(message, row, target_country_names)
             best_score = original_score
             ranking_query_used = message
@@ -1034,6 +1052,7 @@ class OpenSearchSectionProvider:
                     row,
                     ranking_query,
                     hardening_enabled=self.retrieval_hardening_enabled,
+                    authority_ranking_enabled=self.authority_ranking_enabled,
                 ) + _directory_record_country_score(ranking_query, row, target_country_names)
                 if candidate_score > best_score:
                     best_score = candidate_score
@@ -1233,5 +1252,9 @@ class OpenSearchSectionProvider:
                 "section_id": row.get("section_id", ""),
                 "section_title": row.get("section_title", ""),
                 "parent_section_id": row.get("parent_section_id", ""),
+                "entity_tags": row.get("entity_tags", []),
+                "question_type_tags": row.get("question_type_tags", []),
+                "section_authority": row.get("section_authority", ""),
+                "authority_alignment_score": row.get("authority_alignment_score", 0.0),
             },
         )

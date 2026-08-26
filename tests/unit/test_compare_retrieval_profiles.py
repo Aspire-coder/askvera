@@ -41,6 +41,7 @@ def test_vnext_experiment_adds_requested_factor_to_current_parity(monkeypatch) -
     for name in (
         "RETRIEVAL_VNEXT_RRF_ENABLED",
         "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED",
+        "RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED",
         "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED",
         "RETRIEVAL_VNEXT_HARDENING_ENABLED",
         "RETRIEVAL_VNEXT_RERANK_ENABLED",
@@ -54,6 +55,7 @@ def test_vnext_experiment_adds_requested_factor_to_current_parity(monkeypatch) -
     assert settings.OPENSEARCH_VNEXT_INDEX == "isolated"
     assert settings.RETRIEVAL_VNEXT_RRF_ENABLED is True
     assert settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED is False
     assert settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED is True
     assert settings.RETRIEVAL_VNEXT_HARDENING_ENABLED is False
     assert settings.RETRIEVAL_VNEXT_RERANK_ENABLED is False
@@ -70,6 +72,7 @@ def test_vnext_parity_mirrors_live_provider_behavior(monkeypatch) -> None:
     assert settings.OPENSEARCH_VNEXT_INDEX == "isolated"
     assert settings.RETRIEVAL_VNEXT_RRF_ENABLED is False
     assert settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED is False
     assert settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED is True
     assert settings.RETRIEVAL_VNEXT_HARDENING_ENABLED is True
     assert settings.RETRIEVAL_VNEXT_RERANK_ENABLED is False

@@ -22,6 +22,7 @@ from services.embeddings import embed_text
 from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
+from .authority_ranking import authority_alignment
 
 LOGGER = get_logger("app.retrieval.section_index")
 
@@ -263,6 +264,7 @@ def _source_score(
     message: str,
     *,
     hardening_enabled: bool | None = None,
+    authority_ranking_enabled: bool | None = None,
 ) -> float:
     """Blend search rank with generic, document-derived lexical alignment."""
     base_score = float(row.get("rank") or 0.0)
@@ -309,6 +311,17 @@ def _source_score(
         content,
         hardening_enabled=hardening_enabled,
     )
+    if authority_ranking_enabled is None:
+        authority_ranking_enabled = settings.RETRIEVAL_AUTHORITY_RANKING_ENABLED
+    if authority_ranking_enabled:
+        alignment = authority_alignment(row, message)
+        score += alignment.score
+        row["entity_tags"] = list(alignment.section.entities)
+        row["question_type_tags"] = list(alignment.section.question_types)
+        row["section_authority"] = alignment.section.authority
+        row["authority_alignment_score"] = alignment.score
+        row["authority_entity_match"] = alignment.entity_match
+        row["authority_question_type_match"] = alignment.question_type_match
     for phrase in phrases:
         if phrase in _normalize_text(title):
             score += 0.35
@@ -588,5 +601,9 @@ class SectionSearchProvider:
                 "section_id": row.get("section_id", ""),
                 "section_title": row.get("section_title", ""),
                 "parent_section_id": row.get("parent_section_id", ""),
+                "entity_tags": row.get("entity_tags", []),
+                "question_type_tags": row.get("question_type_tags", []),
+                "section_authority": row.get("section_authority", ""),
+                "authority_alignment_score": row.get("authority_alignment_score", 0.0),
             },
         )

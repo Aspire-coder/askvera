@@ -28,6 +28,7 @@ REQUIRED_CASE_FIELDS = {
     "evidence_must_be_approved",
 }
 VNEXT_FACTORS = {
+    "authority": "RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED",
     "rrf": "RETRIEVAL_VNEXT_RRF_ENABLED",
     "parent-diversity": "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED",
     "evidence-selector": "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED",
@@ -42,6 +43,9 @@ def _mirror_current_retrieval_factors() -> None:
 
     settings.RETRIEVAL_VNEXT_RRF_ENABLED = False
     settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED = False
+    settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED = bool(
+        settings.RETRIEVAL_AUTHORITY_RANKING_ENABLED
+    )
     settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED = bool(
         settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
     )
@@ -125,6 +129,7 @@ def _provider_for_profile(profile: str):
         enable_bedrock_rerank=settings.RETRIEVAL_VNEXT_RERANK_ENABLED,
         enable_rrf=settings.RETRIEVAL_VNEXT_RRF_ENABLED,
         enable_parent_diversity=settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED,
+        enable_authority_ranking=settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED,
         enable_evidence_selector=settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
         enable_retrieval_hardening=settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
         profile_name="vnext",
