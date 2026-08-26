@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.document_preflight import extract_pdf_page_text, is_table_like_layout  # noqa: E402
+from app.retrieval.classification import classify_section  # noqa: E402
 
 
 # Policies commonly use a mix of top-level headings ("1 Introduction"),
@@ -84,7 +85,13 @@ class PolicySection:
     chunk_profile: str = "current"
 
     @property
-    def metadata(self) -> dict[str, str | int]:
+    def metadata(self) -> dict[str, str | int | list[str]]:
+        classification = classify_section(
+            title=self.title,
+            content=self.content,
+            chunk_type=self.chunk_type,
+            document_type="policy",
+        )
         return {
             "source_file": self.source_file,
             "country": self.country,
@@ -102,6 +109,9 @@ class PolicySection:
             "chunk_type": self.chunk_type,
             "parent_section_id": self.parent_section_id,
             "chunk_profile": self.chunk_profile,
+            "entity_tags": list(classification.entities),
+            "question_type_tags": list(classification.question_types),
+            "section_authority": classification.authority,
         }
 
 
@@ -688,7 +698,9 @@ def write_jsonl(sections: list[PolicySection], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for section in sections:
-            handle.write(json.dumps(asdict(section), ensure_ascii=False) + "\n")
+            handle.write(
+                json.dumps({**asdict(section), **section.metadata}, ensure_ascii=False) + "\n"
+            )
 
 
 def write_csv(sections: list[PolicySection], path: Path) -> None:
@@ -713,6 +725,9 @@ def write_csv(sections: list[PolicySection], path: Path) -> None:
                 "chunk_type",
                 "parent_section_id",
                 "chunk_profile",
+                "entity_tags",
+                "question_type_tags",
+                "section_authority",
                 "content_length",
                 "preview",
             ],
@@ -737,6 +752,9 @@ def write_csv(sections: list[PolicySection], path: Path) -> None:
                     "chunk_type": section.chunk_type,
                     "parent_section_id": section.parent_section_id,
                     "chunk_profile": section.chunk_profile,
+                    "entity_tags": ",".join(section.metadata["entity_tags"]),
+                    "question_type_tags": ",".join(section.metadata["question_type_tags"]),
+                    "section_authority": section.metadata["section_authority"],
                     "content_length": len(section.content),
                     "preview": section.content[:300],
                 }

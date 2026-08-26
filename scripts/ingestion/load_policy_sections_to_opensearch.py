@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 from config import settings  # noqa: E402
 from services.embeddings import embed_text  # noqa: E402
+from app.retrieval.classification import classify_section, normalized_tags  # noqa: E402
 
 
 def _client() -> OpenSearch:
@@ -72,6 +73,9 @@ def _index_body() -> dict[str, Any]:
                 "parent_section_id": {"type": "keyword"},
                 "chunk_profile": {"type": "keyword"},
                 "embedding_text_profile": {"type": "keyword"},
+                "entity_tags": {"type": "keyword"},
+                "question_type_tags": {"type": "keyword"},
+                "section_authority": {"type": "keyword"},
                 "start_page": {"type": "integer"},
                 "end_page": {"type": "integer"},
                 "content": {"type": "text"},
@@ -163,8 +167,35 @@ def _document(
     embedding_text = _embedding_text(section, embedding_text_profile)
     source_file = str(section["source_file"])
     source_uri = source_uri_prefix.rstrip("/") + "/" + source_file if source_uri_prefix else ""
+    supplied_metadata = dict(section.get("metadata") or {})
+    classification = classify_section(
+        title=str(section.get("title") or ""),
+        content=content,
+        chunk_type=str(section.get("chunk_type") or "section"),
+        document_type=document_type,
+        metadata=supplied_metadata,
+    )
+    entity_tags = list(
+        normalized_tags(
+            section.get("entity_tags")
+            or supplied_metadata.get("entity_tags")
+            or classification.entities
+        )
+    )
+    question_type_tags = list(
+        normalized_tags(
+            section.get("question_type_tags")
+            or supplied_metadata.get("question_type_tags")
+            or classification.question_types
+        )
+    )
+    section_authority = str(
+        section.get("section_authority")
+        or supplied_metadata.get("section_authority")
+        or classification.authority
+    )
     metadata = {
-        **dict(section.get("metadata") or {}),
+        **supplied_metadata,
         "source_file": source_file,
         "country": section["country"],
         "language": section["language"],
@@ -180,6 +211,9 @@ def _document(
         "parent_section_id": section.get("parent_section_id", ""),
         "chunk_profile": section.get("chunk_profile", "current"),
         "embedding_text_profile": embedding_text_profile,
+        "entity_tags": entity_tags,
+        "question_type_tags": question_type_tags,
+        "section_authority": section_authority,
     }
     return {
         "id": _section_id(section),
@@ -196,6 +230,9 @@ def _document(
         "parent_section_id": section.get("parent_section_id", ""),
         "chunk_profile": section.get("chunk_profile", "current"),
         "embedding_text_profile": embedding_text_profile,
+        "entity_tags": entity_tags,
+        "question_type_tags": question_type_tags,
+        "section_authority": section_authority,
         "section_id": section["section_id"],
         "section_title": section["title"],
         "start_page": section["start_page"],

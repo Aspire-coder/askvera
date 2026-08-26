@@ -99,3 +99,31 @@ def test_auto_embedding_profile_uses_semantic_v2_only_for_vnext(monkeypatch) -> 
         "auto",
         "askvera-current",
     ) == "current"
+
+
+def test_index_document_contains_retrieval_classification_tags(monkeypatch) -> None:
+    monkeypatch.setattr(loader, "embed_text", lambda _value: [0.0] * 1024)
+    section = {
+        "source_file": "Forever Living Products U.K. Company Policy.pdf",
+        "country": "GB",
+        "language": "en",
+        "section_id": "1.1-a",
+        "title": "Joining requirements",
+        "start_page": 2,
+        "end_page": 2,
+        "content": "No minimum capital investment is required to join.",
+    }
+
+    document = loader._document(
+        section,
+        source_uri_prefix="s3://approved",
+        status="active",
+        ingestion_id="test-ingestion",
+        document_type="policy",
+        access_scope="country",
+    )
+
+    assert "joining" in document["entity_tags"]
+    assert "pricing" in document["question_type_tags"]
+    assert document["section_authority"] == "governing"
+    assert document["metadata"]["section_authority"] == "governing"

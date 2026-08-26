@@ -367,3 +367,20 @@ def test_vnext_contextual_children_are_bounded_after_expansion() -> None:
     )
     assert all(section.parent_section_id == "1.02" for section in bounded)
     assert bounded[0].section_id == "1.02-definition-1-part-1"
+
+
+def test_policy_section_metadata_includes_retrieval_classifications() -> None:
+    section = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="GB",
+        language="en",
+        section_id="1.1-a",
+        title="Joining requirements",
+        start_page=2,
+        end_page=2,
+        content="No minimum capital investment is required to join.",
+    )
+
+    assert "joining" in section.metadata["entity_tags"]
+    assert "pricing" in section.metadata["question_type_tags"]
+    assert section.metadata["section_authority"] == "governing"
