@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.run_retrieval_canary import (  # noqa: E402
     DEFAULT_FIXTURE,
     VNEXT_FACTORS,
+    VNEXT_PROFILES,
     _provider_for_profile,
     configure_vnext_experiment,
     load_fixture,
@@ -108,7 +109,7 @@ def main() -> int:
     parser.add_argument("--vnext-index", default="")
     parser.add_argument(
         "--vnext-factor",
-        choices=("configured", "none", "parity", *VNEXT_FACTORS),
+        choices=("configured", "none", "parity", *VNEXT_FACTORS, *VNEXT_PROFILES),
         default="configured",
     )
     args = parser.parse_args()

@@ -37,6 +37,7 @@ VNEXT_FACTORS = {
     "hardening": "RETRIEVAL_VNEXT_HARDENING_ENABLED",
     "rerank": "RETRIEVAL_VNEXT_RERANK_ENABLED",
 }
+VNEXT_PROFILES = ("authority-stack",)
 
 
 def _mirror_current_retrieval_factors() -> None:
@@ -108,14 +109,18 @@ def configure_vnext_experiment(
         settings.OPENSEARCH_VNEXT_INDEX = index_name
     if factor == "configured":
         return
-    if factor not in {"none", "parity", *VNEXT_FACTORS}:
+    if factor not in {"none", "parity", *VNEXT_FACTORS, *VNEXT_PROFILES}:
         raise ValueError(f"Unsupported vNext factor: {factor}")
     if factor == "none":
         for setting_name in VNEXT_FACTORS.values():
             setattr(settings, setting_name, False)
         return
     _mirror_current_retrieval_factors()
-    if factor != "parity":
+    if factor == "authority-stack":
+        settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED = True
+        settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED = True
+        settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED = True
+    elif factor != "parity":
         setattr(settings, VNEXT_FACTORS[factor], True)
 
 
@@ -226,7 +231,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--vnext-factor",
-        choices=("configured", "none", "parity", *VNEXT_FACTORS),
+        choices=("configured", "none", "parity", *VNEXT_FACTORS, *VNEXT_PROFILES),
         default="configured",
         help="Enable exactly one candidate factor, or none, after SSM loads.",
     )
