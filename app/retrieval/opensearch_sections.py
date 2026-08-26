@@ -593,6 +593,7 @@ class OpenSearchSectionProvider:
         enable_rrf: bool = False,
         enable_parent_diversity: bool = False,
         enable_authority_ranking: bool | None = None,
+        enable_parent_child: bool | None = None,
         enable_evidence_selector: bool | None = None,
         enable_retrieval_hardening: bool | None = None,
         profile_name: str = "current",
@@ -602,6 +603,7 @@ class OpenSearchSectionProvider:
         self.enable_rrf = enable_rrf
         self.enable_parent_diversity = enable_parent_diversity
         self.enable_authority_ranking = enable_authority_ranking
+        self.enable_parent_child = enable_parent_child
         self.enable_evidence_selector = enable_evidence_selector
         self.enable_retrieval_hardening = enable_retrieval_hardening
         self.profile_name = profile_name
@@ -626,6 +628,13 @@ class OpenSearchSectionProvider:
         if self.enable_authority_ranking is None:
             return bool(settings.RETRIEVAL_AUTHORITY_RANKING_ENABLED)
         return bool(self.enable_authority_ranking)
+
+    @property
+    def parent_child_enabled(self) -> bool:
+        """Enable bounded parent expansion only for an explicit candidate."""
+        if self.enable_parent_child is None:
+            return bool(settings.RETRIEVAL_PARENT_CHILD_ENABLED)
+        return bool(self.enable_parent_child)
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
@@ -726,6 +735,13 @@ class OpenSearchSectionProvider:
             target_country_names=target_country_names,
         )
         fused_rows = rows
+        parent_expansion_count = 0
+        if self.parent_child_enabled:
+            rows, parent_expansion_count = self._expand_parent_rows(
+                client,
+                rows,
+                correlation_id=correlation_id,
+            )
         if self.enable_bedrock_rerank:
             from .bedrock_reranker import rerank_rows
 
@@ -764,6 +780,8 @@ class OpenSearchSectionProvider:
                 "evidence_selector_enabled": self.evidence_selector_enabled,
                 "retrieval_hardening_enabled": self.retrieval_hardening_enabled,
                 "authority_ranking_enabled": self.authority_ranking_enabled,
+                "parent_child_enabled": self.parent_child_enabled,
+                "parent_expansion_count": parent_expansion_count,
                 "candidate_count": len(raw_rows),
                 "selected_candidate_count": len(rows),
                 "threshold_eligible_count": threshold_eligible_count,
@@ -1084,6 +1102,122 @@ class OpenSearchSectionProvider:
             leading.append(candidate)
         return [*leading, *deferred]
 
+    def _expand_parent_rows(
+        self,
+        client: OpenSearch,
+        rows: list[tuple[dict[str, Any], float]],
+        *,
+        correlation_id: str = "",
+    ) -> tuple[list[tuple[dict[str, Any], float]], int]:
+        """Add the exact parent of top child hits without crossing document scope."""
+        limit = max(0, settings.RETRIEVAL_PARENT_CHILD_LIMIT)
+        if not rows or limit == 0:
+            return rows, 0
+
+        existing_ids = {str(row.get("id") or "") for row, _score in rows}
+        requests: list[tuple[dict[str, Any], float]] = []
+        seen_parent_keys: set[tuple[str, str, str, str, str]] = set()
+        for row, score in rows:
+            if len(requests) >= limit:
+                break
+            if str(row.get("document_type") or "policy") != "policy":
+                continue
+            parent_section_id = str(row.get("parent_section_id") or "").strip()
+            section_id = str(row.get("section_id") or "").strip()
+            if not parent_section_id or parent_section_id == section_id:
+                continue
+            key = (
+                str(row.get("source_file") or ""),
+                parent_section_id,
+                str(row.get("country") or ""),
+                str(row.get("language") or ""),
+                str(row.get("access_scope") or "country"),
+            )
+            if not key[0] or key in seen_parent_keys:
+                continue
+            seen_parent_keys.add(key)
+            requests.append(({
+                "source_file": key[0],
+                "section_id": key[1],
+                "country": key[2],
+                "language": key[3],
+                "access_scope": key[4],
+                "child_id": str(row.get("id") or ""),
+            }, score))
+
+        if not requests:
+            return rows, 0
+
+        should_filters = []
+        for request, _score in requests:
+            should_filters.append({
+                "bool": {
+                    "filter": [
+                        exact_term_query("status", "active"),
+                        exact_term_query("source_file", request["source_file"]),
+                        exact_term_query("section_id", request["section_id"]),
+                        exact_term_query("country", request["country"]),
+                        exact_term_query("language", request["language"]),
+                        exact_term_query("access_scope", request["access_scope"]),
+                        *_generation_filters(
+                            request["country"],
+                            request["language"],
+                            request["access_scope"],
+                        ),
+                    ]
+                }
+            })
+        try:
+            response = client.search(
+                index=self.index_name,
+                body={
+                    "size": len(requests),
+                    "query": {
+                        "bool": {
+                            "should": should_filters,
+                            "minimum_should_match": 1,
+                        }
+                    },
+                },
+            )
+        except OpenSearchException:
+            LOGGER.exception(
+                "opensearch_parent_expansion_failed",
+                correlation_id=correlation_id,
+            )
+            return rows, 0
+        parent_by_key = {
+            (str(row.get("source_file") or ""), str(row.get("section_id") or "")): row
+            for row in (
+                _hit_to_row(hit)
+                for hit in response.get("hits", {}).get("hits", [])
+            )
+        }
+
+        expanded: list[tuple[dict[str, Any], float]] = []
+        added_parent_ids: set[str] = set()
+        request_by_child = {
+            request["child_id"]: (request, score)
+            for request, score in requests
+        }
+        for row, score in rows:
+            expanded.append((row, score))
+            request_entry = request_by_child.get(str(row.get("id") or ""))
+            if not request_entry:
+                continue
+            request, child_score = request_entry
+            parent = parent_by_key.get((request["source_file"], request["section_id"]))
+            if not parent:
+                continue
+            parent_id = str(parent.get("id") or "")
+            if not parent_id or parent_id in existing_ids or parent_id in added_parent_ids:
+                continue
+            parent["parent_expanded_from"] = request["child_id"]
+            parent["parent_context"] = True
+            expanded.append((parent, round(max(child_score - 0.05, 0.0), 6)))
+            added_parent_ids.add(parent_id)
+        return expanded, len(added_parent_ids)
+
     def _select_evidence_rows(
         self,
         message: str,
@@ -1256,5 +1390,7 @@ class OpenSearchSectionProvider:
                 "question_type_tags": row.get("question_type_tags", []),
                 "section_authority": row.get("section_authority", ""),
                 "authority_alignment_score": row.get("authority_alignment_score", 0.0),
+                "parent_context": bool(row.get("parent_context")),
+                "parent_expanded_from": row.get("parent_expanded_from", ""),
             },
         )

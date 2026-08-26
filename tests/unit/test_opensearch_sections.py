@@ -415,6 +415,82 @@ def test_parent_diversity_defers_repeated_children_without_dropping_them() -> No
     assert len(diversified) == len(rows)
 
 
+def test_parent_child_expansion_adds_exact_same_document_parent(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_PARENT_CHILD_LIMIT", 2)
+    monkeypatch.setattr(opensearch_sections, "_generation_filters", lambda *_args: [])
+
+    class ParentClient:
+        def search(self, **_kwargs):
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_id": "parent-1",
+                            "_score": 1.0,
+                            "_source": {
+                                "id": "parent-1",
+                                "source_file": "policy.pdf",
+                                "section_id": "4.01",
+                                "section_title": "Manager qualification",
+                                "content": "Full governing context.",
+                                "search_text": "Full governing context.",
+                                "country": "CA",
+                                "language": "en",
+                                "access_scope": "country",
+                                "document_type": "policy",
+                                "status": "active",
+                            },
+                        }
+                    ]
+                }
+            }
+
+    child = _hit("child-1", "Case Credit requirement", 5.0)["_source"]
+    child.update(
+        {
+            "source_file": "policy.pdf",
+            "section_id": "4.01-fact-1",
+            "parent_section_id": "4.01",
+            "access_scope": "country",
+            "document_type": "policy",
+        }
+    )
+    provider = OpenSearchSectionProvider(enable_parent_child=True)
+
+    expanded, count = provider._expand_parent_rows(ParentClient(), [(child, 5.0)])
+
+    assert count == 1
+    assert [row["id"] for row, _score in expanded] == ["child-1", "parent-1"]
+    assert expanded[1][0]["parent_expanded_from"] == "child-1"
+    assert expanded[1][1] == 4.95
+
+
+def test_parent_child_expansion_skips_global_directory_records(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_PARENT_CHILD_LIMIT", 2)
+
+    class FailingClient:
+        def search(self, **_kwargs):
+            raise AssertionError("directory parent expansion must not query OpenSearch")
+
+    directory = _hit("directory-child", "Belgium", 5.0)["_source"]
+    directory.update(
+        {
+            "source_file": "directory.pdf",
+            "section_id": "BE-phone",
+            "parent_section_id": "BE",
+            "access_scope": "global",
+            "document_type": "office_directory",
+        }
+    )
+
+    expanded, count = OpenSearchSectionProvider(enable_parent_child=True)._expand_parent_rows(
+        FailingClient(), [(directory, 5.0)]
+    )
+
+    assert expanded == [(directory, 5.0)]
+    assert count == 0
+
+
 def test_hardened_ranking_prefers_governing_manager_requirement(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
     direct = _hit("manager-requirement", "Manager is achieved by generating Case Credits", 2.0)
