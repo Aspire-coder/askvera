@@ -36,6 +36,25 @@ _GOVERNING_QUESTION_TYPES = {
 }
 
 
+def _authority_score(question_type: str, authority: str, entity_match: bool) -> float:
+    """Return the authority-only contribution for an aligned candidate."""
+    if question_type == "definition":
+        return {"definition": 1.1, "summary": -0.2}.get(authority, 0.0)
+    if question_type == "contact":
+        if authority == "directory":
+            return 1.25
+        return -0.35 if authority in {"definition", "summary"} else 0.0
+    if question_type in _GOVERNING_QUESTION_TYPES:
+        if authority == "governing":
+            return 1.25
+        if authority == "exception" and question_type == "exception":
+            return 1.15
+        return {"definition": -0.55, "summary": -0.3}.get(authority, 0.0)
+    if authority == "governing" and entity_match:
+        return 0.35
+    return 0.0
+
+
 def _row_classification(row: dict[str, Any]) -> SectionClassification:
     metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     fallback = classify_section(
@@ -74,33 +93,14 @@ def authority_alignment(row: dict[str, Any], message: str) -> AuthorityAlignment
     entity_match = bool(question_entities and question_entities & section_entities)
     question_type_match = question.question_type in set(section.question_types)
 
-    score = 0.0
-    if entity_match:
-        score += 0.75
-    if question_type_match:
-        score += 0.35
-
-    if question.question_type == "definition":
-        if section.authority == "definition":
-            score += 1.1
-        elif section.authority == "summary":
-            score -= 0.2
-    elif question.question_type == "contact":
-        if section.authority == "directory":
-            score += 1.25
-        elif section.authority in {"definition", "summary"}:
-            score -= 0.35
-    elif question.question_type in _GOVERNING_QUESTION_TYPES:
-        if section.authority == "governing":
-            score += 1.25
-        elif section.authority == "exception" and question.question_type == "exception":
-            score += 1.15
-        elif section.authority == "definition":
-            score -= 0.55
-        elif section.authority == "summary":
-            score -= 0.3
-    elif section.authority == "governing" and entity_match:
-        score += 0.35
+    score = (0.75 if entity_match else 0.0) + (
+        0.35 if question_type_match else 0.0
+    )
+    score += _authority_score(
+        question.question_type,
+        section.authority,
+        entity_match,
+    )
 
     # Authority cannot rescue an unrelated section. Apply authority-only boosts
     # only when either entity or question type aligns with the user question.

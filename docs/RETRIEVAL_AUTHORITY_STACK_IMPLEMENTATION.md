@@ -10,6 +10,7 @@ Implemented on `feat/retrieval-authority-stack`. All customer-facing flags remai
 2. `6cd0c98` - bounded authority-aware ranking.
 3. `c2257ec` - bounded parent-child policy expansion.
 4. `276a333` - signal-based confidence scoring.
+5. `5a98f04` - isolated factor and combined-profile promotion tooling.
 
 Keeping the changes separate makes attribution and rollback possible.
 
@@ -97,4 +98,19 @@ Deployment is prohibited unless all of these pass on the same commit and frozen 
 
 ## Current hold
 
-Code implementation is complete locally. Live AWS comparisons, the complete test suite, and deployment remain pending. The branch must not be merged or deployed based only on compile checks or unit-level examples.
+Code implementation is complete locally. Verification completed on 2026-08-26:
+
+- 748 unit tests passed.
+- Focused classification, ingestion, authority ranking, parent-child, confidence, provider, and comparison tests passed.
+- Python compilation and flake8 passed.
+- Security regression checks passed.
+- Configuration contract validation passed.
+- The frozen 15-case retrieval fixture passed validation with SHA-256 `6a4f9c2c2f412c3c8640b48314509d792f105952a219c94068d84f4a50c2e4b0`.
+
+Still required before promotion:
+
+- Frontend builds must be rerun in CI; local npm installation was blocked by a Windows npm cache/installer failure before TypeScript could execute.
+- Exact-clone Current parity and all four cache-free live AWS comparisons remain pending.
+- Held-out retrieval, safety, response-quality, latency, cost, and post-deployment parity gates remain pending.
+
+Therefore the candidate is **implemented but not approved for merge or deployment**.
