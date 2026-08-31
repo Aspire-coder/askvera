@@ -18,7 +18,12 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
-from services.market_config import find_market_mentions, get_countries, get_document_country_codes
+from services.market_config import (
+    find_market_mentions,
+    get_countries,
+    get_document_country_codes,
+    resolve_published_market_code,
+)
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
@@ -381,6 +386,37 @@ def _directory_record_country_score(
     return 0.0
 
 
+def _directory_record_matches_target(row: dict[str, Any], target_market: str) -> bool:
+    """Match an approved directory row to one explicitly grounded target."""
+    if row.get("document_type") not in GLOBAL_DIRECTORY_DOCUMENT_TYPES:
+        return False
+    metadata = dict(row.get("metadata") or {})
+    record_country = _normalize_text(str(metadata.get("record_country") or ""))
+    target = _normalize_text(target_market)
+    if not record_country or not target:
+        return False
+    if record_country == target or target in record_country or record_country in target:
+        return True
+    acronym = "".join(token[0] for token in record_country.split() if token)
+    return len(acronym) >= 2 and acronym == "".join(target.split())
+
+
+def _isolate_explicit_target_rows(
+    rows: list[tuple[dict[str, Any], float]],
+    target_market: str,
+    target_market_is_published: bool,
+) -> tuple[list[tuple[dict[str, Any], float]], bool]:
+    """Prevent an unlisted target from borrowing selected-market policy rows."""
+    if not target_market or target_market_is_published:
+        return rows, False
+    isolated = [
+        (row, score)
+        for row, score in rows
+        if _directory_record_matches_target(row, target_market)
+    ]
+    return isolated, bool(isolated)
+
+
 def _vector_query(message: str, country: str, language: str, *, scope: str = "locale") -> dict[str, Any]:
     """Build a vector query with metadata filters."""
     return {
@@ -405,9 +441,15 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
     }
 
 
-def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
+def _directory_target_country_names(
+    message: str,
+    selected_country: str,
+    explicit_target_market: str = "",
+) -> set[str]:
     """Return the named market(s) whose global directory record should lead."""
     mentioned_codes = find_market_mentions(message)
+    if explicit_target_market:
+        return {explicit_target_market}
     if not mentioned_codes and not _DIRECTORY_DETAIL_RE.search(message or ""):
         return set()
     target_codes = mentioned_codes or {str(selected_country or "").upper()}
@@ -477,6 +519,13 @@ def _candidate_stage(rows: list[tuple[dict[str, Any], float]], limit: int) -> li
             "vector_rank": row.get("vector_rank"),
             "section_authority": str(row.get("section_authority") or ""),
             "authority_alignment_score": row.get("authority_alignment_score", 0.0),
+            "authority_entity_match_count": row.get(
+                "authority_entity_match_count", 0
+            ),
+            "authority_entity_coverage": row.get("authority_entity_coverage", 0.0),
+            "authority_directory_country_match": bool(
+                row.get("authority_directory_country_match")
+            ),
         }
         for index, (row, score) in enumerate(rows[: max(0, limit)], start=1)
     ]
@@ -596,6 +645,7 @@ class OpenSearchSectionProvider:
         enable_authority_ranking: bool | None = None,
         enable_parent_child: bool | None = None,
         enable_signal_confidence: bool | None = None,
+        enable_target_market_guard: bool | None = None,
         enable_evidence_selector: bool | None = None,
         enable_retrieval_hardening: bool | None = None,
         profile_name: str = "current",
@@ -607,6 +657,7 @@ class OpenSearchSectionProvider:
         self.enable_authority_ranking = enable_authority_ranking
         self.enable_parent_child = enable_parent_child
         self.enable_signal_confidence = enable_signal_confidence
+        self.enable_target_market_guard = enable_target_market_guard
         self.enable_evidence_selector = enable_evidence_selector
         self.enable_retrieval_hardening = enable_retrieval_hardening
         self.profile_name = profile_name
@@ -646,6 +697,13 @@ class OpenSearchSectionProvider:
             return bool(settings.RETRIEVAL_SIGNAL_CONFIDENCE_ENABLED)
         return bool(self.enable_signal_confidence)
 
+    @property
+    def target_market_guard_enabled(self) -> bool:
+        """Keep unsupported-target isolation candidate-only until promotion."""
+        if self.enable_target_market_guard is None:
+            return bool(settings.RETRIEVAL_TARGET_MARKET_GUARD_ENABLED)
+        return bool(self.enable_target_market_guard)
+
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
         try:
@@ -680,7 +738,20 @@ class OpenSearchSectionProvider:
             client = _client()
             search_messages = search_plan.queries
             global_search_message = ""
-            target_country_names = _directory_target_country_names(message, country)
+            explicit_target_market = (
+                search_plan.target_market if self.target_market_guard_enabled else ""
+            )
+            target_market_is_published = bool(
+                resolve_published_market_code(explicit_target_market)
+            )
+            target_country_names = _directory_target_country_names(
+                message,
+                country,
+                explicit_target_market,
+            )
+            global_documents_searched = bool(
+                search_plan.include_global_documents or explicit_target_market
+            )
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
             explicit_section_id = _section_reference(message)
@@ -719,7 +790,7 @@ class OpenSearchSectionProvider:
                 )
                 text_hits.extend(outline_response.get("hits", {}).get("hits", []))
 
-            if search_plan.include_global_documents:
+            if global_documents_searched:
                 global_search_message = self._global_search_query(message, language, correlation_id)
                 global_text_response = client.search(
                     index=self.index_name,
@@ -743,6 +814,11 @@ class OpenSearchSectionProvider:
             ranking_queries=typo_ranking_queries,
             prefer_outline=search_plan.prefer_outline,
             target_country_names=target_country_names,
+        )
+        rows, target_directory_match_found = _isolate_explicit_target_rows(
+            rows,
+            explicit_target_market,
+            target_market_is_published,
         )
         fused_rows = rows
         parent_expansion_count = 0
@@ -802,6 +878,14 @@ class OpenSearchSectionProvider:
                 "parent_child_enabled": self.parent_child_enabled,
                 "parent_expansion_count": parent_expansion_count,
                 "signal_confidence_enabled": self.signal_confidence_enabled,
+                "target_market_guard_enabled": self.target_market_guard_enabled,
+                "target_market": explicit_target_market,
+                "target_market_is_published": target_market_is_published,
+                "unsupported_target_market": bool(
+                    explicit_target_market
+                    and not target_market_is_published
+                    and not target_directory_match_found
+                ),
                 "confidence_signals": (
                     confidence_assessment.signals if confidence_assessment is not None else {}
                 ),
@@ -809,11 +893,11 @@ class OpenSearchSectionProvider:
                 "selected_candidate_count": len(rows),
                 "threshold_eligible_count": threshold_eligible_count,
                 "below_threshold_count": len(rows) - threshold_eligible_count,
-                "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
+                "search_query_count": len(search_messages) + int(global_documents_searched),
                 "typo_ranking_query_count": len(typo_ranking_queries),
                 "typo_ranking_applied": bool(documents and documents[0].metadata.get("typo_ranking_applied")),
                 "ranking_query_used": documents[0].metadata.get("ranking_query_used", "") if documents else "",
-                "global_documents_searched": search_plan.include_global_documents,
+                "global_documents_searched": global_documents_searched,
                 "outline_preferred": search_plan.prefer_outline,
                 "client_action": search_plan.client_action,
                 "conversation_intent": "knowledge",
@@ -1251,6 +1335,14 @@ class OpenSearchSectionProvider:
         if not self.evidence_selector_enabled or not rows:
             return rows
 
+        authority_anchor: tuple[dict[str, Any], float] | None = None
+        if self.authority_ranking_enabled and rows[0][0].get(
+            "authority_directory_country_match"
+        ):
+            runner_up_score = rows[1][1] if len(rows) > 1 else 0.0
+            if rows[0][1] - runner_up_score >= 1.0:
+                authority_anchor = rows[0]
+
         candidate_limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
         candidates = _selector_candidates(rows, candidate_limit)
         candidate_text = "\n\n".join(
@@ -1337,6 +1429,17 @@ class OpenSearchSectionProvider:
 
         if not selected:
             return rows
+
+        if authority_anchor is not None:
+            anchor_id = str(authority_anchor[0].get("id") or "")
+            selected = [
+                candidate
+                for candidate in selected
+                if str(candidate[0].get("id") or "") != anchor_id
+            ]
+            authority_anchor[0]["authority_anchor_preserved"] = True
+            selected.insert(0, authority_anchor)
+            selected_ids.add(anchor_id)
 
         remaining = [
             candidate

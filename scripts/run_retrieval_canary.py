@@ -31,13 +31,14 @@ VNEXT_FACTORS = {
     "authority": "RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED",
     "parent-child": "RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED",
     "signal-confidence": "RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED",
+    "target-market-guard": "RETRIEVAL_VNEXT_TARGET_MARKET_GUARD_ENABLED",
     "rrf": "RETRIEVAL_VNEXT_RRF_ENABLED",
     "parent-diversity": "RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED",
     "evidence-selector": "RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED",
     "hardening": "RETRIEVAL_VNEXT_HARDENING_ENABLED",
     "rerank": "RETRIEVAL_VNEXT_RERANK_ENABLED",
 }
-VNEXT_PROFILES = ("authority-stack",)
+VNEXT_PROFILES = ("authority-parent", "authority-stack")
 
 
 def _mirror_current_retrieval_factors() -> None:
@@ -54,6 +55,9 @@ def _mirror_current_retrieval_factors() -> None:
     )
     settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED = bool(
         settings.RETRIEVAL_SIGNAL_CONFIDENCE_ENABLED
+    )
+    settings.RETRIEVAL_VNEXT_TARGET_MARKET_GUARD_ENABLED = bool(
+        settings.RETRIEVAL_TARGET_MARKET_GUARD_ENABLED
     )
     settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED = bool(
         settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
@@ -116,10 +120,11 @@ def configure_vnext_experiment(
             setattr(settings, setting_name, False)
         return
     _mirror_current_retrieval_factors()
-    if factor == "authority-stack":
+    if factor in {"authority-parent", "authority-stack"}:
         settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED = True
         settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED = True
-        settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED = True
+        settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED = factor == "authority-stack"
+        settings.RETRIEVAL_VNEXT_TARGET_MARKET_GUARD_ENABLED = True
     elif factor != "parity":
         setattr(settings, VNEXT_FACTORS[factor], True)
 
@@ -145,6 +150,7 @@ def _provider_for_profile(profile: str):
         enable_authority_ranking=settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED,
         enable_parent_child=settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED,
         enable_signal_confidence=settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED,
+        enable_target_market_guard=settings.RETRIEVAL_VNEXT_TARGET_MARKET_GUARD_ENABLED,
         enable_evidence_selector=settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED,
         enable_retrieval_hardening=settings.RETRIEVAL_VNEXT_HARDENING_ENABLED,
         profile_name="vnext",

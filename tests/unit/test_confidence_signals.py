@@ -111,3 +111,60 @@ def test_global_directory_is_not_penalized_for_selected_market() -> None:
 
     assert assessment.confidence >= 0.47
     assert assessment.signals["locale_country_match"] is True
+
+
+def test_named_country_sponsoring_directory_clears_confidence_threshold() -> None:
+    directory = _document(
+        country="GLOBAL",
+        score=1.5,
+        title="International Sponsoring Directory - Forever Mexico",
+        content="International sponsoring procedure for Forever Mexico.",
+        metadata={
+            "access_scope": "global",
+            "document_type": "international_sponsoring_directory",
+            "record_country": "Mexico",
+            "entity_tags": ["international_sponsoring", "sponsoring"],
+            "question_type_tags": ["contact"],
+            "section_authority": "directory",
+        },
+    )
+
+    assessment = signal_confidence(
+        [directory],
+        "How can I join Mexico through international sponsoring?",
+        "US",
+        "en",
+    )
+
+    assert assessment.confidence >= 0.35
+    assert assessment.signals["directory_country_match"] is True
+
+
+def test_confidence_uses_evidence_bounded_typo_repair_query() -> None:
+    directory = _document(
+        country="GLOBAL",
+        score=1.5,
+        title="International Sponsoring Directory - Forever Mexico",
+        content="International sponsoring procedure for Forever Mexico.",
+        metadata={
+            "access_scope": "global",
+            "document_type": "international_sponsoring_directory",
+            "record_country": "Mexico",
+            "entity_tags": ["international_sponsoring", "sponsoring"],
+            "question_type_tags": ["contact"],
+            "section_authority": "directory",
+            "typo_ranking_applied": True,
+            "ranking_query_used": "How can I join Mexico through international sponsoring?",
+        },
+    )
+
+    assessment = signal_confidence(
+        [directory],
+        "How cn I join mexcio through internatinal sponsering?",
+        "US",
+        "en",
+    )
+
+    assert assessment.confidence >= 0.35
+    assert assessment.signals["directory_country_match"] is True
+    assert assessment.signals["alignment_used_safe_typo_query"] is True

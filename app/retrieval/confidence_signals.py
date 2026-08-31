@@ -41,8 +41,11 @@ def signal_confidence(
         return ConfidenceAssessment(confidence=0.0, signals={"has_evidence": False})
 
     top = documents[0]
-    alignment = authority_alignment(_document_row(top), message)
     metadata = top.metadata or {}
+    ranking_query = str(metadata.get("ranking_query_used") or "").strip()
+    typo_ranking_applied = bool(metadata.get("typo_ranking_applied"))
+    alignment_message = ranking_query if typo_ranking_applied and ranking_query else message
+    alignment = authority_alignment(_document_row(top), alignment_message)
     access_scope = str(metadata.get("access_scope") or "country").casefold()
     document_country = str(top.country or metadata.get("country") or "").upper()
     document_language = str(top.language or metadata.get("language") or "").casefold()
@@ -56,7 +59,11 @@ def signal_confidence(
     entity_signal = 0.16 if alignment.entity_match else 0.0
     question_type_signal = 0.10 if alignment.question_type_match else 0.0
     authority_signal = 0.0
-    if alignment.question.question_type == "definition" and alignment.section.authority == "definition":
+    if alignment.directory_country_match:
+        # An exact named-country row in an approved global directory is the
+        # governing source for both contact fields and sponsoring procedures.
+        authority_signal = 0.16
+    elif alignment.question.question_type == "definition" and alignment.section.authority == "definition":
         authority_signal = 0.16
     elif alignment.question.question_type == "contact" and alignment.section.authority == "directory":
         authority_signal = 0.16
@@ -110,11 +117,13 @@ def signal_confidence(
         confidence=confidence,
         signals={
             "has_evidence": True,
+            "alignment_used_safe_typo_query": alignment_message != message,
             "raw_score": round(raw_score, 6),
             "score_signal": round(score_signal, 6),
             "entity_match": alignment.entity_match,
             "question_type_match": alignment.question_type_match,
             "section_authority": alignment.section.authority,
+            "directory_country_match": alignment.directory_country_match,
             "authority_signal": authority_signal,
             "locale_country_match": locale_country_match,
             "locale_language_match": locale_language_match,

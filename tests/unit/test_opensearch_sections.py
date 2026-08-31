@@ -5,12 +5,14 @@ from app.retrieval import opensearch_sections
 from app.retrieval.models import RetrievalResult
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
+    _directory_record_matches_target,
     _directory_record_country_score,
     _directory_text_query,
     _exact_section_query,
     _generation_filters,
     is_approved_source,
     _language_key,
+    _isolate_explicit_target_rows,
     _outline_text_query,
     _parse_selector_decision,
     _selector_candidates,
@@ -635,6 +637,47 @@ def test_successful_selector_marks_selected_evidence(monkeypatch) -> None:
     assert "evidence_selector_selected" not in selected[1][0]
 
 
+def test_selector_cannot_displace_clear_named_country_directory_authority(monkeypatch) -> None:
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {
+                "output": {
+                    "message": {
+                        "content": [{"text": '{"selected_ranks":[2],"reason":"policy"}'}]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [
+        (
+            {
+                "id": "kyrgyzstan-directory",
+                "metadata": {"record_country": "Kyrgyzstan"},
+                "content": "Foreign FBO bonus information for Kyrgyzstan.",
+                "authority_directory_country_match": True,
+            },
+            11.4,
+        ),
+        (
+            {"id": "us-policy", "metadata": {}, "content": "General US bonus policy."},
+            4.3,
+        ),
+    ]
+    provider = OpenSearchSectionProvider(enable_authority_ranking=True)
+
+    selected = provider._select_evidence_rows("Kyrgyzstan bonus", rows, "cid")
+
+    assert selected[0][0]["id"] == "kyrgyzstan-directory"
+    assert selected[0][0]["authority_anchor_preserved"] is True
+    assert selected[1][0]["id"] == "us-policy"
+
+
 def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None:
     class Runtime:
         def converse(self, **_kwargs):
@@ -822,6 +865,50 @@ def test_sponsoring_directory_country_score_uses_record_metadata() -> None:
     }
 
     assert _directory_record_country_score("Who is the sponsor for Italy?", row) == 2.4
+
+
+def test_directory_target_match_supports_unlisted_approved_records() -> None:
+    thailand = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Thailand"},
+    }
+    united_kingdom = {
+        "document_type": "international_sponsoring_directory",
+        "metadata": {"record_country": "United Kingdom"},
+    }
+
+    assert _directory_record_matches_target(thailand, "Thailand") is True
+    assert _directory_record_matches_target(united_kingdom, "UK") is True
+    assert _directory_record_matches_target(thailand, "Antarctica") is False
+
+
+def test_unlisted_target_cannot_borrow_selected_market_policy_rows() -> None:
+    canada_policy = {
+        "document_type": "company_policy",
+        "country": "CA",
+        "metadata": {},
+    }
+    thailand_directory = {
+        "document_type": "office_directory",
+        "country": "GLOBAL",
+        "metadata": {"record_country": "Thailand"},
+    }
+
+    isolated, found = _isolate_explicit_target_rows(
+        [(canada_policy, 9.0), (thailand_directory, 3.0)],
+        "Thailand",
+        False,
+    )
+    missing, missing_found = _isolate_explicit_target_rows(
+        [(canada_policy, 9.0), (thailand_directory, 3.0)],
+        "Antarctica",
+        False,
+    )
+
+    assert isolated == [(thailand_directory, 3.0)]
+    assert found is True
+    assert missing == []
+    assert missing_found is False
 
 
 def test_target_country_score_separates_global_directory_records() -> None:

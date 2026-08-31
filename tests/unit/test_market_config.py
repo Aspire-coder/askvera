@@ -136,6 +136,13 @@ def test_public_markets_are_limited_to_published_policy_locales() -> None:
     assert "TR" not in countries
 
 
+def test_resolve_published_market_code_uses_names_codes_and_document_aliases() -> None:
+    assert market_config.resolve_published_market_code("United Kingdom") == "GB"
+    assert market_config.resolve_published_market_code("UK") == "GB"
+    assert market_config.resolve_published_market_code("U.S.") == "US"
+    assert market_config.resolve_published_market_code("Antarctica") == ""
+
+
 def test_widget_provisioning_includes_turkey_without_publishing_it() -> None:
     """Turkey can be configured in advance without entering the public picker."""
     market_config.load_market_config.cache_clear()

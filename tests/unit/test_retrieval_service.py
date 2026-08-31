@@ -611,6 +611,51 @@ def test_query_planner_schema_limits_untrusted_model_output(monkeypatch) -> None
     assert parsed[5] == 1.0
 
 
+def test_query_planner_parses_and_bounds_explicit_target_market(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS", 2000)
+
+    parsed = _parse_planned_query_plan(
+        '{"queries":[],"document_scopes":["global_directory"],'
+        '"target_market":"  United   Kingdom  "}'
+    )
+
+    assert parsed[7] == "United Kingdom"
+
+
+def test_planner_target_market_must_be_grounded_in_user_text() -> None:
+    assert retrieval_providers._grounded_target_market(
+        "What is the minimum order in Antarctica?", "Antarctica"
+    ) == "Antarctica"
+    assert retrieval_providers._grounded_target_market(
+        "What is the UK office number?", "United Kingdom"
+    ) == "United Kingdom"
+    assert retrieval_providers._grounded_target_market(
+        "What is the Canada return policy?", "Antarctica"
+    ) == ""
+
+
+def test_planner_target_market_fallback_is_narrow_and_user_grounded() -> None:
+    assert retrieval_providers._fallback_grounded_target_market(
+        "What's the minimum order for becoming a manager in Antarctica?",
+        ["minimum order Antarctica", "manager qualification Antarctica"],
+    ) == "Antarctica"
+    assert retrieval_providers._fallback_grounded_target_market(
+        "How do I become a Manager?", ["manager qualification"]
+    ) == ""
+    assert retrieval_providers._fallback_grounded_target_market(
+        "Tell me about working in Forever Living.", ["employment policy"]
+    ) == ""
+    assert retrieval_providers._fallback_grounded_target_market(
+        "What's the minimum order for becoming a manager in Antarctica?", []
+    ) == "Antarctica"
+    assert retrieval_providers._fallback_grounded_target_market(
+        "What's the minimum order for Antarctica?", []
+    ) == "Antarctica"
+    assert retrieval_providers._fallback_grounded_target_market(
+        "What's the discount for Preferred Customer?", []
+    ) == ""
+
+
 def test_query_planner_rejects_invalid_container_types(monkeypatch) -> None:
     monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS", 2000)
 

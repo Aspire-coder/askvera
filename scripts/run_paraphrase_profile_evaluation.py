@@ -29,6 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.run_retrieval_canary import (  # noqa: E402
     VNEXT_FACTORS,
+    VNEXT_PROFILES,
     _provider_for_profile,
     configure_vnext_experiment,
 )
@@ -426,28 +427,23 @@ def generate_profile_answer(
     try:
         model_response = BedrockClaudeProvider().generate(prompt, approved_result, correlation_base)
     except Exception as exc:  # Evaluation must preserve the failure instead of hiding the row.
-        contracted = orchestrator._deterministic_joining_cost_repair(
-            prompt,
-            approved_result,
-            correlation_base,
+        response = _fallback_answer(
+            orchestrator, body.language, correlation_base, type(exc).__name__
         )
-        if contracted is None:
-            response = _fallback_answer(orchestrator, body.language, correlation_base, type(exc).__name__)
-            return ProfileAnswer(
-                answer=response.answer,
-                citations=[],
-                model_name="error",
-                answer_status="generation_error",
-                failure_layer=type(exc).__name__,
-                evidence_approved=True,
-                evidence_reason=decision.reason,
-                confidence=round(float(first_result.confidence or 0.0), 6),
-                candidate_metrics=metrics,
-                selector_success=selector_success,
-                answer_delivered=False,
-                retrieval_repeats=snapshots,
-            )
-        model_response, approved_result = contracted
+        return ProfileAnswer(
+            answer=response.answer,
+            citations=[],
+            model_name="error",
+            answer_status="generation_error",
+            failure_layer=type(exc).__name__,
+            evidence_approved=True,
+            evidence_reason=decision.reason,
+            confidence=round(float(first_result.confidence or 0.0), 6),
+            candidate_metrics=metrics,
+            selector_success=selector_success,
+            answer_delivered=False,
+            retrieval_repeats=snapshots,
+        )
     else:
         if model_response.finish_reason == "guardrail_intervened":
             response = orchestrator.response_builder.fallback(
@@ -458,21 +454,6 @@ def generate_profile_answer(
             contracted = None
         else:
             contracted = orchestrator._apply_evidence_contract(model_response, approved_result, correlation_base)
-            deterministic_evidence = contracted[1] if contracted is not None else approved_result
-            deterministic = orchestrator._deterministic_joining_cost_repair(
-                prompt,
-                deterministic_evidence,
-                correlation_base,
-            )
-            if deterministic is not None:
-                contracted = deterministic
-            elif contracted is None:
-                contracted = orchestrator._repair_joining_cost_contract(
-                    prompt,
-                    approved_result,
-                    correlation_base,
-                    generator=BedrockClaudeProvider().generate,
-                )
             if contracted is None:
                 response = _fallback_answer(orchestrator, body.language, correlation_base, "evidence_contract")
 
@@ -722,7 +703,11 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--vnext-index", default="")
-    parser.add_argument("--vnext-factor", choices=("configured", "none", "parity", *VNEXT_FACTORS), default="configured")
+    parser.add_argument(
+        "--vnext-factor",
+        choices=("configured", "none", "parity", *VNEXT_FACTORS, *VNEXT_PROFILES),
+        default="configured",
+    )
     parser.add_argument("--retrieval-repeats", type=int, default=3)
     parser.add_argument("--case-id", action="append", default=[])
     parser.add_argument("--generation-model-id", default="")

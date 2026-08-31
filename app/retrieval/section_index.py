@@ -321,7 +321,10 @@ def _source_score(
         row["section_authority"] = alignment.section.authority
         row["authority_alignment_score"] = alignment.score
         row["authority_entity_match"] = alignment.entity_match
+        row["authority_entity_match_count"] = alignment.entity_match_count
+        row["authority_entity_coverage"] = alignment.entity_coverage
         row["authority_question_type_match"] = alignment.question_type_match
+        row["authority_directory_country_match"] = alignment.directory_country_match
     for phrase in phrases:
         if phrase in _normalize_text(title):
             score += 0.35

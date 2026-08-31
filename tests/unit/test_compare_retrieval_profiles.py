@@ -100,3 +100,21 @@ def test_authority_stack_enables_only_the_three_reviewed_factors(monkeypatch) ->
     assert settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED is False
     assert settings.RETRIEVAL_VNEXT_HARDENING_ENABLED is False
     assert settings.RETRIEVAL_VNEXT_RERANK_ENABLED is False
+
+
+def test_authority_parent_keeps_signal_confidence_disabled(monkeypatch) -> None:
+    from config import settings
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+
+    configure_vnext_experiment(index_name="isolated", factor="authority-parent")
+
+    assert settings.RETRIEVAL_VNEXT_AUTHORITY_RANKING_ENABLED is True
+    assert settings.RETRIEVAL_VNEXT_PARENT_CHILD_ENABLED is True
+    assert settings.RETRIEVAL_VNEXT_SIGNAL_CONFIDENCE_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_RRF_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_PARENT_DIVERSITY_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_EVIDENCE_SELECTOR_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_HARDENING_ENABLED is False
+    assert settings.RETRIEVAL_VNEXT_RERANK_ENABLED is False

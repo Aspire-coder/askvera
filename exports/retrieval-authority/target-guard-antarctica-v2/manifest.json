@@ -1,0 +1,32 @@
+{
+  "commit": "169979745a9b408604eda88448ef6dee922f1ebb",
+  "source_fixture": "C:\\Users\\KRISH\\Downloads\\paraphrase_heldout_v2.json",
+  "source_fixture_sha256": "71f4ae6a301ff7a21e4952f8d3415c022447b830679832d86bfa3f41558c6789",
+  "normalization_changes": [
+    "PARA-MGR-UK-024: normalized market UK to GB.",
+    "PARA-PC-UK-025: normalized market UK to GB.",
+    "PARA-INTL-UK-026: normalized market UK to GB.",
+    "PARA-DIR-039: preserved DZ as the directory target and used CA as the supported widget market.",
+    "PARA-DIR-040: preserved NG as the directory target and used CA as the supported widget market.",
+    "PARA-DIR-041: preserved BD as the directory target and used CA as the supported widget market."
+  ],
+  "cache_bypassed": true,
+  "generation_model_id": "arn:aws:bedrock:us-east-1:615592621509:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "current_index": "askvera-policy-sections",
+  "candidate_index": "askvera-policy-sections-rank-20260825-92b2020-v3",
+  "current_pipeline_version": "2026-08-23-selector-calibration-v4",
+  "candidate_pipeline_version": "2026-07-28-vnext-2fadf50",
+  "candidate_factor": "authority-parent",
+  "candidate_factor_state": {
+    "authority": true,
+    "parent-child": true,
+    "signal-confidence": false,
+    "target-market-guard": true,
+    "rrf": false,
+    "parent-diversity": false,
+    "evidence-selector": true,
+    "hardening": false,
+    "rerank": false
+  },
+  "retrieval_repeats": 3
+}

@@ -1,0 +1,42 @@
+{
+  "status": "passed",
+  "total": 15,
+  "current_passed": 15,
+  "vnext_passed": 15,
+  "improved_case_ids": [],
+  "regressed_case_ids": [],
+  "unchanged_case_ids": [
+    "belgium-minimum-order-typo",
+    "kyrgyzstan-foreign-fbo-bonus-release-gate",
+    "mexico-sponsoring-multiple-typos",
+    "monthly-bonus-payment-release-gate",
+    "preferred-customer-discount-release-gate",
+    "recognized-manager-baseline",
+    "recognized-manager-british-and-typo",
+    "recognized-manager-joined-word",
+    "recognized-manager-missing-letter",
+    "recognized-manager-requirements-baseline",
+    "supervisor-case-credits-release-gate",
+    "thailand-minimum-order-release-gate",
+    "unopened-product-return-window-release-gate",
+    "uruguay-phone-release-gate",
+    "us-payment-methods-release-gate"
+  ],
+  "fixture": "C:\\Users\\KRISH\\Downloads\\Chatbot\\Archives\\enterprise-chatbot\\release-retrieval-measurement-only\\tests\\fixtures\\retrieval_canary.json",
+  "fixture_sha256": "6a4f9c2c2f412c3c8640b48314509d792f105952a219c94068d84f4a50c2e4b0",
+  "current_index": "askvera-policy-sections",
+  "vnext_index": "askvera-policy-sections-rank-20260825-92b2020-v3",
+  "current_pipeline_version": "2026-08-23-selector-calibration-v4",
+  "vnext_pipeline_version": "2026-07-28-vnext-2fadf50",
+  "vnext_factor": "parity",
+  "vnext_factor_state": {
+    "authority": false,
+    "parent-child": false,
+    "signal-confidence": false,
+    "rrf": false,
+    "parent-diversity": false,
+    "evidence-selector": true,
+    "hardening": false,
+    "rerank": false
+  }
+}

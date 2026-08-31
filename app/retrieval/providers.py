@@ -13,7 +13,7 @@ from app.risk.models import RiskContext
 from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 from config import settings
 from services.aws_clients import get_aws_clients
-from services.market_config import find_market_mentions
+from services.market_config import find_market_mentions, resolve_published_market_code
 from utils.logging import get_logger
 
 from .glossary import approved_joined_term_queries, glossary_queries
@@ -216,6 +216,7 @@ class RetrievalQueryPlan:
     conversation_intent: str = "knowledge"
     conversation_subtype: str = ""
     intent_confidence: float = 0.0
+    target_market: str = ""
 
 
 def _metadata_value(metadata: dict[str, Any], *keys: str) -> str:
@@ -399,7 +400,7 @@ def _is_purchase_channel_question(message: str) -> bool:
     return bool(terms & PURCHASE_INTENT_TERMS) or ({"where", "order"} <= terms)
 
 
-def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool]:
+def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool, str]:
     """Parse planner-generated queries and content scopes from compact JSON."""
     stripped = text.strip()
     if len(stripped) > settings.BEDROCK_QUERY_PLANNER_MAX_RESPONSE_CHARS:
@@ -454,6 +455,10 @@ def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, st
     except (TypeError, ValueError):
         confidence = 0.0
     explicit_support = payload.get("explicit_support_request") is True
+    target_market = payload.get("target_market", "")
+    if not isinstance(target_market, str):
+        target_market = ""
+    target_market = re.sub(r"\s+", " ", target_market).strip()[:120]
     return (
         parsed,
         "global_directory" in scopes,
@@ -462,7 +467,65 @@ def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, st
         subtype,
         confidence,
         explicit_support,
+        target_market,
     )
+
+
+def _grounded_target_market(message: str, target_market: str) -> str:
+    """Accept a planner target only when the user's text actually names it."""
+    cleaned_target = re.sub(r"\s+", " ", target_market or "").strip()
+    if not cleaned_target:
+        return ""
+    normalized_message = _fold_search_text(message)
+    normalized_target = _fold_search_text(cleaned_target)
+    if re.search(rf"(?<!\w){re.escape(normalized_target)}(?!\w)", normalized_message):
+        return cleaned_target
+
+    target_tokens = re.findall(r"[^\W_]+", normalized_target, flags=re.UNICODE)
+    acronym = "".join(token[0] for token in target_tokens if token)
+    if len(acronym) >= 2:
+        acronym_pattern = r"(?<!\w)" + r"[^\w]*".join(map(re.escape, acronym)) + r"(?!\w)"
+        if re.search(acronym_pattern, normalized_message):
+            return cleaned_target
+
+    resolved_code = resolve_published_market_code(cleaned_target)
+    return cleaned_target if resolved_code and resolved_code in find_market_mentions(message) else ""
+
+
+def _fallback_grounded_target_market(message: str, planned_queries: list[str]) -> str:
+    """Recover a clearly named trailing place when the planner omits its field.
+
+    This is intentionally narrow: it accepts only a title-cased phrase after
+    ``in``, ``from``, or ``for`` at the end of the question. A proper place name remains
+    grounded in the user's own wording even when the managed planner omits it
+    from both ``target_market`` and its generated search queries. Broad noun
+    extraction would risk mistaking policy terms or people for markets.
+    """
+    matches = re.findall(
+        r"(?<!\w)(?:in|from|for)\s+"
+        r"([A-Z][\w'’\-]*(?:\s+[A-Z][\w'’\-]*){0,3})(?=\s*[?.!,;:]|$)",
+        message or "",
+    )
+    for candidate in matches:
+        normalized_candidate = _fold_search_text(candidate)
+        terminal_token = normalized_candidate.rsplit(" ", 1)[-1]
+        if normalized_candidate and terminal_token not in {
+            "company",
+            "customer",
+            "directory",
+            "fee",
+            "living",
+            "manager",
+            "owner",
+            "plan",
+            "policy",
+            "program",
+            "products",
+            "rank",
+            "supervisor",
+        }:
+            return candidate.strip()
+    return ""
 
 
 def _verify_explicit_support_request(
@@ -541,6 +604,8 @@ def _planned_retrieval_plan(
         "knowledge. Set support_request only when the user directly asks to create, open, or submit a support "
         "request, help-desk ticket, or human handoff; then set explicit_support_request to true. A symptom, a need "
         "for help, a complaint, or a request for support contact information is not an explicit support request. "
+        "Set target_market to the country, territory, or market explicitly named by the user, or to an empty "
+        "string when none is named. Never infer target_market from the selected Market value. "
         "Set intent_confidence from 0 to 1. Apply these rules in the user's language. "
         "Return only JSON."
     )
@@ -549,7 +614,8 @@ def _planned_retrieval_plan(
         "Return JSON exactly like this: "
         "{\"queries\":[\"search phrase 1\",\"search phrase 2\",\"search phrase 3\"],"
         "\"document_scopes\":[\"locale_policy\"],\"answer_shape\":\"content\",\"intent\":\"knowledge\","
-        "\"intent_subtype\":\"\",\"intent_confidence\":0.99,\"explicit_support_request\":false}. "
+        "\"intent_subtype\":\"\",\"intent_confidence\":0.99,\"explicit_support_request\":false,"
+        "\"target_market\":\"\"}. "
         f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
     )
     try:
@@ -569,7 +635,11 @@ def _planned_retrieval_plan(
             conversation_subtype,
             intent_confidence,
             explicit_support,
+            target_market,
         ) = _parse_planned_query_plan(text)
+        target_market = _grounded_target_market(message, target_market)
+        if not target_market:
+            target_market = _fallback_grounded_target_market(message, planned_queries)
         # Global directories include sponsoring and operational records for
         # named markets. Keep the model planner as a helpful hint, but enforce
         # this scope from shared market configuration so planner omissions do
@@ -643,6 +713,8 @@ def _planned_retrieval_plan(
         joined_term_query_count=len(joined_term_queries),
         glossary_query_count=len(glossary),
         named_market_count=len(find_market_mentions(message)),
+        target_market=target_market,
+        target_market_is_published=bool(resolve_published_market_code(target_market)),
         query_count=len(merged),
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,
@@ -658,6 +730,7 @@ def _planned_retrieval_plan(
         conversation_intent=conversation_intent,
         conversation_subtype=conversation_subtype,
         intent_confidence=intent_confidence,
+        target_market=target_market,
     )
 
 

@@ -1,0 +1,19 @@
+﻿id,category,scope,expected_behavior,country,target_country,language,question,current_answer,candidate_answer,current_citations,candidate_citations,current_recall_at_1,candidate_recall_at_1,current_first_relevant_rank,candidate_first_relevant_rank,current_selector_success,candidate_selector_success,current_expectation_met,candidate_expectation_met,human_current_score,human_candidate_score,reviewer_notes
+PARA-MGR-CA-001,Becoming a Manager,locale_policy,answer,CA,,en,How do I work my way up to actually become a Manager in the Forever plan?,"I appreciate the question, but the retrieved information I have covers *definitions* of Manager status and some classification details—not the step-by-step qualification path to reach Manager for the first time.
+
+To give you accurate, complete information about the initial requirements to qualify as a Manager (such as Case Credit thresholds, sponsorship rules, and timelines), I'd need access to the qualification section that covers that entry point. 
+
+I'd recommend reaching out to Forever Living directly or speaking with a Forever Business Owner who can walk you through the full qualification requirements. They'll have the complete picture of what it takes to move from where you are now into Manager status.
+
+Is there anything else about Forever Living's products or business structure I can help clarify?","I appreciate the question! The retrieved information I have covers **Eagle Manager status and recognition** for people who are already Recognized Managers — but it doesn't include the earlier qualification steps for *becoming* a Recognized Manager in the first place.
+
+To get accurate details on the path to Manager (the foundational rank), you'll want to reach out directly to Forever Living or your sponsor, who can walk you through:
+
+- The specific case-credit and team-building requirements for your first Manager qualification
+- How the qualification period works
+- What ""Active"" status means month to month
+- Any other prerequisites
+
+This is something best explained by someone who knows your situation and can point you to the right plan materials for your country and market. Your sponsor or a Forever Living representative will have the complete picture.
+
+Is there anything else about the company or products I can help clarify?","CA-EN-Company-Policy.pdf - Sec 4.01-h: An FBO who moves up to Recognized Manager as outlined in Section 4.01, | 4.01 | CA; CA-EN-Company-Policy.pdf - Sec 8.04-definition-2: Manager | 8.04 | CA",CA-EN-Company-Policy.pdf - Sec 8.05: Manager Recognition - A Recognized Manager may qualify for Manager | 8.05 | CA; CA-EN-Company-Policy.pdf - Sec 8.04: Eagle Manager Status: | 8.04 | CA,False,False,,29,False,False,False,False,,,

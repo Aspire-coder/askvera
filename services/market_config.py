@@ -221,6 +221,33 @@ def get_widget_country_codes() -> set[str]:
     return {country["code"] for country in get_widget_countries()}
 
 
+def resolve_published_market_code(value: str) -> str:
+    """Resolve an explicit market name or alias to a published market code."""
+    normalized_value = _normalize_market_text(value)
+    compact_value = normalized_value.replace(" ", "")
+    if not normalized_value:
+        return ""
+
+    for country in get_countries():
+        code = str(country.get("code") or "").upper()
+        name = _normalize_market_text(str(country.get("name") or ""))
+        name_acronym = "".join(token[0] for token in name.split() if token)
+        aliases = {
+            _normalize_market_text(code),
+            name,
+            name_acronym,
+            *(
+                _normalize_market_text(alias)
+                for alias in get_document_country_codes(code)
+            ),
+        }
+        if normalized_value in aliases or compact_value in {
+            alias.replace(" ", "") for alias in aliases
+        }:
+            return code
+    return ""
+
+
 def find_market_mentions(message: str) -> set[str]:
     """Return enabled markets whose configured name is present in a message.
 
