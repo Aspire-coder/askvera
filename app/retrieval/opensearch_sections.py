@@ -35,13 +35,6 @@ from .typo_safety import safe_typo_ranking_queries
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
 
-
-def _optional_bedrock_runtime():
-    """Use the bounded optional client while preserving injected test clients."""
-    clients = get_aws_clients()
-    return getattr(clients, "bedrock_optional_runtime", clients.bedrock_runtime)
-
-
 GLOBAL_DIRECTORY_DOCUMENT_TYPES = (
     "office_directory",
     "international_sponsoring_directory",
@@ -733,7 +726,7 @@ class OpenSearchSectionProvider:
         )
         user_prompt = f"Target language code: {target_language}\nQuery:\n{message}"
         try:
-            response = _optional_bedrock_runtime().converse(
+            response = get_aws_clients().bedrock_runtime.converse(
                 modelId=settings.BEDROCK_MODEL_ARN,
                 system=[{"text": system_prompt}],
                 messages=[{"role": "user", "content": [{"text": user_prompt}]}],
@@ -918,7 +911,7 @@ class OpenSearchSectionProvider:
             f"Return JSON exactly like this: {response_example}."
         )
         try:
-            response = _optional_bedrock_runtime().converse(
+            response = get_aws_clients().bedrock_runtime.converse(
                 modelId=settings.BEDROCK_MODEL_ARN,
                 system=[{"text": system_prompt}],
                 messages=[{"role": "user", "content": [{"text": user_prompt}]}],
