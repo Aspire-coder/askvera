@@ -16,8 +16,21 @@ class AwsClients:
             read_timeout=settings.AWS_READ_TIMEOUT_SECONDS,
             retries={"max_attempts": settings.AWS_MAX_ATTEMPTS, "mode": "standard"},
         )
+        optional_bedrock_config = Config(
+            connect_timeout=settings.AWS_OPTIONAL_BEDROCK_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=settings.AWS_OPTIONAL_BEDROCK_READ_TIMEOUT_SECONDS,
+            retries={
+                "total_max_attempts": settings.AWS_OPTIONAL_BEDROCK_TOTAL_MAX_ATTEMPTS,
+                "mode": "standard",
+            },
+        )
         self.bedrock_agent_runtime = boto3.client("bedrock-agent-runtime", region_name=settings.AWS_REGION, config=client_config)
         self.bedrock_runtime = boto3.client("bedrock-runtime", region_name=settings.AWS_REGION, config=client_config)
+        self.bedrock_optional_runtime = boto3.client(
+            "bedrock-runtime",
+            region_name=settings.AWS_REGION,
+            config=optional_bedrock_config,
+        )
         self.comprehend = boto3.client("comprehend", region_name=settings.AWS_REGION, config=client_config)
         self.cognito_idp = boto3.client(
             "cognito-idp",
@@ -47,3 +60,9 @@ def get_aws_clients() -> AwsClients:
     if aws_clients is None:
         return init_aws_clients()
     return aws_clients
+
+
+def get_optional_bedrock_runtime():
+    """Return the bounded client used only by fallback-safe Bedrock stages."""
+    clients = get_aws_clients()
+    return getattr(clients, "bedrock_optional_runtime", clients.bedrock_runtime)

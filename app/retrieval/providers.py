@@ -21,6 +21,13 @@ from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.providers")
 
+
+def _optional_bedrock_runtime():
+    """Use the bounded optional client while preserving injected test clients."""
+    clients = get_aws_clients()
+    return getattr(clients, "bedrock_optional_runtime", clients.bedrock_runtime)
+
+
 TOKEN_STOPWORDS = {
     "about",
     "after",
@@ -553,7 +560,7 @@ def _planned_retrieval_plan(
         f"Return at most {settings.BEDROCK_QUERY_PLANNER_QUERY_COUNT} queries."
     )
     try:
-        runtime = get_aws_clients().bedrock_runtime
+        runtime = _optional_bedrock_runtime()
         response = runtime.converse(
             modelId=settings.BEDROCK_MODEL_ARN,
             system=[{"text": system_prompt}],
@@ -836,7 +843,7 @@ def _select_evidence_documents(
         f"Choose at most {settings.BEDROCK_RETRIEVAL_RESULT_COUNT} ranks."
     )
     try:
-        response = get_aws_clients().bedrock_runtime.converse(
+        response = _optional_bedrock_runtime().converse(
             modelId=settings.BEDROCK_MODEL_ARN,
             system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": user_prompt}]}],

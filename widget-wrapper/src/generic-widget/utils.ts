@@ -37,8 +37,11 @@ export const detectInitialLocale = (
 ) => {
   const browserLanguage = typeof navigator !== "undefined" ? navigator.language : "";
   const [browserLanguageCode, browserCountryCode] = browserLanguage.split("-");
-  const countryCode = defaultCountryCode || browserCountryCode?.toUpperCase() || countries[0]?.code || "";
-  const country = countries.find((option) => option.code === countryCode) || countries[0];
+  // An explicit configuration or saved choice wins. Otherwise use the
+  // browser's country hint only when it maps to a supported market. Never
+  // silently scope an unknown visitor to the first configured market.
+  const browserMarket = countries.find((option) => option.code === browserCountryCode?.toUpperCase());
+  const country = countries.find((option) => option.code === defaultCountryCode) || browserMarket;
   const languageOptions = filterLanguagesByCountry(languages, country?.code, countries);
   const languageCode = defaultLanguageCode || browserLanguageCode || languageOptions[0]?.code || "";
   const language = languageOptions.find((option) => option.code === languageCode) || languageOptions[0] || languages[0];

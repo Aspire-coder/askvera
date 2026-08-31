@@ -103,6 +103,21 @@ DB_SCHEMA_BOOTSTRAP_ON_STARTUP = _env_bool("DB_SCHEMA_BOOTSTRAP_ON_STARTUP", Fal
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
 AWS_MAX_ATTEMPTS = 3
+# Optional Bedrock enrichment must not consume the user-facing request budget.
+# Query planning, evidence selection, and search-query translation already have
+# deterministic fallbacks, so use a short single-attempt client for those calls.
+AWS_OPTIONAL_BEDROCK_CONNECT_TIMEOUT_SECONDS = _env_int(
+    "AWS_OPTIONAL_BEDROCK_CONNECT_TIMEOUT_SECONDS",
+    2,
+)
+AWS_OPTIONAL_BEDROCK_READ_TIMEOUT_SECONDS = _env_int(
+    "AWS_OPTIONAL_BEDROCK_READ_TIMEOUT_SECONDS",
+    8,
+)
+AWS_OPTIONAL_BEDROCK_TOTAL_MAX_ATTEMPTS = _env_int(
+    "AWS_OPTIONAL_BEDROCK_TOTAL_MAX_ATTEMPTS",
+    1,
+)
 # Per-IP request limiting for public widget endpoints. Production uses Valkey
 # so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60

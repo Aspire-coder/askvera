@@ -71,6 +71,10 @@ export function Header({
           </div>
         </div>
       </div>
+      <span className="gw-early-access-badge" aria-label="Early access release">
+        <span className="gw-early-access-dot" aria-hidden="true" />
+        Early access
+      </span>
       <div className="gw-header-actions">
         <button type="button" className="gw-icon-button" onClick={onToggleMenu} aria-label={config.labels.menuAriaLabel} aria-expanded={menuOpen}>
           <HeaderIcon name="menu" />

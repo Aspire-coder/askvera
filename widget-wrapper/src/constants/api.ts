@@ -1,4 +1,5 @@
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+export const CHAT_REQUEST_TIMEOUT_MS = 95_000;
 
 export const ApiErrorCodes = {
   CONSENT_REQUIRED: "CONSENT_REQUIRED",

@@ -35,6 +35,7 @@ import {
   writeLocalePreference,
   type LocalePreference
 } from "../storage/localePreference";
+import { CHAT_REQUEST_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from "../constants";
 
 type WidgetRuntimeProps = {
   apiBaseUrl: string;
@@ -150,7 +151,7 @@ type InitialLocale = {
 
 function storedLocale(widgetId?: string): InitialLocale {
   if (typeof window === "undefined") {
-    return { preference: { country: "US", language: "en" }, explicit: false };
+    return { preference: { country: "", language: "" }, explicit: false };
   }
   try {
     const rawMetadata = transientStorage.getItem("askvera_session_metadata");
@@ -165,9 +166,14 @@ function storedLocale(widgetId?: string): InitialLocale {
     }
     const preference = readLocalePreference(persistentStorage, widgetId);
     if (preference) return { preference, explicit: true };
-    return { preference: { country: "US", language: "en" }, explicit: false };
+    const browserLanguage = typeof navigator !== "undefined" ? navigator.language || "" : "";
+    const [language, country] = browserLanguage.split("-");
+    return {
+      preference: { country: country?.toUpperCase() || "", language: language || "" },
+      explicit: false
+    };
   } catch {
-    return { preference: { country: "US", language: "en" }, explicit: false };
+    return { preference: { country: "", language: "" }, explicit: false };
   }
 }
 
@@ -350,6 +356,11 @@ export function WidgetRuntime({
   const activeAuthTokenRef = useRef(authToken);
   const authRefreshPromiseRef = useRef<Promise<string | undefined> | null>(null);
   const apiClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl, authToken: () => activeAuthToken }), [activeAuthToken, apiBaseUrl]);
+  const chatClient = useMemo(() => createApiClient({
+    baseUrl: apiBaseUrl,
+    authToken: () => activeAuthToken,
+    timeoutMs: CHAT_REQUEST_TIMEOUT_MS
+  }), [activeAuthToken, apiBaseUrl]);
   const healthClient = useMemo(() => createApiClient({ baseUrl: apiBaseUrl }), [apiBaseUrl]);
 
   const checkBackendHealth = useCallback(async () => {
@@ -541,14 +552,22 @@ export function WidgetRuntime({
     return refreshPromise;
   }, [apiBaseUrl, widgetId]);
 
-  const withWidgetAuthRetry = useCallback(async <T,>(request: (client: ReturnType<typeof createApiClient>) => Promise<T>) => {
+  const withWidgetAuthRetry = useCallback(async <T,>(
+    request: (client: ReturnType<typeof createApiClient>) => Promise<T>,
+    requestClient = apiClient,
+    retryTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
+  ) => {
     try {
-      return await request(apiClient);
+      return await request(requestClient);
     } catch (error) {
       if (!(error instanceof ApiUnauthorizedError)) throw error;
       const refreshedToken = await refreshWidgetAuth();
       if (!refreshedToken) throw error;
-      return request(createApiClient({ baseUrl: apiBaseUrl, authToken: refreshedToken }));
+      return request(createApiClient({
+        baseUrl: apiBaseUrl,
+        authToken: refreshedToken,
+        timeoutMs: retryTimeoutMs
+      }));
     }
   }, [apiBaseUrl, apiClient, refreshWidgetAuth]);
 
@@ -581,13 +600,17 @@ export function WidgetRuntime({
         const selectedCountryConfig = loadedConfig.countries.find((country) => country.code === selectedLocale.country);
         const selectedLanguageConfig = selectedCountryConfig?.languages.find((language) => language.code === selectedLocale.language);
         let resolvedLocale: LocalePreference | undefined;
-        if ((!localePreferenceResolvedRef.current || !selectedCountryConfig) && fallbackCountry && fallbackLanguage) {
-          resolvedLocale = { country: fallbackCountry.code, language: fallbackLanguage.code };
+        if (selectedLocale.country && !selectedCountryConfig && !initialLocale.explicit) {
+          // A browser locale may identify a market that is not enabled for this
+          // widget. Keep the market unselected instead of silently using another.
+          resolvedLocale = { country: "", language: "" };
         } else if (selectedCountryConfig && !selectedLanguageConfig) {
           const selectedCountryFallback = selectedCountryConfig.languages[0];
           if (selectedCountryFallback) {
             resolvedLocale = { country: selectedCountryConfig.code, language: selectedCountryFallback.code };
           }
+        } else if (initialLocale.explicit && !selectedCountryConfig && fallbackCountry && fallbackLanguage) {
+          resolvedLocale = { country: fallbackCountry.code, language: fallbackLanguage.code };
         }
         if (
           resolvedLocale
@@ -633,7 +656,7 @@ export function WidgetRuntime({
       language: payload.selectedLanguage,
       role: "new_prospect",
       trafficSource: "widget"
-    }));
+    }), chatClient, CHAT_REQUEST_TIMEOUT_MS);
   };
 
   const sendChat = async (payload: MessageEventPayload, showUserMessage = true) => {
