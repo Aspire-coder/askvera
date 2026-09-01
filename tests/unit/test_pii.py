@@ -179,6 +179,42 @@ def test_government_id_is_scrubbed_without_language_specific_service() -> None:
     assert contains_sensitive_pii_placeholder(scrubbed) is True
 
 
+def test_government_id_shaped_number_from_approved_evidence_is_not_masked() -> None:
+    """A directory phone/order-line number can coincidentally match the
+    3-2-4 digit shape of a US SSN. When it is grounded in approved evidence
+    (an office directory record, not user-submitted text) it is a public
+    business contact value and gets the same exemption phone/email numbers
+    already have, instead of being masked as a personal government ID."""
+    evidence = "Orders: +595 981 234 567"
+
+    scrubbed = scrub_pattern_pii("Orders: +595 981 234 567", allowed_texts=[evidence])
+
+    assert scrubbed == "Orders: +595 981 234 567"
+    assert "[GOVERNMENT_ID]" not in scrubbed
+
+
+def test_unresolved_government_id_placeholder_line_is_removed() -> None:
+    """The 2026-09-01 live finding: an unresolved [GOVERNMENT_ID] placeholder
+    (or any of the other high-risk categories) must never survive to a
+    user-visible response - this cleanup pass previously only knew about
+    ADDRESS/EMAIL/PHONE/NAME/PII and silently missed the higher-risk set."""
+    answer = "Contact Support:\n* Orders: +595 [GOVERNMENT_ID]\n* WhatsApp: +595 [GOVERNMENT_ID]\nEmail: info@example.com"
+
+    cleaned = remove_unresolved_pii_placeholders(answer)
+
+    assert "[GOVERNMENT_ID]" not in cleaned
+    assert "Email: info@example.com" in cleaned
+
+
+def test_unresolved_bank_account_and_payment_card_placeholders_are_removed() -> None:
+    answer = "Bank: [BANK_ACCOUNT]\nCard on file: [PAYMENT_CARD]\nSSN: [SSN]\nID: [CREDIT_DEBIT_NUMBER]"
+
+    cleaned = remove_unresolved_pii_placeholders(answer)
+
+    for placeholder in ("[BANK_ACCOUNT]", "[PAYMENT_CARD]", "[SSN]", "[CREDIT_DEBIT_NUMBER]"):
+        assert placeholder not in cleaned
+
+
 def test_valid_payment_card_is_scrubbed_but_long_phone_is_not_misclassified() -> None:
     assert scrub_pattern_pii("Card 4111 1111 1111 1111") == "Card [PAYMENT_CARD]"
     assert "[PAYMENT_CARD]" not in scrub_pattern_pii("Office +44 1926 626 600")
