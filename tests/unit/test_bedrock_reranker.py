@@ -33,9 +33,7 @@ class _Clients:
 def test_rerank_rows_reorders_selected_candidates_and_preserves_remainder(monkeypatch) -> None:
     runtime = _AgentRuntime({"results": [{"index": 1, "relevanceScore": 0.9}, {"index": 0, "relevanceScore": 0.8}]})
     monkeypatch.setattr(bedrock_reranker, "get_aws_clients", lambda: _Clients(runtime))
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "arn:model")
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT", 20)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_RESULT_COUNT", 10)
+    monkeypatch.setattr(settings, "OPENSEARCH_RERANK_MODEL_ARN", "arn:model")
 
     result = bedrock_reranker.rerank_rows("question", _rows(), correlation_id="cid")
 
@@ -48,7 +46,7 @@ def test_rerank_rows_reorders_selected_candidates_and_preserves_remainder(monkey
 def test_rerank_rows_fails_open_when_bedrock_rejects_request(monkeypatch) -> None:
     runtime = _AgentRuntime(error=ValueError("invalid"))
     monkeypatch.setattr(bedrock_reranker, "get_aws_clients", lambda: _Clients(runtime))
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "arn:model")
+    monkeypatch.setattr(settings, "OPENSEARCH_RERANK_MODEL_ARN", "arn:model")
     original = _rows()
 
     assert bedrock_reranker.rerank_rows("question", original, correlation_id="cid") == original
@@ -59,7 +57,7 @@ def test_rerank_rows_ignores_invalid_and_duplicate_result_indexes(monkeypatch) -
         {"results": [{"index": 2}, {"index": 2}, {"index": 99}, {"index": "1"}]}
     )
     monkeypatch.setattr(bedrock_reranker, "get_aws_clients", lambda: _Clients(runtime))
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "arn:model")
+    monkeypatch.setattr(settings, "OPENSEARCH_RERANK_MODEL_ARN", "arn:model")
 
     result = bedrock_reranker.rerank_rows("question", _rows(), correlation_id="cid")
 
@@ -70,23 +68,9 @@ def test_rerank_rows_skips_the_network_call_when_no_model_arn_is_configured(monk
     runtime = _AgentRuntime({"results": [{"index": 1}]})
     monkeypatch.setattr(bedrock_reranker, "get_aws_clients", lambda: _Clients(runtime))
     monkeypatch.setattr(settings, "OPENSEARCH_RERANK_MODEL_ARN", "")
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "")
     original = _rows()
 
     result = bedrock_reranker.rerank_rows("question", original, correlation_id="cid")
 
     assert result == original
     assert runtime.calls == []
-
-
-def test_rerank_rows_prefers_the_live_model_arn_over_the_vnext_arn(monkeypatch) -> None:
-    runtime = _AgentRuntime({"results": [{"index": 0}]})
-    monkeypatch.setattr(bedrock_reranker, "get_aws_clients", lambda: _Clients(runtime))
-    monkeypatch.setattr(settings, "OPENSEARCH_RERANK_MODEL_ARN", "arn:live")
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "arn:vnext")
-
-    bedrock_reranker.rerank_rows("question", _rows(), correlation_id="cid")
-
-    assert runtime.calls[0]["rerankingConfiguration"]["bedrockRerankingConfiguration"]["modelConfiguration"] == {
-        "modelArn": "arn:live"
-    }

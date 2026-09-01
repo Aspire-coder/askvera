@@ -19,30 +19,15 @@
 ## Safe promotion path
 
 1. Capture a locked baseline from the current `opensearch_section` path.
-2. Run candidate behavior in shadow mode against a separate `OPENSEARCH_VNEXT_INDEX`.
-3. Compare retrieval quality by country and language, including citations, locale isolation, latency, and cost.
-4. Require the configured promotion thresholds for same-section match, evidence overlap, and latency.
-5. Run multilingual regression cases and review low-confidence answers before enabling any flag.
-6. Promote one experiment at a time, with a documented rollback to the current provider and index.
+2. Compare retrieval quality by country and language, including citations, locale isolation, latency, and cost.
+3. Require the configured promotion thresholds for same-section match, evidence overlap, and latency.
+4. Run multilingual regression cases and review low-confidence answers before enabling any flag.
+5. Promote one experiment at a time, with a documented rollback to the current provider and index.
 
-## Offline comparison command
-
-The comparison report can be JSON, JSONL, or an object containing a `comparisons`
-or `records` array. Run it against a saved shadow sample:
-
-```text
-python scripts/evaluate_retrieval_shadow.py shadow-comparisons.json \
-  --require-locale-gates --enforce-gate \
-  --output retrieval-report.json
-```
-
-The report includes overall and per-country/language metrics for section match,
-evidence overlap, confidence wins, p50/p95 shadow latency, input/output tokens,
-estimated cost, and failure categories. Cost is reported only when the input
-records contain token/cost fields; the evaluator does not invent pricing.
-
-`--enforce-gate` is intended for CI or a promotion review. It does not change
-the live answer path and should be run on a separate vNext comparison sample.
+(A separate-index shadow-comparison mechanism against `OPENSEARCH_VNEXT_INDEX`
+existed for this purpose and was retired 2026-09-01 - see
+`docs/RETRIEVAL_VNEXT_SHADOW_ROLLOUT.md` for why. A future experiment needing
+live-traffic comparison would need to re-implement that pattern.)
 
 ## Available but disabled by default
 

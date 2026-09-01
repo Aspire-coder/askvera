@@ -42,7 +42,6 @@ from services.analytics import (
     interaction_export_xlsx,
     interaction_page,
     model_routing_report,
-    retrieval_shadow_report,
 )
 from services.analytics_governance import (
     delete_saved_view,
@@ -82,10 +81,6 @@ from services.market_config import (
 )
 from services.market_readiness import build_market_readiness, upsert_market_governance
 from services.operations_status import operations_status
-from services.retrieval_runtime import (
-    retrieval_profile_status,
-    set_retrieval_runtime_control,
-)
 from services.support_routes import list_support_routes, send_support_route_test, support_route_history, upsert_support_route
 from services.aws_clients import get_aws_clients
 from services.widget_configs import (
@@ -213,13 +208,6 @@ class CacheResetInput(BaseModel):
     confirmation: str = Field(min_length=5, max_length=32)
 
 
-class RetrievalProfileInput(BaseModel):
-    mode: Literal["current", "shadow"]
-    sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
-    reason: str = Field(min_length=8, max_length=500)
-    confirmation: str = Field(min_length=8, max_length=32)
-
-
 def _payload(data: Any, request: Request) -> dict[str, Any]:
     return {
         "success": True,
@@ -293,61 +281,6 @@ def operational_status(request: Request) -> dict[str, Any]:
     """Return safe dependency, synchronization and deployed-version signals."""
     require_admin_access(request, "flow", "view")
     return _payload(operations_status(), request)
-
-
-@admin_router.get("/operations/retrieval-profile")
-def operational_retrieval_profile(request: Request) -> dict[str, Any]:
-    """Return the serving profile and isolated candidate readiness."""
-    require_admin_access(request, "flow", "view")
-    return _payload(retrieval_profile_status(), request)
-
-
-@admin_router.put("/operations/retrieval-profile")
-def operational_retrieval_profile_update(body: RetrievalProfileInput, request: Request) -> dict[str, Any]:
-    """Enable or disable safe shadow comparison without changing customer answers."""
-    principal = getattr(request.state, "admin_identity", {}) or {}
-    if principal.get("role") != "super_admin":
-        raise HTTPException(status_code=403, detail="Only a Super Admin can change the retrieval profile.")
-
-    expected_confirmation = "ENABLE SHADOW" if body.mode == "shadow" else "USE CURRENT"
-    if body.confirmation.strip().upper() != expected_confirmation:
-        raise HTTPException(status_code=400, detail=f'Type "{expected_confirmation}" to confirm.')
-    if body.mode == "shadow" and body.sample_rate <= 0:
-        raise HTTPException(status_code=400, detail="Select a positive sample rate for Shadow mode.")
-
-    before = retrieval_profile_status()
-    if body.mode == "shadow" and not before["candidate"]["ready"]:
-        detail = before["candidate"]["readiness_error"] or "The candidate retrieval profile is not ready."
-        raise HTTPException(status_code=409, detail=detail)
-
-    try:
-        control = set_retrieval_runtime_control(
-            body.mode,
-            body.sample_rate,
-            actor=_actor(request),
-            reason=body.reason.strip(),
-        )
-    except (ValueError, SQLAlchemyError) as exc:
-        raise HTTPException(status_code=503, detail="The retrieval profile could not be updated safely.") from exc
-
-    correlation_id = str(getattr(request.state, "correlation_id", "admin"))
-    record_admin_audit_event(
-        _actor(request),
-        "operations.retrieval_profile_updated",
-        "retrieval",
-        metadata={
-            "previous_mode": before["control"]["mode"],
-            "mode": control.mode,
-            "sample_rate": control.sample_rate,
-            "reason": body.reason.strip(),
-            "primary_pipeline_version": before["primary"]["pipeline_version"],
-            "candidate_pipeline_version": before["candidate"]["pipeline_version"],
-            "primary_index": before["primary"]["index"],
-            "candidate_index": before["candidate"]["index"],
-            "correlation_id": correlation_id,
-        },
-    )
-    return _payload(retrieval_profile_status(), request)
 
 
 @admin_router.post("/operations/cache/reset")
@@ -691,35 +624,6 @@ def interactions_export_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="askvera-feedback.xlsx"'},
     )
-
-
-@admin_router.get("/analytics/retrieval-shadow")
-def retrieval_shadow(
-    request: Request,
-    days: int = 30,
-    country: str = "",
-    language: str = "",
-    start: datetime | None = None,
-    end: datetime | None = None,
-) -> dict[str, Any]:
-    principal = getattr(request.state, "admin_identity", None) or {}
-    markets = accessible_markets(principal, "insights", "view")
-    if country:
-        require_admin_access(request, "insights", "view", country)
-    elif not markets:
-        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
-    try:
-        result = retrieval_shadow_report(
-            days=days,
-            country=country,
-            language=language,
-            allowed_countries=None if principal.get("role") == "super_admin" else markets,
-            start=start,
-            end=end,
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    return _payload(result, request)
 
 
 @admin_router.get("/traces")

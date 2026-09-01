@@ -31,7 +31,6 @@ class FakeEngine:
 def test_cleanup_uses_independent_retention_windows(monkeypatch) -> None:
     engine = FakeEngine()
     monkeypatch.setattr(retention, "get_engine", lambda: engine)
-    monkeypatch.setattr(retention.settings, "RETRIEVAL_SHADOW_RETENTION_DAYS", 11)
     monkeypatch.setattr(retention.settings, "CHAT_ANALYTICS_RETENTION_DAYS", 22)
     monkeypatch.setattr(retention.settings, "FEEDBACK_RETENTION_DAYS", 33)
     monkeypatch.setattr(retention.settings, "SUPPORT_REQUEST_RETENTION_DAYS", 44)
@@ -42,7 +41,6 @@ def test_cleanup_uses_independent_retention_windows(monkeypatch) -> None:
     result = retention.cleanup_retained_data(batch_size=3)
 
     assert set(result) == {
-        "retrieval_shadow_comparisons",
         "chat_analytics",
         "feedback_events",
         "support_requests",
@@ -50,7 +48,7 @@ def test_cleanup_uses_independent_retention_windows(monkeypatch) -> None:
         "consent_log",
         "chat_sessions",
     }
-    assert [params["retention_days"] for _, params in engine.connection.calls] == [11, 22, 33, 44, 55, 66, 77]
+    assert [params["retention_days"] for _, params in engine.connection.calls] == [22, 33, 44, 55, 66, 77]
     ingestion_sql = next(sql for sql, _ in engine.connection.calls if "DELETE FROM ingestion_jobs" in sql)
     assert "completed" in ingestion_sql
     assert "failed" in ingestion_sql
@@ -58,7 +56,7 @@ def test_cleanup_uses_independent_retention_windows(monkeypatch) -> None:
 
 def test_cleanup_rejects_disabled_retention_window(monkeypatch) -> None:
     monkeypatch.setattr(retention, "get_engine", FakeEngine)
-    monkeypatch.setattr(retention.settings, "RETRIEVAL_SHADOW_RETENTION_DAYS", 0)
+    monkeypatch.setattr(retention.settings, "CHAT_ANALYTICS_RETENTION_DAYS", 0)
 
     with pytest.raises(AwsServiceError, match="retention cleanup"):
         retention.cleanup_retained_data()

@@ -1,4 +1,26 @@
-# AskVera Retrieval vNext Shadow Rollout
+# AskVera Retrieval vNext Shadow Rollout (retired 2026-09-01)
+
+**This experiment was retired on 2026-09-01.** `current` (`opensearch_section`)
+remains the sole retrieval path going forward. The shadow-comparison
+mechanism, the vNext OpenSearch index, the `vnext` chunk-size profile, the
+Operations Portal comparison controls, and the Insights shadow-comparison
+dashboard have all been removed from the codebase.
+
+Reasoning: after ~3.5 weeks live at a 5% sample rate, only 17 real
+comparisons had accumulated (traffic was overwhelmingly concentrated in
+US/GB), the headline top-match rate was inflated by trivial zero-result
+matches, vNext confidence ran measurably lower than current's on the same
+queries, and the vNext index was missing two markets entirely (Kyrgyzstan,
+Netherlands-French) - a real coverage gap independent of the ranking
+question. None of the promotion gates below were ever satisfied. The standing
+OpenSearch Serverless index for the isolated candidate was also a confirmed,
+material ongoing cost with no offsetting evidence of benefit.
+
+This document is kept as the historical record of what was built and why. If
+a similar experiment is revisited later, the design below (separate index,
+sampled shadow evaluation, explicit promotion gates) is a reasonable starting
+point, but it should be re-implemented rather than un-deleted, since the code
+paths referenced here no longer exist.
 
 ## Purpose
 

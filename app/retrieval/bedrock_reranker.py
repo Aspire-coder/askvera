@@ -28,11 +28,6 @@ def _candidate_text(row: dict[str, Any]) -> str:
     return "\n".join(part for part in parts if not part.endswith(": "))
 
 
-def _resolve_model_arn() -> str:
-    """Prefer the live-path ARN; fall back to the vNext ARN if that is already set."""
-    return settings.OPENSEARCH_RERANK_MODEL_ARN or settings.RETRIEVAL_VNEXT_RERANK_MODEL_ARN
-
-
 def rerank_rows(
     query: str,
     rows: list[tuple[dict[str, Any], float]],
@@ -43,17 +38,13 @@ def rerank_rows(
     if not rows:
         return rows
 
-    model_arn = _resolve_model_arn()
+    model_arn = settings.OPENSEARCH_RERANK_MODEL_ARN
     if not model_arn:
         # No reranker configured for this call site. Skip the network call
         # entirely instead of making a request that is guaranteed to fail.
         return rows
 
-    candidate_count = max(
-        settings.OPENSEARCH_RESULT_COUNT,
-        settings.RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT,
-    )
-    candidates = rows[:candidate_count]
+    candidates = rows[: settings.OPENSEARCH_RESULT_COUNT]
     sources = [
         {
             "type": "INLINE",
@@ -75,10 +66,7 @@ def rerank_rows(
                     "modelConfiguration": {
                         "modelArn": model_arn,
                     },
-                    "numberOfResults": min(
-                        len(candidates),
-                        max(settings.OPENSEARCH_RESULT_COUNT, settings.RETRIEVAL_VNEXT_RERANK_RESULT_COUNT),
-                    ),
+                    "numberOfResults": min(len(candidates), settings.OPENSEARCH_RESULT_COUNT),
                 },
             },
         )

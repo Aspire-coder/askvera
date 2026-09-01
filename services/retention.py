@@ -24,7 +24,6 @@ class RetentionRule:
 
 
 RETENTION_RULES = (
-    RetentionRule("retrieval_shadow_comparisons", "created_at", "RETRIEVAL_SHADOW_RETENTION_DAYS"),
     RetentionRule("chat_analytics", "created_at", "CHAT_ANALYTICS_RETENTION_DAYS"),
     RetentionRule("feedback_events", "created_at", "FEEDBACK_RETENTION_DAYS"),
     RetentionRule("support_requests", "created_at", "SUPPORT_REQUEST_RETENTION_DAYS"),

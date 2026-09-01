@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
-import type { AnalyticsOverview, AnalyticsSavedView, Interaction, InteractionPage, Market, ShadowReport } from "../types";
+import type { AnalyticsOverview, AnalyticsSavedView, Interaction, InteractionPage, Market } from "../types";
 import { useDialogFocus } from "../useDialogFocus";
 import "../tokenSplit.css";
 
@@ -52,7 +52,6 @@ function RankedBars({ data }: { data: Array<{ label: string; value: number }> })
 
 export function InsightsDashboard({ credentials }: { credentials: AdminCredentials }) {
   const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
-  const [shadowReport, setShadowReport] = useState<ShadowReport>(demo.shadowReport);
   const [interactions, setInteractions] = useState<Interaction[]>(demo.interactions);
   const [interactionTotal, setInteractionTotal] = useState(demo.interactions.length);
   const [interactionTotalPages, setInteractionTotalPages] = useState(1);
@@ -103,48 +102,40 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setLoadError("");
     const overviewFilters = new URLSearchParams({ days });
     const interactionFilters = new URLSearchParams({ days, feedback, search: debouncedQuery, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
-    const shadowFilters = new URLSearchParams({ days });
     if (startAt) {
       const start = new Date(startAt).toISOString();
       overviewFilters.set("start", start);
       interactionFilters.set("start", start);
-      shadowFilters.set("start", start);
     }
     if (endAt) {
       const end = new Date(endAt).toISOString();
       overviewFilters.set("end", end);
       interactionFilters.set("end", end);
-      shadowFilters.set("end", end);
     }
     if (country) {
       overviewFilters.set("country", country);
       interactionFilters.set("country", country);
-      shadowFilters.set("country", country);
     }
     if (language) {
       overviewFilters.set("language", language);
       interactionFilters.set("language", language);
-      shadowFilters.set("language", language);
     }
     if (trafficSource) { overviewFilters.set("traffic_source", trafficSource); interactionFilters.set("traffic_source", trafficSource); }
     const api = new AdminApi(credentials);
     try {
-      const [overviewResult, interactionResult, shadowResult, configResult] = await Promise.all([
+      const [overviewResult, interactionResult, configResult] = await Promise.all([
         withDemoFallback(() => api.overview(overviewFilters), demo.overview),
         withDemoFallback(() => api.interactions(interactionFilters), demoInteractionPage),
-        withDemoFallback(() => api.retrievalShadow(shadowFilters), demo.shadowReport),
         withDemoFallback(() => api.config(), demo.config)
       ]);
       setOverview(overviewResult.data);
       setInteractions(interactionResult.data.items);
       setInteractionTotal(interactionResult.data.total);
       setInteractionTotalPages(interactionResult.data.totalPages);
-      setShadowReport(shadowResult.data);
       setMarkets(configResult.data.countries);
       setMode(
         overviewResult.mode === "live"
         && interactionResult.mode === "live"
-        && shadowResult.mode === "live"
         && configResult.mode === "live"
           ? "live"
           : "demo"
@@ -303,89 +294,6 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <article className="chart-card surface"><div className="card-heading"><div><span>Top question themes</span></div><small>Volume</small></div><RankedBars data={overview.topics} /></article>
         <article className="chart-card surface"><div className="card-heading"><div><span>Country mix</span></div><small>Questions</small></div><RankedBars data={overview.countries} /></article>
         <article className="chart-card surface"><div className="card-heading"><div><span>Language mix</span></div><small>Questions</small></div><RankedBars data={overview.languages} /></article>
-      </div>
-
-      <div className="shadow-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Retrieval vNext</span>
-            <h2>Shadow comparison</h2>
-            <p>Compare vNext with the live retriever. These checks never change the answer sent to users.</p>
-          </div>
-          <span className="shadow-sample-note">5% background sample</span>
-        </div>
-        <div className="shadow-metrics">
-          <article className="shadow-metric surface">
-            <span>Comparisons</span>
-            <strong>{compact.format(shadowReport.totals.comparisons)}</strong>
-            <small>Completed in this range</small>
-          </article>
-          <article className="shadow-metric surface">
-            <span>Same top section</span>
-            <strong>{percent(shadowReport.totals.topMatchRate)}</strong>
-            <small>{compact.format(shadowReport.totals.topMatches)} exact matches</small>
-          </article>
-          <article className="shadow-metric surface">
-            <span>Evidence overlap</span>
-            <strong>{percent(shadowReport.totals.averageOverlap)}</strong>
-            <small>Shared results across both pipelines</small>
-          </article>
-          <article className="shadow-metric surface">
-            <span>vNext confidence wins</span>
-            <strong>{percent(shadowReport.totals.vnextConfidenceWinRate)}</strong>
-            <small>{shadowReport.totals.primaryConfidence.toFixed(2)} live vs {shadowReport.totals.vnextConfidence.toFixed(2)} vNext</small>
-          </article>
-          <article className="shadow-metric surface">
-            <span>Shadow latency</span>
-            <strong>{Math.round(shadowReport.totals.averageDurationMs)} ms</strong>
-            <small>Background only, outside user response time</small>
-          </article>
-        </div>
-        <div className="shadow-detail-grid">
-          <article className="shadow-locale-card surface">
-            <div className="card-heading"><div><span>Country consistency</span></div><small>Top-section match</small></div>
-            <div className="shadow-locale-list">
-              {shadowReport.countries.map((item) => <div key={item.label}>
-                <span>{item.label}</span>
-                <i><b style={{ width: `${item.matchRate * 100}%` }} /></i>
-                <strong>{percent(item.matchRate)}</strong>
-                <small>{item.comparisons}</small>
-              </div>)}
-              {!shadowReport.countries.length ? <p className="shadow-empty">Waiting for comparisons.</p> : null}
-            </div>
-          </article>
-          <article className="shadow-locale-card surface">
-            <div className="card-heading"><div><span>Language consistency</span></div><small>Top-section match</small></div>
-            <div className="shadow-locale-list">
-              {shadowReport.languages.map((item) => <div key={item.label}>
-                <span>{item.label.toUpperCase()}</span>
-                <i><b style={{ width: `${item.matchRate * 100}%` }} /></i>
-                <strong>{percent(item.matchRate)}</strong>
-                <small>{item.comparisons}</small>
-              </div>)}
-              {!shadowReport.languages.length ? <p className="shadow-empty">Waiting for comparisons.</p> : null}
-            </div>
-          </article>
-        </div>
-        <div className="shadow-disagreements surface">
-          <div className="card-heading">
-            <div><span>Recent top-section differences</span></div>
-            <small>Review these before promotion</small>
-          </div>
-          {shadowReport.disagreements.map((item) => <div className="shadow-difference" key={item.correlation_id}>
-            <div>
-              <strong>{item.country}/{item.language.toUpperCase()}</strong>
-              <small>{interactionDateLabel(item.created_at)} · {percent(item.result_overlap)} evidence overlap</small>
-            </div>
-            <dl>
-              <div><dt>Live</dt><dd>{item.primary_top_id || "No result"}</dd></div>
-              <div><dt>vNext</dt><dd>{item.vnext_top_id || "No result"}</dd></div>
-            </dl>
-          </div>)}
-          {!shadowReport.disagreements.length ? (
-            <div className="shadow-empty success">No top-section differences in this range.</div>
-          ) : null}
-        </div>
       </div>
 
       <div className="review-section">

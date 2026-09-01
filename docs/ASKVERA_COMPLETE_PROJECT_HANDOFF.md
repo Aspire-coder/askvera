@@ -148,7 +148,7 @@ The exact file list changes over time. These are the main ownership areas.
 | `main.py` | FastAPI startup, application wiring, health endpoint, middleware, and route registration. |
 | `api/` | Public API and administrator API endpoints. Includes chat, consent, feedback, support, widget, knowledge, analytics, and operations routes where implemented. |
 | `app/orchestrator/chat_orchestrator.py` | Coordinates one chat turn: history, safety, retrieval, model generation, validation, fallback, caching, and response metadata. |
-| `app/retrieval/` | Retrieval contracts, query planning, OpenSearch section retrieval, ranking, reranking, neighboring context, and shadow/vNext experiments. |
+| `app/retrieval/` | Retrieval contracts, query planning, OpenSearch section retrieval, ranking, reranking, and neighboring context. |
 | `services/` | Shared business services such as Bedrock, embeddings, sessions, analytics, support email, knowledge ingestion, market configuration, cache, audit, and localization. |
 | `models/` | Request, response, retrieval, validation, support, widget, and knowledge data contracts. |
 | `utils/` | Logging, OpenSearch field compatibility, sanitization, security, and other shared helpers. |

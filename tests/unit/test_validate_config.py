@@ -32,7 +32,6 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "opensearch_section")
     monkeypatch.setattr(settings, "OPENSEARCH_ENDPOINT", "https://example.aoss.amazonaws.com")
     monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "sections")
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", False)
     monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 60)
     monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 2)
     monkeypatch.setattr(settings, "RETRIEVAL_NEIGHBOR_LIMIT", 2)
@@ -206,65 +205,6 @@ def test_support_email_accepts_default_route_in_production(monkeypatch) -> None:
     )
 
     assert validate() == []
-
-
-def test_shadow_retrieval_requires_a_separate_vnext_index(monkeypatch) -> None:
-    _configure_valid_production(monkeypatch)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 0.1)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
-    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "sections")
-
-    failures = validate()
-
-    assert "OPENSEARCH_VNEXT_INDEX (must differ from OPENSEARCH_INDEX)" in failures
-
-
-def test_shadow_retrieval_accepts_safe_isolated_configuration(monkeypatch) -> None:
-    _configure_valid_production(monkeypatch)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 0.1)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
-    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "sections-vnext")
-
-    assert validate() == []
-
-
-def test_shadow_reranking_requires_a_model_arn(monkeypatch) -> None:
-    _configure_valid_production(monkeypatch)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 0.1)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
-    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "sections-vnext")
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_ENABLED", True)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "")
-
-    failures = validate()
-
-    assert "RETRIEVAL_VNEXT_RERANK_MODEL_ARN" in failures
-
-
-def test_shadow_reranking_requires_enough_candidates(monkeypatch) -> None:
-    _configure_valid_production(monkeypatch)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
-    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 0.1)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
-    monkeypatch.setattr(settings, "OPENSEARCH_VNEXT_INDEX", "sections-vnext")
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_ENABLED", True)
-    monkeypatch.setattr(
-        settings,
-        "RETRIEVAL_VNEXT_RERANK_MODEL_ARN",
-        "arn:aws:bedrock:us-east-1::foundation-model/cohere.rerank-v3-5:0",
-    )
-    monkeypatch.setattr(settings, "OPENSEARCH_RESULT_COUNT", 10)
-    monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT", 9)
-
-    failures = validate()
-
-    assert (
-        "RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT "
-        "(must be at least OPENSEARCH_RESULT_COUNT)"
-    ) in failures
 
 
 def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> None:
