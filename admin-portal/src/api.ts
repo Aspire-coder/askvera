@@ -141,17 +141,6 @@ export class AdminApi {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
-  deleteAnalyticsView(id: string) { return this.request<{ deleted: boolean }>(`/api/admin/analytics/saved-views/${encodeURIComponent(id)}`, { method: "DELETE" }); }
-  async exportInteractions(filters: URLSearchParams): Promise<Blob> {
-    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.csv?${filters}`, {
-      headers: {
-        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
-        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
-      }
-    });
-    if (!response.ok) throw await responseError(response, "Export failed");
-    return response.blob();
-  }
   async exportInteractionsXlsx(filters: URLSearchParams): Promise<Blob> {
     const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.xlsx?${filters}`, {
       headers: {
@@ -228,11 +217,6 @@ export class AdminApi {
   createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
     return this.request<WidgetConfig>("/api/admin/widget-configs", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-    });
-  }
-  updateWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
-    return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
   stageWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
