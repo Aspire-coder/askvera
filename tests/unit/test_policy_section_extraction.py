@@ -127,6 +127,49 @@ def test_top_level_numbered_prose_is_not_a_section_heading() -> None:
     assert [match.group("section") for match in matches] == ["18", "21", "18.01"]
 
 
+def test_title_extends_to_full_sentence_across_a_pdf_line_wrap() -> None:
+    """PDF text extraction preserves the source document's own visual line
+    wraps, so a heading regex anchored to one line can cut a title off
+    mid-sentence right where the PDF happened to wrap, even though the rest
+    of that same sentence is on the very next extracted line. This is the
+    dominant real-world case: many policy sections have no short standalone
+    heading at all, just a numbered paragraph."""
+    body = (
+        "1.01 (a) Forever Living Products is an international family of companies\n"
+        "that produces and markets health and beauty products worldwide.\n"
+        "(b) Something else entirely."
+    )
+    match = extractor.SECTION_RE.match(body)
+    assert match is not None
+
+    title = extractor._extend_title_to_sentence_boundary(match, body)
+
+    assert title == (
+        "(a) Forever Living Products is an international family of companies "
+        "that produces and markets health and beauty products worldwide."
+    )
+
+
+def test_title_extension_leaves_a_real_short_heading_untouched() -> None:
+    body = "5.01 Recognized Manager:\nRecognized Manager is achieved by generating Case Credits."
+    match = extractor.SECTION_RE.match(body)
+    assert match is not None
+
+    title = extractor._extend_title_to_sentence_boundary(match, body)
+
+    assert title == "Recognized Manager:"
+
+
+def test_normalize_title_truncates_a_very_long_sentence_at_a_word_boundary() -> None:
+    long_title = "Forever Living Products is an international family of companies " * 5
+
+    normalized = extractor._normalize_title(long_title)
+
+    assert len(normalized) <= extractor.TITLE_MAX_CHARS + 4
+    assert normalized.endswith("...")
+    assert not normalized[:-3].endswith(" ")
+
+
 def test_duplicate_section_ids_receive_stable_occurrence_suffixes() -> None:
     sections = [
         extractor.PolicySection("policy.pdf", "IT", "it", "1", "Main", 1, 1, "Main"),

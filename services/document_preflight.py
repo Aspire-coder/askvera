@@ -26,6 +26,8 @@ class DocumentPreflight:
     extracted_character_count: int
     requires_ocr: bool
     table_aware_extraction_recommended: bool
+    garbled_character_count: int = 0
+    encoding_corruption_detected: bool = False
 
     def to_dict(self) -> dict[str, int | bool]:
         return asdict(self)
@@ -48,6 +50,18 @@ def is_table_like_layout(text: str) -> bool:
     return aligned_rows >= 3 and aligned_rows / max(1, len(lines)) >= 0.12
 
 
+def _garbled_character_count(text: str) -> int:
+    """Count Unicode replacement characters left by an undecodable PDF glyph.
+
+    This happens when a PDF's embedded font has a broken or missing
+    character mapping for a specific glyph (commonly an accented letter).
+    The original character is permanently lost at the PDF level - no
+    extraction library can recover it, since none of them ever received the
+    correct code point. This can only be caught and flagged, not fixed.
+    """
+    return text.count("�")
+
+
 def analyze_pdf(
     path: Path,
     *,
@@ -63,11 +77,13 @@ def analyze_pdf(
     empty_pages = 0
     table_pages = 0
     character_count = 0
+    garbled_count = 0
     for page in reader.pages:
         plain = extract_pdf_page_text(page)
         layout = extract_pdf_page_text(page, preserve_layout=True)
         visible_chars = len("".join(plain.split()))
         character_count += visible_chars
+        garbled_count += _garbled_character_count(plain)
         if max_extracted_characters is not None and character_count > max_extracted_characters:
             raise DocumentPreflightError("PDF extracted text exceeds the safety limit.")
         if visible_chars >= 40:
@@ -88,6 +104,8 @@ def analyze_pdf(
         extracted_character_count=character_count,
         requires_ocr=requires_ocr,
         table_aware_extraction_recommended=table_pages > 0,
+        garbled_character_count=garbled_count,
+        encoding_corruption_detected=garbled_count > 0,
     )
 
 
