@@ -14,7 +14,6 @@ from utils.logging import get_logger
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import BedrockRetrievalProvider, RetrievalProvider
-from .section_index import SectionSearchProvider
 
 LOGGER = get_logger("app.retrieval.shadow")
 _SHADOW_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="retrieval-shadow")
@@ -68,8 +67,6 @@ class RetrievalService:
         enable_bedrock_rerank: bool = False,
     ) -> RetrievalProvider:
         """Build a provider without changing the established live selection."""
-        if provider_name == "section":
-            return SectionSearchProvider()
         if provider_name == "opensearch_section":
             from .opensearch_sections import OpenSearchSectionProvider
 

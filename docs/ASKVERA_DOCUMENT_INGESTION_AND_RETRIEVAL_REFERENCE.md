@@ -967,22 +967,17 @@ The result includes:
 - whether a global search query was translated;
 - up to 30 candidate sources for diagnostics.
 
-### 11.13 Non-primary retrieval providers retained in the code
+### 11.13 Non-primary retrieval provider retained in the code
 
-The repository retains two alternatives behind `RETRIEVAL_PROVIDER`.
-
-#### PostgreSQL section provider
-
-`RETRIEVAL_PROVIDER=section` searches the `policy_sections` table. It uses:
-
-- Unicode-normalized tokens;
-- PostgreSQL full-text queries;
-- a broad regular-expression candidate fallback;
-- stored embeddings and cosine similarity;
-- the shared source-scoring and confidence functions.
-
-This provider is useful for comparison and evaluation but is not the stated
-production OpenSearch path.
+The repository retains one alternative behind `RETRIEVAL_PROVIDER`. A second
+alternative, the PostgreSQL `policy_sections`-table provider
+(`RETRIEVAL_PROVIDER=section`), was removed in the 2026-09-01 retrieval
+cleanup: `scripts/validate_config.py` only ever accepted `opensearch_section`
+or `bedrock` as valid values, so `section` was unreachable through any
+validated configuration and had no test coverage. Its shared scoring helpers
+(`_source_score`, `_confidence_from_documents`, `_character_overlap`, and the
+per-heuristic `_*_score` functions) remain in `app/retrieval/section_index.py`
+because the live OpenSearch path still uses them.
 
 #### Bedrock managed Knowledge Base provider
 
