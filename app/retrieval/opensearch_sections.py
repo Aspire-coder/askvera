@@ -44,6 +44,10 @@ _DIRECTORY_DETAIL_RE = re.compile(
     r"\b(?:address|business\s+hours?|email|office|phone|telephone|website|contact)\b",
     re.IGNORECASE,
 )
+_GLOBAL_DIRECTORY_INTENT_RE = re.compile(
+    r"\b(?:international\s+)?sponsoring\b|" + _DIRECTORY_DETAIL_RE.pattern,
+    re.IGNORECASE,
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -421,7 +425,7 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
                 for token in message_tokens
             ):
                 mentioned_codes.add(str(market.get("code") or "").upper())
-    if not mentioned_codes and not _DIRECTORY_DETAIL_RE.search(message or ""):
+    if not mentioned_codes and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or ""):
         return set()
     target_codes = mentioned_codes or {str(selected_country or "").upper()}
     return {
