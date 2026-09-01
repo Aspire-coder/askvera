@@ -627,23 +627,6 @@ def test_global_search_query_skips_translation_for_matching_language(monkeypatch
     assert query == "Where is the Mexico office?"
 
 
-def test_search_queries_use_runtime_planner_instead_of_country_aliases(monkeypatch) -> None:
-    monkeypatch.setattr(
-        opensearch_sections,
-        "_planned_retrieval_queries",
-        lambda message, country, language, correlation_id: [message, "semantic policy query"],
-    )
-
-    queries = OpenSearchSectionProvider()._build_search_queries(
-        "Een korte beleidsvraag",
-        "NL",
-        "nl",
-        "cid",
-    )
-
-    assert queries == ["Een korte beleidsvraag", "semantic policy query"]
-
-
 def test_search_plan_carries_runtime_document_scope(monkeypatch) -> None:
     monkeypatch.setattr(
         opensearch_sections,

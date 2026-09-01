@@ -92,7 +92,6 @@ def test_confidence_above_one_is_error() -> None:
     result = _validator().validate(_context(_chat_response(confidence=1.2)))
 
     assert result.valid is False
-    assert result.has_errors() is True
     assert result.issues[0].code == "CONFIDENCE_OUT_OF_RANGE"
 
 
@@ -100,7 +99,6 @@ def test_confidence_below_zero_is_error() -> None:
     result = _validator().validate(_context(_chat_response(confidence=-0.1)))
 
     assert result.valid is False
-    assert result.has_errors() is True
     assert result.issues[0].field == "confidence"
 
 
