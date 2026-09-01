@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "default": {
+    "website": "www.foreverliving.com"
+  },
+  "countries": {
+    "US": {
+      "customerCarePhone": "(888) 440-ALOE (2563)",
+      "website": "www.foreverliving.com"
+    }
+  }
+}

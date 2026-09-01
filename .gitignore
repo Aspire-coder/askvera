@@ -9,6 +9,8 @@ deployment/production.env
 .DS_Store
 venv/
 .venv/
+.test-venv/
+.test-tmp*/
 *.egg-info/
 dist/
 .pytest_cache/

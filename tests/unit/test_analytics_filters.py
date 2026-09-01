@@ -7,9 +7,12 @@ from pydantic import ValidationError
 from services.analytics import (
     _analytics_window,
     _live_session_scope,
+    _model_routing_metadata,
     _normalize_traffic_source,
     _redacted_preview,
+    _routing_cost_projection,
 )
+from app.response.models import ChatResponse
 from utils.validators import ChatRequest
 
 
@@ -99,3 +102,69 @@ def test_live_session_scope_applies_locale_and_traffic_filters() -> None:
     assert "consent_log" in where
     assert "chat_analytics" in where
     assert parameters == {"country": "US", "language": "en", "traffic_source": "widget"}
+
+
+def test_model_routing_metadata_preserves_shadow_decision() -> None:
+    response = ChatResponse(
+        answer="Answer",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.9,
+        metadata={
+            "provider": "claude",
+            "model_route_mode": "shadow",
+            "model_route_target": "fast",
+            "model_route_reasons": ["low_risk_evidence"],
+            "model_route_actual_model": "sonnet-production",
+            "latency_ms": 1250,
+        },
+        correlation_id="route-1",
+    )
+
+    metadata = _model_routing_metadata(response)
+
+    assert metadata["model_route_mode"] == "shadow"
+    assert metadata["model_route_target"] == "fast"
+    assert metadata["model_route_reasons"] == '["low_risk_evidence"]'
+    assert metadata["actual_model"] == "sonnet-production"
+    assert metadata["generation_latency_ms"] == 1250
+    assert metadata["cache_hit"] is False
+
+
+def test_model_routing_metadata_marks_cache_without_inventing_a_route() -> None:
+    response = ChatResponse(
+        answer="Cached answer",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.9,
+        metadata={"provider": "cache", "cache": "semantic", "model_name": "cached response"},
+        correlation_id="route-2",
+    )
+
+    metadata = _model_routing_metadata(response)
+
+    assert metadata["cache_hit"] is True
+    assert metadata["model_route_target"] == ""
+    assert metadata["actual_model"] == ""
+
+
+def test_routing_cost_projection_compares_against_current_primary(monkeypatch) -> None:
+    monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION", 1.0)
+    monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION", 5.0)
+    monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION", 3.0)
+    monkeypatch.setattr("services.analytics.settings.MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION", 15.0)
+    monkeypatch.setattr("services.analytics.settings.BEDROCK_MODEL_ARN", "global.claude-haiku-4-5")
+    targets = [
+        {"target": "fast", "input_tokens": 1_000_000, "output_tokens": 100_000},
+        {"target": "complex", "input_tokens": 1_000_000, "output_tokens": 100_000},
+    ]
+
+    result = _routing_cost_projection(targets)
+
+    assert result["baselineUsd"] == 3.0
+    assert result["currentUsd"] == 3.0
+    assert result["projectedUsd"] == 6.0
+    assert result["projectedDeltaUsd"] == 3.0
+    assert result["projectedSavingsUsd"] == 0.0

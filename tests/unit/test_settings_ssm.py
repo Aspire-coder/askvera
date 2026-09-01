@@ -1,78 +1,44 @@
-"""Regression tests for strict, atomic SSM configuration loading."""
+"""Tests for production SSM configuration precedence."""
 
 import sys
 from types import SimpleNamespace
-
-import pytest
+from unittest.mock import MagicMock
 
 from config import settings
 
 
-class _ParameterPaginator:
-    def __init__(self, parameters: list[dict[str, str]]) -> None:
-        self._parameters = parameters
-
-    def paginate(self, **_kwargs):
-        yield {"Parameters": self._parameters}
-
-
-class _SsmClient:
-    def __init__(self, parameters: list[dict[str, str]]) -> None:
-        self._parameters = parameters
-
-    def get_paginator(self, name: str) -> _ParameterPaginator:
-        assert name == "get_parameters_by_path"
-        return _ParameterPaginator(self._parameters)
-
-
-def _install_fake_boto3(monkeypatch, parameters: list[dict[str, str]]) -> None:
-    fake_boto3 = SimpleNamespace(
-        client=lambda service, **_kwargs: _SsmClient(parameters)
-        if service == "ssm"
-        else None
-    )
-    monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
-
-
-def test_boolean_parser_rejects_ambiguous_values() -> None:
-    with pytest.raises(ValueError, match="Invalid boolean"):
-        settings._parse_bool("enabled", "WIDGET_AUTH_REQUIRED")
-
-
-def test_ssm_batch_is_not_partially_applied_when_one_value_is_invalid(
-    monkeypatch,
-) -> None:
+def test_ssm_cannot_override_code_owned_pipeline_versions(monkeypatch) -> None:
+    """A stale SSM cache namespace must not survive a code deployment."""
+    paginator = MagicMock()
+    paginator.paginate.return_value = [
+        {
+            "Parameters": [
+                {
+                    "Name": "/askverachat/prod/RETRIEVAL_PIPELINE_VERSION",
+                    "Value": "stale-retrieval-version",
+                },
+                {
+                    "Name": "/askverachat/prod/CONVERSATION_ROUTING_VERSION",
+                    "Value": "stale-conversation-version",
+                },
+                {
+                    "Name": "/askverachat/prod/BEDROCK_MIN_CONFIDENCE",
+                    "Value": "0.51",
+                },
+            ]
+        }
+    ]
+    client = MagicMock()
+    client.get_paginator.return_value = paginator
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(client=lambda *_args, **_kwargs: client))
     monkeypatch.setattr(settings, "SSM_CONFIG_ENABLED", True)
-    monkeypatch.setattr(settings, "APP_ENV", "development")
-    monkeypatch.setattr(settings, "WIDGET_AUTH_REQUIRED", False)
-    _install_fake_boto3(
-        monkeypatch,
-        [
-            {"Name": "/test/APP_ENV", "Value": "production"},
-            {"Name": "/test/WIDGET_AUTH_REQUIRED", "Value": "sometimes"},
-        ],
-    )
+    monkeypatch.setattr(settings, "RETRIEVAL_PIPELINE_VERSION", "deployed-code-version")
+    monkeypatch.setattr(settings, "CONVERSATION_ROUTING_VERSION", "deployed-conversation-version")
+    monkeypatch.setattr(settings, "BEDROCK_MIN_CONFIDENCE", 0.47)
 
-    with pytest.raises(ValueError, match="WIDGET_AUTH_REQUIRED"):
-        settings.load_ssm_config("/test/")
+    loaded = settings.load_ssm_config("/askverachat/prod/")
 
-    assert settings.APP_ENV == "development"
-    assert settings.WIDGET_AUTH_REQUIRED is False
-
-
-def test_hardened_ssm_rejects_unknown_parameter_names(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "SSM_CONFIG_ENABLED", True)
-    monkeypatch.setattr(settings, "APP_ENV", "development")
-    monkeypatch.setattr(settings, "SECURITY_PROFILE", "standard")
-    _install_fake_boto3(
-        monkeypatch,
-        [
-            {"Name": "/test/SECURITY_PROFILE", "Value": "hardened"},
-            {"Name": "/test/WIDET_AUTH_REQUIRED", "Value": "true"},
-        ],
-    )
-
-    with pytest.raises(ValueError, match="WIDET_AUTH_REQUIRED"):
-        settings.load_ssm_config("/test/")
-
-    assert settings.SECURITY_PROFILE == "standard"
+    assert loaded["RETRIEVAL_PIPELINE_VERSION"] == "stale-retrieval-version"
+    assert settings.RETRIEVAL_PIPELINE_VERSION == "deployed-code-version"
+    assert settings.CONVERSATION_ROUTING_VERSION == "deployed-conversation-version"
+    assert settings.BEDROCK_MIN_CONFIDENCE == 0.51

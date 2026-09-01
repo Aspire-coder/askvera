@@ -116,6 +116,117 @@ def _exact_topic_score(message: str, title: str, content: str) -> float:
     return score
 
 
+def _governing_requirement_score(message: str, title: str, content: str) -> float:
+    """Prefer a governing qualification clause over nearby rank mentions."""
+    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+        return 0.0
+    normalized_message = _normalize_text(message)
+    intent_terms = {
+        "achieve",
+        "achieved",
+        "become",
+        "condition",
+        "conditions",
+        "criteria",
+        "qualification",
+        "qualifications",
+        "qualify",
+        "requirement",
+        "requirements",
+    }
+    if not (set(_tokens(normalized_message)) & intent_terms):
+        return 0.0
+
+    rank_terms = ("manager", "supervisor")
+    modifiers = (
+        "assistant",
+        "inherited",
+        "recognized",
+        "recognised",
+        "sponsored",
+        "transferred",
+        "unrecognized",
+        "unrecognised",
+    )
+    message_tokens = _tokens(normalized_message)
+    anchor = ""
+    for index, token in enumerate(message_tokens):
+        if token not in rank_terms:
+            continue
+        anchor = token
+        if index > 0 and message_tokens[index - 1] in modifiers:
+            anchor = f"{message_tokens[index - 1]} {token}"
+        break
+    if not anchor:
+        return 0.0
+
+    evidence = _normalize_text(f"{title} {content[:1800]}")
+    if " " in anchor:
+        anchor_pattern = rf"\b{re.escape(anchor)}\b"
+    else:
+        # A generic Manager question must not treat Assistant Manager or
+        # Unrecognized Manager as the governing clause.
+        anchor_pattern = rf"(?<![a-z]\s)\b{re.escape(anchor)}\b"
+    governing_patterns = (
+        rf"{anchor_pattern}\s+is\s+achieved\b",
+        rf"{anchor_pattern}\s+requires\b",
+        rf"\bqualif(?:y|ies|ied)\s+as\s+{re.escape(anchor)}\b",
+        rf"\breaches\s+the\s+level\s+of\s+{re.escape(anchor)}\b",
+    )
+    return 1.8 if any(re.search(pattern, evidence) for pattern in governing_patterns) else 0.0
+
+
+def _fragment_quality_score(row: dict[str, Any], message: str) -> float:
+    """Reduce detached numeric fragments unless the user asks for a value."""
+    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+        return 0.0
+    if str(row.get("chunk_type") or "") != "numeric_fact":
+        return 0.0
+    normalized_message = _normalize_text(message)
+    numeric_intent = bool(re.search(
+        r"\b(?:amount|cost|how many|how much|minimum|number|percent|percentage|price|rate|when|year)\b",
+        normalized_message,
+    )) or bool(re.search(r"\d", normalized_message))
+    return 0.1 if numeric_intent else -0.35
+
+
+def _purchase_channel_score(message: str, title: str, content: str) -> float:
+    """Prefer clauses that explicitly identify a permitted sales channel."""
+    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+        return 0.0
+    message_terms = set(_tokens(message))
+    asks_where_to_order = "where" in message_terms and "order" in message_terms
+    if not ({"buy", "purchase", "purchasing", "shop"} & message_terms or asks_where_to_order):
+        return 0.0
+    evidence = _normalize_text(f"{title} {content[:1800]}")
+    direct_channels = (
+        "selling products online",
+        "personal forever web shop",
+        "approved fbo website",
+        "online shop",
+        "purchase products online",
+    )
+    return 1.8 if any(channel in evidence for channel in direct_channels) else 0.0
+
+
+def _return_policy_score(message: str, title: str, content: str) -> float:
+    """Prefer clauses that directly state product-return rights or conditions."""
+    if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+        return 0.0
+    message_terms = set(_tokens(message))
+    if not ({"return", "returns", "refund", "refunds"} & message_terms):
+        return 0.0
+    evidence = _normalize_text(f"{title} {content[:1800]}")
+    direct_terms = (
+        "product return",
+        "return of the product",
+        "timely return",
+        "100 product satisfaction",
+        "proof of purchase",
+    )
+    return 1.8 if any(term in evidence for term in direct_terms) else 0.0
+
+
 def _source_score(row: dict[str, Any], message: str) -> float:
     """Blend search rank with generic, document-derived lexical alignment."""
     base_score = float(row.get("rank") or 0.0)
@@ -139,6 +250,10 @@ def _source_score(row: dict[str, Any], message: str) -> float:
     if message_tokens:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
     score += _exact_topic_score(message, title, content)
+    score += _governing_requirement_score(message, title, content)
+    score += _fragment_quality_score(row, message)
+    score += _purchase_channel_score(message, title, content)
+    score += _return_policy_score(message, title, content)
     for phrase in phrases:
         if phrase in _normalize_text(title):
             score += 0.35
@@ -148,7 +263,12 @@ def _source_score(row: dict[str, Any], message: str) -> float:
 
 
 def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
-    """Create a conservative confidence value from section scores."""
+    """Create conservative confidence from selected and corroborating evidence.
+
+    An evidence selector may place the governing section ahead of a higher raw
+    lexical score. Preserve that selected order, but grant a small capped bonus
+    when another approved section strongly corroborates the selected result.
+    """
     if not documents:
         return 0.0
     scores = [float(document.score or 0.0) for document in documents]
@@ -156,7 +276,12 @@ def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
     runner_up = scores[1] if len(scores) > 1 else 0.0
     avg_score = sum(scores) / len(scores)
     margin = max(top_score - runner_up, 0.0)
-    normalized = min((top_score / 10.0) + (margin / 10.0) + (avg_score / 30.0), 0.95)
+    strongest_score = max(scores)
+    corroboration = min(max(strongest_score - top_score, 0.0) / 40.0, 0.1)
+    normalized = min(
+        (top_score / 10.0) + (margin / 10.0) + (avg_score / 30.0) + corroboration,
+        0.95,
+    )
     return round(normalized, 3)
 
 

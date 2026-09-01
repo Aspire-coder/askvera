@@ -17,6 +17,12 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
+from app.response.quality import (
+    contact_for_country,
+    format_period_not_covered,
+    remove_or_replace_contact_placeholders,
+    unsupported_requested_years,
+)
 from app.retrieval import RetrievalService, retrieval_service
 from app.retrieval.models import RetrievalResult
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
@@ -28,8 +34,12 @@ from services.audit import write_audit_event
 from services.cache import (
     build_cache_key,
     get_cache_value,
-    get_semantic_cache_value,
     set_cache_value,
+)
+from services.semantic_cache import (
+    SemanticCacheHit,
+    get_semantic_cache_value,
+    semantic_cache_active,
     set_semantic_cache_value,
 )
 from services.consent_service import has_valid_consent
@@ -39,7 +49,15 @@ from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
-from utils.directory_fields import restore_missing_directory_contacts
+from utils.directory_fields import (
+    parse_directory_fields,
+    preserve_directory_role_labels,
+    correct_directory_source_contradictions,
+    remove_unrequested_directory_fields,
+    restore_missing_directory_contacts,
+    restore_missing_requested_directory_fields,
+    restore_missing_requested_order_size,
+)
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 
@@ -56,8 +74,22 @@ FOLLOW_UP_CONTEXT_MARKERS = (
     "first question",
     "last question",
     "more about",
+    "more detail",
+    "more details",
+    "more information",
     "explain more",
     "tell me more",
+    "elaborate",
+    "expand on",
+    "go deeper",
+    "what else",
+    "continue",
+    "how so",
+    "why is that",
+)
+DIRECTORY_DETAIL_TERMS = re.compile(
+    r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
+    re.IGNORECASE,
 )
 
 
@@ -108,33 +140,21 @@ class AIOrchestrator:
         )
         chat_response = self._early_conversation_response(scrubbed_input, body, correlation_id)
         if chat_response:
-            return self._finish_response(chat_response, body, scrubbed_input, correlation_id)
+            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
+            return chat_response
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
-        governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
+        request_query = self._build_request_query(scrubbed_input, retrieval_query, history)
+        governance_decision = self._evaluate_governance(request_query, body, correlation_id)
         if not governance_decision.allowed:
-            return self._finish_response(
-                self._governance_fallback(
-                    governance_decision, correlation_id, body.language, body.country, body.message
-                ),
-                body,
-                scrubbed_input,
-                correlation_id,
+            return self._governance_fallback(
+                governance_decision, correlation_id, body.language, body.country, body.message
             )
 
-        cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
-        cached_response = self._cached_response(cache_key, body, correlation_id)
+        cache_key = build_cache_key(request_query, body.country, body.language, body.role)
+        cached_response = self._cached_response(cache_key, body, correlation_id, scrubbed_input)
         if cached_response:
-            return self._finish_response(cached_response, body, scrubbed_input, correlation_id)
-        semantic_cached = get_semantic_cache_value(
-            retrieval_query, body.country, body.language, body.role, correlation_id
-        )
-        if semantic_cached:
-            cached_response = self._cached_response_value(
-                semantic_cached, body, correlation_id, cache_type="semantic"
-            )
-            if cached_response:
-                return self._finish_response(cached_response, body, scrubbed_input, correlation_id)
+            return cached_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
@@ -145,8 +165,13 @@ class AIOrchestrator:
             correlation_id,
         )
         if chat_response:
-            return self._finish_response(chat_response, body, scrubbed_input, correlation_id)
+            return chat_response
         assert evidence_decision is not None
+        cached_response, semantic_candidate, semantic_lookup_ms = self._semantic_cached_response(
+            request_query, retrieval_result, body, correlation_id, scrubbed_input
+        )
+        if cached_response:
+            return cached_response
         prompt_package = self.prompt_builder.build(
             user_question=scrubbed_input,
             conversation=history,
@@ -160,57 +185,42 @@ class AIOrchestrator:
             model_response = self.model_router.generate(prompt_package, retrieval_result, correlation_id)
         except LowConfidenceError as exc:
             failure_layer = self._low_confidence_failure_layer(exc)
-            return self._finish_response(
-                self._validate_response(
-                    self.response_builder.fallback(
-                        self._insufficient_evidence_message(body.language),
-                        correlation_id,
-                        metadata={"failure_layer": failure_layer},
-                    ),
-                    body,
+            return self._validate_response(
+                self.response_builder.fallback(
+                    self._insufficient_evidence_message(body.language),
                     correlation_id,
-                    retrieval_result=retrieval_result,
+                    metadata={"failure_layer": failure_layer},
                 ),
                 body,
-                scrubbed_input,
                 correlation_id,
+                retrieval_result=retrieval_result,
             )
 
         if model_response.finish_reason == "guardrail_intervened":
-            return self._finish_response(
-                self.response_builder.fallback(
-                    localized_conversation_response("guardrail_blocked", body.language)
-                    or (
-                        "I couldn't provide that response because it did not pass AskVera's safety checks. "
-                        "Please rephrase the question without private information or unsafe claims."
-                    ),
-                    correlation_id,
-                    metadata={
-                        "failure_layer": "aws_guardrail",
-                        "response_source": "guardrail",
-                    },
+            return self.response_builder.fallback(
+                localized_conversation_response("guardrail_blocked", body.language)
+                or (
+                    "I couldn't provide that response because it did not pass AskVera's safety checks. "
+                    "Please rephrase the question without private information or unsafe claims."
                 ),
-                body,
-                scrubbed_input,
                 correlation_id,
+                metadata={
+                    "failure_layer": "aws_guardrail",
+                    "response_source": "guardrail",
+                },
             )
 
         contracted_response = self._apply_evidence_contract(model_response, retrieval_result, correlation_id)
         if contracted_response is None:
-            return self._finish_response(
-                self._validate_response(
-                    self.response_builder.fallback(
-                        self._insufficient_evidence_message(body.language),
-                        correlation_id,
-                        metadata={"failure_layer": "evidence_contract"},
-                    ),
-                    body,
+            return self._validate_response(
+                self.response_builder.fallback(
+                    self._insufficient_evidence_message(body.language),
                     correlation_id,
-                    retrieval_result=retrieval_result,
+                    metadata={"failure_layer": "evidence_contract"},
                 ),
                 body,
-                scrubbed_input,
                 correlation_id,
+                retrieval_result=retrieval_result,
             )
         model_response, retrieval_result = contracted_response
 
@@ -233,6 +243,7 @@ class AIOrchestrator:
             body.language,
             correlation_id,
             user_question=body.message,
+            country=body.country,
         )
         chat_response = self._validate_response(
             chat_response,
@@ -243,45 +254,17 @@ class AIOrchestrator:
         )
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
         if not governance_decision.allowed:
-            return self._finish_response(
-                self._governance_fallback(
-                    governance_decision, correlation_id, body.language, body.country, body.message
-                ),
-                body,
-                scrubbed_input,
-                correlation_id,
+            return self._governance_fallback(
+                governance_decision, correlation_id, body.language, body.country, body.message
             )
-        self._finish_response(chat_response, body, scrubbed_input, correlation_id)
-        if self._should_cache_response(chat_response):
-            set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
-            set_semantic_cache_value(
-                retrieval_query,
-                body.country,
-                body.language,
-                body.role,
-                chat_response.to_cache_value(),
-                correlation_id,
-            )
-        else:
-            LOGGER.info(
-                "cache_write_skipped",
-                correlation_id=correlation_id,
-                reason="fallback_or_critical_validation",
-            )
-        return chat_response
-
-    @staticmethod
-    def _finish_response(
-        chat_response: ChatResponse,
-        body: ChatRequest,
-        scrubbed_input: str,
-        correlation_id: str,
-    ) -> ChatResponse:
-        """Record every delivered turn through one shared path."""
-        try:
-            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
-        except Exception:
-            LOGGER.exception("session_turn_append_failed", correlation_id=correlation_id)
+        self._record_semantic_shadow_result(
+            semantic_candidate,
+            chat_response,
+            body,
+            correlation_id,
+            semantic_lookup_ms,
+        )
+        append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
                 "type": "chat",
@@ -291,8 +274,15 @@ class AIOrchestrator:
                 "validation": chat_response.metadata.get("validation"),
                 "failure_layer": chat_response.metadata.get("failure_layer"),
                 "finish_reason": chat_response.metadata.get("finish_reason"),
-                "cache": chat_response.metadata.get("cache"),
             },
+            correlation_id,
+        )
+        self._cache_response(
+            cache_key,
+            request_query,
+            retrieval_result,
+            chat_response,
+            body,
             correlation_id,
         )
         return chat_response
@@ -305,23 +295,84 @@ class AIOrchestrator:
         correlation_id: str,
         *,
         user_question: str,
+        country: str = "",
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
         completed_answer, restored_fields = chat_response.answer, []
         if chat_response.citations:
-            completed_answer, restored_fields = restore_missing_directory_contacts(
-                chat_response.answer,
-                (
+            directory_field_sets = [
+                fields
+                for document in retrieval_result.documents
+                for fields in [
                     document.metadata.get("directory_fields", {})
-                    for document in retrieval_result.documents
                     if isinstance(document.metadata.get("directory_fields"), dict)
-                ),
+                    else parse_directory_fields(document.content)
+                    if document.metadata.get("directory_kind")
+                    or document.metadata.get("directory_section")
+                    else {}
+                ]
+                if fields
+            ]
+            completed_answer, restored_requested_fields = restore_missing_requested_directory_fields(
+                completed_answer,
+                directory_field_sets,
+                user_question,
             )
+            completed_answer, restored_fields = restore_missing_directory_contacts(
+                completed_answer,
+                directory_field_sets,
+            )
+            restored_fields = [*restored_requested_fields, *restored_fields]
         if restored_fields:
             chat_response = self._replace_answer(
                 chat_response,
                 completed_answer,
                 {"directory_contacts_restored": restored_fields},
+            )
+
+        role_safe_answer, role_label_corrected = preserve_directory_role_labels(
+            chat_response.answer,
+            (document.content for document in retrieval_result.documents),
+        )
+        if role_label_corrected:
+            chat_response = self._replace_answer(
+                chat_response,
+                role_safe_answer,
+                {"directory_role_label_corrected": True},
+            )
+
+        focused_answer, extra_fields_removed = remove_unrequested_directory_fields(
+            chat_response.answer,
+            user_question,
+        )
+        if extra_fields_removed:
+            chat_response = self._replace_answer(
+                chat_response,
+                focused_answer,
+                {"unrequested_directory_fields_removed": True},
+            )
+
+        order_safe_answer, order_restored = restore_missing_requested_order_size(
+            chat_response.answer,
+            (document.content for document in retrieval_result.documents),
+            user_question,
+        )
+        if order_restored:
+            chat_response = self._replace_answer(
+                chat_response,
+                order_safe_answer,
+                {"directory_order_size_restored": True},
+            )
+
+        source_safe_answer, source_contradiction_corrected = correct_directory_source_contradictions(
+            chat_response.answer,
+            (document.content for document in retrieval_result.documents),
+        )
+        if source_contradiction_corrected:
+            chat_response = self._replace_answer(
+                chat_response,
+                source_safe_answer,
+                {"directory_source_contradiction_corrected": True},
             )
 
         safe_answer = scrub_pii(
@@ -330,6 +381,7 @@ class AIOrchestrator:
             language,
             allowed_texts=[
                 *settings.PII_APPROVED_PUBLIC_TERMS,
+                *contact_for_country(country).values(),
                 *(document.content for document in retrieval_result.documents),
             ],
             allowed_name_texts=[user_question],
@@ -337,12 +389,29 @@ class AIOrchestrator:
         if safe_answer != chat_response.answer:
             chat_response = self._replace_answer(chat_response, safe_answer, {"response_pii_scrubbed": True})
 
+        contact_safe_answer, contact_changes = remove_or_replace_contact_placeholders(
+            chat_response.answer,
+            country,
+        )
+        if contact_changes:
+            chat_response = self._replace_answer(
+                chat_response,
+                contact_safe_answer,
+                {"contact_placeholder_actions": contact_changes},
+            )
+
         cleaned_answer = remove_unresolved_pii_placeholders(chat_response.answer)
         if cleaned_answer != chat_response.answer:
             chat_response = self._replace_answer(
                 chat_response,
                 cleaned_answer,
                 {"unresolved_pii_placeholders_removed": True},
+            )
+        if not chat_response.answer.strip():
+            chat_response = self._replace_answer(
+                chat_response,
+                self._insufficient_evidence_message(language),
+                {"empty_after_output_cleanup": True, "fallback": True},
             )
         return chat_response
 
@@ -368,6 +437,7 @@ class AIOrchestrator:
         cache_key: str,
         body: ChatRequest,
         correlation_id: str,
+        session_input: str = "",
     ) -> ChatResponse | None:
         """Read and revalidate a cached response before returning it."""
         cache_started = perf_counter()
@@ -388,7 +458,10 @@ class AIOrchestrator:
                 "outputTokensSaved": saved_output_tokens,
             },
         )
-        return self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+        response = self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+        if response and response.metadata.get("cache") == "exact":
+            append_session_turn(body.sessionId, session_input or body.message, response.answer, correlation_id)
+        return response
 
     def _cached_response_value(
         self,
@@ -400,8 +473,16 @@ class AIOrchestrator:
     ) -> ChatResponse | None:
         if not cached:
             return None
+        chat_response = self._secure_and_complete_response(
+            self.response_builder.from_cached(cached, correlation_id),
+            RetrievalResult(documents=[], citations=[], confidence=0.0),
+            body.language,
+            correlation_id,
+            user_question=body.message,
+            country=body.country,
+        )
         chat_response = self._validate_response(
-            self.response_builder.from_cached(cached, correlation_id), body, correlation_id
+            chat_response, body, correlation_id
         )
         chat_response = self._replace_answer(chat_response, chat_response.answer, {"cache": cache_type})
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
@@ -418,6 +499,152 @@ class AIOrchestrator:
                 governance_decision, correlation_id, body.language, body.country, body.message
             )
         return chat_response
+
+    def _semantic_cached_response(
+        self,
+        retrieval_query: str,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+        session_input: str = "",
+    ) -> tuple[ChatResponse | None, SemanticCacheHit | None, float]:
+        """Read semantic cache only after current evidence has been approved."""
+        if not semantic_cache_active():
+            return None, None, 0.0
+        started = perf_counter()
+        cached = get_semantic_cache_value(
+            retrieval_query,
+            body.country,
+            body.language,
+            body.role,
+            retrieval_result,
+            correlation_id,
+        )
+        duration_ms = round((perf_counter() - started) * 1000, 2)
+        live_mode = bool(settings.SEMANTIC_CACHE_ENABLED)
+        pipeline_trace_store.record(
+            correlation_id,
+            "semantic_cache_lookup",
+            success=True,
+            duration_ms=duration_ms,
+            metadata={
+                "service": "Amazon ElastiCache for Valkey",
+                "mode": "live" if live_mode else "shadow",
+                "cacheHit": bool(cached and live_mode),
+                "wouldHit": bool(cached),
+                "served": bool(cached and live_mode),
+                "similarity": round(cached.similarity, 4) if cached else 0.0,
+                "candidatesChecked": cached.candidates_checked if cached else 0,
+            },
+        )
+        if not cached or not live_mode:
+            return None, cached, duration_ms
+        response = self._cached_response_value(
+            cached.response,
+            body,
+            correlation_id,
+            cache_type="semantic",
+        )
+        if not response or response.metadata.get("cache") != "semantic":
+            return response, cached, duration_ms
+        response = self._replace_answer(
+            response,
+            response.answer,
+            {
+                "semantic_cache_similarity": round(cached.similarity, 4),
+                "semantic_cache_candidates_checked": cached.candidates_checked,
+            },
+        )
+        append_session_turn(body.sessionId, session_input or body.message, response.answer, correlation_id)
+        return response, cached, duration_ms
+
+    def _record_semantic_shadow_result(
+        self,
+        candidate: SemanticCacheHit | None,
+        fresh_response: ChatResponse,
+        body: ChatRequest,
+        correlation_id: str,
+        lookup_duration_ms: float,
+    ) -> None:
+        """Compare a shadow candidate with the delivered fresh answer without logging either text."""
+        if not settings.SEMANTIC_CACHE_SHADOW_ENABLED or settings.SEMANTIC_CACHE_ENABLED:
+            return
+        fresh_usage = dict((fresh_response.metadata or {}).get("token_usage") or {})
+        input_tokens = int(fresh_usage.get("inputTokens", fresh_usage.get("input_tokens", 0)) or 0)
+        output_tokens = int(fresh_usage.get("outputTokens", fresh_usage.get("output_tokens", 0)) or 0)
+        answer_agreement = (
+            self._text_agreement(str(candidate.response.get("response") or ""), fresh_response.answer)
+            if candidate
+            else 0.0
+        )
+        citation_agreement = (
+            self._citation_agreement(candidate.response.get("sources"), fresh_response.citations)
+            if candidate
+            else 0.0
+        )
+        needs_review = bool(
+            candidate and answer_agreement < settings.SEMANTIC_CACHE_SHADOW_MIN_ANSWER_AGREEMENT
+        )
+        metadata = {
+            "service": "Amazon ElastiCache for Valkey",
+            "mode": "shadow",
+            "cacheHit": False,
+            "wouldHit": bool(candidate),
+            "served": False,
+            "freshGenerated": True,
+            "similarity": round(candidate.similarity, 4) if candidate else 0.0,
+            "candidatesChecked": candidate.candidates_checked if candidate else 0,
+            "answerAgreement": answer_agreement,
+            "citationAgreement": citation_agreement,
+            "reviewRecommended": needs_review,
+            "decision": "review" if needs_review else "agree" if candidate else "miss",
+            "estimatedInputTokensSaved": input_tokens if candidate else 0,
+            "estimatedOutputTokensSaved": output_tokens if candidate else 0,
+            "estimatedTokensSaved": input_tokens + output_tokens if candidate else 0,
+        }
+        pipeline_trace_store.record(
+            correlation_id,
+            "semantic_cache_lookup",
+            success=True,
+            duration_ms=lookup_duration_ms,
+            metadata=metadata,
+        )
+        write_audit_event(
+            {
+                "type": "semantic_cache_shadow",
+                "country": body.country,
+                "language": body.language,
+                **{key: value for key, value in metadata.items() if key != "service"},
+            },
+            correlation_id,
+        )
+
+    @staticmethod
+    def _text_agreement(left: str, right: str) -> float:
+        """Return privacy-safe lexical agreement for two generated answers."""
+        left_tokens = set(re.findall(r"[^\W_]+", left.casefold(), flags=re.UNICODE))
+        right_tokens = set(re.findall(r"[^\W_]+", right.casefold(), flags=re.UNICODE))
+        if not left_tokens or not right_tokens:
+            return 0.0
+        return round(len(left_tokens & right_tokens) / len(left_tokens | right_tokens), 4)
+
+    @staticmethod
+    def _citation_agreement(cached_sources: object, fresh_sources: object) -> float:
+        """Compare source identities without storing source excerpts."""
+        def identities(value: object) -> set[str]:
+            if not isinstance(value, list):
+                return set()
+            return {
+                str(item.get("uri") or item.get("title") or "").strip()
+                for item in value
+                if isinstance(item, dict) and (item.get("uri") or item.get("title"))
+            }
+
+        cached = identities(cached_sources)
+        fresh = identities(fresh_sources)
+        if not cached or not fresh:
+            return 0.0
+        return round(len(cached & fresh) / len(cached | fresh), 4)
 
     def _apply_evidence_contract(
         self,
@@ -473,7 +700,7 @@ class AIOrchestrator:
         )
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
-        """Expand vague follow-up questions with recent user-message context."""
+        """Return the substantive question used to retrieve follow-up evidence."""
         user_message = self._normalize_malformed_spacing(user_message, correlation_id)
         if not self._needs_history_context(user_message, history):
             return user_message
@@ -482,15 +709,26 @@ class AIOrchestrator:
         if not user_messages:
             return user_message
 
-        anchor = user_messages[0] if "first question" in user_message.lower() else user_messages[-1]
-        query = f"{anchor}\nFollow-up request: {user_message}"
+        anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
         LOGGER.info(
             "chat_followup_context_applied",
             correlation_id=correlation_id,
             original_length=len(user_message),
-            contextual_length=len(query),
+            contextual_length=len(anchor),
         )
-        return query
+        return anchor
+
+    def _build_request_query(self, user_message: str, retrieval_query: str, history: str = "") -> str:
+        """Keep follow-up intent in governance and cache keys, outside retrieval."""
+        normalized_message = " ".join((user_message or "").split()).strip()
+        normalized_retrieval = " ".join((retrieval_query or "").split()).strip()
+        if (
+            not self._needs_history_context(normalized_message, history)
+            or not normalized_retrieval
+            or normalized_retrieval == normalized_message
+        ):
+            return normalized_retrieval or normalized_message
+        return f"{normalized_retrieval}\nFollow-up request: {normalized_message}"
 
     def _normalize_malformed_spacing(self, message: str, correlation_id: str) -> str:
         """Repair character-spaced input without using a language vocabulary."""
@@ -529,7 +767,33 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
-        return word_count <= 14 and any(marker in normalized for marker in FOLLOW_UP_CONTEXT_MARKERS)
+        return word_count <= 14 and self._contains_follow_up_marker(normalized)
+
+    def _contains_follow_up_marker(self, normalized_message: str) -> bool:
+        """Match follow-up words as complete phrases, never inside policy terms."""
+        for marker in FOLLOW_UP_CONTEXT_MARKERS:
+            escaped_marker = re.escape(marker).replace(r"\ ", r"\s+")
+            if re.search(
+                rf"(?<!\w){escaped_marker}(?!\w)",
+                normalized_message,
+                flags=re.UNICODE,
+            ):
+                return True
+        return False
+
+    def _latest_context_anchor(self, user_messages: list[str]) -> str:
+        """Return the latest self-contained user question behind chained follow-ups."""
+        for message in reversed(user_messages):
+            if not self._is_context_dependent_message(message):
+                return message
+        return user_messages[-1]
+
+    def _is_context_dependent_message(self, user_message: str) -> bool:
+        """Identify short references that cannot be retrieved safely on their own."""
+        normalized = " ".join(user_message.lower().split())
+        if not normalized:
+            return False
+        return len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized)
 
     def _user_messages_from_history(self, history: str) -> list[str]:
         """Extract prior user messages from compact session history."""
@@ -713,7 +977,11 @@ class AIOrchestrator:
             # The planner is advisory. Only reviewed exact phrases may produce
             # assistant identity/capability copy.
             if classify_intent(body.message, body.language) == "assistant_meta":
-                response_key = subtype if subtype in {"greeting", "capability", "thanks", "wellbeing"} else "capability"
+                response_key = (
+                    subtype
+                    if subtype in {"greeting", "capability", "thanks", "wellbeing", "casual"}
+                    else "capability"
+                )
             else:
                 intent = "off_topic"
                 response_key = "off_topic"
@@ -759,11 +1027,35 @@ class AIOrchestrator:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id)
         if routed_response:
+            append_session_turn(body.sessionId, scrubbed_input, routed_response.answer, correlation_id)
             return routed_response, retrieval_result, None
 
         evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
         if evidence_decision.approved:
+            unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
+            if unsupported_years:
+                template = localized_conversation_response("period_not_covered", body.language) or (
+                    "The approved documents available to me do not contain information for {period}. "
+                    "I cannot speculate about policy changes outside the documented period."
+                )
+                answer = format_period_not_covered(template, unsupported_years)
+                fallback = self._validate_response(
+                    self.response_builder.fallback(
+                        answer,
+                        correlation_id,
+                        metadata={
+                            "fallback": False,
+                            "failure_layer": "document_period_not_covered",
+                            "response_source": "period_scope_guard",
+                            "requested_periods": unsupported_years,
+                        },
+                    ),
+                    body,
+                    correlation_id,
+                )
+                append_session_turn(body.sessionId, scrubbed_input, fallback.answer, correlation_id)
+                return fallback, approved_result, evidence_decision
             return None, approved_result, evidence_decision
 
         LOGGER.warning(
@@ -774,6 +1066,14 @@ class AIOrchestrator:
             role=body.role,
             **evidence_decision.to_metadata(),
         )
+        clarification = self._directory_clarification_response(
+            retrieval_result,
+            body,
+            correlation_id,
+            scrubbed_input,
+        )
+        if clarification:
+            return clarification, approved_result, evidence_decision
         fallback = self._validate_response(
             self.response_builder.fallback(
                 self._insufficient_evidence_message(body.language),
@@ -788,6 +1088,50 @@ class AIOrchestrator:
             retrieval_result=approved_result,
         )
         return fallback, approved_result, evidence_decision
+
+    def _directory_clarification_response(
+        self,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+        scrubbed_input: str,
+    ) -> ChatResponse | None:
+        """Ask for the missing directory detail when approved evidence is ambiguous.
+
+        This is deliberately narrow: governance has already run, and the response
+        is used only when the planner searched global directory content but could
+        not approve a sufficiently clear answer. It never weakens guardrails or
+        invents a country, office, phone number, or other contact value.
+        """
+        metadata = retrieval_result.metadata or {}
+        if not metadata.get("global_documents_searched"):
+            return None
+        if not metadata.get("candidate_count") or not DIRECTORY_DETAIL_TERMS.search(body.message or ""):
+            return None
+        answer = (
+            "I found approved directory information, but I need one more detail to answer accurately. "
+            "Are you asking for the telephone number, business hours, email address, office address, "
+            "website, or sponsoring information?"
+        )
+        response = self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "failure_layer": "directory_clarification",
+                "response_source": "directory_clarification",
+                "fallback": False,
+            },
+            cards=[
+                {"id": "directory-telephone", "label": "Telephone number", "prompt": "What is the telephone number for that country?"},
+                {"id": "directory-hours", "label": "Business hours", "prompt": "What are the business hours for that country?"},
+                {"id": "directory-email", "label": "Email address", "prompt": "What is the email address for that country?"},
+                {"id": "directory-address", "label": "Office address", "prompt": "What is the office address for that country?"},
+                {"id": "directory-website", "label": "Website", "prompt": "What is the website for that country?"},
+                {"id": "directory-sponsoring", "label": "Sponsoring information", "prompt": "What sponsoring information is available for that country?"},
+            ],
+        )
+        append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
+        return response
 
     def _validate_response(
         self,
@@ -939,7 +1283,48 @@ class AIOrchestrator:
         if isinstance(validation, dict) and str(validation.get("highestSeverity", "")).upper() == "CRITICAL":
             return False
 
+        if float(chat_response.confidence or 0.0) < settings.BEDROCK_MIN_CONFIDENCE:
+            return False
+
         return bool((chat_response.answer or "").strip())
+
+    def _should_semantic_cache_response(self, chat_response: ChatResponse) -> bool:
+        """Require strong, cited evidence before an answer can be reused semantically."""
+        return (
+            self._should_cache_response(chat_response)
+            and bool(chat_response.citations)
+            and float(chat_response.confidence or 0.0) >= settings.SEMANTIC_CACHE_MIN_CONFIDENCE
+        )
+
+    def _cache_response(
+        self,
+        cache_key: str,
+        retrieval_query: str,
+        retrieval_result: RetrievalResult,
+        chat_response: ChatResponse,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> None:
+        """Write exact cache and the more restrictive semantic cache."""
+        if not self._should_cache_response(chat_response):
+            LOGGER.info(
+                "cache_write_skipped",
+                correlation_id=correlation_id,
+                reason="unsafe_or_low_confidence_response",
+            )
+            return
+        cache_value = chat_response.to_cache_value()
+        set_cache_value(cache_key, cache_value, correlation_id)
+        if self._should_semantic_cache_response(chat_response):
+            set_semantic_cache_value(
+                retrieval_query,
+                body.country,
+                body.language,
+                body.role,
+                retrieval_result,
+                cache_value,
+                correlation_id,
+            )
 
 
 ai_orchestrator = AIOrchestrator()

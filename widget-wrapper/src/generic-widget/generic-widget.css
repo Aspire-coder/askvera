@@ -1353,6 +1353,30 @@
   background: color-mix(in srgb, var(--gw-surface), transparent 16%);
 }
 
+.gw-quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.gw-quick-reply {
+  border: 1px solid rgba(217, 170, 0, 0.45);
+  border-radius: 999px;
+  padding: 9px 12px;
+  background: rgba(255, 247, 214, 0.72);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.gw-quick-reply:hover,
+.gw-quick-reply:focus-visible {
+  background: rgba(255, 238, 170, 0.9);
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .gw-citation-card a,
 .gw-citation-card span {
   color: var(--gw-secondary);

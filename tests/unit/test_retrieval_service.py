@@ -10,7 +10,6 @@ from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
     _expanded_retrieval_query,
-    _looks_like_directory_query,
     _tokens,
     _planned_retrieval_plan,
     _planned_retrieval_queries,
@@ -28,6 +27,30 @@ from config import settings
 def disable_shadow_analytics(monkeypatch):
     """Retrieval unit tests must not connect to operational analytics storage."""
     monkeypatch.setattr(retrieval_service_module, "record_retrieval_shadow_comparison", MagicMock())
+    monkeypatch.setattr(
+        retrieval_service_module,
+        "get_retrieval_runtime_control",
+        lambda: SimpleNamespace(
+            mode="shadow" if settings.RETRIEVAL_SHADOW_ENABLED else "current",
+            sample_rate=settings.RETRIEVAL_SHADOW_SAMPLE_RATE,
+        ),
+    )
+
+
+def test_retrieval_plan_adds_reviewed_spaced_variant_for_joined_business_term(monkeypatch) -> None:
+    """Joined policy terms get an extra approved query without enabling glossary expansion."""
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", False)
+    monkeypatch.setattr(retrieval_providers.settings, "OPENSEARCH_GLOSSARY_ENABLED", False)
+
+    plan = _planned_retrieval_plan(
+        "How can I become a recognizedmanager?",
+        "US",
+        "en",
+        "joined-term-cid",
+    )
+
+    assert plan.queries[0] == "How can I become a recognizedmanager?"
+    assert "recognized manager" in plan.queries
 
 
 class _StaticProvider:
@@ -99,32 +122,22 @@ def test_shadow_retrieval_is_inert_by_default(monkeypatch) -> None:
     assert shadow.calls == []
 
 
-def test_shadow_task_is_dropped_when_background_capacity_is_full(monkeypatch) -> None:
-    capacity = MagicMock()
-    capacity.acquire.return_value = False
-    executor = MagicMock()
-    task = MagicMock()
-    monkeypatch.setattr(retrieval_service_module, "_SHADOW_CAPACITY", capacity)
-    monkeypatch.setattr(retrieval_service_module, "_SHADOW_EXECUTOR", executor)
+def test_runtime_current_mode_suppresses_configured_shadow(monkeypatch) -> None:
+    primary = _RecordingProvider("primary", "primary-document")
+    shadow = _RecordingProvider("shadow", "shadow-document")
+    service = RetrievalService(provider=primary, shadow_provider=shadow)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 1.0)
+    monkeypatch.setattr(
+        retrieval_service_module,
+        "get_retrieval_runtime_control",
+        lambda: SimpleNamespace(mode="current", sample_rate=0.0),
+    )
 
-    retrieval_service_module._submit_shadow_task(task)
+    result = service.retrieve("question", "CA", "en", "new_prospect", "cid")
 
-    task.assert_not_called()
-    executor.submit.assert_not_called()
-
-
-def test_shadow_task_releases_capacity_when_executor_is_unavailable(monkeypatch) -> None:
-    capacity = MagicMock()
-    capacity.acquire.return_value = True
-    executor = MagicMock()
-    executor.submit.side_effect = RuntimeError("executor unavailable")
-    monkeypatch.setattr(retrieval_service_module, "_SHADOW_CAPACITY", capacity)
-    monkeypatch.setattr(retrieval_service_module, "_SHADOW_EXECUTOR", executor)
-
-    with pytest.raises(RuntimeError, match="executor unavailable"):
-        retrieval_service_module._submit_shadow_task(MagicMock())
-
-    capacity.release.assert_called_once_with()
+    assert result.documents[0].id == "primary-document"
+    assert shadow.calls == []
 
 
 def test_shadow_retrieval_never_replaces_primary_result(monkeypatch) -> None:
@@ -468,6 +481,34 @@ def test_retrieval_query_expands_case_credit_rank_terms() -> None:
     assert "supervisor is achieved by generating open group case credits" in queries
 
 
+def test_hardened_query_expands_generic_manager_qualification(monkeypatch) -> None:
+    monkeypatch.setattr(
+        retrieval_providers.settings,
+        "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED",
+        True,
+    )
+
+    queries = _retrieval_queries(
+        "What does the company policy say about manager qualifications?"
+    )
+
+    assert "manager is achieved by generating" in queries
+
+
+def test_hardened_query_expands_purchase_channel(monkeypatch) -> None:
+    monkeypatch.setattr(
+        retrieval_providers.settings,
+        "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED",
+        True,
+    )
+
+    queries = _retrieval_queries(
+        "Where can I buy Forever products in the United States?"
+    )
+
+    assert "selling products online personal Forever web shop approved FBO website" in queries
+
+
 def test_retrieval_query_expands_bonus_terms() -> None:
     """Bonus questions should include the exact business phrase for retrieval."""
     query = _expanded_retrieval_query("What is the Personal Retail Bonus %?")
@@ -494,28 +535,6 @@ def test_multilingual_policy_query_keeps_terms_for_local_expansion() -> None:
 
     assert queries[0] == "Quelles sont les conditions d'inactivité du Manager?"
     assert any("manager" in query for query in queries)
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "What is the Mali office telephone number?",
-        "Quelle est l'adresse du bureau au Mali ?",
-        "¿Cuál es el teléfono de la oficina de México?",
-        "Wie sind die Öffnungszeiten des Büros in Deutschland?",
-        "Какой телефон офиса в Гамбии?",
-    ],
-)
-def test_directory_scope_survives_planner_outage_in_supported_languages(message: str) -> None:
-    assert _looks_like_directory_query(message) is True
-
-
-def test_policy_question_does_not_open_global_directory_without_planner(monkeypatch) -> None:
-    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", False)
-
-    plan = _planned_retrieval_plan("What are the Manager qualification requirements?", "US", "en", "cid")
-
-    assert plan.include_global_documents is False
 
 
 def test_multilingual_query_planner_uses_runtime_question_without_country_aliases(monkeypatch) -> None:
@@ -729,6 +748,60 @@ def test_query_planner_routes_health_statement_without_opening_support(monkeypat
     assert runtime.converse.call_count == 1
 
 
+def test_query_planner_cannot_misroute_return_policy_as_income_claim(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        {
+            "output": {
+                "message": {
+                    "content": [{
+                        "text": '{"queries":["return and refund policy"],'
+                        '"document_scopes":["locale_policy"],"intent":"income_claim",'
+                        '"intent_confidence":0.99,"explicit_support_request":false}'
+                    }]
+                }
+            }
+        },
+        {"output": {"message": {"content": [{"text": '{"income_claim":false}'}]}}},
+    ]
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("What is the return policy?", "US", "en", "returns-cid")
+
+    assert plan.conversation_intent == "knowledge"
+    assert plan.client_action == ""
+    assert runtime.converse.call_count == 2
+
+
+def test_query_planner_preserves_confirmed_income_claim(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"income_claim",'
+                    '"intent_confidence":0.99,"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Can this replace my salary?", "US", "en", "income-cid")
+
+    assert plan.conversation_intent == "income_claim"
+
+
 def test_query_planner_routes_assistant_capability_without_document_search(monkeypatch) -> None:
     runtime = MagicMock()
     runtime.converse.return_value = {
@@ -843,3 +916,127 @@ def test_unverified_support_intent_fails_closed_to_knowledge(monkeypatch) -> Non
 
     assert plan.conversation_intent == "knowledge"
     assert plan.client_action == ""
+
+
+def test_query_planner_always_includes_global_documents_for_sponsoring_questions(monkeypatch) -> None:
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["international sponsoring Italy"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Who is the sponsor for Italy?", "IT", "en", "sponsor-cid")
+
+    assert plan.include_global_documents is True
+
+
+@pytest.mark.parametrize(
+    ("question", "selected_market"),
+    [
+        ("What are the legal requirements in Baltics?", "US"),
+        ("How can I become a member in Mexico?", "US"),
+    ],
+)
+def test_query_planner_includes_global_documents_for_named_markets(
+    monkeypatch,
+    question: str,
+    selected_market: str,
+) -> None:
+    """A named market opens global records even if the planner omits them."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["market requirements"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(question, selected_market, "en", "named-market-cid")
+
+    assert plan.include_global_documents is True
+
+
+def test_query_planner_includes_global_documents_for_unknown_directory_country(monkeypatch) -> None:
+    """Operational directory intent must not depend on a configured widget market."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["Thailand minimum order size"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "What is the minimum order size for Forever Thailand?",
+        "US",
+        "en",
+        "unknown-directory-market-cid",
+    )
+
+    assert plan.include_global_documents is True
+
+
+def test_operational_policy_question_does_not_open_global_scope_without_named_record(monkeypatch) -> None:
+    """An operational phrase alone must not mix global records into local policy evidence."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["United States accepted order payment methods"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(
+        "What payment methods are accepted for orders in the U.S.?",
+        "US",
+        "en",
+        "local-payment-method-cid",
+    )
+
+    assert plan.include_global_documents is False

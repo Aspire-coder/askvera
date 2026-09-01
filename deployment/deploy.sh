@@ -66,11 +66,53 @@ wait_for_local_health() {
   return 1
 }
 
+run_retrieval_canary() {
+  log "Running blocking retrieval-quality canary against the active index."
+  sudo -u "${APP_USER}" .venv/bin/python scripts/run_retrieval_canary.py --load-ssm
+}
+
+sync_runtime_configuration() {
+  log "Applying checked-in systemd and Nginx configuration."
+  install -m 0644 deployment/systemd/askvera.service /etc/systemd/system/askvera.service
+  install -m 0644 deployment/systemd/askvera-ingestion-worker.service /etc/systemd/system/askvera-ingestion-worker.service
+  install -m 0644 deployment/systemd/askvera-retention.service /etc/systemd/system/askvera-retention.service
+  install -m 0644 deployment/systemd/askvera-retention.timer /etc/systemd/system/askvera-retention.timer
+  install -m 0644 deployment/systemd/askvera-analytics-reports.service /etc/systemd/system/askvera-analytics-reports.service
+  install -m 0644 deployment/systemd/askvera-analytics-reports.timer /etc/systemd/system/askvera-analytics-reports.timer
+
+  if [[ -d /etc/nginx/conf.d ]]; then
+    install -m 0644 deployment/nginx/askvera.conf /etc/nginx/conf.d/askvera.conf
+  elif [[ -d /etc/nginx/sites-available ]]; then
+    install -m 0644 deployment/nginx/askvera.conf /etc/nginx/sites-available/askvera.conf
+    ln -sfn /etc/nginx/sites-available/askvera.conf /etc/nginx/sites-enabled/askvera.conf
+  else
+    echo "No supported Nginx configuration directory was found." >&2
+    return 1
+  fi
+
+  nginx -t
+  systemctl daemon-reload
+  systemctl enable askvera-retention.timer
+  systemctl restart askvera-retention.timer
+  systemctl enable askvera-analytics-reports.timer
+  systemctl restart askvera-analytics-reports.timer
+  if sudo -u "${APP_USER}" .venv/bin/python -c \
+    'from config import settings; settings.load_ssm_config(); raise SystemExit(0 if settings.ADMIN_INGESTION_QUEUE_ENABLED else 1)'; then
+    systemctl enable askvera-ingestion-worker.service
+    systemctl restart askvera-ingestion-worker.service
+  else
+    log "Durable ingestion queueing is disabled; keeping the worker stopped."
+    systemctl disable --now askvera-ingestion-worker.service || true
+  fi
+  systemctl reload nginx
+}
+
 rollback() {
   local previous_rev="$1"
   if [[ -n "${previous_rev}" ]]; then
     echo "Rolling back to ${previous_rev}" >&2
     sudo -u "${APP_USER}" git -C "${APP_DIR}" checkout "${previous_rev}"
+    sync_runtime_configuration || true
     systemctl restart "${SERVICE_NAME}"
     if wait_for_local_health; then
       PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh" || true
@@ -113,8 +155,8 @@ sudo -u "${APP_USER}" .venv/bin/python -m compileall app api config services uti
 log "Validating production configuration before restart."
 sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm --require-production
 
-log "Checking database migrations."
-sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm
+log "Applying ordered database migrations."
+sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm --apply
 
 if [[ "${RUN_TESTS}" == "true" ]]; then
   log "Running tests."
@@ -123,17 +165,16 @@ else
   log "Skipping tests by explicit request."
 fi
 
-log "Applying database migrations."
-sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm --apply
+sync_runtime_configuration
 
-log "Restarting ${SERVICE_NAME} and ingestion worker."
+log "Restarting ${SERVICE_NAME}."
 systemctl restart "${SERVICE_NAME}"
-systemctl restart askvera-ingestion-worker
 
 log "Running health checks."
 if ! wait_for_local_health ||
-  ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh"; then
-  echo "Health check failed after deploy." >&2
+  ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh" ||
+  ! run_retrieval_canary; then
+  echo "Health or retrieval-quality check failed after deploy." >&2
   rollback "${PREVIOUS_REV}"
   exit 1
 fi

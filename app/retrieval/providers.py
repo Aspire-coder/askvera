@@ -9,11 +9,14 @@ from typing import Any, Protocol
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.risk.models import RiskContext
+from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 from config import settings
 from services.aws_clients import get_aws_clients
+from services.market_config import find_market_mentions
 from utils.logging import get_logger
 
-from .glossary import glossary_queries
+from .glossary import approved_joined_term_queries, glossary_queries
 from .models import RetrievedDocument, RetrievalResult
 
 LOGGER = get_logger("app.retrieval.providers")
@@ -87,6 +90,111 @@ CAPITALIZED_STOPWORDS = {
 }
 
 RANK_ANCHOR_TERMS = {"manager", "supervisor"}
+RANK_MODIFIER_TERMS = {
+    "assistant",
+    "inherited",
+    "recognized",
+    "recognised",
+    "sponsored",
+    "transferred",
+    "unrecognized",
+    "unrecognised",
+}
+REQUIREMENT_INTENT_TERMS = {
+    "achieve",
+    "achieved",
+    "become",
+    "condition",
+    "conditions",
+    "criteria",
+    "qualification",
+    "qualifications",
+    "qualify",
+    "requirement",
+    "requirements",
+}
+PURCHASE_INTENT_TERMS = {"buy", "purchase", "purchasing", "shop"}
+
+SPONSORING_QUESTION_RE = re.compile(
+    r"\b(?:sponsor|sponsors|sponsorship|sponsoring|responsor|responsored|responsoring|"
+    r"international\s+sponsoring)\b",
+    re.IGNORECASE,
+)
+
+# Global directories also contain operational facts that are not limited to
+# office contact details. The runtime planner normally chooses this scope, but
+# this deterministic backstop prevents a planner omission from hiding an
+# approved record. It is intentionally phrased by intent rather than country,
+# so newly indexed directory countries work without source-code aliases.
+DIRECTORY_OPERATIONAL_QUESTION_RE = re.compile(
+    r"\b(?:minimum|first)\s+order(?:ing)?(?:\s+size)?\b|"
+    r"\bdelivery\s+(?:cost|charge|fee|time)\b|"
+    r"\b(?:average\s+)?lead\s+time\b|"
+    r"\bpayment\s+methods?\b|"
+    r"\bproduct\s+cent(?:er|re)s?\b|"
+    r"\b(?:sign\s*up|registration|register)\b|"
+    r"\bonline\s+(?:purchase|shop|shopping)\b|"
+    r"\bbusiness\s+hours?\b|"
+    r"\btelephone(?:\s+(?:number|office|orders))?\b|"
+    r"\bphone\s+number\b",
+    re.IGNORECASE,
+)
+FOREVER_NAMED_RECORD_RE = re.compile(
+    r"\bforever(?:\s+living(?:\s+products)?)?\s+"
+    r"(?!business\b|focus\b|fbo\b|living\b|policy\b|policies\b|product\b|products\b)"
+    r"[^\W\d_][\w'’-]*\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _verified_conversation_intent(
+    intent: str,
+    message: str,
+    country: str,
+    language: str,
+    correlation_id: str,
+    runtime: Any,
+) -> tuple[str, bool]:
+    """Require deterministic policy confirmation for high-impact refusals.
+
+    The query planner is an advisory semantic classifier. A false-positive
+    income label must never prevent retrieval of an ordinary policy question.
+    """
+    if intent != "income_claim":
+        return intent, False
+    context = RiskContext(
+        user_message=message,
+        country=country,
+        language=language,
+        role="",
+        correlation_id=correlation_id,
+    )
+    if IncomeClaimPolicy().evaluate(context):
+        return intent, False
+    system_prompt = (
+        "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
+        "income or earnings outcome. Factual questions about published compensation, bonuses, discounts, "
+        "returns, purchases, rank qualifications, or company policy are not income claims. Apply the same "
+        "rule in every language. Do not answer the user. Return only JSON."
+    )
+    user_prompt = (
+        f"Requested language: {language}\nUser message:\n{message}\n\n"
+        'Return exactly: {"income_claim":true} or {"income_claim":false}.'
+    )
+    try:
+        response = runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_SUPPORT_ROUTE_MAX_OUTPUT_TOKENS},
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        json_match = re.search(r"\{.*\}", text.strip(), flags=re.S)
+        payload = json.loads(json_match.group(0) if json_match else text)
+        return (intent, False) if payload.get("income_claim") is True else ("knowledge", True)
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("income_intent_verification_failed", correlation_id=correlation_id)
+        return intent, False
 
 
 class RetrievalProvider(Protocol):
@@ -155,22 +263,6 @@ def _fold_search_text(text: str) -> str:
     """
     decomposed = unicodedata.normalize("NFKD", text or "").casefold()
     return "".join(character for character in decomposed if not unicodedata.combining(character))
-
-
-DIRECTORY_INTENT_TERMS = {
-    "address", "adresse", "adres", "adresa", "адрес",
-    "business hours", "office hours", "opening hours", "horaires", "offnungszeiten",
-    "email", "e-mail", "correo", "courriel", "электронная почта",
-    "office", "bureau", "büro", "oficina", "ufficio", "kantoor", "kontor", "офис",
-    "phone", "telephone", "telefono", "telefon", "téléphone", "телефон",
-    "website", "web site", "sitio web", "site web", "webseite", "sito web",
-}
-
-
-def _looks_like_directory_query(message: str) -> bool:
-    """Keep global office lookups available when the optional planner is unavailable."""
-    folded = _fold_search_text(message)
-    return any(term in folded for term in DIRECTORY_INTENT_TERMS)
 
 
 def _tokens(text: str) -> set[str]:
@@ -243,6 +335,7 @@ def _retrieval_queries(message: str) -> list[str]:
     additions: list[str] = []
     priority_additions: list[str] = []
     message_terms = _tokens(message)
+    all_message_terms = set(_ordered_tokens_including_stopwords(message))
     phrases = _query_phrases(message)
 
     for phrase in phrases:
@@ -255,6 +348,14 @@ def _retrieval_queries(message: str) -> list[str]:
                 priority_additions.append(f"{phrase} is achieved by generating open group case credits")
             if len(phrase.split()) > 1 and any(term in phrase.split() for term in {"manager", "supervisor"}):
                 priority_additions.append(f"{phrase} is achieved by generating open group case credits")
+
+    if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED and all_message_terms & REQUIREMENT_INTENT_TERMS:
+        governing_query = _governing_requirement_query(message)
+        if governing_query:
+            priority_additions.append(governing_query)
+
+    if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED and _is_purchase_channel_question(message):
+        priority_additions.append("selling products online personal Forever web shop approved FBO website")
 
     if {"bonus", "bonuses"} & message_terms:
         additions.extend(
@@ -272,6 +373,30 @@ def _retrieval_queries(message: str) -> list[str]:
     if not unique_additions:
         return [message]
     return [message, *unique_additions[:4]]
+
+
+def _ordered_tokens_including_stopwords(text: str) -> list[str]:
+    """Return folded Unicode tokens without removing intent words."""
+    return re.findall(r"[^\W_]+", _fold_search_text(text), flags=re.UNICODE)
+
+
+def _governing_requirement_query(message: str) -> str:
+    """Build one bounded, country-neutral query for a named rank requirement."""
+    tokens = _ordered_tokens_including_stopwords(message)
+    for index, token in enumerate(tokens):
+        if token not in RANK_ANCHOR_TERMS:
+            continue
+        anchor = token
+        if index > 0 and tokens[index - 1] in RANK_MODIFIER_TERMS:
+            anchor = f"{tokens[index - 1]} {token}"
+        return f"{anchor} is achieved by generating"
+    return ""
+
+
+def _is_purchase_channel_question(message: str) -> bool:
+    """Identify questions asking where products may be purchased."""
+    terms = set(_ordered_tokens_including_stopwords(message))
+    return bool(terms & PURCHASE_INTENT_TERMS) or ({"where", "order"} <= terms)
 
 
 def _parse_planned_query_plan(text: str) -> tuple[list[str], bool, bool, str, str, float, bool]:
@@ -381,11 +506,13 @@ def _planned_retrieval_plan(
 ) -> RetrievalQueryPlan:
     """Create multilingual search phrases and choose relevant document scopes."""
     base_queries = _retrieval_queries(message)
+    joined_term_queries = approved_joined_term_queries(message, country, language)
     glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
+        # Preserve directory availability when the planner is intentionally off.
         return RetrievalQueryPlan(
-            [*base_queries, *glossary],
-            include_global_documents=_looks_like_directory_query(message),
+            [*base_queries, *joined_term_queries, *glossary],
+            include_global_documents=True,
         )
 
     system_prompt = (
@@ -397,9 +524,10 @@ def _planned_retrieval_plan(
         "preserves the user's intent. "
         "Fix obvious typos. If the question is not in English, include English search phrases too. "
         "Also choose document scopes. Use locale_policy for company-policy rules, definitions, fees, returns, "
-        "bonuses, ranks, and document-section questions. Add global_directory only when the user asks for an "
-        "office, address, phone number, email address, website, or named staff contact. A market or country name "
-        "inside a policy question does not make it a directory question. Do not invent facts, numbers, percentages, "
+        "bonuses, ranks, and document-section questions. Add global_directory when the user asks for an "
+        "office, address, phone number, email address, website, named staff contact, international sponsoring, "
+        "or operational information about a specifically named market. Keep locale_policy as well when the "
+        "question may involve a policy rule. Do not invent facts, numbers, percentages, "
         "section IDs, or answers. Set answer_shape to document_structure only when the user asks where a topic "
         "appears, which section or chapter contains it, or requests a document outline; otherwise use content. "
         "Classify the conversation intent as knowledge, assistant_meta, medical_claim, income_claim, off_topic, "
@@ -442,14 +570,43 @@ def _planned_retrieval_plan(
             intent_confidence,
             explicit_support,
         ) = _parse_planned_query_plan(text)
+        # Global directories include sponsoring and operational records for
+        # named markets. Keep the model planner as a helpful hint, but enforce
+        # this scope from shared market configuration so planner omissions do
+        # not hide approved cross-market evidence.
+        named_markets = find_market_mentions(message)
+        include_global_documents = (
+            include_global_documents
+            or bool(SPONSORING_QUESTION_RE.search(message or ""))
+            or bool(named_markets)
+            or bool(DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries])))
+            and bool(FOREVER_NAMED_RECORD_RE.search(message or ""))
+        )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
         # Keep approved terminology expansion even when the optional planner is
         # unavailable. The original query remains first, and all normal locale
         # and document-scope filters still apply downstream.
         return RetrievalQueryPlan(
-            [*base_queries, *glossary],
-            include_global_documents=_looks_like_directory_query(message),
+            [*base_queries, *joined_term_queries, *glossary],
+            include_global_documents=True,
+        )
+
+    conversation_intent, intent_overridden = _verified_conversation_intent(
+        conversation_intent,
+        message,
+        country,
+        language,
+        correlation_id,
+        runtime,
+    )
+    if intent_overridden:
+        conversation_subtype = ""
+        LOGGER.warning(
+            "query_planner_intent_overridden",
+            correlation_id=correlation_id,
+            planner_intent="income_claim",
+            verified_intent=conversation_intent,
         )
 
     if conversation_intent == "assistant_meta":
@@ -475,7 +632,7 @@ def _planned_retrieval_plan(
         intent_confidence = 0.0
 
     merged: list[str] = []
-    for query in [message, *planned_queries, *base_queries[1:], *glossary]:
+    for query in [message, *joined_term_queries, *planned_queries, *base_queries[1:], *glossary]:
         cleaned = re.sub(r"\s+", " ", query).strip()
         if cleaned and cleaned not in merged:
             merged.append(cleaned)
@@ -483,7 +640,9 @@ def _planned_retrieval_plan(
         "query_planner_success",
         correlation_id=correlation_id,
         planned_query_count=len(planned_queries),
+        joined_term_query_count=len(joined_term_queries),
         glossary_query_count=len(glossary),
+        named_market_count=len(find_market_mentions(message)),
         query_count=len(merged),
         include_global_documents=include_global_documents,
         prefer_outline=prefer_outline,

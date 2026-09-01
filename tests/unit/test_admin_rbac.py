@@ -35,6 +35,166 @@ def test_country_scoped_viewer_can_open_section_before_market_filtering() -> Non
     assert admin_users.accessible_markets(principal, "flow", "view") == {"GB"}
 
 
+def test_only_super_admin_can_reset_answer_cache(monkeypatch) -> None:
+    called = False
+
+    def reset_stub(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(admin_routes, "reset_answer_cache", reset_stub)
+    body = admin_routes.CacheResetInput(
+        country="US",
+        mode="exact_and_semantic",
+        reason="Published policy correction",
+        confirmation="RESET US",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.operational_cache_reset(body, _request(_principal()))
+
+    assert exc_info.value.status_code == 403
+    assert not called
+
+
+def test_super_admin_cache_reset_requires_exact_confirmation(monkeypatch) -> None:
+    monkeypatch.setattr(admin_routes, "get_country_codes", lambda: {"US"})
+    monkeypatch.setattr(admin_routes, "get_widget_country_codes", lambda: {"US"})
+    body = admin_routes.CacheResetInput(
+        country="US",
+        mode="exact",
+        reason="Published policy correction",
+        confirmation="RESET ALL",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.operational_cache_reset(
+            body, _request(_principal(role="super_admin"))
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "RESET US" in exc_info.value.detail
+
+
+def test_super_admin_cache_reset_is_audited(monkeypatch) -> None:
+    captured: dict = {}
+    monkeypatch.setattr(admin_routes, "get_country_codes", lambda: {"US"})
+    monkeypatch.setattr(admin_routes, "get_widget_country_codes", lambda: {"US"})
+    monkeypatch.setattr(
+        admin_routes,
+        "reset_answer_cache",
+        lambda *_args, **_kwargs: {
+            "country": "US",
+            "mode": "exact_and_semantic",
+            "exact_deleted": 3,
+            "semantic_deleted": 2,
+            "total_deleted": 5,
+            "completed_at": "2026-08-19T12:00:00+00:00",
+            "duration_ms": 4,
+        },
+    )
+
+    def audit_stub(actor, action, target, metadata=None):
+        captured.update(actor=actor, action=action, target=target, metadata=metadata)
+
+    monkeypatch.setattr(admin_routes, "record_admin_audit_event", audit_stub)
+    body = admin_routes.CacheResetInput(
+        country="us",
+        mode="exact_and_semantic",
+        reason="Published policy correction",
+        confirmation="reset us",
+    )
+
+    response = admin_routes.operational_cache_reset(
+        body, _request(_principal(role="super_admin"))
+    )
+
+    assert response["data"]["total_deleted"] == 5
+    assert captured["action"] == "operations.answer_cache_reset"
+    assert captured["target"] == "US"
+    assert captured["metadata"]["reason"] == "Published policy correction"
+    assert captured["metadata"]["total_deleted"] == 5
+
+
+def _profile_status(mode: str = "current", *, ready: bool = True) -> dict:
+    return {
+        "control": {"mode": mode, "sample_rate": 0.0},
+        "primary": {"pipeline_version": "current-v1", "index": "current-index"},
+        "candidate": {
+            "ready": ready,
+            "readiness_error": "Candidate index is not ready." if not ready else "",
+            "pipeline_version": "candidate-v1",
+            "index": "candidate-index",
+        },
+    }
+
+
+def test_only_super_admin_can_change_retrieval_profile(monkeypatch) -> None:
+    monkeypatch.setattr(admin_routes, "retrieval_profile_status", lambda: _profile_status())
+    body = admin_routes.RetrievalProfileInput(
+        mode="shadow",
+        sample_rate=0.1,
+        reason="Compare candidate retrieval safely",
+        confirmation="ENABLE SHADOW",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.operational_retrieval_profile_update(body, _request(_principal()))
+
+    assert exc_info.value.status_code == 403
+
+
+def test_shadow_profile_requires_ready_isolated_candidate(monkeypatch) -> None:
+    monkeypatch.setattr(admin_routes, "retrieval_profile_status", lambda: _profile_status(ready=False))
+    body = admin_routes.RetrievalProfileInput(
+        mode="shadow",
+        sample_rate=0.1,
+        reason="Compare candidate retrieval safely",
+        confirmation="ENABLE SHADOW",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.operational_retrieval_profile_update(
+            body, _request(_principal(role="super_admin"))
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+def test_super_admin_shadow_profile_update_is_audited(monkeypatch) -> None:
+    captured: dict = {}
+    statuses = iter([_profile_status(), _profile_status("shadow")])
+    monkeypatch.setattr(admin_routes, "retrieval_profile_status", lambda: next(statuses))
+    monkeypatch.setattr(
+        admin_routes,
+        "set_retrieval_runtime_control",
+        lambda mode, rate, **_kwargs: SimpleNamespace(mode=mode, sample_rate=rate),
+    )
+    monkeypatch.setattr(
+        admin_routes,
+        "record_admin_audit_event",
+        lambda actor, action, target, metadata=None: captured.update(
+            actor=actor, action=action, target=target, metadata=metadata
+        ),
+    )
+    body = admin_routes.RetrievalProfileInput(
+        mode="shadow",
+        sample_rate=0.1,
+        reason="Compare candidate retrieval safely",
+        confirmation="ENABLE SHADOW",
+    )
+
+    response = admin_routes.operational_retrieval_profile_update(
+        body, _request(_principal(role="super_admin"))
+    )
+
+    assert response["data"]["control"]["mode"] == "shadow"
+    assert captured["action"] == "operations.retrieval_profile_updated"
+    assert captured["metadata"]["previous_mode"] == "current"
+    assert captured["metadata"]["mode"] == "shadow"
+
+
 def test_permission_hierarchy_is_section_specific() -> None:
     principal = _principal(
         {"market": "CA", "section": "knowledge", "permission": "publish"},
@@ -83,6 +243,18 @@ def test_ingestion_list_includes_local_and_global_records(monkeypatch) -> None:
     assert [item["job_id"] for item in response["data"]] == ["ca", "global"]
 
 
+def test_support_route_list_is_filtered_to_authorized_market(monkeypatch) -> None:
+    principal = _principal({"market": "CA", "section": "support", "permission": "view"})
+    monkeypatch.setattr(admin_routes, "list_support_routes", lambda: [
+        {"country": "CA", "email": "ca@example.com"},
+        {"country": "US", "email": "us@example.com"},
+    ])
+
+    response = admin_routes.support_routes_list(_request(principal))
+
+    assert response["data"] == [{"country": "CA", "email": "ca@example.com"}]
+
+
 def test_country_publisher_cannot_upload_global_content() -> None:
     principal = _principal({"market": "CA", "section": "knowledge", "permission": "publish"})
 
@@ -126,6 +298,34 @@ def test_insights_rejects_unassigned_market() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         admin_routes.overview(_request(principal), country="US")
+
+    assert exc_info.value.status_code == 403
+
+
+def test_model_routing_report_is_limited_to_assigned_markets(monkeypatch) -> None:
+    principal = _principal(
+        {"market": "DE", "section": "insights", "permission": "view"},
+        {"market": "CH", "section": "insights", "permission": "view"},
+    )
+    captured: dict = {}
+
+    def routing_stub(**kwargs):
+        captured.update(kwargs)
+        return {"totals": {"evaluated": 2}}
+
+    monkeypatch.setattr(admin_routes, "model_routing_report", routing_stub)
+
+    response = admin_routes.model_routing_analytics(_request(principal), days=7)
+
+    assert response["data"]["totals"]["evaluated"] == 2
+    assert captured["allowed_countries"] == {"DE", "CH"}
+
+
+def test_model_routing_report_rejects_unassigned_market() -> None:
+    principal = _principal({"market": "CA", "section": "insights", "permission": "view"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.model_routing_analytics(_request(principal), country="US")
 
     assert exc_info.value.status_code == 403
 

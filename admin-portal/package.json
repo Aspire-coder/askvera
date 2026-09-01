@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5176",
     "build": "tsc --noEmit && vite build",
+    "validate-production-build": "node scripts/validate-production-build.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1 --port 4176"
   },
@@ -14,7 +15,7 @@
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "typescript": "5.9.3",
-    "vite": "8.1.5"
+    "vite": "8.2.1"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

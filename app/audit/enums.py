@@ -19,6 +19,7 @@ class AuditEventType(str, Enum):
 
     CACHE_HIT = "CACHE_HIT"
     CACHE_MISS = "CACHE_MISS"
+    SEMANTIC_CACHE_SHADOW = "SEMANTIC_CACHE_SHADOW"
 
     ERROR = "ERROR"
 

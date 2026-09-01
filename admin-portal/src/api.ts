@@ -3,6 +3,7 @@ import {
   demoConfig,
   demoInteractions,
   demoJobs,
+  demoModelRouting,
   demoOverview,
   demoShadowReport,
   demoTrace
@@ -13,11 +14,17 @@ import type {
   AdminScope,
   AdminUser,
   AnalyticsOverview,
+  AnalyticsSavedView,
   IngestionJob,
   IngestionPreview,
   IngestionPreviewTest,
+  KnowledgeGeneration,
   InteractionPage,
   MarketReadiness,
+  ModelRoutingReport,
+  OperationsStatus,
+  RetrievalProfileStatus,
+  CacheResetResult,
   PipelineTrace,
   ShadowReport,
   SupportRoute,
@@ -26,71 +33,143 @@ import type {
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
 const ALLOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEMO === "true";
-const REQUEST_TIMEOUT_MS = 15_000;
-const FILE_REQUEST_TIMEOUT_MS = 120_000;
 
 type Envelope<T> = { success: boolean; data?: T; error?: { message?: string } };
 export type AdminCredentials = { accessToken?: string; apiKey?: string };
-type RequestOptions = RequestInit & { timeoutMs?: number };
+
+export class AdminApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "AdminApiError";
+  }
+}
+
+const signalExpiredSession = (response: Response) => {
+  if (response.status === 401) window.dispatchEvent(new Event("askvera:auth-expired"));
+};
+
+const responseError = async (response: Response, fallback: string): Promise<AdminApiError> => {
+  signalExpiredSession(response);
+  const text = await response.text();
+  let message = "";
+  if (text) {
+    try {
+      const payload = JSON.parse(text) as Envelope<unknown> & { detail?: string };
+      message = payload.error?.message || payload.detail || "";
+    } catch {
+      message = "";
+    }
+  }
+  return new AdminApiError(message || `${fallback} (${response.status})`, response.status);
+};
 
 export class AdminApi {
   constructor(private readonly credentials: AdminCredentials) {}
 
-  private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    const { timeoutMs = REQUEST_TIMEOUT_MS, ...init } = options;
-    const timeout = AbortSignal.timeout(timeoutMs);
-    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE}${path}`, {
-        ...init,
-        signal,
-        headers: {
-          ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
-          ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {}),
-          ...(init.headers || {})
-        }
-      });
-    } catch (error) {
-      if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name)) {
-        throw new Error("The operations API did not respond in time.");
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {}),
+        ...(init?.headers || {})
       }
-      throw new Error("The operations API could not be reached.");
+    });
+    if (!response.ok) throw await responseError(response, "Request failed");
+    const text = await response.text();
+    let payload: Envelope<T> & { detail?: string };
+    try {
+      payload = JSON.parse(text) as Envelope<T> & { detail?: string };
+    } catch {
+      throw new AdminApiError("The service returned an invalid response.", response.status);
     }
-    const payload = await response.json().catch(() => ({})) as Envelope<T> & { detail?: string };
     if (!response.ok || payload.success === false || payload.data === undefined) {
-      throw new Error(payload.error?.message || payload.detail || `Request failed (${response.status})`);
+      throw new AdminApiError(payload.error?.message || payload.detail || `Request failed (${response.status})`, response.status);
     }
     return payload.data;
   }
 
-  private async requestBlob(path: string): Promise<Blob> {
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE}${path}`, {
-        signal: AbortSignal.timeout(FILE_REQUEST_TIMEOUT_MS),
-        headers: {
-          ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
-          ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
-        }
-      });
-    } catch {
-      throw new Error("The export could not be downloaded from the operations API.");
-    }
-    if (!response.ok) throw new Error(`Export failed (${response.status})`);
-    return response.blob();
-  }
-
   config() { return this.request<AdminConfig>("/api/admin/config"); }
   marketReadiness() { return this.request<MarketReadiness>("/api/admin/market-readiness"); }
+  updateMarketGovernance(country: string, body: { owner_email: string; deadline: string }) {
+    return this.request<{ owner_email: string; deadline: string }>(`/api/admin/market-readiness/${encodeURIComponent(country)}/governance`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  operationsStatus() { return this.request<OperationsStatus>("/api/admin/operations/status"); }
+  retrievalProfile() { return this.request<RetrievalProfileStatus>("/api/admin/operations/retrieval-profile"); }
+  updateRetrievalProfile(body: { mode: "current" | "shadow"; sample_rate: number; reason: string; confirmation: string }) {
+    return this.request<RetrievalProfileStatus>("/api/admin/operations/retrieval-profile", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  resetAnswerCache(body: { country: string; mode: "exact" | "exact_and_semantic"; reason: string; confirmation: string }) {
+    return this.request<CacheResetResult>("/api/admin/operations/cache/reset", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
+  trace(correlationId: string) { return this.request<PipelineTrace>(`/api/admin/traces/${encodeURIComponent(correlationId)}`); }
+  async streamTraces(onTraces: (traces: PipelineTrace[]) => void, signal: AbortSignal): Promise<void> {
+    const response = await fetch(`${API_BASE}/api/admin/traces/stream`, {
+      signal,
+      headers: {
+        Accept: "text/event-stream",
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+      }
+    });
+    if (!response.ok) throw await responseError(response, "Trace stream failed");
+    if (!response.body) throw new AdminApiError("Trace stream is unavailable.", response.status);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        const data = event.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+        if (data) onTraces(JSON.parse(data) as PipelineTrace[]);
+      }
+    }
+  }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
+  modelRouting(filters: URLSearchParams) { return this.request<ModelRoutingReport>(`/api/admin/analytics/model-routing?${filters}`); }
   interactions(filters: URLSearchParams) { return this.request<InteractionPage>(`/api/admin/analytics/interactions?${filters}`); }
+  updateInteractionReview(correlationId: string, body: { status: string; assignee_email: string; resolution_notes: string }) {
+    return this.request<{ status: string; assignee_email: string; resolution_notes: string }>(`/api/admin/analytics/interactions/${encodeURIComponent(correlationId)}/review`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  savedAnalyticsViews() { return this.request<AnalyticsSavedView[]>("/api/admin/analytics/saved-views"); }
+  saveAnalyticsView(body: { id?: string; name: string; filters: Record<string, string>; schedule: string; report_email: string; alert_not_helpful_threshold: number | null }) {
+    return this.request<AnalyticsSavedView>("/api/admin/analytics/saved-views", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  deleteAnalyticsView(id: string) { return this.request<{ deleted: boolean }>(`/api/admin/analytics/saved-views/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   async exportInteractions(filters: URLSearchParams): Promise<Blob> {
-    return this.requestBlob(`/api/admin/analytics/interactions.csv?${filters}`);
+    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.csv?${filters}`, {
+      headers: {
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+      }
+    });
+    if (!response.ok) throw await responseError(response, "Export failed");
+    return response.blob();
   }
   async exportInteractionsXlsx(filters: URLSearchParams): Promise<Blob> {
-    return this.requestBlob(`/api/admin/analytics/interactions.xlsx?${filters}`);
+    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.xlsx?${filters}`, {
+      headers: {
+        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+      }
+    });
+    if (!response.ok) throw await responseError(response, "Excel export failed");
+    return response.blob();
   }
   retrievalShadow(filters: URLSearchParams) {
     return this.request<ShadowReport>(`/api/admin/analytics/retrieval-shadow?${filters}`);
@@ -109,12 +188,18 @@ export class AdminApi {
   publishIngestion(jobId: string) {
     return this.request<{ job: IngestionJob; publishedCount: number }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/publish`, { method: "POST" });
   }
+  deleteIngestion(jobId: string) {
+    return this.request<{ job: IngestionJob; message: string }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+  }
+  ingestionGenerations(jobId: string) { return this.request<KnowledgeGeneration[]>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/generations`); }
+  rollbackIngestion(jobId: string, targetIngestionId: string) {
+    return this.request<{ active_ingestion_id: string; previous_ingestion_id: string }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/rollback/${encodeURIComponent(targetIngestionId)}`, { method: "POST" });
+  }
   upload(formData: FormData, signal?: AbortSignal) {
     return this.request<{ jobId: string; filename: string; detectedFormat?: { format?: string; media_type?: string }; status: string; message: string }>("/api/admin/documents", {
       method: "POST",
       body: formData,
-      signal,
-      timeoutMs: FILE_REQUEST_TIMEOUT_MS
+      signal
     });
   }
   users() { return this.request<AdminUser[]>("/api/admin/users"); }
@@ -139,23 +224,33 @@ export class AdminApi {
   resendInvite(id: string) {
     return this.request<AdminUser>(`/api/admin/users/${id}/resend-invite`, { method: "POST" });
   }
+  certifyUser(id: string) { return this.request<AdminUser>(`/api/admin/users/${id}/certify`, { method: "POST" }); }
   supportRoutes() { return this.request<SupportRoute[]>("/api/admin/support-routes"); }
-  updateSupportRoute(country: string, body: { department: string; email: string; enabled: boolean }) {
+  updateSupportRoute(country: string, body: { department: string; email: string; fallback_department: string; fallback_email: string; enabled: boolean }) {
     return this.request<SupportRoute>(`/api/admin/support-routes/${country}`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
+  bulkUpdateSupportRoutes(countries: string[], route: { department: string; email: string; fallback_department: string; fallback_email: string; enabled: boolean }) {
+    return this.request<SupportRoute[]>("/api/admin/support-routes/bulk", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countries, route }) });
+  }
+  testSupportRoute(country: string) { return this.request<{ status: string; message_id: string }>(`/api/admin/support-routes/${country}/test`, { method: "POST" }); }
+  supportRouteHistory(country: string) { return this.request<AdminAuditEvent[]>(`/api/admin/support-routes/${country}/history`); }
   widgetConfigs() { return this.request<WidgetConfig[]>("/api/admin/widget-configs"); }
-  createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
+  createWidgetConfig(body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
     return this.request<WidgetConfig>("/api/admin/widget-configs", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
-  updateWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">) {
+  updateWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
     return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
   }
+  stageWidgetConfig(id: string, body: Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">) {
+    return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/draft`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+  publishWidgetConfig(id: string) { return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/publish`, { method: "POST" }); }
   rotateWidgetKey(id: string) {
     return this.request<WidgetConfig>(`/api/admin/widget-configs/${id}/rotate-key`, { method: "POST" });
   }
@@ -165,13 +260,11 @@ export class AdminApi {
   uploadWidgetLogo(file: File) {
     const form = new FormData();
     form.append("file", file);
-    return this.request<{ url: string }>("/api/admin/widget-assets", {
-      method: "POST", body: form, timeoutMs: FILE_REQUEST_TIMEOUT_MS
-    });
+    return this.request<{ url: string }>("/api/admin/widget-assets", { method: "POST", body: form });
   }
 }
 
-export type DataMode = "live" | "demo" | "unavailable";
+export type DataMode = "live" | "demo";
 
 export async function withDemoFallback<T>(live: () => Promise<T>, fallback: T): Promise<{ data: T; mode: DataMode }> {
   try {
@@ -186,30 +279,8 @@ export const demo = {
   config: demoConfig,
   traces: [demoTrace, demoCachedTrace],
   overview: demoOverview,
+  modelRouting: demoModelRouting,
   shadowReport: demoShadowReport,
   interactions: demoInteractions,
   jobs: demoJobs
-};
-
-export const empty = {
-  config: { ...demoConfig, countries: [], widgetCountries: [], documentTypes: [], accessScopes: [] },
-  overview: {
-    ...demoOverview,
-    totals: {
-      questions: 0, users: 0, liveSessions: 0, inputTokens: 0, outputTokens: 0, tokens: 0,
-      averageConfidence: 0, unanswered: 0, helpful: 0, notHelpful: 0, helpfulRate: 0
-    },
-    topics: [], countries: [], languages: [], trend: []
-  },
-  shadowReport: {
-    ...demoShadowReport,
-    totals: {
-      comparisons: 0, topMatches: 0, topMatchRate: 0, averageOverlap: 0,
-      vnextConfidenceWins: 0, vnextConfidenceWinRate: 0, primaryConfidence: 0,
-      vnextConfidence: 0, averageDurationMs: 0
-    },
-    countries: [], languages: [], trend: [], disagreements: []
-  },
-  interactions: [],
-  jobs: []
 };

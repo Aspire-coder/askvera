@@ -4,6 +4,7 @@ param(
   [string]$PortalDomain = "operations.vera-api.xyz",
   [string]$CertificateArn = "",
   [string]$ApiOrigin = "https://api.vera-api.xyz",
+  [ValidateSet("true", "false")][string]$EnableWebAcl = "true",
   [Parameter(Mandatory = $true)][string]$CognitoDomainPrefix
 )
 
@@ -18,6 +19,16 @@ function Assert-NativeCommandSucceeded([string]$Operation) {
   }
 }
 
+if (-not $CertificateArn) {
+  $CertificateArn = aws cloudformation describe-stacks `
+    --stack-name $StackName `
+    --region $Region `
+    --query "Stacks[0].Parameters[?ParameterKey=='CertificateArn'].ParameterValue | [0]" `
+    --output text
+  Assert-NativeCommandSucceeded "Read existing portal certificate configuration"
+  if ($CertificateArn -eq "None") { $CertificateArn = "" }
+}
+
 aws cloudformation deploy `
   --template-file $template `
   --stack-name $StackName `
@@ -26,9 +37,16 @@ aws cloudformation deploy `
     "PortalDomainName=$PortalDomain" `
     "CertificateArn=$CertificateArn" `
     "ApiOrigin=$ApiOrigin" `
+    "EnableWebAcl=$EnableWebAcl" `
     "CognitoDomainPrefix=$CognitoDomainPrefix" `
   --no-fail-on-empty-changeset
 Assert-NativeCommandSucceeded "CloudFormation deployment"
+
+aws cloudformation update-termination-protection `
+  --stack-name $StackName `
+  --region $Region `
+  --enable-termination-protection
+Assert-NativeCommandSucceeded "Enable stack termination protection"
 
 function Get-StackOutput([string]$Key) {
   return aws cloudformation describe-stacks `
@@ -58,10 +76,34 @@ try {
   Assert-NativeCommandSucceeded "Dependency installation"
   npm run build
   Assert-NativeCommandSucceeded "Portal build"
+  npm run validate-production-build
+  Assert-NativeCommandSucceeded "Production build feature validation"
   aws s3 sync dist "s3://$bucket/" --delete --region $Region
   Assert-NativeCommandSucceeded "Portal upload"
-  aws cloudfront create-invalidation --distribution-id $distribution --paths "/*"
+  $invalidation = aws cloudfront create-invalidation --distribution-id $distribution --paths "/*" | ConvertFrom-Json
   Assert-NativeCommandSucceeded "CloudFront invalidation"
+  aws cloudfront wait invalidation-completed --distribution-id $distribution --id $invalidation.Invalidation.Id
+  Assert-NativeCommandSucceeded "CloudFront invalidation wait"
+  $verified = $false
+  $lastVerificationError = ""
+  for ($attempt = 1; $attempt -le 6 -and -not $verified; $attempt++) {
+    try {
+      $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+      $liveHtml = (Invoke-WebRequest -Uri "$portalUrl/?release=verify-$cacheBust" -UseBasicParsing).Content
+      $liveAsset = [regex]::Match($liveHtml, 'assets/index-[^"'']+\.js').Value
+      if (-not $liveAsset) { throw "Live portal does not reference an application bundle." }
+      $liveAssetResponse = Invoke-WebRequest -Uri "$portalUrl/$liveAsset?release=verify-$cacheBust" -UseBasicParsing
+      if ($liveAssetResponse.StatusCode -ne 200) { throw "Live portal application bundle returned HTTP $($liveAssetResponse.StatusCode)." }
+      $assetKey = $liveAsset -replace '^/+', ''
+      aws s3api head-object --bucket $bucket --key $assetKey --region $Region | Out-Null
+      Assert-NativeCommandSucceeded "Verify uploaded portal application bundle"
+      $verified = $true
+    } catch {
+      $lastVerificationError = $_.Exception.Message
+      if ($attempt -lt 6) { Start-Sleep -Seconds 3 }
+    }
+  }
+  if (-not $verified) { throw "Live portal verification failed after 6 attempts: $lastVerificationError" }
 } finally {
   Pop-Location
 }

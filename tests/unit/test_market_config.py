@@ -170,6 +170,15 @@ def test_kyrgyzstan_is_published_in_russian_only() -> None:
     ]
 
 
+def test_market_mentions_are_loaded_from_shared_configuration() -> None:
+    """Retrieval recognizes configured names without country-specific code."""
+    market_config.load_market_config.cache_clear()
+
+    assert market_config.find_market_mentions("What are the requirements in Baltics?") == {"BALTICS"}
+    assert market_config.find_market_mentions("How can I become a member in Mexico?") == {"MX"}
+    assert market_config.find_market_mentions("What is required for it to work?") == set()
+
+
 def test_chat_request_accepts_published_sweden_languages() -> None:
     """Sweden accepts only the two company-policy languages being published."""
     market_config.load_market_config.cache_clear()

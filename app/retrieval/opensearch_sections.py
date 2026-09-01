@@ -18,17 +18,31 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
-from services.market_config import get_document_country_codes, load_market_config
+from services.market_config import find_market_mentions, get_countries, get_document_country_codes
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
-from .experiments import diversify_by_parent, reciprocal_rank_fusion
-from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
+from .providers import (
+    RetrievalQueryPlan,
+    _document_relevance,
+    _planned_retrieval_plan,
+    _planned_retrieval_queries,
+)
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
+from .typo_safety import safe_typo_ranking_queries
 
 LOGGER = get_logger("app.retrieval.opensearch_sections")
+
+GLOBAL_DIRECTORY_DOCUMENT_TYPES = (
+    "office_directory",
+    "international_sponsoring_directory",
+)
+_DIRECTORY_DETAIL_RE = re.compile(
+    r"\b(?:address|business\s+hours?|email|office|phone|telephone|website|contact)\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -57,6 +71,14 @@ def _client() -> OpenSearch:
         max_retries=settings.AWS_MAX_ATTEMPTS,
         retry_on_timeout=True,
     )
+
+
+def opensearch_index_exists(index_name: str) -> bool:
+    """Return whether a named retrieval index exists without exposing client details."""
+    normalized = str(index_name or "").strip()
+    if not normalized:
+        return False
+    return bool(_client().indices.exists(index=normalized))
 
 
 def _language_filter(language: str) -> dict[str, Any]:
@@ -263,76 +285,52 @@ def _exact_section_query(section_id: str, country: str, language: str) -> dict[s
     }
 
 
-@lru_cache(maxsize=1)
-def _directory_country_aliases() -> tuple[tuple[str, tuple[str, ...]], ...]:
-    """Return content-managed country names and their unambiguous aliases."""
-    countries = []
-    for market in load_market_config().get("markets", []):
-        name = str(market.get("name") or "").strip()
-        code = str(market.get("code") or "").strip().upper()
-        normalized_name = _normalize_text(name)
-        if not normalized_name:
-            continue
-        acronym = "".join(part[0] for part in normalized_name.split() if part).upper()
-        aliases = tuple(alias for alias in {code, acronym} if len(alias) >= 2)
-        countries.append((name, aliases))
-    return tuple(sorted(countries, key=lambda item: len(item[0]), reverse=True))
-
-
-def _requested_directory_country(message: str) -> str:
-    """Resolve only an explicitly named country; never guess from widget market."""
-    normalized = f" {_normalize_text(message)} "
-    uppercase_tokens = set(re.findall(r"\b[A-Z]{2,3}\b", message or ""))
-    for name, aliases in _directory_country_aliases():
-        if f" {_normalize_text(name)} " in normalized or uppercase_tokens.intersection(aliases):
-            return name
-    return ""
-
-
-def _directory_text_query(message: str, record_country: str = "") -> dict[str, Any]:
+def _directory_text_query(
+    message: str,
+    target_country_names: set[str] | None = None,
+) -> dict[str, Any]:
     """Build a metadata-aware query for globally available directory records."""
-    query = {
+    should_queries: list[dict[str, Any]] = [
+        {
+            "multi_match": {
+                "query": message,
+                "fields": [
+                    "metadata.record_country^12",
+                    "section_title^10",
+                    "content^4",
+                    "search_text^2",
+                ],
+                "type": "best_fields",
+                "operator": "or",
+                "fuzziness": "AUTO",
+            }
+        },
+        {"match_phrase": {"metadata.record_country": {"query": message, "boost": 18}}},
+        {"match_phrase": {"section_title": {"query": message, "boost": 8}}},
+    ]
+    for name in sorted(target_country_names or set()):
+        should_queries.append(
+            {"match_phrase": {"metadata.record_country": {"query": name, "boost": 40}}}
+        )
+    return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "bool": {
                 "filter": [
                     _scope_filter("", "", "global"),
                     {"term": {"status": "active"}},
-                    {"term": {"document_type": "office_directory"}},
+                    {"terms": {"document_type": list(GLOBAL_DIRECTORY_DOCUMENT_TYPES)}},
                     *_generation_filters(
                         "",
                         "en",
                         "global",
-                        document_type="office_directory",
                     ),
                 ],
-                "should": [
-                    {
-                        "multi_match": {
-                            "query": message,
-                            "fields": [
-                                "metadata.record_country^12",
-                                "section_title^10",
-                                "content^4",
-                                "search_text^2",
-                            ],
-                            "type": "best_fields",
-                            "operator": "or",
-                            "fuzziness": "AUTO",
-                        }
-                    },
-                    {"match_phrase": {"metadata.record_country": {"query": message, "boost": 18}}},
-                    {"match_phrase": {"section_title": {"query": message, "boost": 8}}},
-                ],
+                "should": should_queries,
                 "minimum_should_match": 1,
             }
         },
     }
-    if record_country:
-        query["query"]["bool"]["filter"].append(
-            exact_term_query("metadata.record_country", record_country)
-        )
-    return query
 
 
 def _outline_text_query(message: str, country: str, language: str) -> dict[str, Any]:
@@ -342,15 +340,29 @@ def _outline_text_query(message: str, country: str, language: str) -> dict[str, 
     return query
 
 
-def _directory_record_country_score(message: str, row: dict[str, Any]) -> float:
+def _directory_record_country_score(
+    message: str,
+    row: dict[str, Any],
+    target_country_names: set[str] | None = None,
+) -> float:
     """Reward directory records whose own country metadata matches the query."""
-    if row.get("document_type") != "office_directory":
+    if row.get("document_type") not in GLOBAL_DIRECTORY_DOCUMENT_TYPES:
         return 0.0
     metadata = dict(row.get("metadata") or {})
     record_country = _normalize_text(str(metadata.get("record_country") or ""))
     normalized_message = _normalize_text(message)
     if not record_country or not normalized_message:
         return 0.0
+    if target_country_names:
+        normalized_targets = {_normalize_text(name) for name in target_country_names}
+        if record_country in normalized_targets:
+            return 8.0
+        # A country explicitly named in the question outranks the selected
+        # widget market. This matters for global-directory questions such as
+        # "What is Gambia's telephone number?" asked from a US widget.
+        if record_country in normalized_message:
+            return 6.0
+        return -4.0
     if record_country in normalized_message:
         return 2.4
 
@@ -387,7 +399,20 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
                     },
                 }
             }
-        },
+        }
+    }
+
+
+def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
+    """Return the named market(s) whose global directory record should lead."""
+    mentioned_codes = find_market_mentions(message)
+    if not mentioned_codes and not _DIRECTORY_DETAIL_RE.search(message or ""):
+        return set()
+    target_codes = mentioned_codes or {str(selected_country or "").upper()}
+    return {
+        str(country.get("name") or "")
+        for country in get_countries()
+        if str(country.get("code") or "").upper() in target_codes
     }
 
 
@@ -496,6 +521,28 @@ def _parse_selector_ranks(text: str) -> list[int]:
     return parsed
 
 
+def _parse_selector_decision(text: str) -> tuple[list[int], bool | None] | None:
+    """Parse a selector decision while distinguishing rejection from failure."""
+    stripped = text.strip()
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            payload = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    relevant = payload.get("relevant_evidence")
+    if relevant is not True and relevant is not False and relevant is not None:
+        return None
+    return _parse_selector_ranks(json.dumps(payload)), relevant
+
+
 class OpenSearchSectionProvider:
     """Retrieve approved document sections from an OpenSearch section index."""
 
@@ -539,56 +586,116 @@ class OpenSearchSectionProvider:
                         "intent_confidence": search_plan.intent_confidence,
                     },
                 )
+            client = _client()
             search_messages = search_plan.queries
+            global_search_message = ""
+            target_country_names = _directory_target_country_names(message, country)
+            text_hits: list[dict[str, Any]] = []
+            vector_hits: list[dict[str, Any]] = []
             explicit_section_id = _section_reference(message)
-            text_hits, vector_hits, global_search_message = self._execute_searches(
-                message,
-                country,
-                language,
-                correlation_id,
-                search_plan,
-                explicit_section_id,
-            )
+            if explicit_section_id:
+                exact_response = client.search(
+                    index=self.index_name,
+                    body=_exact_section_query(explicit_section_id, country, language),
+                )
+                text_hits.extend(
+                    {**hit, "_score": max(float(hit.get("_score") or 0.0), 100.0)}
+                    for hit in exact_response.get("hits", {}).get("hits", [])
+                )
+            for index, search_message in enumerate(search_messages):
+                weight = 1.0 if index == 0 else 0.88
+                text_response = client.search(
+                    index=self.index_name,
+                    body=_text_query(search_message, country, language, scope="locale"),
+                )
+                vector_response = client.search(
+                    index=self.index_name,
+                    body=_vector_query(search_message, country, language, scope="locale"),
+                )
+                text_hits.extend(
+                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+                    for hit in text_response.get("hits", {}).get("hits", [])
+                )
+                vector_hits.extend(
+                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+                    for hit in vector_response.get("hits", {}).get("hits", [])
+                )
+
+            if search_plan.prefer_outline:
+                outline_response = client.search(
+                    index=self.index_name,
+                    body=_outline_text_query(message, country, language),
+                )
+                text_hits.extend(outline_response.get("hits", {}).get("hits", []))
+
+            if search_plan.include_global_documents:
+                global_search_message = self._global_search_query(message, language, correlation_id)
+                global_text_response = client.search(
+                    index=self.index_name,
+                    body=_directory_text_query(global_search_message, target_country_names),
+                )
+                global_vector_response = client.search(
+                    index=self.index_name,
+                    body=_vector_query(global_search_message, country, language, scope="global"),
+                )
+                text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
+                vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
         except OpenSearchException:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
 
+        typo_ranking_queries = safe_typo_ranking_queries(message, search_messages[1:])
         rows = self._merge_hits(
             text_hits,
             vector_hits,
             message,
+            ranking_queries=typo_ranking_queries,
             prefer_outline=search_plan.prefer_outline,
+            target_country_names=target_country_names,
         )
         if self.enable_bedrock_rerank:
             from .bedrock_reranker import rerank_rows
 
             rows = rerank_rows(message, rows, correlation_id=correlation_id)
+        raw_rows = rows
         rows = self._select_evidence_rows(message, rows, correlation_id)
-        if settings.RETRIEVAL_PARENT_DIVERSITY_ENABLED:
-            rows = self._apply_parent_diversity(rows)
+        selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
 
         documents = [
             self._document_from_row(row, score)
             for row, score in rows
             if score >= settings.SECTION_RETRIEVAL_MIN_SCORE
         ][: settings.OPENSEARCH_RESULT_COUNT]
+        selector_applied = bool(rows and rows[0][0].get("evidence_selector_selected"))
+        max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
+        strong_local_match = bool(
+            selector_applied
+            and max_local_relevance >= settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
+        )
         result = RetrievalResult(
             documents=documents,
             citations=[document.to_source() for document in documents],
             confidence=_confidence_from_documents(documents),
             metadata={
                 "provider": "opensearch_section",
-                "candidate_count": len(rows),
+                "candidate_count": len(raw_rows),
                 "search_query_count": len(search_messages) + int(search_plan.include_global_documents),
+                "typo_ranking_query_count": len(typo_ranking_queries),
+                "typo_ranking_applied": bool(documents and documents[0].metadata.get("typo_ranking_applied")),
+                "ranking_query_used": documents[0].metadata.get("ranking_query_used", "") if documents else "",
                 "global_documents_searched": search_plan.include_global_documents,
                 "outline_preferred": search_plan.prefer_outline,
                 "client_action": search_plan.client_action,
                 "conversation_intent": "knowledge",
                 "global_query_translated": bool(global_search_message) and global_search_message != message,
                 "explicit_section_reference": explicit_section_id,
+                "evidence_selector_rejected": selector_rejected,
+                "evidence_selector_applied": selector_applied,
+                "max_local_relevance": round(max_local_relevance, 6),
+                "strong_local_match": strong_local_match,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
-                    for row, score in rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
+                    for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
                 ],
             },
         )
@@ -598,72 +705,13 @@ class OpenSearchSectionProvider:
             country=country,
             language=language,
             source_count=len(result.sources),
-            candidate_count=len(rows),
+            candidate_count=len(raw_rows),
             confidence=result.confidence,
+            typo_ranking_query_count=len(typo_ranking_queries),
+            typo_ranking_applied=result.metadata["typo_ranking_applied"],
+            ranking_query_used=result.metadata["ranking_query_used"],
         )
         return result
-
-    def _execute_searches(
-        self,
-        message: str,
-        country: str,
-        language: str,
-        correlation_id: str,
-        search_plan: RetrievalQueryPlan,
-        explicit_section_id: str,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
-        """Build one OpenSearch multi-search and separate text from vector results."""
-        searches: list[dict[str, Any]] = []
-        result_kinds: list[tuple[str, float]] = []
-
-        def add_search(query: dict[str, Any], kind: str, weight: float = 1.0) -> None:
-            searches.extend(({"index": self.index_name}, query))
-            result_kinds.append((kind, weight))
-
-        if explicit_section_id:
-            add_search(_exact_section_query(explicit_section_id, country, language), "exact")
-        for index, search_message in enumerate(search_plan.queries):
-            weight = 1.0 if index == 0 else 0.88
-            add_search(_text_query(search_message, country, language, scope="locale"), "text", weight)
-            add_search(_vector_query(search_message, country, language, scope="locale"), "vector", weight)
-        if search_plan.prefer_outline:
-            add_search(_outline_text_query(message, country, language), "text")
-
-        global_search_message = ""
-        if search_plan.include_global_documents:
-            global_search_message = self._global_search_query(message, language, correlation_id)
-            requested_country = _requested_directory_country(message)
-            add_search(_directory_text_query(global_search_message, requested_country), "text")
-            global_vector_query = _vector_query(global_search_message, country, language, scope="global")
-            if requested_country:
-                global_vector_query["query"]["knn"]["embedding"]["filter"]["bool"]["filter"].append(
-                    exact_term_query("metadata.record_country", requested_country)
-                )
-            add_search(global_vector_query, "vector")
-
-        responses = _client().msearch(body=searches).get("responses", [])
-        if len(responses) != len(result_kinds):
-            raise OpenSearchException("OpenSearch returned an incomplete multi-search response.")
-
-        text_hits: list[dict[str, Any]] = []
-        vector_hits: list[dict[str, Any]] = []
-        for response, (kind, weight) in zip(responses, result_kinds):
-            if response.get("error"):
-                raise OpenSearchException(str(response["error"]))
-            hits = response.get("hits", {}).get("hits", [])
-            destination = vector_hits if kind == "vector" else text_hits
-            destination.extend(
-                {
-                    **hit,
-                    "_score": (
-                        max(float(hit.get("_score") or 0.0), 100.0)
-                        if kind == "exact"
-                        else float(hit.get("_score") or 0.0) * weight
-                    ),
-                }
-                for hit in hits
-            )
-        return text_hits, vector_hits, global_search_message
 
     def _global_search_query(self, message: str, language: str, correlation_id: str) -> str:
         """Translate a query into the configured language of global documents."""
@@ -731,17 +779,13 @@ class OpenSearchSectionProvider:
         vector_hits: list[dict[str, Any]],
         message: str,
         *,
+        ranking_queries: list[str] | None = None,
         prefer_outline: bool = False,
+        target_country_names: set[str] | None = None,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
-        text_rows = [_hit_to_row(hit) for hit in text_hits]
-        vector_rows = [
-            _hit_to_row(hit, score_weight=settings.OPENSEARCH_VECTOR_WEIGHT)
-            for hit in vector_hits
-        ]
-        text_ids = [str(row.get("id") or "") for row in text_rows]
-        vector_ids = [str(row.get("id") or "") for row in vector_rows]
-        for row in text_rows:
+        for hit in text_hits:
+            row = _hit_to_row(hit)
             row_id = str(row["id"] or "")
             if not row_id:
                 continue
@@ -750,7 +794,8 @@ class OpenSearchSectionProvider:
                 # Original and glossary searches may return the same section. Keep
                 # the strongest text result instead of letting a later query erase it.
                 merged[row_id] = row
-        for row in vector_rows:
+        for hit in vector_hits:
+            row = _hit_to_row(hit, score_weight=settings.OPENSEARCH_VECTOR_WEIGHT)
             if not row["id"]:
                 continue
             existing = merged.get(row["id"])
@@ -760,45 +805,56 @@ class OpenSearchSectionProvider:
                 existing["rank"] = float(existing.get("rank") or 0.0) + float(row.get("rank") or 0.0)
 
         self._normalize_opensearch_ranks(list(merged.values()))
-        scored = [
-            (
-                row,
-                _source_score(row, message)
-                + _directory_record_country_score(message, row)
-                + (2.0 if prefer_outline and row.get("chunk_type") == "document_outline" else 0.0),
-            )
-            for row in merged.values()
-        ]
-        if settings.RETRIEVAL_RRF_ENABLED:
-            fused_scores = reciprocal_rank_fusion(
+        shared_evidence_text = [
+            " ".join(
                 [
-                    [row_id for row_id in text_ids if row_id],
-                    [row_id for row_id in vector_ids if row_id],
-                ],
-                k=settings.RETRIEVAL_RRF_K,
+                    str(row.get("section_title") or ""),
+                    str(row.get("content") or "")[:500],
+                ]
             )
-            return sorted(
-                scored,
-                key=lambda pair: (fused_scores.get(str(pair[0].get("id") or ""), 0.0), pair[1]),
-                reverse=True,
-            )
-        return sorted(scored, key=lambda pair: pair[1], reverse=True)
-
-    def _apply_parent_diversity(
-        self,
-        rows: list[tuple[dict[str, Any], float]],
-    ) -> list[tuple[dict[str, Any], float]]:
-        """Limit repeated chunks from one parent only for the opt-in experiment."""
-        decorated = [
-            {"id": row.get("id"), "metadata": row, "row": row, "score": score}
-            for row, score in rows
+            for row in list(merged.values())[: settings.OPENSEARCH_CANDIDATE_COUNT]
         ]
-        selected = diversify_by_parent(
-            decorated,
-            max_results=settings.OPENSEARCH_RESULT_COUNT,
-            max_per_parent=settings.RETRIEVAL_MAX_RESULTS_PER_PARENT,
+        shared_evidence_repair_queries = safe_typo_ranking_queries(
+            message,
+            shared_evidence_text,
         )
-        return [(item["row"], item["score"]) for item in selected]
+        shared_ranking_queries = list(
+            dict.fromkeys([*(ranking_queries or []), *shared_evidence_repair_queries])
+        )
+        scored: list[tuple[dict[str, Any], float]] = []
+        for row in merged.values():
+            original_score = (
+                _source_score(row, message)
+                + _directory_record_country_score(message, row, target_country_names)
+            )
+            best_score = original_score
+            ranking_query_used = message
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            evidence_repair_queries = safe_typo_ranking_queries(
+                message,
+                [
+                    str(row.get("section_title") or ""),
+                    str(row.get("content") or "")[:1500],
+                    str(metadata.get("record_country") or ""),
+                ],
+            )
+            candidate_ranking_queries = list(
+                dict.fromkeys([*shared_ranking_queries, *evidence_repair_queries])
+            )
+            for ranking_query in candidate_ranking_queries:
+                candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
+                    ranking_query, row, target_country_names
+                )
+                if candidate_score > best_score:
+                    best_score = candidate_score
+                    ranking_query_used = ranking_query
+            if prefer_outline and row.get("chunk_type") == "document_outline":
+                best_score += 2.0
+            row["original_question_score"] = round(original_score, 6)
+            row["ranking_query_used"] = ranking_query_used
+            row["typo_ranking_applied"] = ranking_query_used != message
+            scored.append((row, round(best_score, 6)))
+        return sorted(scored, key=lambda pair: pair[1], reverse=True)
 
     def _select_evidence_rows(
         self,
@@ -829,13 +885,30 @@ class OpenSearchSectionProvider:
             "Do not substitute a selected-market policy section that merely mentions generic customer care when a matching "
             "global office or staff record directly contains the requested contact information. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
-            "Return only JSON."
+            "When a return question says a product is unopened, unused, unsold, or salable and asks for a time window, "
+            "prefer the FBO buy-back or unsold-salable-product clause over a general Retail/Preferred Customer satisfaction clause. "
+        )
+        if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
+            system_prompt += (
+                "A candidate is relevant only when its text contains the requested fact or a governing rule that directly answers it; "
+                "sharing a product, company, person, rank, or country name is not enough. "
+                "For a question about where or how to buy something, prefer a section that states a permitted purchase or sales channel, "
+                "not a general company description or an unrelated product rule. "
+                "For qualifications or requirements, prefer the clause that states how the exact named level is achieved, not a different "
+                "type of manager or a later benefit that assumes qualification already happened. "
+                "If none of the candidates directly supports an answer, mark relevant_evidence false and select no ranks. "
+            )
+        system_prompt += "Return only JSON."
+        response_example = (
+            '{"relevant_evidence":true,"selected_ranks":[1,2,3],"reason":"short reason"}'
+            if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            else '{"selected_ranks":[1,2,3],"reason":"short reason"}'
         )
         user_prompt = (
             f"User question:\n{message}\n\n"
             f"Candidate sections:\n{candidate_text}\n\n"
             f"Select up to {settings.OPENSEARCH_RESULT_COUNT} candidate ranks. "
-            "Return JSON exactly like this: {\"selected_ranks\":[1,2,3],\"reason\":\"short reason\"}."
+            f"Return JSON exactly like this: {response_example}."
         )
         try:
             response = get_aws_clients().bedrock_runtime.converse(
@@ -845,10 +918,26 @@ class OpenSearchSectionProvider:
                 inferenceConfig={"maxTokens": settings.OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS},
             )
             text = response["output"]["message"]["content"][0].get("text", "")
-            ranks = _parse_selector_ranks(text)
+            decision = _parse_selector_decision(text)
         except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
             LOGGER.exception("opensearch_evidence_selector_failed", correlation_id=correlation_id)
             return rows
+
+        if decision is None:
+            LOGGER.warning("opensearch_evidence_selector_invalid", correlation_id=correlation_id)
+            return rows
+        ranks, relevant_evidence = decision
+        if (
+            settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            and relevant_evidence is False
+            and not ranks
+        ):
+            LOGGER.info(
+                "opensearch_evidence_selector_no_relevant_evidence",
+                correlation_id=correlation_id,
+                candidate_count=len(candidates),
+            )
+            return []
 
         selected: list[tuple[dict[str, Any], float]] = []
         selected_ids: set[str] = set()
@@ -857,6 +946,7 @@ class OpenSearchSectionProvider:
                 candidate = candidates[rank - 1]
                 row_id = str(candidate[0].get("id") or "")
                 if row_id not in selected_ids:
+                    candidate[0]["evidence_selector_selected"] = True
                     selected.append(candidate)
                     selected_ids.add(row_id)
 
@@ -926,6 +1016,11 @@ class OpenSearchSectionProvider:
             score=score,
             metadata={
                 **metadata,
+                "ranking_query_used": row.get("ranking_query_used", ""),
+                "typo_ranking_applied": bool(row.get("typo_ranking_applied")),
+                "original_question_score": row.get("original_question_score"),
+                "access_scope": row.get("access_scope", "country"),
+                "document_type": row.get("document_type", ""),
                 "section_id": row.get("section_id", ""),
                 "section_title": row.get("section_title", ""),
                 "parent_section_id": row.get("parent_section_id", ""),

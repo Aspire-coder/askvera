@@ -17,9 +17,14 @@ Parameters:
     Default: 900
     MinValue: 30
     MaxValue: 43200
+  KnowledgeBucketName:
+    Type: String
+    Default: ""
+    Description: Existing S3 bucket whose approved policy uploads should enter the ingestion worker.
 
 Conditions:
   SendAlarmNotifications: !Not [!Equals [!Ref AlarmTopicArn, ""]]
+  EnableS3AutoIngestion: !Not [!Equals [!Ref KnowledgeBucketName, ""]]
 
 Resources:
   IngestionDeadLetterQueue:
@@ -80,9 +85,45 @@ Resources:
             Condition:
               Bool:
                 aws:SecureTransport: "false"
+          - !If
+            - EnableS3AutoIngestion
+            - Sid: AllowApprovedS3Events
+              Effect: Allow
+              Principal:
+                Service: events.amazonaws.com
+              Action: sqs:SendMessage
+              Resource: !GetAtt IngestionQueue.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !GetAtt ApprovedPolicyObjectCreatedRule.Arn
+                StringEquals:
+                  aws:SourceAccount: !Ref AWS::AccountId
+            - !Ref AWS::NoValue
       Queues:
         - !Ref IngestionQueue
         - !Ref IngestionDeadLetterQueue
+
+  ApprovedPolicyObjectCreatedRule:
+    Type: AWS::Events::Rule
+    Condition: EnableS3AutoIngestion
+    Properties:
+      Description: Send approved policy uploads to the AskVera durable ingestion worker.
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref KnowledgeBucketName
+          object:
+            key:
+              - prefix: approved/
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt IngestionQueue.Arn
+          Id: IngestionQueue
 
   DeadLetterQueueAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -133,3 +174,6 @@ Outputs:
     Value: !GetAtt IngestionDeadLetterQueue.Arn
   IngestionDeadLetterQueueUrl:
     Value: !Ref IngestionDeadLetterQueue
+  ApprovedPolicyObjectCreatedRuleArn:
+    Condition: EnableS3AutoIngestion
+    Value: !GetAtt ApprovedPolicyObjectCreatedRule.Arn

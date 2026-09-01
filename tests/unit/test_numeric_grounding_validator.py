@@ -50,6 +50,34 @@ def test_numeric_grounding_accepts_claim_present_in_source() -> None:
     assert result.issues == []
 
 
+def test_numeric_grounding_accepts_equivalent_decimal_separator() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "The minimum FBO order size is 50.00 in products, excluding VAT and literature.",
+            "Minimum order size FBO: 50,00 in products excl. VAT and excl. literature.",
+            {"access_scope": "global", "directory_section": "sponsoring"},
+        ),
+        result,
+    )
+
+    assert result.valid
+    assert result.issues == []
+
+
+def test_numeric_grounding_does_not_treat_thousands_separator_as_decimal() -> None:
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "The threshold is 1.000 Case Credits.",
+            "The threshold is 1,000 Case Credits.",
+        ),
+        result,
+    )
+
+    assert result.has_critical()
+
+
 def test_numeric_grounding_ignores_bracketed_source_reference() -> None:
     result = ValidationResult()
     context = _context(

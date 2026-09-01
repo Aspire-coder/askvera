@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-29",
+  "version": "2026-08-19",
   "description": "Controlled zero-token conversation copy by language.",
   "locales": {
     "en": {
@@ -17,18 +17,35 @@
           "thanks",
           "thank you"
         ],
+        "farewell": [
+          "bye",
+          "goodbye",
+          "see you",
+          "talk to you later"
+        ],
         "capability": [
           "who are you",
+          "are you a robot",
+          "what is your name",
+          "what's your name",
           "what do you do",
           "what can you help with",
           "help"
+        ],
+        "casual": [
+          "tell me a joke",
+          "can you tell me a joke",
+          "make me laugh"
         ]
       },
       "responses": {
         "wellbeing": "I'm doing well, thank you for asking. I'm here to help with approved Forever Living company policies and information from the global office directory. What would you like to know?",
         "greeting": "Hello, I'm AskVera. How can I help with approved Forever Living company policies or information from the global office directory?",
         "thanks": "You're welcome. I'm here whenever you need another approved Forever Living answer.",
+        "farewell": "Goodbye. I'm here whenever you need another approved Forever Living answer.",
         "capability": "I'm AskVera, Forever Living's approved knowledge assistant. I can help find approved answers from Forever Living company policies and the global office directory.",
+        "casual": "I keep my humor on the safe side, so I’ll skip the joke. I’m happy to help with approved Forever Living company policies or the global office directory.",
+        "period_not_covered": "The approved documents available to me do not contain information for {period}. I cannot speculate about policy changes outside the documented period.",
         "insufficient_evidence": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer.",
         "off_topic": "I'm sorry, but I can't help with that question. AskVera can help with approved Forever Living company policies and information from the global office directory. Please ask me about one of those areas, and I'll be happy to help.",
         "medical_claim": "I'm sorry, but I can't provide medical advice or treatment claims. AskVera is limited to approved Forever Living company policies and information from the global office directory. Please speak with a qualified healthcare professional about medical questions.",

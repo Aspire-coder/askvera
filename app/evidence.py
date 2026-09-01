@@ -61,8 +61,11 @@ def assistant_meta_response(message: str, language: str = "") -> str | None:
     if not category:
         return None
     locale = _locale_key(language)
-    routes = _conversation_routes().get(locale, {})
+    all_routes = _conversation_routes()
+    routes = all_routes.get(locale, {})
     response = (routes.get("responses", {}) or {}).get(category)
+    if not response:
+        response = (all_routes.get("en", {}).get("responses", {}) or {}).get(category)
     return str(response).strip() if response else None
 
 
@@ -95,7 +98,10 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     score_margin = top_score - second_score
     current_document = _has_current_locale_document(documents, country, language)
     exact_topic_match = any(_has_topic_match(query, document) for document in documents)
-    enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
+    enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or (
+        retrieval_result.confidence >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE
+        and top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
+    ) or bool(retrieval_result.metadata.get("strong_local_match"))
 
     # Safety is based on approved document metadata and retrieval confidence,
     # not an English list of business or rule words. Topic overlap is retained
@@ -173,13 +179,124 @@ def _conversation_routes() -> dict[str, dict[str, Any]]:
 def _assistant_meta_category(normalized_message: str, language: str) -> str | None:
     if not normalized_message:
         return None
-    routes = _conversation_routes().get(_locale_key(language), {})
-    patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
-    for category, phrases in patterns.items():
-        normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
-        if normalized_message in normalized_phrases:
-            return str(category)
+    all_routes = _conversation_routes()
+    locale = _locale_key(language)
+    route_candidates = [all_routes.get(locale, {})]
+    # English reviewed phrases are safe to recognize in every market. This
+    # keeps English-language widget traffic consistent even when the market's
+    # configured default language is different.
+    if locale != "en":
+        route_candidates.append(all_routes.get("en", {}))
+    # Recognize reviewed greetings regardless of the selected response locale.
+    # This supports visitors who greet AskVera in another configured language,
+    # while the response itself remains in the selected widget language.
+    route_candidates.extend(
+        routes
+        for candidate_locale, routes in all_routes.items()
+        if candidate_locale not in {locale, "en"}
+    )
+    for routes in route_candidates:
+        patterns = routes.get("patterns", {}) if isinstance(routes, dict) else {}
+        phrase_entries: list[tuple[tuple[str, ...], str]] = []
+        for category, phrases in patterns.items():
+            normalized_phrases = {_normalize_text(str(phrase)) for phrase in phrases}
+            if normalized_message in normalized_phrases:
+                return str(category)
+            if any(
+                _safe_short_phrase_variant(normalized_message, phrase, str(category))
+                for phrase in normalized_phrases
+            ):
+                return str(category)
+            phrase_entries.extend(
+                (tuple(phrase.split()), str(category))
+                for phrase in normalized_phrases
+                if phrase
+            )
+        composed_category = _composed_assistant_meta_category(normalized_message, phrase_entries)
+        if composed_category:
+            return composed_category
     return None
+
+
+def _safe_short_phrase_variant(message: str, phrase: str, category: str) -> bool:
+    """Allow only tightly bounded typos for reviewed social phrases."""
+    if category not in {"greeting", "thanks", "farewell"}:
+        return False
+    if not message or not phrase or len(message.split()) > 3 or len(message) > 32:
+        return False
+    compact_message = message.replace(" ", "")
+    compact_phrase = phrase.replace(" ", "")
+    if compact_message == compact_phrase:
+        return True
+    if min(len(compact_message), len(compact_phrase)) < 3:
+        return False
+    if compact_message[:1] != compact_phrase[:1]:
+        return False
+    return _edit_distance_at_most_one(compact_message, compact_phrase)
+
+
+def _edit_distance_at_most_one(left: str, right: str) -> bool:
+    """Return true for one insertion, deletion, substitution, or transposition."""
+    if left == right:
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        differences = [index for index, pair in enumerate(zip(left, right)) if pair[0] != pair[1]]
+        if len(differences) == 1:
+            return True
+        return (
+            len(differences) == 2
+            and differences[1] == differences[0] + 1
+            and left[differences[0]] == right[differences[1]]
+            and left[differences[1]] == right[differences[0]]
+        )
+    shorter, longer = (left, right) if len(left) < len(right) else (right, left)
+    short_index = 0
+    long_index = 0
+    skipped = False
+    while short_index < len(shorter) and long_index < len(longer):
+        if shorter[short_index] == longer[long_index]:
+            short_index += 1
+            long_index += 1
+            continue
+        if skipped:
+            return False
+        skipped = True
+        long_index += 1
+    return True
+
+
+def _composed_assistant_meta_category(
+    normalized_message: str,
+    phrase_entries: list[tuple[tuple[str, ...], str]],
+) -> str | None:
+    """Recognize messages made entirely from two or three reviewed phrases."""
+    message_tokens = tuple(normalized_message.split())
+    if not message_tokens:
+        return None
+    entries = sorted(phrase_entries, key=lambda item: len(item[0]), reverse=True)
+    joiners = {"and", "askvera", "please", "vera"}
+
+    def match_from(index: int, categories: tuple[str, ...]) -> tuple[str, ...] | None:
+        if index == len(message_tokens):
+            return categories if len(categories) >= 2 else None
+        if len(categories) >= 3:
+            return None
+        if categories and message_tokens[index] in joiners:
+            joined = match_from(index + 1, categories)
+            if joined:
+                return joined
+        for phrase_tokens, category in entries:
+            end = index + len(phrase_tokens)
+            if message_tokens[index:end] == phrase_tokens:
+                matched = match_from(end, (*categories, category))
+                if matched:
+                    return matched
+        return None
+
+    categories = match_from(0, ())
+    return categories[-1] if categories else None
 
 
 def _locale_key(language: str) -> str:

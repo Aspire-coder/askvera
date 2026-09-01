@@ -296,3 +296,67 @@ def test_hardened_profile_requires_durable_security_controls(monkeypatch) -> Non
         "ADMIN_ANALYTICS_REDACTED_BY_DEFAULT "
         "(must be enabled for the hardened security profile)"
     ) in failures
+
+
+def test_semantic_cache_requires_safe_configuration(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_THRESHOLD", 1.1)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_MIN_SCORE_MARGIN", -0.1)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_MAX_CANDIDATES", 0)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_EMBED_MODEL_ID", "")
+
+    failures = validate()
+
+    assert "SEMANTIC_CACHE_THRESHOLD (must be between 0 and 1)" in failures
+    assert "SEMANTIC_CACHE_MIN_SCORE_MARGIN (must be at least 0 and less than 1)" in failures
+    assert "SEMANTIC_CACHE_MAX_CANDIDATES (must be greater than 0)" in failures
+    assert "SEMANTIC_CACHE_EMBED_MODEL_ID" in failures
+
+
+def test_semantic_cache_live_and_shadow_modes_are_mutually_exclusive(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "SEMANTIC_CACHE_SHADOW_ENABLED", True)
+
+    failures = validate()
+
+    assert (
+        "SEMANTIC_CACHE_ENABLED and SEMANTIC_CACHE_SHADOW_ENABLED (choose only one mode)"
+        in failures
+    )
+
+
+def test_model_routing_rejects_invalid_mode(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_MODE", "automatic")
+
+    assert "MODEL_ROUTING_MODE (must be off, shadow, or live)" in validate()
+
+
+def test_model_routing_requires_distinct_models(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_MODE", "shadow")
+    monkeypatch.setattr(settings, "BEDROCK_FAST_MODEL_ID", "same-model")
+    monkeypatch.setattr(settings, "BEDROCK_COMPLEX_MODEL_ID", "same-model")
+
+    assert "BEDROCK_FAST_MODEL_ID and BEDROCK_COMPLEX_MODEL_ID (must differ)" in validate()
+
+
+def test_live_model_routing_requires_evidence_gate(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_MODE", "live")
+    monkeypatch.setattr(settings, "BEDROCK_FAST_MODEL_ID", "fast-model")
+    monkeypatch.setattr(settings, "BEDROCK_COMPLEX_MODEL_ID", "complex-model")
+    monkeypatch.setattr(settings, "EVIDENCE_GATED_OUTPUT_ENABLED", False)
+
+    assert "EVIDENCE_GATED_OUTPUT_ENABLED (must be true for live model routing)" in validate()
+
+
+def test_model_routing_rejects_negative_dashboard_pricing(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION", -1.0)
+
+    assert (
+        "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION (must not be negative)" in validate()
+    )

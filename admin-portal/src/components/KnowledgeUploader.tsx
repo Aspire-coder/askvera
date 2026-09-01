@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AdminApi, demo, empty, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
+import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
+import { demoAllowed } from "../auth";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
-import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest } from "../types";
+import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest, KnowledgeGeneration } from "../types";
 
 const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
 export function KnowledgeUploader({ credentials }: { credentials: AdminCredentials }) {
-  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
-  const [config, setConfig] = useState<AdminConfig>(hasCredentials ? empty.config : demo.config);
-  const [jobs, setJobs] = useState<IngestionJob[]>(hasCredentials ? empty.jobs : demo.jobs);
-  const [mode, setMode] = useState<DataMode>(hasCredentials ? "unavailable" : "demo");
+  const [config, setConfig] = useState<AdminConfig>(demo.config);
+  const [jobs, setJobs] = useState<IngestionJob[]>(demoAllowed ? demo.jobs : []);
+  const [mode, setMode] = useState<DataMode>(demoAllowed ? "demo" : "live");
+  const [loadError, setLoadError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [country, setCountry] = useState("BE");
+  const [coverageSelection, setCoverageSelection] = useState("BE");
   const [language, setLanguage] = useState("nl");
   const [documentType, setDocumentType] = useState("policy");
   const [accessScope, setAccessScope] = useState("country");
   const [version, setVersion] = useState("");
   const [effectiveDate, setEffectiveDate] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
   const [logicalDocumentId, setLogicalDocumentId] = useState("");
   const [documentOwner, setDocumentOwner] = useState("");
   const [approvalReference, setApprovalReference] = useState("");
@@ -34,10 +37,15 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [testResult, setTestResult] = useState<IngestionPreviewTest | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState("");
+  const [historyJob, setHistoryJob] = useState<IngestionJob | null>(null);
+  const [generations, setGenerations] = useState<KnowledgeGeneration[]>([]);
+  const [compareVersions, setCompareVersions] = useState<string[]>([]);
+  const [rollbackLoading, setRollbackLoading] = useState("");
 
   const refresh = async () => {
+    const api = new AdminApi(credentials);
     try {
-      const api = new AdminApi(credentials);
       const [configResult, jobsResult] = await Promise.all([
         withDemoFallback(() => api.config(), demo.config),
         withDemoFallback(() => api.ingestions(), demo.jobs)
@@ -45,11 +53,11 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
       setConfig(configResult.data);
       setJobs(jobsResult.data);
       setMode(configResult.mode === "live" && jobsResult.mode === "live" ? "live" : "demo");
+      setLoadError("");
     } catch (error) {
-      setConfig(empty.config);
-      setJobs(empty.jobs);
-      setMode("unavailable");
-      setNotice(error instanceof Error ? error.message : "Knowledge data could not be loaded.");
+      setJobs([]);
+      setMode("live");
+      setLoadError(error instanceof Error ? error.message : "Live document activity could not be loaded.");
     }
   };
 
@@ -63,9 +71,19 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     setAccessScope(documentType === "office_directory" ? "global" : "country");
   }, [documentType]);
 
-  const selectedMarket = config.countries.find((market) => market.code === country) || config.countries[0];
-  const languages = selectedMarket?.languages || [];
+  const selectedMarket = config.countries.find((market) => market.code === coverageSelection);
+  const uploadMarket = config.countries.find((market) => market.code === country) || config.countries[0];
+  const showingGlobalCoverage = coverageSelection === "GLOBAL";
+  const languages = uploadMarket?.languages || [];
+  const marketJobs = useMemo(
+    () => jobs.filter((job) => showingGlobalCoverage ? job.access_scope === "global" : job.access_scope === "global" || job.country === coverageSelection),
+    [coverageSelection, jobs, showingGlobalCoverage],
+  );
+  const readyDocuments = marketJobs.filter((job) => job.status === "ready").length;
+  const inProgressDocuments = marketJobs.filter((job) => !["ready", "failed"].includes(job.status)).length;
+  const suggestedDocumentId = `${country.toLowerCase()}-${documentType.replaceAll("_", "-")}`;
   useEffect(() => {
+    if (!config.countries.some((market) => market.code === country) && config.countries[0]) setCountry(config.countries[0].code);
     if (!languages.some((option) => option.code === language) && languages[0]) setLanguage(languages[0].code);
   }, [country, config]);
 
@@ -98,6 +116,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     formData.set("access_scope", accessScope);
     formData.set("document_version", version);
     formData.set("effective_date", effectiveDate);
+    formData.set("expiry_date", expiryDate);
     formData.set("logical_document_id", logicalDocumentId);
     formData.set("document_owner", documentOwner);
     formData.set("approval_reference", approvalReference);
@@ -168,6 +187,51 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     }
   };
 
+  const canDeleteDocuments = config.principal?.role === "super_admin" && mode === "live";
+  const openHistory = async (job: IngestionJob) => {
+    setHistoryJob(job);
+    setGenerations([]);
+    setCompareVersions([]);
+    try {
+      const result = await new AdminApi(credentials).ingestionGenerations(job.job_id);
+      setGenerations(result);
+      setCompareVersions(result.slice(0, 2).map((item) => item.ingestion_id));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Version history could not be loaded.");
+    }
+  };
+  const rollback = async (target: KnowledgeGeneration) => {
+    if (!historyJob || !window.confirm(`Roll back ${historyJob.filename} to version ${target.document_version || target.ingestion_id}?`)) return;
+    setRollbackLoading(target.ingestion_id);
+    try {
+      await new AdminApi(credentials).rollbackIngestion(historyJob.job_id, target.ingestion_id);
+      setNotice(`${historyJob.filename} was rolled back to ${target.document_version || target.ingestion_id}.`);
+      await openHistory(historyJob);
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The rollback could not be completed.");
+    } finally {
+      setRollbackLoading("");
+    }
+  };
+  const deleteDocument = async (job: IngestionJob) => {
+    if (!canDeleteDocuments || deletingJobId) return;
+    const scope = job.access_scope === "global" ? "all markets" : `${job.country} · ${job.language.toUpperCase()}`;
+    const confirmed = window.confirm(`Delete “${job.filename}” (${job.document_version || "no version"}) from ${scope}?\n\nThis removes it from customer retrieval, the search index, and source storage. This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingJobId(job.job_id);
+    setNotice("");
+    try {
+      const result = await new AdminApi(credentials).deleteIngestion(job.job_id);
+      setNotice(result.message);
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The document could not be deleted.");
+    } finally {
+      setDeletingJobId("");
+    }
+  };
+
   return (
     <section className="page-section" aria-labelledby="knowledge-title">
       <div className="page-heading">
@@ -176,8 +240,31 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
           <h1 id="knowledge-title">Add knowledge. Keep control.</h1>
           <p>Upload approved content, describe it once, and follow it into the search index.</p>
         </div>
-        <span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Connected" : mode === "demo" ? "Demo data" : "Data unavailable"}</span>
+        <span className={`mode-pill ${loadError ? "error" : mode}`}><span />{loadError ? "Connection error" : mode === "live" ? "Connected" : "Demo data"}</span>
       </div>
+
+      <section className="knowledge-market-summary surface" aria-labelledby="knowledge-market-title">
+        <div className="knowledge-market-selector">
+          <label htmlFor="knowledge-market"><span className="eyebrow">Coverage view</span><strong id="knowledge-market-title">Which documents should we review?</strong></label>
+          <select id="knowledge-market" value={coverageSelection} onChange={(event) => setCoverageSelection(event.target.value)} aria-label="Select knowledge coverage">
+            <option value="GLOBAL">Global documents (all markets)</option>
+            {config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}
+          </select>
+        </div>
+        <div className="knowledge-market-stats" aria-label={`${showingGlobalCoverage ? "Global" : selectedMarket?.name || "Selected market"} document summary`}>
+          <div><strong>{marketJobs.length}</strong><span>Available here</span></div>
+          <div><strong>{readyDocuments}</strong><span>Ready</span></div>
+          <div><strong>{inProgressDocuments}</strong><span>In progress</span></div>
+        </div>
+      </section>
+
+      <section className="knowledge-existing surface" aria-labelledby="existing-documents-title">
+        <div className="section-heading"><div><span className="eyebrow">Current coverage</span><h2 id="existing-documents-title">{showingGlobalCoverage ? "Global documents" : `Documents available for ${selectedMarket?.name || "this market"}`}</h2><p>{showingGlobalCoverage ? "Documents available to every market, including global directories and FAQs." : "Global documents are included. Use names and versions to avoid replacing the wrong document."}</p></div><span className="review-safety">{marketJobs.length} found</span></div>
+        {notice ? <div className="notice" role="status" aria-live="polite">{notice}</div> : null}
+        {loadError ? <div className="review-empty" role="alert">{loadError} Existing documents are hidden until live data is available.</div> : marketJobs.filter((job) => job.status !== "deleted").length ? <div className="knowledge-existing-list">{marketJobs.filter((job) => job.status !== "deleted").map((job) => <article className="knowledge-existing-row" key={job.job_id}><FileIcon /><div><strong>{job.filename}</strong><small>{job.access_scope === "global" ? "Global · available to all markets" : `${job.language.toUpperCase()} · ${job.country}`} · {readableType(job.document_type)} · {job.document_version || "No version"}{job.expiry_date ? ` · expires ${new Date(`${job.expiry_date}T00:00:00`).toLocaleDateString()}` : ""}</small><small>{job.malware_scan_status === "clean" ? "Malware scan passed" : job.malware_scan_status === "blocked" ? "Blocked by malware scan" : job.malware_scan_status === "pending" ? "Malware scan pending" : "Preflight complete"} · {job.status === "ready" ? "Indexed in OpenSearch" : "Not active in retrieval"}</small></div><span className={`status-label ${job.status}`}>{job.status}</span><span className="knowledge-chunks">{job.section_count || 0} chunks</span><button className="button secondary small" onClick={() => void openHistory(job)}>Versions</button>{canDeleteDocuments ? <button className="button danger small" disabled={deletingJobId === job.job_id} onClick={() => void deleteDocument(job)}>{deletingJobId === job.job_id ? "Deleting..." : "Delete"}</button> : null}</article>)}</div> : <div className="review-empty">No documents are currently available for this coverage.</div>}
+      </section>
+
+      {historyJob ? <section className="knowledge-history surface"><div className="section-heading"><div><span className="eyebrow">Version control</span><h2>{historyJob.filename}</h2><p>Compare retained generations and restore a previously verified version.</p></div><button className="button secondary" onClick={() => setHistoryJob(null)}>Close</button></div>{generations.length ? <><div className="version-compare-select"><label>Compare versions<select value={compareVersions[0] || ""} onChange={(event) => setCompareVersions([event.target.value, compareVersions[1] || ""])}>{generations.map((item) => <option key={item.ingestion_id} value={item.ingestion_id}>{item.document_version || item.ingestion_id}</option>)}</select></label><label>With<select value={compareVersions[1] || ""} onChange={(event) => setCompareVersions([compareVersions[0] || "", event.target.value])}>{generations.map((item) => <option key={item.ingestion_id} value={item.ingestion_id}>{item.document_version || item.ingestion_id}</option>)}</select></label></div><div className="version-comparison">{compareVersions.map((id) => generations.find((item) => item.ingestion_id === id)).filter(Boolean).map((item) => <article key={item!.ingestion_id}><strong>{item!.document_version || "Unversioned"}</strong><span className={`status-label ${item!.status}`}>{item!.status}</span><dl><div><dt>Chunks</dt><dd>{item!.section_count}</dd></div><div><dt>Effective</dt><dd>{item!.effective_date || "Not set"}</dd></div><div><dt>Expiry</dt><dd>{item!.expiry_date || "Not set"}</dd></div><div><dt>Malware</dt><dd>{item!.malware_scan_status}</dd></div><div><dt>Activated</dt><dd>{item!.activated_at ? new Date(item!.activated_at).toLocaleString() : "Not activated"}</dd></div></dl>{canDeleteDocuments && item!.status !== "active" ? <button className="button secondary" disabled={rollbackLoading === item!.ingestion_id} onClick={() => void rollback(item!)}>{rollbackLoading === item!.ingestion_id ? "Rolling back..." : "Restore this version"}</button> : null}</article>)}</div></> : <div className="empty-state">No retained version history is available for this document.</div>}</section> : null}
 
       <div className="uploader-layout">
         <div className="upload-card surface">
@@ -201,12 +288,13 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field span-2"><label>Content type</label><div className="type-options">
               {config.documentTypes.map((type) => <button key={type} type="button" className={documentType === type ? "selected" : ""} onClick={() => setDocumentType(type)}>{readableType(type)}</button>)}
             </div></div>
-            <div className="form-field"><label htmlFor="market">Market</label><select id="market" value={country} onChange={(event) => setCountry(event.target.value)}>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></div>
+            <div className="form-field"><label htmlFor="market">Market</label><select id="market" value={country} onChange={(event) => setCountry(event.target.value)}>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}</select></div>
             <div className="form-field"><label htmlFor="language">Language</label><select id="language" value={language} onChange={(event) => setLanguage(event.target.value)}>{languages.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)}</select></div>
             <div className="form-field"><label htmlFor="scope">Availability</label><select id="scope" value={accessScope} onChange={(event) => setAccessScope(event.target.value)}><option value="country">Selected market only</option><option value="global">All markets</option></select></div>
             <div className="form-field"><label htmlFor="version">Document version</label><input id="version" value={version} onChange={(event) => setVersion(event.target.value)} placeholder="e.g. 2026.3" /></div>
             <div className="form-field"><label htmlFor="effective">Effective date</label><input id="effective" type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></div>
-            <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder="e.g. US-company-policy" /></div>
+            <div className="form-field"><label htmlFor="expiry">Review or expiry date</label><input id="expiry" type="date" value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} /><small className="field-help">The portal will flag documents approaching this date.</small></div>
+            <div className="form-field"><label htmlFor="logical-document">Stable document ID</label><input id="logical-document" value={logicalDocumentId} onChange={(event) => setLogicalDocumentId(event.target.value)} placeholder={suggestedDocumentId} /><small className="field-help">Suggested: {suggestedDocumentId}. Keep this stable when replacing the same document.</small></div>
             <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
             <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>
             <label className="review-toggle"><input type="checkbox" checked={reviewBeforePublish} onChange={(event) => setReviewBeforePublish(event.target.checked)} /><span><strong>Review chunks before publishing</strong><small>Keep this document out of live answers until you test and approve it.</small></span></label>
@@ -229,7 +317,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
       <section className="review-panel surface" aria-labelledby="review-title">
         <div className="section-heading"><div><span className="eyebrow">Staging workspace</span><h2 id="review-title">Review before publish</h2><p>Check the extracted chunks and try a question before a document can affect customer answers.</p></div><span className="review-safety">Staging only</span></div>
-        {mode !== "live" ? <div className="review-empty">{mode === "demo" ? "Connect the portal to load staging documents. Demo data never publishes anything." : "Staging documents are unavailable until the operations API reconnects."}</div> : <>
+        {loadError ? <div className="review-empty" role="alert">{loadError} Refresh after the live service is available. No demo documents are shown in production.</div> : mode !== "live" ? <div className="review-empty">Connect the portal to load staging documents. Demo data never publishes anything.</div> : <>
           <div className="review-toolbar"><label htmlFor="review-job">Document ready for review</label><select id="review-job" value={selectedJobId} onChange={(event) => void loadPreview(event.target.value)}><option value="">Select a reviewed document</option>{reviewableJobs.map((job) => <option key={job.job_id} value={job.job_id}>{job.filename} ({job.section_count} chunks)</option>)}</select><button className="button secondary" disabled={!selectedJobId || previewLoading} onClick={() => void loadPreview(selectedJobId)}><RefreshIcon /> Check document</button></div>
           {previewLoading ? <div className="review-empty">Loading the extracted chunks...</div> : null}
           {previewError ? <div className="notice error" role="alert">{previewError}</div> : null}
@@ -246,14 +334,15 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
       <div className="jobs-section">
         <div className="section-heading"><div><h2>Document activity</h2><p>Recent ingestion jobs and indexing progress.</p></div><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
         <div className="jobs-table surface">
-          <div className="table-row table-head"><span>Document</span><span>Market</span><span>Type</span><span>Status</span><span>Chunks</span></div>
-          {jobs.map((job) => <div className="table-row" key={job.job_id}>
+          <div className="table-row table-head"><span>Document</span><span>Market</span><span>Type</span><span>Status</span><span>Chunks</span><span>Actions</span></div>
+          {marketJobs.length ? marketJobs.map((job) => <div className="table-row" key={job.job_id}>
             <span className="document-cell"><FileIcon /><span><strong>{job.filename}</strong><small>{job.document_version || "No version"}</small></span></span>
             <span>{job.access_scope === "global" ? "Global" : `${job.country} · ${job.language.toUpperCase()}`}</span>
             <span>{readableType(job.document_type)}</span>
             <span><span className={`status-label ${job.status}`}>{job.status}</span>{job.status !== "ready" && job.status !== "failed" ? <span className="mini-progress"><i style={{ width: `${job.progress}%` }} /></span> : null}{job.status === "failed" && job.error_message ? <small className="job-error">{job.error_message}</small> : null}</span>
             <span>{job.section_count || "—"}</span>
-          </div>)}
+            <span>{canDeleteDocuments && job.status !== "deleted" ? <button className="button danger small" disabled={deletingJobId === job.job_id} onClick={() => void deleteDocument(job)}>{deletingJobId === job.job_id ? "Deleting..." : "Delete"}</button> : job.status === "deleted" ? "Deleted" : ""}</span>
+          </div>) : <div className="empty-state">{loadError || "No document activity found."}</div>}
         </div>
       </div>
     </section>

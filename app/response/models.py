@@ -27,6 +27,8 @@ class ChatResponse:
         public_metadata = self._public_metadata()
         if public_metadata:
             result["metadata"] = public_metadata
+        if self.cards:
+            result["cards"] = self.cards
         return result
 
     def to_cache_value(self) -> dict[str, Any]:
@@ -52,4 +54,6 @@ class ChatResponse:
             public["validation"] = metadata["validation"]
         if metadata.get("client_action"):
             public["clientAction"] = metadata["client_action"]
+        cache_source = str(metadata.get("cache") or "").lower()
+        public["cacheSource"] = cache_source if cache_source in {"exact", "semantic"} else "fresh"
         return public

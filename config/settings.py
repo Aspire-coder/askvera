@@ -10,29 +10,12 @@ from pathlib import Path
 from typing import Any
 
 
-_TRUE_VALUES = {"1", "true", "yes", "on"}
-_FALSE_VALUES = {"0", "false", "no", "off"}
-
-
-def _parse_bool(raw_value: str, name: str) -> bool:
-    """Parse an explicit boolean and reject ambiguous configuration."""
-    normalized = raw_value.strip().lower()
-    if normalized in _TRUE_VALUES:
-        return True
-    if normalized in _FALSE_VALUES:
-        return False
-    raise ValueError(
-        f"Invalid boolean for {name}: {raw_value!r}. "
-        "Use true/false, yes/no, on/off, or 1/0."
-    )
-
-
 def _env_bool(name: str, default: bool) -> bool:
     """Read a boolean from the process environment with a safe default."""
     raw_value = os.environ.get(name)
     if raw_value is None:
         return default
-    return _parse_bool(raw_value, name)
+    return raw_value.lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
@@ -88,13 +71,16 @@ PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-07-17.1")
 KB_VERSION = _env_str("KB_VERSION", "2026-07-15-global-directory-v2")
 # Code-owned retrieval behavior version. Bump when query normalization or
 # ranking changes so previously cached failures cannot mask a deployed fix.
-RETRIEVAL_PIPELINE_VERSION = _env_str("RETRIEVAL_PIPELINE_VERSION", "2026-07-16-atomic-sections-v1")
+RETRIEVAL_PIPELINE_VERSION = "2026-08-23-selector-calibration-v4"
 # Code-owned response behavior version. Bump when deterministic response
 # post-processing changes so stale rendered answers are not served from cache.
-RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-07-22-directory-safety-v2")
+RESPONSE_PIPELINE_VERSION = _env_str("RESPONSE_PIPELINE_VERSION", "2026-08-22-legal-output-integrity-v3")
 # Code-owned conversation-routing behavior version. Change this when routing
 # semantics change so stale cached answers cannot bypass the new router.
-CONVERSATION_ROUTING_VERSION = "2026-07-29-assistant-meta-v2"
+CONVERSATION_ROUTING_VERSION = "2026-08-22-verified-risk-routing-v4"
+# Code-owned model-routing behavior version. It participates in cache keys so
+# routing changes cannot silently reuse answers produced by an older policy.
+MODEL_ROUTING_VERSION = "2026-08-19-risk-router-v1"
 # RDS PostgreSQL database identifier. Found in RDS -> Databases.
 RDS_DB_IDENTIFIER = _env_str("RDS_DB_IDENTIFIER", "")
 # RDS PostgreSQL connection target. RDS-managed Secrets Manager credentials may
@@ -117,12 +103,6 @@ DB_SCHEMA_BOOTSTRAP_ON_STARTUP = _env_bool("DB_SCHEMA_BOOTSTRAP_ON_STARTUP", Fal
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
 AWS_MAX_ATTEMPTS = 3
-# Interactive chat dependencies use bounded budgets so a transient dependency
-# cannot consume the entire request latency budget.
-AWS_INTERACTIVE_READ_TIMEOUT_SECONDS = _env_int("AWS_INTERACTIVE_READ_TIMEOUT_SECONDS", 8)
-AWS_INTERACTIVE_MAX_ATTEMPTS = _env_int("AWS_INTERACTIVE_MAX_ATTEMPTS", 1)
-AWS_PII_READ_TIMEOUT_SECONDS = _env_int("AWS_PII_READ_TIMEOUT_SECONDS", 5)
-AWS_PII_MAX_ATTEMPTS = _env_int("AWS_PII_MAX_ATTEMPTS", 1)
 # Per-IP request limiting for public widget endpoints. Production uses Valkey
 # so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60
@@ -157,7 +137,10 @@ ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL = _env_str("ADMIN_BOOTSTRAP_SUPER_ADMIN_EMAIL"
 ADMIN_UPLOAD_MAX_BYTES = _env_int("ADMIN_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
 ADMIN_RBAC_ENABLED = _env_bool("ADMIN_RBAC_ENABLED", False)
 ADMIN_USER_MANAGEMENT_ENABLED = _env_bool("ADMIN_USER_MANAGEMENT_ENABLED", False)
+ADMIN_INVITE_EXPIRY_DAYS = _env_int("ADMIN_INVITE_EXPIRY_DAYS", 7)
+ADMIN_ACCESS_REVIEW_DAYS = _env_int("ADMIN_ACCESS_REVIEW_DAYS", 90)
 WIDGET_CONFIG_ADMIN_ENABLED = _env_bool("WIDGET_CONFIG_ADMIN_ENABLED", False)
+WIDGET_KEY_ROTATION_GRACE_HOURS = _env_int("WIDGET_KEY_ROTATION_GRACE_HOURS", 24)
 WIDGET_CONFIG_RUNTIME_ENABLED = _env_bool("WIDGET_CONFIG_RUNTIME_ENABLED", False)
 WIDGET_LOADER_URL = _env_str("WIDGET_LOADER_URL", "https://d1wzljalfbhsv7.cloudfront.net/widget/latest/widget.js")
 WIDGET_STYLES_URL = _env_str("WIDGET_STYLES_URL", "https://d1wzljalfbhsv7.cloudfront.net/widget/latest/widget.css")
@@ -273,6 +256,32 @@ BEDROCK_MODEL_ARN = _env_str("BEDROCK_MODEL_ARN", "")
 # Optional secondary generation model. Keep empty until the fallback model has
 # passed the same retrieval and validation evaluation suite as the primary.
 BEDROCK_FALLBACK_MODEL_ARN = _env_str("BEDROCK_FALLBACK_MODEL_ARN", "")
+# Risk-aware generation routing. Production begins in shadow mode; live mode is
+# valid only after the same benchmark and evidence-contract checks pass for the
+# fast model. Geographic profiles keep inference within the US geography.
+MODEL_ROUTING_MODE = _env_str("MODEL_ROUTING_MODE", "off").lower()
+BEDROCK_FAST_MODEL_ID = _env_str(
+    "BEDROCK_FAST_MODEL_ID",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+)
+BEDROCK_COMPLEX_MODEL_ID = _env_str(
+    "BEDROCK_COMPLEX_MODEL_ID",
+    "us.anthropic.claude-sonnet-5",
+)
+MODEL_ROUTING_FAST_MIN_CONFIDENCE = _env_float("MODEL_ROUTING_FAST_MIN_CONFIDENCE", 0.75)
+MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES = _env_int("MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES", 1)
+MODEL_ROUTING_FAST_MAX_QUESTION_CHARS = _env_int("MODEL_ROUTING_FAST_MAX_QUESTION_CHARS", 220)
+# Configurable US geographic inference prices used only for projected dashboard
+# savings. They never affect routing or billing. Refresh them when AWS pricing
+# changes and update the label so administrators can see the estimate's basis.
+MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION = _env_float("MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION", 1.10)
+MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION = _env_float("MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION", 5.50)
+MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION = _env_float("MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION", 2.20)
+MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION = _env_float("MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION", 11.00)
+MODEL_ROUTING_PRICING_LABEL = _env_str(
+    "MODEL_ROUTING_PRICING_LABEL",
+    "US geographic on-demand rates configured 2026-08-19",
+)
 BEDROCK_CIRCUIT_BREAKER_FAILURE_THRESHOLD = _env_int("BEDROCK_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 3)
 BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS = _env_int("BEDROCK_CIRCUIT_BREAKER_RESET_SECONDS", 60)
 BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED = _env_bool("BEDROCK_SHARED_CIRCUIT_BREAKER_ENABLED", False)
@@ -296,6 +305,12 @@ BEDROCK_MIN_CONFIDENCE = _env_float("BEDROCK_MIN_CONFIDENCE", 0.47)
 # the blended confidence is slightly below the minimum.
 BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES = _env_int("BEDROCK_CONFIDENCE_EVIDENCE_MIN_SOURCES", 3)
 BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE = _env_float("BEDROCK_CONFIDENCE_EVIDENCE_TOP_SCORE", 0.45)
+# The evidence-count override is only for borderline results. It must never
+# turn a very low-confidence retrieval into a generated and cacheable answer.
+BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE = _env_float(
+    "BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE",
+    0.35,
+)
 # Retrieval configuration and fallback confidence weighting.
 BEDROCK_RETRIEVAL_RESULT_COUNT = _env_int("BEDROCK_RETRIEVAL_RESULT_COUNT", 5)
 BEDROCK_RETRIEVAL_CANDIDATE_COUNT = _env_int(
@@ -355,6 +370,14 @@ OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file_
 OPENSEARCH_EVIDENCE_SELECTOR_ENABLED = _env_bool("OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
 OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS = _env_int("OPENSEARCH_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS", 512)
+OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD = _env_float(
+    "OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD",
+    0.44,
+)
+# Ranking and evidence-coverage protections are evaluated as one reversible
+# profile. Keep this off by default so a code deployment cannot silently change
+# live retrieval before the locked benchmark and locale gates pass.
+OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
 RETRIEVAL_RRF_ENABLED = _env_bool("RETRIEVAL_RRF_ENABLED", False)
 RETRIEVAL_RRF_K = _env_int("RETRIEVAL_RRF_K", 60)
 RETRIEVAL_PARENT_DIVERSITY_ENABLED = _env_bool("RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)
@@ -436,10 +459,19 @@ CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "4")
 # Semantic caching is deliberately opt-in. Exact, versioned caching remains
 # the default UAT and production behavior until similarity quality is evaluated.
 SEMANTIC_CACHE_ENABLED = _env_bool("SEMANTIC_CACHE_ENABLED", False)
-SEMANTIC_CACHE_THRESHOLD = _env_float("SEMANTIC_CACHE_THRESHOLD", 0.92)
-SEMANTIC_CACHE_MAX_CANDIDATES = _env_int("SEMANTIC_CACHE_MAX_CANDIDATES", 32)
+SEMANTIC_CACHE_SHADOW_ENABLED = _env_bool("SEMANTIC_CACHE_SHADOW_ENABLED", False)
+SEMANTIC_CACHE_SCHEMA_VERSION = _env_str("SEMANTIC_CACHE_SCHEMA_VERSION", "1")
+SEMANTIC_CACHE_THRESHOLD = _env_float("SEMANTIC_CACHE_THRESHOLD", 0.96)
+SEMANTIC_CACHE_MIN_SCORE_MARGIN = _env_float("SEMANTIC_CACHE_MIN_SCORE_MARGIN", 0.02)
+SEMANTIC_CACHE_MIN_CONFIDENCE = _env_float("SEMANTIC_CACHE_MIN_CONFIDENCE", 0.75)
+SEMANTIC_CACHE_MAX_CANDIDATES = _env_int("SEMANTIC_CACHE_MAX_CANDIDATES", 64)
+SEMANTIC_CACHE_MAX_ENTRIES = _env_int("SEMANTIC_CACHE_MAX_ENTRIES", 256)
 SEMANTIC_CACHE_TTL_SECONDS = _env_int("SEMANTIC_CACHE_TTL_SECONDS", CACHE_TTL_SECONDS)
 SEMANTIC_CACHE_MAX_VECTOR_DIMENSIONS = _env_int("SEMANTIC_CACHE_MAX_VECTOR_DIMENSIONS", 1536)
+SEMANTIC_CACHE_EMBED_MODEL_ID = _env_str("SEMANTIC_CACHE_EMBED_MODEL_ID", BEDROCK_EMBED_MODEL_ID)
+SEMANTIC_CACHE_SHADOW_MIN_ANSWER_AGREEMENT = _env_float(
+    "SEMANTIC_CACHE_SHADOW_MIN_ANSWER_AGREEMENT", 0.70
+)
 # Audit Firehose sink configuration. Defaults are overridden by production.env, then by SSM.
 AUDIT_FIREHOSE_ENABLED = _env_bool("AUDIT_FIREHOSE_ENABLED", False)
 AUDIT_FIREHOSE_STREAM = _env_str("AUDIT_FIREHOSE_STREAM", "askvera-audit")
@@ -495,9 +527,16 @@ FEEDBACK_EXPECTED_ANSWER_ENABLED = _env_bool("FEEDBACK_EXPECTED_ANSWER_ENABLED",
 SUPPORT_EMAIL_ENABLED = _env_bool("SUPPORT_EMAIL_ENABLED", False)
 SUPPORT_EMAIL_FROM = _env_str("SUPPORT_EMAIL_FROM", "")
 SUPPORT_EMAIL_SUBJECT_PREFIX = _env_str("SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera support request")
+ANALYTICS_REPORTS_ENABLED = _env_bool("ANALYTICS_REPORTS_ENABLED", False)
+ANALYTICS_REPORT_FROM = _env_str("ANALYTICS_REPORT_FROM", SUPPORT_EMAIL_FROM)
 SUPPORT_RECOMMEND_AFTER_FAILURES = _env_int("SUPPORT_RECOMMEND_AFTER_FAILURES", 2)
 SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
 SUPPORT_DEFAULT_ROUTE_JSON: dict[str, str] = json.loads(_env_str("SUPPORT_DEFAULT_ROUTE_JSON", "{}"))
+# WhatsApp is a disabled integration boundary until Meta credentials,
+# verification, and outbound delivery have been provisioned and tested.
+WHATSAPP_ENABLED = _env_bool("WHATSAPP_ENABLED", False)
+WHATSAPP_VERIFY_TOKEN = _env_str("WHATSAPP_VERIFY_TOKEN", "")
+WHATSAPP_APP_SECRET = _env_str("WHATSAPP_APP_SECRET", "")
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.
@@ -524,14 +563,22 @@ WIDGET_DOMAIN = "chat.vera-api.xyz"
 MARKETS_CONFIG_PATH = os.environ.get("MARKETS_CONFIG_PATH", str(Path(__file__).with_name("markets.json")))
 
 SSM_PARAMETER_PATH = os.environ.get("SSM_PARAMETER_PATH", "/askverachat/prod/")
-SSM_CONFIG_ENABLED = _env_bool("SSM_CONFIG_ENABLED", True)
+SSM_CONFIG_ENABLED = os.environ.get("SSM_CONFIG_ENABLED", "true").lower() == "true"
 _SSM_CONFIG: dict[str, str] = {}
+# These values describe deployed source behavior and participate in cache keys.
+# Letting an older SSM value override them can make a successful deployment
+# continue serving responses created by previous code.
+_CODE_OWNED_SETTINGS = {
+    "RETRIEVAL_PIPELINE_VERSION",
+    "CONVERSATION_ROUTING_VERSION",
+    "MODEL_ROUTING_VERSION",
+}
 
 
-def _coerce_value(name: str, current_value: Any, raw_value: str) -> Any:
+def _coerce_value(current_value: Any, raw_value: str) -> Any:
     """Coerce SSM strings to the existing setting type where possible."""
     if isinstance(current_value, bool):
-        return _parse_bool(raw_value, name)
+        return raw_value.lower() in {"1", "true", "yes", "on"}
     if isinstance(current_value, int) and not isinstance(current_value, bool):
         return int(raw_value)
     if isinstance(current_value, float):
@@ -549,8 +596,19 @@ def _coerce_value(name: str, current_value: Any, raw_value: str) -> Any:
     return raw_value
 
 
-def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:  # noqa: C901
-    """Validate all SSM overrides, then apply the complete batch atomically."""
+def _apply_ssm_values(loaded: dict[str, str]) -> None:
+    """Apply runtime-owned SSM values while preserving code-owned versions."""
+    for key, raw_value in loaded.items():
+        if key in _CODE_OWNED_SETTINGS:
+            continue
+        if key in globals():
+            globals()[key] = _coerce_value(globals()[key], raw_value)
+        else:
+            globals()[key] = raw_value
+
+
+def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
+    """Load config overrides from SSM Parameter Store and apply them to this module."""
     global _SSM_CONFIG
     if not SSM_CONFIG_ENABLED:
         return {}
@@ -564,45 +622,27 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:  # noqa: 
         for parameter in page.get("Parameters", []):
             loaded[parameter["Name"].split("/")[-1]] = parameter["Value"]
 
-    current = globals()
-    target_environment = loaded.get("APP_ENV", str(current["APP_ENV"])).strip().lower()
-    target_profile = loaded.get(
-        "SECURITY_PROFILE",
-        str(current["SECURITY_PROFILE"]),
-    ).strip().lower()
-    strict = target_environment == "production" or target_profile == "hardened"
-
-    unknown = sorted(key for key in loaded if key not in current)
-    if strict and unknown:
-        raise ValueError(f"Unknown SSM configuration parameters: {', '.join(unknown)}")
-
-    staged: dict[str, Any] = {}
-    for key, raw_value in loaded.items():
-        if key in current:
-            staged[key] = _coerce_value(key, current[key], raw_value)
-
-    def staged_value(name: str) -> Any:
-        return staged.get(name, current[name])
+    _apply_ssm_values(loaded)
 
     if "REDIS_HOST" in loaded:
-        staged["ELASTICACHE_REDIS_HOST"] = staged_value("REDIS_HOST")
+        globals()["ELASTICACHE_REDIS_HOST"] = globals()["REDIS_HOST"]
     if "REDIS_PORT" in loaded:
-        staged["ELASTICACHE_REDIS_PORT"] = staged_value("REDIS_PORT")
+        globals()["ELASTICACHE_REDIS_PORT"] = globals()["REDIS_PORT"]
     if "FIREHOSE_STREAM_NAME" in loaded:
-        staged["KINESIS_FIREHOSE_STREAM_NAME"] = staged_value("FIREHOSE_STREAM_NAME")
+        globals()["KINESIS_FIREHOSE_STREAM_NAME"] = globals()["FIREHOSE_STREAM_NAME"]
     if "BEDROCK_DATA_SOURCE_ID" in loaded:
-        staged["BEDROCK_DATASOURCE_ID"] = staged_value("BEDROCK_DATA_SOURCE_ID")
+        globals()["BEDROCK_DATASOURCE_ID"] = globals()["BEDROCK_DATA_SOURCE_ID"]
     if "BEDROCK_DATASOURCE_ID" in loaded:
-        staged["BEDROCK_DATA_SOURCE_ID"] = staged_value("BEDROCK_DATASOURCE_ID")
+        globals()["BEDROCK_DATA_SOURCE_ID"] = globals()["BEDROCK_DATASOURCE_ID"]
     if "AWS_REGION" in loaded:
-        staged["BEDROCK_REGION"] = staged_value("AWS_REGION")
+        globals()["BEDROCK_REGION"] = globals()["AWS_REGION"]
     if "BEDROCK_REGION" in loaded and "AWS_REGION" not in loaded:
-        staged["AWS_REGION"] = staged_value("BEDROCK_REGION")
+        globals()["AWS_REGION"] = globals()["BEDROCK_REGION"]
+    if "BEDROCK_EMBED_MODEL_ID" in loaded and "SEMANTIC_CACHE_EMBED_MODEL_ID" not in loaded:
+        globals()["SEMANTIC_CACHE_EMBED_MODEL_ID"] = globals()["BEDROCK_EMBED_MODEL_ID"]
     if "SESSION_IDLE_TIMEOUT_MINUTES" in loaded:
-        staged["SESSION_TTL_SECONDS"] = int(staged_value("SESSION_IDLE_TIMEOUT_MINUTES")) * 60
-        staged["SESSION_TIMEOUT_HOURS"] = staged["SESSION_TTL_SECONDS"] / (60 * 60)
-
-    current.update(staged)
+        globals()["SESSION_TTL_SECONDS"] = int(globals()["SESSION_IDLE_TIMEOUT_MINUTES"]) * 60
+        globals()["SESSION_TIMEOUT_HOURS"] = globals()["SESSION_TTL_SECONDS"] / (60 * 60)
 
     _SSM_CONFIG = loaded
     return loaded

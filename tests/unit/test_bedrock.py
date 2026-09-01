@@ -1,5 +1,6 @@
 """Unit tests for Bedrock prompt rendering and response parsing."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -231,6 +232,38 @@ def test_bedrock_provider_allows_borderline_confidence_with_enough_evidence() ->
     runtime.converse.assert_called_once()
 
 
+def test_bedrock_provider_blocks_very_low_confidence_despite_many_sources() -> None:
+    """Raw source scores cannot override a clearly weak blended confidence."""
+    runtime = MagicMock()
+    clients = SimpleNamespace(bedrock_runtime=runtime)
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id=f"irrelevant-{index}",
+                title="US policy.pdf",
+                content="Unrelated policy text",
+                source="s3://kb/US-policy.pdf",
+                country="US",
+                language="en",
+                score=1.2,
+            )
+            for index in range(5)
+        ],
+        citations=[],
+        confidence=0.185,
+    )
+
+    with patch("app.models.bedrock_provider.get_aws_clients", return_value=clients):
+        with pytest.raises(LowConfidenceError):
+            BedrockClaudeProvider().generate(
+                build_prompt_package("What are the requirements in Baltics?", "US", "en", "new_prospect", retrieval_result),
+                retrieval_result,
+                "cid",
+            )
+
+    runtime.converse.assert_not_called()
+
+
 def test_bedrock_provider_raises_when_no_sources_are_available() -> None:
     """No citations and no retrieve fallback sources should still produce the fallback."""
     retrieval_result = RetrievalResult(documents=[], citations=[], confidence=0.0)
@@ -275,6 +308,92 @@ def test_bedrock_provider_uses_configured_fallback_for_transient_failure(monkeyp
     assert [call.kwargs["modelId"] for call in runtime.converse.call_args_list] == [
         "primary-model",
         "fallback-model",
+    ]
+
+
+def test_bedrock_provider_uses_routed_fast_model(monkeypatch) -> None:
+    """A live route may override the normal model without changing the prompt."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {"output": {"message": {"content": [{"text": "Fast answer"}]}}}
+    monkeypatch.setattr(
+        "app.models.bedrock_provider.get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_MODEL_ARN", "production-model")
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_FAST_MODEL_ID", "fast-model")
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_COMPLEX_MODEL_ID", "complex-model")
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id="doc",
+                title="doc",
+                content="evidence",
+                source="s3://kb/doc",
+                score=0.9,
+            )
+        ],
+        citations=[],
+        confidence=0.9,
+    )
+    prompt = build_prompt_package("question", "US", "en", "new_prospect", retrieval_result)
+    prompt = replace(
+        prompt,
+        metadata={**prompt.metadata, "generation_model_id": "fast-model"},
+    )
+
+    result = BedrockClaudeProvider().generate(prompt, retrieval_result, "cid")
+
+    assert result.model_name == "fast-model"
+    assert runtime.converse.call_args.kwargs["modelId"] == "fast-model"
+
+
+def test_bedrock_provider_falls_back_from_fast_to_complex_on_transient_error(monkeypatch) -> None:
+    """A transient fast-model error escalates to the approved complex model."""
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        ClientError(
+            {
+                "Error": {"Code": "ThrottlingException", "Message": "slow down"},
+                "ResponseMetadata": {"HTTPStatusCode": 429},
+            },
+            "Converse",
+        ),
+        {"output": {"message": {"content": [{"text": "Complex answer"}]}}},
+    ]
+    monkeypatch.setattr(
+        "app.models.bedrock_provider.get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_MODEL_ARN", "production-model")
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_FAST_MODEL_ID", "fast-model")
+    monkeypatch.setattr("app.models.bedrock_provider.settings.BEDROCK_COMPLEX_MODEL_ID", "complex-model")
+    retrieval_result = RetrievalResult(
+        documents=[
+            RetrievedDocument(
+                id="doc",
+                title="doc",
+                content="evidence",
+                source="s3://kb/doc",
+                score=0.9,
+            )
+        ],
+        citations=[],
+        confidence=0.9,
+    )
+    prompt = build_prompt_package("question", "US", "en", "new_prospect", retrieval_result)
+    prompt = replace(
+        prompt,
+        metadata={**prompt.metadata, "generation_model_id": "fast-model"},
+    )
+
+    result = BedrockClaudeProvider().generate(prompt, retrieval_result, "cid")
+
+    assert result.text == "Complex answer"
+    assert result.model_name == "complex-model"
+    assert result.metadata["model_fallback_used"] is True
+    assert [call.kwargs["modelId"] for call in runtime.converse.call_args_list] == [
+        "fast-model",
+        "complex-model",
     ]
 
 

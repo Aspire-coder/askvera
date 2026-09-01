@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import shutil
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
@@ -19,10 +21,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.operations import pipeline_trace_store
 from config import settings
 from services.admin_auth import require_admin_identity
+from services.answer_cache_admin import AnswerCacheUnavailable, reset_answer_cache
 from services.admin_users import (
     ADMIN_ROLES,
     ADMIN_SECTIONS,
     accessible_markets,
+    certify_admin_access,
     create_admin_user,
     list_admin_audit_events,
     list_admin_users,
@@ -37,18 +41,29 @@ from services.analytics import (
     interaction_export_csv,
     interaction_export_xlsx,
     interaction_page,
+    model_routing_report,
     retrieval_shadow_report,
+)
+from services.analytics_governance import (
+    delete_saved_view,
+    list_saved_views,
+    review_case_market,
+    save_view,
+    update_review_case,
 )
 from services.knowledge_ingestion import (
     ACCESS_SCOPES,
     DOCUMENT_TYPES,
     create_ingestion_job,
+    delete_ingestion_job,
     enqueue_ingestion_job,
     fail_ingestion_job,
     list_ingestion_jobs,
+    list_document_generations,
     process_ingestion_job,
     preview_ingestion_job,
     publish_ingestion_job,
+    rollback_document_generation,
     stage_ingestion_upload,
     test_ingestion_job,
     cleanup_staged_ingestion_upload,
@@ -65,8 +80,13 @@ from services.market_config import (
     get_widget_countries,
     get_widget_country_codes,
 )
-from services.market_readiness import build_market_readiness
-from services.support_routes import list_support_routes, upsert_support_route
+from services.market_readiness import build_market_readiness, upsert_market_governance
+from services.operations_status import operations_status
+from services.retrieval_runtime import (
+    retrieval_profile_status,
+    set_retrieval_runtime_control,
+)
+from services.support_routes import list_support_routes, send_support_route_test, support_route_history, upsert_support_route
 from services.aws_clients import get_aws_clients
 from services.widget_configs import (
     create_widget_config,
@@ -74,6 +94,8 @@ from services.widget_configs import (
     get_widget_config,
     list_widget_configs,
     rotate_widget_key,
+    stage_widget_config,
+    publish_widget_config,
     update_widget_config,
 )
 from app.widget_registry.service import widget_registry_service
@@ -155,6 +177,47 @@ class SupportRouteInput(BaseModel):
     department: str = Field(min_length=1, max_length=160)
     email: str = Field(min_length=3, max_length=254)
     enabled: bool = True
+    fallback_department: str = Field(default="", max_length=160)
+    fallback_email: str = Field(default="", max_length=254)
+
+
+class SupportRouteBulkInput(BaseModel):
+    countries: list[str] = Field(min_length=1, max_length=200)
+    route: SupportRouteInput
+
+
+class MarketGovernanceInput(BaseModel):
+    owner_email: str = Field(default="", max_length=254)
+    deadline: str = Field(default="", max_length=10)
+
+
+class ReviewCaseInput(BaseModel):
+    status: str
+    assignee_email: str = Field(default="", max_length=254)
+    resolution_notes: str = Field(default="", max_length=4000)
+
+
+class AnalyticsSavedViewInput(BaseModel):
+    id: str | None = None
+    name: str = Field(min_length=1, max_length=100)
+    filters: dict[str, str] = Field(default_factory=dict)
+    schedule: str = "none"
+    report_email: str = Field(default="", max_length=254)
+    alert_not_helpful_threshold: float | None = Field(default=None, ge=0, le=1)
+
+
+class CacheResetInput(BaseModel):
+    country: str = Field(min_length=2, max_length=12)
+    mode: Literal["exact", "exact_and_semantic"] = "exact_and_semantic"
+    reason: str = Field(min_length=8, max_length=500)
+    confirmation: str = Field(min_length=5, max_length=32)
+
+
+class RetrievalProfileInput(BaseModel):
+    mode: Literal["current", "shadow"]
+    sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = Field(min_length=8, max_length=500)
+    confirmation: str = Field(min_length=8, max_length=32)
 
 
 def _payload(data: Any, request: Request) -> dict[str, Any]:
@@ -209,6 +272,124 @@ def market_readiness(request: Request) -> dict[str, Any]:
     return _payload(build_market_readiness(), request)
 
 
+@admin_router.put("/market-readiness/{country}/governance")
+def market_readiness_governance(country: str, body: MarketGovernanceInput, request: Request) -> dict[str, Any]:
+    normalized = country.upper().strip()
+    require_admin_access(request, "knowledge", "manage", normalized)
+    if normalized not in get_country_codes():
+        raise HTTPException(status_code=400, detail="Unsupported country.")
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    actor = str(principal.get("email") or principal.get("sub") or "admin")[:320]
+    try:
+        result = upsert_market_governance(normalized, body.owner_email, body.deadline, actor)
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=400, detail="Owner or deadline is invalid.") from exc
+    record_admin_audit_event(actor, "market_readiness.governance_updated", normalized)
+    return _payload(result, request)
+
+
+@admin_router.get("/operations/status")
+def operational_status(request: Request) -> dict[str, Any]:
+    """Return safe dependency, synchronization and deployed-version signals."""
+    require_admin_access(request, "flow", "view")
+    return _payload(operations_status(), request)
+
+
+@admin_router.get("/operations/retrieval-profile")
+def operational_retrieval_profile(request: Request) -> dict[str, Any]:
+    """Return the serving profile and isolated candidate readiness."""
+    require_admin_access(request, "flow", "view")
+    return _payload(retrieval_profile_status(), request)
+
+
+@admin_router.put("/operations/retrieval-profile")
+def operational_retrieval_profile_update(body: RetrievalProfileInput, request: Request) -> dict[str, Any]:
+    """Enable or disable safe shadow comparison without changing customer answers."""
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can change the retrieval profile.")
+
+    expected_confirmation = "ENABLE SHADOW" if body.mode == "shadow" else "USE CURRENT"
+    if body.confirmation.strip().upper() != expected_confirmation:
+        raise HTTPException(status_code=400, detail=f'Type "{expected_confirmation}" to confirm.')
+    if body.mode == "shadow" and body.sample_rate <= 0:
+        raise HTTPException(status_code=400, detail="Select a positive sample rate for Shadow mode.")
+
+    before = retrieval_profile_status()
+    if body.mode == "shadow" and not before["candidate"]["ready"]:
+        detail = before["candidate"]["readiness_error"] or "The candidate retrieval profile is not ready."
+        raise HTTPException(status_code=409, detail=detail)
+
+    try:
+        control = set_retrieval_runtime_control(
+            body.mode,
+            body.sample_rate,
+            actor=_actor(request),
+            reason=body.reason.strip(),
+        )
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail="The retrieval profile could not be updated safely.") from exc
+
+    correlation_id = str(getattr(request.state, "correlation_id", "admin"))
+    record_admin_audit_event(
+        _actor(request),
+        "operations.retrieval_profile_updated",
+        "retrieval",
+        metadata={
+            "previous_mode": before["control"]["mode"],
+            "mode": control.mode,
+            "sample_rate": control.sample_rate,
+            "reason": body.reason.strip(),
+            "primary_pipeline_version": before["primary"]["pipeline_version"],
+            "candidate_pipeline_version": before["candidate"]["pipeline_version"],
+            "primary_index": before["primary"]["index"],
+            "candidate_index": before["candidate"]["index"],
+            "correlation_id": correlation_id,
+        },
+    )
+    return _payload(retrieval_profile_status(), request)
+
+
+@admin_router.post("/operations/cache/reset")
+def operational_cache_reset(body: CacheResetInput, request: Request) -> dict[str, Any]:
+    """Reset only cached answers after explicit Super Admin confirmation."""
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can reset answer caches.")
+
+    country = body.country.strip().upper()
+    supported = get_country_codes() | get_widget_country_codes()
+    if country != "ALL" and country not in supported:
+        raise HTTPException(status_code=400, detail="Unsupported country.")
+    if body.confirmation.strip().upper() != f"RESET {country}":
+        raise HTTPException(status_code=400, detail=f'Type "RESET {country}" to confirm.')
+
+    correlation_id = str(getattr(request.state, "correlation_id", "admin"))
+    try:
+        result = reset_answer_cache(
+            country,
+            include_semantic=body.mode == "exact_and_semantic",
+            correlation_id=correlation_id,
+        )
+    except AnswerCacheUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    record_admin_audit_event(
+        _actor(request),
+        "operations.answer_cache_reset",
+        country,
+        metadata={
+            "reason": body.reason.strip(),
+            "mode": body.mode,
+            "exact_deleted": result["exact_deleted"],
+            "semantic_deleted": result["semantic_deleted"],
+            "total_deleted": result["total_deleted"],
+            "correlation_id": correlation_id,
+        },
+    )
+    return _payload(result, request)
+
+
 @admin_router.get("/analytics/overview")
 def overview(
     request: Request,
@@ -231,6 +412,33 @@ def overview(
             country=country,
             language=language,
             traffic_source=traffic_source,
+            allowed_countries=None if principal.get("role") == "super_admin" else markets,
+            start=start,
+            end=end,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _payload(result, request)
+
+
+@admin_router.get("/analytics/model-routing")
+def model_routing_analytics(
+    request: Request,
+    days: int = 7,
+    country: str = "",
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", None) or {}
+    markets = accessible_markets(principal, "insights", "view")
+    if country:
+        require_admin_access(request, "insights", "view", country)
+    elif not markets:
+        raise HTTPException(status_code=403, detail="You do not have access to Insights.")
+    try:
+        result = model_routing_report(
+            days=days,
+            country=country,
             allowed_countries=None if principal.get("role") == "super_admin" else markets,
             start=start,
             end=end,
@@ -351,6 +559,83 @@ def interactions_export(
     )
 
 
+@admin_router.put("/analytics/interactions/{correlation_id}/review")
+def interaction_review_update(
+    correlation_id: str,
+    body: ReviewCaseInput,
+    request: Request,
+) -> dict[str, Any]:
+    """Assign, investigate or resolve one answer-quality case."""
+    try:
+        country = review_case_market(correlation_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    require_admin_access(request, "insights", "manage", country)
+    actor = _actor(request)
+    try:
+        result = update_review_case(
+            correlation_id,
+            status=body.status,
+            assignee_email=body.assignee_email,
+            resolution_notes=body.resolution_notes,
+            actor=actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    record_admin_audit_event(actor, "analytics.review_updated", correlation_id)
+    return _payload(result, request)
+
+
+@admin_router.get("/analytics/saved-views")
+def analytics_saved_views_list(request: Request) -> dict[str, Any]:
+    require_admin_access(request, "insights", "view")
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    actor = str(principal.get("sub") or principal.get("email") or "unknown")
+    return _payload(list_saved_views(actor), request)
+
+
+@admin_router.put("/analytics/saved-views")
+def analytics_saved_view_save(
+    body: AnalyticsSavedViewInput,
+    request: Request,
+) -> dict[str, Any]:
+    require_admin_access(request, "insights", "manage")
+    actor = _actor(request)
+    try:
+        result = save_view(
+            view_id=body.id,
+            name=body.name,
+            owner_sub=actor,
+            filters={
+                **body.filters,
+                "_allowed_countries": ",".join(sorted(accessible_markets(
+                    getattr(request.state, "admin_identity", {}) or {},
+                    "insights",
+                    "view",
+                ))),
+            },
+            schedule=body.schedule,
+            report_email=body.report_email,
+            alert_not_helpful_threshold=body.alert_not_helpful_threshold,
+        )
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_admin_audit_event(actor, "analytics.saved_view_updated", result["id"])
+    return _payload(result, request)
+
+
+@admin_router.delete("/analytics/saved-views/{view_id}")
+def analytics_saved_view_delete(view_id: str, request: Request) -> dict[str, Any]:
+    require_admin_access(request, "insights", "manage")
+    actor = _actor(request)
+    if not delete_saved_view(view_id, actor):
+        raise HTTPException(status_code=404, detail="Saved view not found.")
+    record_admin_audit_event(actor, "analytics.saved_view_deleted", view_id)
+    return _payload({"deleted": True}, request)
+
+
 @admin_router.get("/analytics/interactions.xlsx")
 def interactions_export_xlsx(
     request: Request,
@@ -446,6 +731,32 @@ def traces(request: Request, limit: int = 20) -> dict[str, Any]:
     return _payload(visible[: max(1, min(limit, pipeline_trace_store.capacity))], request)
 
 
+@admin_router.get("/traces/stream")
+async def trace_stream(request: Request) -> StreamingResponse:
+    """Stream privacy-safe traces to authorized administrators as they change."""
+    principal = require_admin_access(request, "flow", "view")
+    markets = accessible_markets(principal, "flow", "view")
+
+    async def events():
+        previous = ""
+        while not await request.is_disconnected():
+            recent = pipeline_trace_store.latest(20)
+            visible = [trace for trace in recent if str(trace.get("country") or "").upper() in markets]
+            payload = json.dumps(visible, separators=(",", ":"), default=str)
+            if payload != previous:
+                yield f"event: traces\ndata: {payload}\n\n"
+                previous = payload
+            else:
+                yield ": keep-alive\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
 @admin_router.get("/traces/{correlation_id}")
 def trace_detail(correlation_id: str, request: Request) -> dict[str, Any]:
     trace = pipeline_trace_store.get(correlation_id)
@@ -466,6 +777,26 @@ def ingestions(request: Request, limit: int = 50) -> dict[str, Any]:
         if job.get("access_scope") == "global" or str(job.get("country") or "").upper() in markets
     ]
     return _payload(visible[: max(1, min(limit, 200))], request)
+
+
+@admin_router.delete("/ingestions/{job_id}")
+def delete_ingestion(job_id: str, request: Request) -> dict[str, Any]:
+    """Delete a document and remove it from the live retrieval index."""
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can delete documents.")
+    require_admin_access(request, "knowledge", "manage")
+    deleted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
+    try:
+        job = delete_ingestion_job(job_id, deleted_by=deleted_by)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    record_admin_audit_event(deleted_by, "knowledge.document_deleted", job_id)
+    return _payload({"job": job, "message": "Document deleted from live retrieval and source storage."}, request)
 
 
 class IngestionPreviewTestRequest(BaseModel):
@@ -519,6 +850,34 @@ def publish_ingestion(job_id: str, request: Request) -> dict[str, Any]:
     return _payload(result, request)
 
 
+@admin_router.get("/ingestions/{job_id}/generations")
+def ingestion_generations(job_id: str, request: Request) -> dict[str, Any]:
+    require_admin_access(request, "knowledge", "view")
+    try:
+        preview = preview_ingestion_job(job_id, limit=1)
+        if str(preview["job"].get("access_scope") or "") != "global":
+            require_admin_access(request, "knowledge", "view", str(preview["job"].get("country") or ""))
+        result = list_document_generations(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
+    return _payload(result, request)
+
+
+@admin_router.post("/ingestions/{job_id}/rollback/{target_ingestion_id}")
+def ingestion_rollback(job_id: str, target_ingestion_id: str, request: Request) -> dict[str, Any]:
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can roll back knowledge.")
+    require_admin_access(request, "knowledge", "manage")
+    actor = str(principal.get("email") or principal.get("sub") or "admin")[:320]
+    try:
+        result = rollback_document_generation(job_id, target_ingestion_id, activated_by=actor)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_admin_audit_event(actor, "knowledge.generation_rolled_back", target_ingestion_id)
+    return _payload(result, request)
+
+
 @admin_router.post("/documents")
 async def upload_document(
     request: Request,
@@ -530,6 +889,7 @@ async def upload_document(
     access_scope: Annotated[str, Form()] = "country",
     document_version: Annotated[str, Form()] = "",
     effective_date: Annotated[str, Form()] = "",
+    expiry_date: Annotated[str, Form()] = "",
     logical_document_id: Annotated[str, Form()] = "",
     document_owner: Annotated[str, Form()] = "",
     approval_reference: Annotated[str, Form()] = "",
@@ -586,6 +946,7 @@ async def upload_document(
         access_scope=access_scope,
         version=document_version,
         effective_date=effective_date,
+        expiry_date=expiry_date,
         content_hash=content_hash,
         accepted_by=accepted_by,
         logical_document_id=logical_document_id.strip(),
@@ -595,7 +956,13 @@ async def upload_document(
     )
     if settings.ADMIN_INGESTION_QUEUE_ENABLED:
         try:
-            upload_uri = stage_ingestion_upload(job_id, filename, content)
+            upload_uri = stage_ingestion_upload(
+                job_id,
+                filename,
+                content,
+                country=normalized_country,
+                access_scope=access_scope,
+            )
             enqueue_ingestion_job(
                 job_id=job_id,
                 upload_uri=upload_uri,
@@ -606,6 +973,7 @@ async def upload_document(
                 access_scope=access_scope,
                 version=document_version,
                 effective_date=effective_date,
+                expiry_date=expiry_date,
                 content_hash=content_hash,
                 accepted_by=accepted_by,
                 logical_document_id=logical_document_id.strip(),
@@ -643,6 +1011,7 @@ async def upload_document(
         access_scope=access_scope,
         version=document_version,
         effective_date=effective_date,
+        expiry_date=expiry_date,
         accepted_by=accepted_by,
         logical_document_id=logical_document_id.strip(),
         document_owner=document_owner.strip(),
@@ -757,10 +1126,31 @@ def admin_user_resend_invite(user_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="Cognito could not resend the invitation.") from exc
 
 
+@admin_router.post("/users/{user_id}/certify")
+def admin_user_certify(user_id: str, request: Request) -> dict[str, Any]:
+    _user_management_enabled()
+    require_admin_access(request, "users", "manage")
+    try:
+        return _payload(certify_admin_access(user_id, _actor(request)), request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Administrator not found.") from exc
+
+
 @admin_router.get("/support-routes")
 def support_routes_list(request: Request) -> dict[str, Any]:
-    require_admin_access(request, "support", "view")
-    return _payload(list_support_routes(), request)
+    principal = require_admin_access(request, "support", "view")
+    markets = accessible_markets(principal, "support", "view")
+    return _payload([route for route in list_support_routes() if route.get("country") in markets], request)
+
+
+@admin_router.put("/support-routes/bulk")
+def support_routes_bulk(body: SupportRouteBulkInput, request: Request) -> dict[str, Any]:
+    actor = _actor(request)
+    updated = []
+    for country in sorted({value.upper().strip() for value in body.countries}):
+        require_admin_access(request, "support", "manage", country)
+        updated.append(upsert_support_route(country, department=body.route.department, email=body.route.email, fallback_department=body.route.fallback_department, fallback_email=body.route.fallback_email, enabled=body.route.enabled, actor_sub=actor))
+    return _payload(updated, request)
 
 
 @admin_router.put("/support-routes/{country}")
@@ -772,6 +1162,8 @@ def support_route_update(country: str, body: SupportRouteInput, request: Request
                 country,
                 department=body.department,
                 email=body.email,
+                fallback_department=body.fallback_department,
+                fallback_email=body.fallback_email,
                 enabled=body.enabled,
                 actor_sub=_actor(request),
             ),
@@ -779,6 +1171,25 @@ def support_route_update(country: str, body: SupportRouteInput, request: Request
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@admin_router.post("/support-routes/{country}/test")
+def support_route_test(country: str, request: Request) -> dict[str, Any]:
+    require_admin_access(request, "support", "manage", country)
+    try:
+        result = send_support_route_test(country)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    record_admin_audit_event(_actor(request), "support_route.test_submitted", country.upper())
+    return _payload(result, request)
+
+
+@admin_router.get("/support-routes/{country}/history")
+def support_route_history_view(country: str, request: Request) -> dict[str, Any]:
+    require_admin_access(request, "support", "view", country)
+    return _payload(support_route_history(country), request)
 
 
 def _widget_management_enabled() -> None:
@@ -882,6 +1293,39 @@ def widget_config_update(widget_id: str, body: WidgetConfigInput, request: Reque
         _require_widget_markets(request, "manage", current.get("markets") or [])
         _require_widget_markets(request, "manage", body.markets)
         result = update_widget_config(widget_id, body.model_dump(), _actor(request))
+        widget_registry_service.invalidate()
+        return _payload(result, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Widget instance not found.") from exc
+
+
+@admin_router.put("/widget-configs/{widget_id}/draft")
+def widget_config_draft(widget_id: str, body: WidgetConfigInput, request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    try:
+        current = get_widget_config(widget_id)
+        if not current:
+            raise KeyError(widget_id)
+        _require_widget_markets(request, "manage", current.get("markets") or [])
+        _require_widget_markets(request, "manage", body.markets)
+        return _payload(stage_widget_config(widget_id, body.model_dump(), _actor(request)), request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Widget instance not found.") from exc
+
+
+@admin_router.post("/widget-configs/{widget_id}/publish")
+def widget_config_publish(widget_id: str, request: Request) -> dict[str, Any]:
+    _widget_management_enabled()
+    try:
+        current = get_widget_config(widget_id)
+        if not current:
+            raise KeyError(widget_id)
+        _require_widget_markets(request, "manage", current.get("markets") or [])
+        result = publish_widget_config(widget_id, _actor(request))
         widget_registry_service.invalidate()
         return _payload(result, request)
     except ValueError as exc:

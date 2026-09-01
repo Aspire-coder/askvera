@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -217,6 +219,35 @@ def get_country_codes() -> set[str]:
 def get_widget_country_codes() -> set[str]:
     """Return markets accepted by managed widget configuration."""
     return {country["code"] for country in get_widget_countries()}
+
+
+def find_market_mentions(message: str) -> set[str]:
+    """Return enabled markets whose configured name is present in a message.
+
+    Market discovery is driven entirely by ``markets.json`` so newly configured
+    countries work without adding retrieval-specific source code. Short market
+    codes are deliberately not matched because ordinary words such as ``it``
+    and ``us`` would otherwise create false global-directory searches.
+    """
+    normalized_message = _normalize_market_text(message)
+    if not normalized_message:
+        return set()
+
+    padded_message = f" {normalized_message} "
+    matches: set[str] = set()
+    for market in load_market_config()["markets"]:
+        if not market.get("enabled", True):
+            continue
+        normalized_name = _normalize_market_text(str(market.get("name") or ""))
+        if normalized_name and f" {normalized_name} " in padded_message:
+            matches.add(str(market["code"]).upper())
+    return matches
+
+
+def _normalize_market_text(value: str) -> str:
+    """Normalize configured names and user wording for whole-name matching."""
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    return re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE).strip()
 
 
 def get_language_codes_for_country(country_code: str) -> set[str]:

@@ -1,16 +1,18 @@
 """Tests for generic OpenSearch section retrieval behavior."""
 
+from app.evidence import approve_evidence
 from app.retrieval import opensearch_sections
+from app.retrieval.models import RetrievalResult
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
     _directory_text_query,
-    _requested_directory_country,
     _exact_section_query,
     _generation_filters,
     is_approved_source,
     _language_key,
     _outline_text_query,
+    _parse_selector_decision,
     _selector_candidates,
     _scope_filter,
     _section_reference,
@@ -132,45 +134,6 @@ def test_provider_can_target_an_isolated_vnext_index(monkeypatch) -> None:
     assert OpenSearchSectionProvider(index_name="vnext-index").index_name == "vnext-index"
 
 
-def test_rrf_ranking_is_opt_in_and_does_not_change_baseline(monkeypatch) -> None:
-    provider = OpenSearchSectionProvider()
-    text_hits = [_hit("b", "B", 1.0), _hit("a", "A", 1.0)]
-    vector_hits = [_hit("b", "B", 1.0), _hit("c", "C", 1.0)]
-
-    source_scores = {"a": 10.0, "b": 0.0, "c": 0.0}
-    monkeypatch.setattr(
-        opensearch_sections,
-        "_source_score",
-        lambda row, message: source_scores[str(row["id"])],
-    )
-    monkeypatch.setattr(settings, "RETRIEVAL_RRF_ENABLED", False)
-    baseline = provider._merge_hits(text_hits, vector_hits, "question")
-
-    assert [row["id"] for row, _ in baseline] == ["a", "b", "c"]
-
-    monkeypatch.setattr(settings, "RETRIEVAL_RRF_ENABLED", True)
-    monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 1)
-    fused = provider._merge_hits(text_hits, vector_hits, "question")
-
-    assert fused[0][0]["id"] == "b"
-    assert {row["id"] for row, _ in fused} == {"a", "b", "c"}
-
-
-def test_parent_diversity_is_opt_in_and_bounded(monkeypatch) -> None:
-    provider = OpenSearchSectionProvider()
-    rows = [
-        ({"id": "one-a", "parent_section_id": "one", "section_id": "one"}, 3.0),
-        ({"id": "one-b", "parent_section_id": "one", "section_id": "one"}, 2.0),
-        ({"id": "two-a", "parent_section_id": "two", "section_id": "two"}, 1.0),
-    ]
-    monkeypatch.setattr(settings, "OPENSEARCH_RESULT_COUNT", 3)
-    monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 1)
-
-    selected = provider._apply_parent_diversity(rows)
-
-    assert [row["id"] for row, _ in selected] == ["one-a", "two-a"]
-
-
 def test_sponsoring_directory_keeps_source_text_instead_of_office_fields() -> None:
     document = OpenSearchSectionProvider()._document_from_row(
         {
@@ -190,7 +153,42 @@ def test_sponsoring_directory_keeps_source_text_instead_of_office_fields() -> No
     )
 
     assert document.metadata["directory_kind"] == "international_sponsoring"
+    assert document.metadata["access_scope"] == "country"
     assert "directory_fields" not in document.metadata
+
+
+def test_global_sponsoring_document_preserves_scope_for_evidence_gate() -> None:
+    document = OpenSearchSectionProvider()._document_from_row(
+        {
+            "id": "sponsoring-belgium",
+            "section_id": "sponsoring-belgium",
+            "section_title": "Forever Belgium",
+            "content": "Minimum order size FBO: 50,00 in products excluding VAT.",
+            "country": "GLOBAL",
+            "language": "en",
+            "access_scope": "global",
+            "document_type": "international_sponsoring_directory",
+            "metadata": {
+                "directory_kind": "international_sponsoring",
+                "record_country": "Belgium",
+            },
+        },
+        1.0,
+    )
+
+    assert document.metadata["access_scope"] == "global"
+    assert document.metadata["document_type"] == "international_sponsoring_directory"
+    result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.9,
+    )
+    assert approve_evidence(
+        "What is the minimum order size for Belgium?",
+        result,
+        "US",
+        "en",
+    ).approved
 
 
 def test_retrieval_scopes_keep_locale_and_global_documents_isolated(monkeypatch) -> None:
@@ -347,6 +345,167 @@ def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:
     assert rows[0][0]["section_title"] == "Original governing title"
 
 
+def test_hardened_ranking_prefers_governing_manager_requirement(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    direct = _hit("manager-requirement", "Manager is achieved by generating Case Credits", 2.0)
+    direct["_source"]["section_id"] = "4.01-d"
+    direct["_source"]["content"] = (
+        "Manager is achieved by generating 120 Open Group Case Credits within 1-2 consecutive Months."
+    )
+    direct["_source"]["search_text"] = direct["_source"]["content"]
+    nearby = _hit("unrecognized-manager", "Unrecognized Manager", 9.0)
+    nearby["_source"]["section_id"] = "5.02"
+    nearby["_source"]["content"] = "An Unrecognized Manager can re-qualify by meeting separate requirements."
+    nearby["_source"]["search_text"] = nearby["_source"]["content"]
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [nearby, direct],
+        [],
+        "What does the company policy say about manager qualifications?",
+    )
+
+    assert rows[0][0]["id"] == "manager-requirement"
+
+
+def test_hardened_ranking_prefers_explicit_purchase_channel(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    generic = _hit("general", "General company information", 9.0)
+    channel = _hit("online-sales", "Selling Products Online", 2.0)
+    channel["_source"]["section_id"] = "17.10-a"
+    channel["_source"]["content"] = (
+        "An FBO may sell products through a personal Forever web shop or an Approved FBO Website."
+    )
+    channel["_source"]["search_text"] = channel["_source"]["content"]
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [generic, channel],
+        [],
+        "Where can I buy Forever products?",
+    )
+
+    assert rows[0][0]["id"] == "online-sales"
+
+
+def test_hardened_ranking_prefers_direct_return_clause(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    generic = _hit("generic-return", "General customer service", 2.1)
+    direct = _hit("return-policy", "Product Return", 2.0)
+    direct["_source"]["content"] = (
+        "Proper notice, proof of purchase, and timely return of the product are required."
+    )
+    direct["_source"]["search_text"] = direct["_source"]["content"]
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [generic, direct],
+        [],
+        "How do I return a product?",
+    )
+
+    assert rows[0][0]["id"] == "return-policy"
+
+
+def test_selector_decision_distinguishes_no_evidence_from_invalid_output() -> None:
+    assert _parse_selector_decision(
+        '{"relevant_evidence":false,"selected_ranks":[],"reason":"not covered"}'
+    ) == ([], False)
+    assert _parse_selector_decision("not json") is None
+
+
+def test_hardened_selector_can_reject_unrelated_candidates(monkeypatch) -> None:
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "text": (
+                                    '{"relevant_evidence":false,"selected_ranks":[],'
+                                    '"reason":"No candidate contains a current product price."}'
+                                )
+                            }
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [
+        (
+            {
+                "id": "unrelated-policy",
+                "document_type": "policy",
+                "access_scope": "country",
+                "section_id": "20.01",
+                "section_title": "Genealogical information",
+                "content": "The company protects confidential genealogical information.",
+                "metadata": {},
+            },
+            2.0,
+        )
+    ]
+
+    selected = OpenSearchSectionProvider()._select_evidence_rows(
+        "What is the price of Forever Focus?", rows, "cid"
+    )
+
+    assert selected == []
+
+
+def test_successful_selector_marks_selected_evidence(monkeypatch) -> None:
+    """Only a successful selector decision can activate strong-local approval."""
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {
+                "output": {
+                    "message": {
+                        "content": [{"text": '{"selected_ranks":[2],"reason":"direct clause"}'}]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [
+        ({"id": "nearby", "metadata": {}, "content": "Nearby evidence."}, 2.0),
+        ({"id": "direct", "metadata": {}, "content": "Direct evidence."}, 1.5),
+    ]
+
+    selected = OpenSearchSectionProvider()._select_evidence_rows("Question", rows, "cid")
+
+    assert selected[0][0]["id"] == "direct"
+    assert selected[0][0]["evidence_selector_selected"] is True
+    assert "evidence_selector_selected" not in selected[1][0]
+
+
+def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None:
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {"output": {"message": {"content": [{"text": "not json"}]}}}
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [({"id": "original", "metadata": {}, "content": "Approved evidence."}, 1.0)]
+
+    assert OpenSearchSectionProvider()._select_evidence_rows("Question", rows, "cid") == rows
+
+
 def test_selector_candidates_reserve_space_for_global_documents() -> None:
     locale_rows = [
         ({"id": f"locale-{index}", "access_scope": "country"}, 10.0 - index)
@@ -466,7 +625,7 @@ def test_outline_chunks_are_prioritized_only_for_structure_questions() -> None:
 
 
 def test_directory_query_filters_to_active_global_directory_records() -> None:
-    filters = _directory_text_query("Where is the India office?")["query"]["bool"]["filter"]
+    filters = _directory_text_query("Where is the India office?", {"India"})["query"]["bool"]["filter"]
 
     assert {
         "bool": {
@@ -476,8 +635,20 @@ def test_directory_query_filters_to_active_global_directory_records() -> None:
             ]
         }
     } in filters
+    assert {
+        "match_phrase": {
+            "metadata.record_country": {"query": "India", "boost": 40}
+        }
+    } in _directory_text_query("Where is the India office?", {"India"})["query"]["bool"]["should"]
     assert {"term": {"status": "active"}} in filters
-    assert {"term": {"document_type": "office_directory"}} in filters
+    assert {
+        "terms": {
+            "document_type": [
+                "office_directory",
+                "international_sponsoring_directory",
+            ]
+        }
+    } in filters
 
 
 def test_outline_query_is_locale_isolated_and_outline_only() -> None:
@@ -498,13 +669,35 @@ def test_directory_country_score_derives_acronyms_from_record_metadata() -> None
     assert _directory_record_country_score("Give me the United Kingdom office address", row) == 2.4
 
 
-def test_directory_query_hard_filters_an_explicit_country() -> None:
-    assert _requested_directory_country("What is the telephone number for Mali?") == "Mali"
-    assert _requested_directory_country("Give me the UK office address") == "United Kingdom"
-    assert _requested_directory_country("What is the office phone number?") == ""
+def test_sponsoring_directory_country_score_uses_record_metadata() -> None:
+    row = {
+        "document_type": "international_sponsoring_directory",
+        "metadata": {"record_country": "Italy"},
+    }
 
-    filters = _directory_text_query("Mali phone", "Mali")["query"]["bool"]["filter"]
-    assert any(
-        {"term": {"metadata.record_country": "Mali"}} in item.get("bool", {}).get("should", [])
-        for item in filters
-    )
+    assert _directory_record_country_score("Who is the sponsor for Italy?", row) == 2.4
+
+
+def test_target_country_score_separates_global_directory_records() -> None:
+    cameroon = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Cameroon"},
+    }
+    nigeria = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Nigeria"},
+    }
+
+    assert _directory_record_country_score("What are the business hours?", cameroon, {"Cameroon"}) == 8.0
+    assert _directory_record_country_score("What are the business hours?", nigeria, {"Cameroon"}) == -4.0
+
+
+def test_explicit_unknown_directory_country_beats_selected_market() -> None:
+    gambia = {
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Gambia"},
+    }
+
+    assert _directory_record_country_score(
+        "What is Gambia's telephone number?", gambia, {"United States"}
+    ) == 6.0

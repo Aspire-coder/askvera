@@ -7,6 +7,7 @@ from .language_validator import LanguageValidator
 from .length_validator import LengthValidator
 from .metadata_validator import MetadataValidator
 from .numeric_grounding_validator import NumericGroundingValidator
+from .output_integrity_validator import OutputIntegrityValidator
 
 __all__ = [
     "AnswerValidator",
@@ -16,4 +17,5 @@ __all__ = [
     "LengthValidator",
     "MetadataValidator",
     "NumericGroundingValidator",
+    "OutputIntegrityValidator",
 ]

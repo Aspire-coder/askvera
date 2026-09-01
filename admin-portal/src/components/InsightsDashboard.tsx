@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { AdminApi, demo, empty, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
+import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, SearchIcon } from "../icons";
-import type { AnalyticsOverview, Interaction, InteractionPage, Market, ShadowReport } from "../types";
+import type { AnalyticsOverview, AnalyticsSavedView, Interaction, InteractionPage, Market, ShadowReport } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 import "../tokenSplit.css";
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
@@ -50,11 +51,10 @@ function RankedBars({ data }: { data: Array<{ label: string; value: number }> })
 }
 
 export function InsightsDashboard({ credentials }: { credentials: AdminCredentials }) {
-  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
-  const [overview, setOverview] = useState<AnalyticsOverview>(hasCredentials ? empty.overview : demo.overview);
-  const [shadowReport, setShadowReport] = useState<ShadowReport>(hasCredentials ? empty.shadowReport : demo.shadowReport);
-  const [interactions, setInteractions] = useState<Interaction[]>(hasCredentials ? empty.interactions : demo.interactions);
-  const [interactionTotal, setInteractionTotal] = useState(hasCredentials ? 0 : demo.interactions.length);
+  const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
+  const [shadowReport, setShadowReport] = useState<ShadowReport>(demo.shadowReport);
+  const [interactions, setInteractions] = useState<Interaction[]>(demo.interactions);
+  const [interactionTotal, setInteractionTotal] = useState(demo.interactions.length);
   const [interactionTotalPages, setInteractionTotalPages] = useState(1);
   const [markets, setMarkets] = useState<Market[]>(demo.config.countries);
   const [mode, setMode] = useState<DataMode>("demo");
@@ -66,6 +66,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [trafficSource, setTrafficSource] = useState("");
   const [feedback, setFeedback] = useState("all");
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [reviewPageSize, setReviewPageSize] = useState("50");
   const [reviewSort, setReviewSort] = useState("newest");
@@ -73,14 +74,35 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
   const [exportError, setExportError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [savedViews, setSavedViews] = useState<AnalyticsSavedView[]>([]);
+  const [viewName, setViewName] = useState("");
+  const [reportSchedule, setReportSchedule] = useState("none");
+  const [reportEmail, setReportEmail] = useState("");
+  const [alertThreshold, setAlertThreshold] = useState("");
+  const [reviewStatus, setReviewStatus] = useState("open");
+  const [reviewAssignee, setReviewAssignee] = useState("");
+  const [resolutionNotes, setResolutionNotes] = useState("");
   const selected = selectedId
     ? interactions.find((item) => item.correlation_id === selectedId) || null
     : null;
+  const closeReview = () => setSelectedId(null);
+  const reviewDialogRef = useDialogFocus<HTMLElement>(Boolean(selected), closeReview);
+
+  useEffect(() => {
+    if (!selected) return;
+    setReviewStatus(selected.review_status || "open");
+    setReviewAssignee(selected.assignee_email || "");
+    setResolutionNotes(selected.resolution_notes || "");
+  }, [selectedId]);
+
+  useEffect(() => {
+    void new AdminApi(credentials).savedAnalyticsViews().then(setSavedViews).catch(() => setSavedViews([]));
+  }, [credentials.accessToken, credentials.apiKey]);
 
   const refresh = async () => {
     setLoadError("");
     const overviewFilters = new URLSearchParams({ days });
-    const interactionFilters = new URLSearchParams({ days, feedback, search: query, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
+    const interactionFilters = new URLSearchParams({ days, feedback, search: debouncedQuery, sort: reviewSort, page: String(reviewPage), page_size: reviewPageSize });
     const shadowFilters = new URLSearchParams({ days });
     if (startAt) {
       const start = new Date(startAt).toISOString();
@@ -128,18 +150,16 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
           : "demo"
       );
     } catch (error) {
-      setOverview(empty.overview);
-      setInteractions([]);
-      setInteractionTotal(0);
-      setInteractionTotalPages(1);
-      setShadowReport(empty.shadowReport);
-      setMarkets([]);
-      setMode("unavailable");
       setLoadError(error instanceof Error ? error.message : "Insights data could not be loaded.");
     }
   };
 
-  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback, query, reviewPage, reviewPageSize, reviewSort]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 350);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => { void refresh(); }, [credentials.accessToken, credentials.apiKey, days, startAt, endAt, country, language, trafficSource, feedback, debouncedQuery, reviewPage, reviewPageSize, reviewSort]);
 
   const resetDashboard = () => {
     setDays("30");
@@ -172,7 +192,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     setExporting(true);
     setExportError("");
     try {
-      const filters = new URLSearchParams({ days, feedback, search: query, limit: "5000", sort: reviewSort });
+      const filters = new URLSearchParams({ days, feedback, search: debouncedQuery, limit: "5000", sort: reviewSort });
       if (startAt) filters.set("start", new Date(startAt).toISOString());
       if (endAt) filters.set("end", new Date(endAt).toISOString());
       if (country) filters.set("country", country);
@@ -192,6 +212,35 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     }
   };
 
+  const currentFilters = () => Object.fromEntries(Object.entries({ days, startAt, endAt, country, language, trafficSource, feedback, query, reviewSort }).filter(([, value]) => value));
+  const applySavedView = (view: AnalyticsSavedView) => {
+    const filters = view.filters;
+    setDays(filters.days || "30"); setStartAt(filters.startAt || ""); setEndAt(filters.endAt || "");
+    setCountry(filters.country || ""); setLanguage(filters.language || ""); setTrafficSource(filters.trafficSource || "");
+    setFeedback(filters.feedback || "all"); setQuery(filters.query || ""); setReviewSort(filters.reviewSort || "newest"); setReviewPage(1);
+  };
+  const saveCurrentView = async () => {
+    if (!viewName.trim()) { setLoadError("Enter a name for this saved view."); return; }
+    try {
+      const saved = await new AdminApi(credentials).saveAnalyticsView({
+        name: viewName, filters: currentFilters(), schedule: reportSchedule, report_email: reportEmail,
+        alert_not_helpful_threshold: alertThreshold ? Number(alertThreshold) / 100 : null
+      });
+      setSavedViews((items) => [...items.filter((item) => item.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)));
+      setViewName(""); setLoadError("");
+    } catch (error) { setLoadError(error instanceof Error ? error.message : "Saved view could not be stored."); }
+  };
+  const saveReview = async () => {
+    if (!selected) return;
+    try {
+      const result = await new AdminApi(credentials).updateInteractionReview(selected.correlation_id, {
+        status: reviewStatus, assignee_email: reviewAssignee, resolution_notes: resolutionNotes
+      });
+      setInteractions((items) => items.map((item) => item.correlation_id === selected.correlation_id ? { ...item, ...result } : item));
+      setLoadError("");
+    } catch (error) { setLoadError(error instanceof Error ? error.message : "Review could not be updated."); }
+  };
+
   const feedbackTotal = overview.totals.helpful + overview.totals.notHelpful;
   const unansweredRate = overview.totals.questions ? overview.totals.unanswered / overview.totals.questions : 0;
   const inputTokens = Number(overview.totals.inputTokens || 0);
@@ -204,10 +253,9 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
     <section className="page-section" aria-labelledby="insights-title">
       <div className="page-heading dashboard-heading">
         <div><span className="eyebrow">Experience intelligence</span><h1 id="insights-title">Know what users need next.</h1><p>Measure adoption, answer quality, knowledge gaps and AI usage across every market.</p></div>
-        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : mode === "demo" ? "Demo data" : "Data unavailable"}</span><button className="button secondary" onClick={resetDashboard}>Reset dashboard</button></div>
+        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span><button className="button secondary" onClick={resetDashboard}>Reset dashboard</button></div>
       </div>
-
-      {loadError ? <div className="notice error" role="alert">{loadError}</div> : null}
+      {loadError ? <div className="admin-toast error" role="alert">{loadError}</div> : null}
 
       <div className="filter-bar surface">
         <label><span>Quick range</span><select value={days} onChange={(event) => { setDays(event.target.value); setStartAt(""); setEndAt(""); setReviewPage(1); }}><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
@@ -218,6 +266,14 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <label><span>Traffic source</span><select value={trafficSource} onChange={(event) => { setTrafficSource(event.target.value); setReviewPage(1); }}><option value="">All traffic</option><option value="widget">Widget users</option><option value="evaluation">Evaluation runs</option><option value="backend_test">Backend tests</option><option value="admin_test">Admin tests</option><option value="legacy">Legacy / unclassified</option></select></label>
         <button className="button primary" onClick={() => void refresh()}>Apply filters</button>
         <small className="filter-note">Date and hour use your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</small>
+      </div>
+      <div className="saved-view-bar surface">
+        <label><span>Saved views</span><select defaultValue="" onChange={(event) => { const view = savedViews.find((item) => item.id === event.target.value); if (view) applySavedView(view); }}><option value="">Choose a view</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
+        <label><span>New view name</span><input value={viewName} onChange={(event) => setViewName(event.target.value)} placeholder="Weekly quality review" /></label>
+        <label><span>Report</span><select value={reportSchedule} onChange={(event) => setReportSchedule(event.target.value)}><option value="none">No schedule</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+        <label><span>Email</span><input type="email" value={reportEmail} onChange={(event) => setReportEmail(event.target.value)} placeholder="owner@example.com" /></label>
+        <label><span>Alert above</span><input type="number" min="0" max="100" value={alertThreshold} onChange={(event) => setAlertThreshold(event.target.value)} placeholder="20" /></label>
+        <button className="button secondary" onClick={() => void saveCurrentView()}>Save view</button>
       </div>
 
       <div className="metric-grid">
@@ -347,7 +403,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         {interactionTotalPages > 1 ? <div className="review-pagination"><button className="button secondary" disabled={reviewPage <= 1} onClick={() => setReviewPage((value) => Math.max(1, value - 1))}>Previous</button><span>Page {reviewPage} of {interactionTotalPages}</span><label>Rows <select value={reviewPageSize} onChange={(event) => { setReviewPageSize(event.target.value); setReviewPage(1); }}><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><button className="button secondary" disabled={reviewPage >= interactionTotalPages} onClick={() => setReviewPage((value) => Math.min(interactionTotalPages, value + 1))}>Next</button></div> : null}
       </div>
 
-      {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}><aside className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">
+      {selected ? <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeReview(); }}><aside ref={reviewDialogRef} className="review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title" tabIndex={-1}>
         <button className="drawer-close" onClick={() => setSelectedId(null)} aria-label="Close review">x</button>
         <span className="eyebrow">Answer review</span><h2 id="review-title">{selected.question}</h2>
         <div className="drawer-meta"><span>{selected.country}</span><span>{selected.language.toUpperCase()}</span><span>{selected.traffic_source.replaceAll("_", " ")}</span><span>{percent(selected.confidence)} confidence</span><span>{selected.tokens} tokens</span></div>
@@ -355,6 +411,7 @@ export function InsightsDashboard({ credentials }: { credentials: AdminCredentia
         <section className="feedback-section"><h3>User feedback</h3><p>{selected.comment || selected.expected_answer || "No written comment was provided."}</p></section>
         {selected.comment && selected.expected_answer_present && selected.expected_answer !== selected.comment ? <section className="feedback-section"><h3>User suggestion</h3><p>{selected.expected_answer}</p></section> : null}
         <section><h3>Diagnostic signal</h3><dl><div><dt>Topic</dt><dd>{selected.topic}</dd></div><div><dt>Sources</dt><dd>{selected.source_count}</dd></div><div><dt>Failure layer</dt><dd>{selected.failure_layer || "None"}</dd></div><div><dt>Fallback</dt><dd>{selected.fallback ? "Yes" : "No"}</dd></div></dl></section>
+        <section className="review-workflow"><h3>Investigation workflow</h3><label>Status<select value={reviewStatus} onChange={(event) => setReviewStatus(event.target.value)}><option value="open">Open</option><option value="investigating">Investigating</option><option value="resolved">Resolved</option></select></label><label>Assigned to<input type="email" value={reviewAssignee} onChange={(event) => setReviewAssignee(event.target.value)} placeholder="owner@example.com" /></label><label>Investigation notes<textarea value={resolutionNotes} onChange={(event) => setResolutionNotes(event.target.value)} placeholder="Finding, correction and validation details" /></label><button className="button primary" onClick={() => void saveReview()}>Save review</button></section>
         <div className="recommended-action"><strong>Recommended next step</strong><p>{selected.failure_layer.includes("retrieval") || selected.source_count === 0 ? "Check whether the answer exists in the approved source, then review its chunking and index metadata." : "Compare the answer with its cited passage and add the missed exception or wording to the evaluation set."}</p></div>
       </aside></div> : null}
     </section>

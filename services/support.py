@@ -78,6 +78,16 @@ def _route_for(country: str) -> tuple[str, str]:
     return department, recipient
 
 
+def _fallback_route_for(country: str) -> tuple[str, str] | None:
+    """Return an optional database-managed fallback destination."""
+    route: Any = get_active_support_route(country)
+    if not route:
+        return None
+    department = str(route.get("fallback_department") or "").strip()
+    recipient = str(route.get("fallback_email") or "").strip()
+    return (department, recipient) if department and recipient else None
+
+
 def _ticket_id(correlation_id: str) -> str:
     date = datetime.now(UTC).strftime("%Y%m%d")
     reference = "".join(character for character in correlation_id if character.isalnum())[:10].upper()
@@ -124,22 +134,43 @@ def send_support_request(body: SupportRequest, correlation_id: str) -> SupportDe
         f"Source message: {escape(body.messageId or 'Not linked')}</small></p>"
     )
 
-    try:
-        get_aws_clients().ses.send_email(
-            Source=settings.SUPPORT_EMAIL_FROM,
-            Destination={"ToAddresses": [recipient]},
-            ReplyToAddresses=[body.email],
-            Message={
-                "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {
-                    "Text": {"Data": plain_text, "Charset": "UTF-8"},
-                    "Html": {"Data": html_body, "Charset": "UTF-8"},
-                },
+    message = {
+        "Source": settings.SUPPORT_EMAIL_FROM,
+        "Destination": {"ToAddresses": [recipient]},
+        "ReplyToAddresses": [body.email],
+        "Message": {
+            "Subject": {"Data": subject, "Charset": "UTF-8"},
+            "Body": {
+                "Text": {"Data": plain_text, "Charset": "UTF-8"},
+                "Html": {"Data": html_body, "Charset": "UTF-8"},
             },
-        )
-    except (BotoCoreError, ClientError) as exc:
+        },
+    }
+    try:
+        get_aws_clients().ses.send_email(**message)
+    except (BotoCoreError, ClientError) as primary_exc:
+        fallback = _fallback_route_for(body.country)
+        if fallback:
+            fallback_department, fallback_recipient = fallback
+            message["Destination"] = {"ToAddresses": [fallback_recipient]}
+            try:
+                get_aws_clients().ses.send_email(**message)
+                LOGGER.warning(
+                    "support_email_fallback_submitted",
+                    correlation_id=correlation_id,
+                    country=body.country,
+                    route_name=fallback_department,
+                )
+                return SupportDelivery(ticket_id=ticket_id, route_name=fallback_department)
+            except (BotoCoreError, ClientError):
+                LOGGER.exception(
+                    "support_email_fallback_failed",
+                    correlation_id=correlation_id,
+                    country=body.country,
+                    route_name=fallback_department,
+                )
         LOGGER.exception("support_email_failed", correlation_id=correlation_id, country=body.country, route_name=department)
-        raise SupportUnavailableError("The support request could not be sent. Please try again.") from exc
+        raise SupportUnavailableError("The support request could not be sent. Please try again.") from primary_exc
 
     LOGGER.info("support_email_submitted", correlation_id=correlation_id, ticket_id=ticket_id, country=body.country, route_name=department)
     return SupportDelivery(ticket_id=ticket_id, route_name=department)

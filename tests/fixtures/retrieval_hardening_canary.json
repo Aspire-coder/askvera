@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "generic-manager-governing-clause",
+      "question": "What are the qualifications to become a Manager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Manager is achieved",
+      "expected_section_contains": "4.01-d",
+      "minimum_confidence": 0.30,
+      "evidence_must_be_approved": false
+    },
+    {
+      "id": "us-permitted-purchase-channel",
+      "question": "Where can I buy Forever products in the United States?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Internet Policies",
+      "expected_section_contains": "17.10",
+      "minimum_confidence": 0.30,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "us-product-return-governing-clause",
+      "question": "How do I return a product?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "21.03",
+      "expected_section_contains": "21.03",
+      "minimum_confidence": 0.15,
+      "evidence_must_be_approved": true
+    },
+    {
+      "id": "unsupported-product-price-abstains",
+      "question": "What is the price of Forever Focus?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": false,
+      "evidence_must_be_absent": true
+    }
+  ]
+}

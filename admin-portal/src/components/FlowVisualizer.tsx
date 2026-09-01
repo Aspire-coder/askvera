@@ -19,6 +19,7 @@ const stations: StationDefinition[] = [
   { id: "governance", label: "Guardrails", service: "Amazon Bedrock Guardrails", family: "safety", detail: "Safety policy decides whether processing may continue.", entered: "PII-scrubbed question and market context.", process: "Evaluate denied topics, compliance intent and configured rules.", produced: "Allow, block or review decision with risk classification." },
   { id: "cache_lookup", label: "Cache", service: "ElastiCache for Valkey", family: "cache", detail: "AskVera checks whether an approved answer can be reused.", entered: "Versioned question, market, language and role key.", process: "Look up a validated response without exposing the question in the cache key.", produced: "A cache hit that skips AI work, or a miss that continues to retrieval." },
   { id: "retrieval", label: "Knowledge", service: "OpenSearch Serverless", family: "knowledge", detail: "Hybrid search finds approved, locale-compatible evidence.", entered: "Governed query and country/language access filters.", process: "Combine keyword, vector and structured-section ranking.", produced: "Ranked evidence, source metadata and retrieval confidence." },
+  { id: "semantic_cache_lookup", label: "Semantic shadow", service: "ElastiCache + Bedrock embeddings", family: "cache", detail: "Observe-only matching measures whether a prior grounded answer could be reused.", entered: "Question embedding plus the current approved evidence fingerprint.", process: "Compare only within the same market, language, role and evidence version without serving the cached answer.", produced: "A would-hit decision, similarity, answer agreement and estimated savings for review." },
   { id: "prompt_build", label: "Grounding", service: "AskVera Prompt Builder", family: "context", detail: "Approved evidence is assembled into a grounded model request.", entered: "Question, evidence and limited conversation history.", process: "Apply persona, compliance, role and evidence instructions.", produced: "A constrained prompt ready for model inference." },
   { id: "model_generate", label: "Generate", service: "Amazon Bedrock + Claude", family: "model", detail: "Claude writes an answer using only supplied evidence.", entered: "Grounded prompt and evidence - the input token payload.", process: "Model inference generates the answer and usage telemetry.", produced: "Draft response, finish reason and output token count." },
   { id: "validation", label: "Validate", service: "AskVera Validators", family: "validation", detail: "Independent validators check safety and grounding.", entered: "Draft answer, citations, evidence and locale expectations.", process: "Check language, citations, numbers, claims and response metadata.", produced: "Pass, repaired claim, or a safe blocked response." },
@@ -45,49 +46,42 @@ const metadataNumber = (stages: Array<TraceStage | undefined>, ...keys: string[]
   for (const stage of stages) for (const key of keys) { const value = numberValue(stage?.metadata?.[key]); if (value) return value; }
   return 0;
 };
-const emptyTrace: PipelineTrace = {
-  correlation_id: "",
-  country: "",
-  language: "",
-  session_id: "",
-  question_preview: "No recent answers",
-  started_at: "",
-  completed_at: "",
-  stages: []
-};
 
 export function FlowVisualizer({ credentials }: { credentials: AdminCredentials }) {
-  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
-  const [traces, setTraces] = useState<PipelineTrace[]>(hasCredentials ? [] : demo.traces);
-  const [selectedId, setSelectedId] = useState(hasCredentials ? "" : demo.traces[0].correlation_id);
+  const [traces, setTraces] = useState<PipelineTrace[]>(demo.traces);
+  const [selectedId, setSelectedId] = useState(demo.traces[0].correlation_id);
   const [selectedStage, setSelectedStage] = useState("request_received");
-  const [mode, setMode] = useState<DataMode>(hasCredentials ? "unavailable" : "demo");
+  const [mode, setMode] = useState<DataMode>("demo");
   const [replayKey, setReplayKey] = useState(0);
-  const [error, setError] = useState("");
+  const [correlationSearch, setCorrelationSearch] = useState("");
+  const [streamStatus, setStreamStatus] = useState<"connecting" | "live" | "polling">("connecting");
+  const [lookupError, setLookupError] = useState("");
 
   const refresh = async () => {
-    try {
-      const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
-      setTraces(result.data);
-      setMode(result.mode);
-      setError("");
-      if (result.data.length && !result.data.some((trace) => trace.correlation_id === selectedId)) setSelectedId(result.data[0].correlation_id);
-      if (!result.data.length) setSelectedId("");
-    } catch (nextError) {
-      setTraces([]);
-      setSelectedId("");
-      setMode("unavailable");
-      setError(nextError instanceof Error ? nextError.message : "Live flow data could not be loaded.");
-    }
+    const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
+    setTraces(result.data.length ? result.data : demo.traces);
+    setMode(result.mode);
+    if (result.data.length && !result.data.some((trace) => trace.correlation_id === selectedId)) setSelectedId(result.data[0].correlation_id);
   };
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 3000);
-    return () => window.clearInterval(timer);
+    const controller = new AbortController();
+    const api = new AdminApi(credentials);
+    let timer = 0;
+    void api.streamTraces((next) => {
+      setTraces(next.length ? next : demo.traces);
+      setMode("live");
+      setStreamStatus("live");
+    }, controller.signal).catch(() => {
+      if (controller.signal.aborted) return;
+      setStreamStatus("polling");
+      timer = window.setInterval(() => void refresh(), 3000);
+    });
+    return () => { controller.abort(); if (timer) window.clearInterval(timer); };
   }, [credentials.accessToken, credentials.apiKey]);
 
-  const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || emptyTrace, [selectedId, traces]);
+  const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || demo.traces[0], [selectedId, traces]);
   const detail = stationById.get(selectedStage) || stations[0];
   const activeStage = stageFor(trace, selectedStage);
   const deliveredStage = stageFor(trace, "response_delivered");
@@ -95,10 +89,13 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const retrievalStage = stageFor(trace, "retrieval");
   const responseStage = stageFor(trace, "response_build");
   const cacheStage = stageFor(trace, "cache_lookup");
+  const semanticStage = stageFor(trace, "semantic_cache_lookup");
   const cacheHit = booleanValue(cacheStage?.metadata?.cacheHit) || booleanValue(deliveredStage?.metadata?.cacheHit);
+  const semanticWouldHit = booleanValue(semanticStage?.metadata?.wouldHit);
   const inputTokens = metadataNumber([deliveredStage, modelStage], "inputTokens", "input_tokens");
   const outputTokens = metadataNumber([deliveredStage, modelStage], "outputTokens", "output_tokens");
   const tokensSaved = metadataNumber([deliveredStage, cacheStage], "tokensSaved", "cache_token_savings");
+  const potentialTokensSaved = metadataNumber([semanticStage], "estimatedTokensSaved");
   const sourceCount = metadataNumber([deliveredStage, responseStage, retrievalStage], "source_count", "sourceCount", "citationCount");
   const confidence = metadataNumber([deliveredStage, responseStage, retrievalStage], "confidence");
   const totalDuration = trace.stages.reduce((sum, stage) => sum + stage.duration_ms, 0);
@@ -107,9 +104,29 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const servicesTouched = new Set(trace.stages.map((stage) => stationById.get(stage.stage)?.service).filter(Boolean)).size;
 
   const replay = () => setReplayKey((value) => value + 1);
+  const findTrace = async () => {
+    const correlationId = correlationSearch.trim();
+    if (!correlationId) return;
+    setLookupError("");
+    try {
+      const found = await new AdminApi(credentials).trace(correlationId);
+      setTraces((current) => [found, ...current.filter((item) => item.correlation_id !== found.correlation_id)]);
+      setSelectedId(found.correlation_id);
+    } catch (error) {
+      setLookupError(error instanceof Error ? error.message : "Trace could not be found.");
+    }
+  };
+  const exportTrace = () => {
+    const blob = new Blob([JSON.stringify(trace, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `askvera-trace-${trace.correlation_id}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
   const resetView = () => {
     setSelectedStage("request_received");
-    setSelectedId(traces[0]?.correlation_id || "");
+    setSelectedId(traces[0]?.correlation_id || demo.traces[0].correlation_id);
     setReplayKey((value) => value + 1);
     void refresh();
   };
@@ -128,21 +145,32 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
     <section className="page-section" aria-labelledby="flow-title">
       <div className="page-heading">
         <div><span className="eyebrow">Live service trace</span><h1 id="flow-title">See every answer take shape.</h1><p>Follow the AWS services, decisions, latency, token usage and cache savings behind one response.</p></div>
-        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : mode === "demo" ? "Demo data" : "Data unavailable"}</span><button className="button secondary" onClick={resetView}>Reset view</button><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
+        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{streamStatus === "live" ? "Streaming live" : streamStatus === "polling" ? "Live polling" : mode === "live" ? "Connecting" : "Demo data"}</span><button className="button secondary" onClick={exportTrace}>Export trace</button><button className="button secondary" onClick={resetView}>Reset view</button><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
       </div>
-      {error ? <div className="notice error" role="alert">{error}</div> : null}
 
       <div className="trace-toolbar surface">
         <label><span>Recent question</span><select value={trace.correlation_id} onChange={(event) => setSelectedId(event.target.value)}>{traces.map((item) => <option key={item.correlation_id} value={item.correlation_id}>{item.question_preview || item.correlation_id}</option>)}</select></label>
+        <form className="trace-search" onSubmit={(event) => { event.preventDefault(); void findTrace(); }}><label><span>Correlation ID</span><input value={correlationSearch} onChange={(event) => setCorrelationSearch(event.target.value)} placeholder="Paste an exact correlation ID" /></label><button className="button secondary" type="submit">Find</button></form>
         <div className="trace-context"><span>{trace.country || "-"}</span><span>{trace.language?.toUpperCase() || "-"}</span><span>{displayTime(trace.started_at)}</span></div>
         <button className="button primary" onClick={replay}>Replay journey</button>
       </div>
+      {lookupError ? <div className="notice error" role="alert">{lookupError}</div> : null}
       <div className={`path-summary ${cacheHit ? "cache" : "generated"}`} role="status">
-        <strong>{cacheHit ? "Validated cache path used" : "Grounded generation path used"}</strong>
+        <strong>{cacheHit ? "Validated cache path used" : semanticWouldHit ? "Semantic shadow match observed" : "Grounded generation path used"}</strong>
         <span>{cacheHit
           ? "The approved cached answer was revalidated and returned without a model call."
+          : semanticWouldHit
+            ? "A semantic answer would have matched, but shadow mode still generated and delivered the normal grounded answer."
           : "The request passed safety checks, retrieved approved evidence, generated an answer, and validated it before delivery."}</span>
       </div>
+
+      <section className="trace-waterfall surface" aria-labelledby="waterfall-title">
+        <div className="section-heading"><div><span className="eyebrow">Latency waterfall</span><h2 id="waterfall-title">Where this answer spent its time</h2></div><strong>{Math.round(totalDuration)} ms total work</strong></div>
+        <div className="waterfall-list">{trace.stages.map((stage) => {
+          const width = totalDuration ? Math.max(2, stage.duration_ms / totalDuration * 100) : 2;
+          return <button key={stage.stage} onClick={() => setSelectedStage(stage.stage)}><span>{stationById.get(stage.stage)?.label || titleCase(stage.stage)}</span><i><b style={{ width: `${width}%` }} /></i><em>{Math.round(stage.duration_ms)} ms</em></button>;
+        })}</div>
+      </section>
 
       <div className="journey-metrics">
         <article className="journey-metric surface"><span>End-to-end work</span><strong>{integer.format(Math.round(totalDuration))}<small> ms</small></strong><p>{slowestStage ? `${titleCase(slowestStage.stage)} was the longest stop` : "Waiting for the journey"}</p></article>
@@ -150,6 +178,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
         <article className="journey-metric token-card surface"><span>Input tokens consumed</span><strong>{inputTokens ? compact.format(inputTokens) : cacheHit ? "0" : "-"}</strong><p>{cacheHit ? "Skipped because Valkey returned a validated answer" : "Instructions, question and evidence sent to Claude"}</p></article>
         <article className="journey-metric token-card returned surface"><span>Output tokens returned</span><strong>{outputTokens ? compact.format(outputTokens) : cacheHit ? "0" : "-"}</strong><p>{cacheHit ? "No generation call was required" : "Generated answer returned by Claude"}</p></article>
         <article className={`journey-metric savings-card surface ${tokensSaved ? "has-savings" : ""}`}><span>Tokens saved by cache</span><strong>{tokensSaved ? compact.format(tokensSaved) : "0"}</strong><p>{cacheHit ? "Estimated tokens avoided on this request" : "This request used the regular AI path"}</p></article>
+        <article className={`journey-metric savings-card surface ${potentialTokensSaved ? "has-savings" : ""}`}><span>Potential semantic savings</span><strong>{potentialTokensSaved ? compact.format(potentialTokensSaved) : "0"}</strong><p>{semanticWouldHit ? "Observed only; Claude still generated the delivered answer" : "No safe semantic match was observed"}</p></article>
       </div>
 
       <div className="flow-stage service-map surface" key={replayKey}>
@@ -165,7 +194,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
             </section>
             <section className={`tree-branch model-branch ${cacheHit ? "inactive-path" : "active-path"}`} aria-label="Generated answer path">
               <header><span>Cache miss</span><strong>{cacheHit ? "Skipped" : "Grounded AI path used"}</strong></header>
-              <div className="model-lane">{renderNode("retrieval")}<span className="lane-link" />{renderNode("prompt_build")}<span className="lane-link" />{renderNode("model_generate")}<span className="lane-link" />{renderNode("validation")}<span className="lane-link" />{renderNode("response_build")}<span className="lane-link" />{renderNode("response_delivered")}</div>
+              <div className="model-lane">{renderNode("retrieval")}<span className="lane-link" />{renderNode("semantic_cache_lookup")}<span className="lane-link" />{renderNode("prompt_build")}<span className="lane-link" />{renderNode("model_generate")}<span className="lane-link" />{renderNode("validation")}<span className="lane-link" />{renderNode("response_build")}<span className="lane-link" />{renderNode("response_delivered")}</div>
             </section>
           </div>
         </div>

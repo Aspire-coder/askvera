@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.metrics import STAGE_PROMPT_BUILD
 from app.metrics.pipeline import record_pipeline_metric
-from utils.directory_fields import format_directory_fields
+from utils.directory_fields import format_directory_fields, parse_directory_fields
 from config import settings
 from config.vera_persona import role_scope_for
 from utils.logging import get_logger
@@ -118,11 +118,15 @@ class PromptBuilder:
                 or document.metadata.get("section_id")
                 or ""
             ).strip()
-            directory_fields = format_directory_fields(
-                document.metadata.get("directory_fields", {})
-                if isinstance(document.metadata.get("directory_fields"), dict)
+            directory_metadata = document.metadata
+            directory_fields_data = (
+                directory_metadata.get("directory_fields", {})
+                if isinstance(directory_metadata.get("directory_fields"), dict)
+                else parse_directory_fields(document.content)
+                if directory_metadata.get("directory_kind") or directory_metadata.get("directory_section")
                 else {}
             )
+            directory_fields = format_directory_fields(directory_fields_data)
             source_lines = [
                 f"[Source {index}] {document.title}",
                 f"Source ID: {document.id}",

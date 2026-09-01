@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminApi, type AdminCredentials } from "../api";
 import type { AdminAuditEvent, AdminConfig, AdminScope, AdminUser } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 
 const sections = [
   { id: "knowledge", label: "Knowledge", permissions: ["view", "stage", "publish"] },
@@ -11,6 +12,8 @@ const sections = [
   { id: "users", label: "Users", permissions: ["view", "manage"] },
   { id: "audit", label: "Audit log", permissions: ["view"] }
 ];
+
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function summary(role: string, scopes: AdminScope[]) {
   if (role === "super_admin") return "This user will have full access to every market and admin section.";
@@ -101,12 +104,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
     setMarkets([]);
     setSectionPermissions({ knowledge: "view" });
   };
-  useEffect(() => {
-    if (!showForm) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeForm(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [showForm]);
+  const formDialogRef = useDialogFocus<HTMLElement>(showForm, closeForm);
 
   const edit = (user: AdminUser) => {
     setEditing(user);
@@ -118,7 +116,16 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
   };
 
   const save = async () => {
-    if (!editing && !email.trim()) { setError("Enter an email address."); return; }
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!editing && !normalizedEmail) { setError("Enter an email address."); return; }
+    if (!editing && !EMAIL_PATTERN.test(normalizedEmail)) {
+      setError("Enter a valid email address, such as name@example.com.");
+      return;
+    }
+    if (!editing && users.some((user) => user.email.trim().toLowerCase() === normalizedEmail)) {
+      setError("A user with this email address already exists.");
+      return;
+    }
     if (role !== "super_admin" && !scopes.length) { setError("Choose at least one market and permission."); return; }
     setSaving(true);
     setError("");
@@ -127,8 +134,8 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
         await api.updateUser(editing.id, { role, scopes });
         setNotice("Access updated.");
       } else {
-        await api.createUser({ email: email.trim(), role, scopes });
-        setNotice(`Invite sent. ${email.trim()} will receive a temporary password by email.`);
+        await api.createUser({ email: normalizedEmail, role, scopes });
+        setNotice(`Invite sent. ${normalizedEmail} will receive a temporary password by email.`);
       }
       closeForm();
       await load();
@@ -156,16 +163,16 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
       {loading ? <div className="empty-state">Loading users...</div> : visibleUsers.map((user) => <article className="user-row" key={user.id}>
         <div><strong>{user.email}</strong><small>{user.role.replaceAll("_", " ")} / {user.scopes.map((scope) => scope.market).filter((value, index, all) => all.indexOf(value) === index).join(", ") || "All markets"}</small></div>
         <span className={`status-pill ${user.status}`}>{user.status}</span>
-        <small>{user.status === "disabled" ? disabledFor(user.disabled_at) : user.last_login ? `Last sign-in ${new Date(user.last_login).toLocaleString()}` : "Not signed in yet"}</small>
-        <div><button className="button secondary" onClick={() => edit(user)}>Edit</button>{user.status === "invited" ? <button className="button secondary" onClick={() => void api.resendInvite(user.id).then(() => setNotice("Invitation resent.")).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "Invitation could not be resent."))}>Resend invite</button> : null}<button className="button secondary" onClick={() => void toggle(user)}>{user.status === "disabled" ? "Enable" : "Terminate access"}</button></div>
+        <div className="user-governance"><small>{user.status === "disabled" ? disabledFor(user.disabled_at) : user.last_login ? `Last sign-in ${new Date(user.last_login).toLocaleString()}` : "Not signed in yet"}</small><small>MFA: {user.mfa_status.replaceAll("_", " ")}</small><small>{user.status === "invited" && user.invite_expires_at ? `Invite expires ${new Date(user.invite_expires_at).toLocaleString()}` : user.access_review_due_at ? `Access review due ${new Date(`${user.access_review_due_at}T00:00:00`).toLocaleDateString()}` : "Access review not scheduled"}</small><small>{user.access_certified_at ? `Certified ${new Date(user.access_certified_at).toLocaleDateString()} by ${user.access_certified_by || "administrator"}` : "Not yet certified"}</small></div>
+        <div><button className="button secondary" onClick={() => edit(user)}>Edit</button><button className="button secondary" onClick={() => void api.certifyUser(user.id).then(() => { setNotice("Access certified."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "Access could not be certified."))}>Certify access</button>{user.status === "invited" ? <button className="button secondary" onClick={() => void api.resendInvite(user.id).then(() => { setNotice("Invitation resent."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "Invitation could not be resent."))}>Resend invite</button> : null}<button className="button secondary" onClick={() => void toggle(user)}>{user.status === "disabled" ? "Enable" : "Terminate access"}</button></div>
       </article>)}
       {!loading && !filtered.length ? <div className="empty-state">No users match these filters.</div> : null}
       {!loading && filtered.length > pageSize ? <div className="pagination"><button className="button secondary" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>Previous</button><span>Page {page} of {pageCount} / {filtered.length} users</span><button className="button secondary" disabled={page === pageCount} onClick={() => setPage((value) => value + 1)}>Next</button></div> : null}
     </div>
     {canViewAudit ? <section className="audit-list surface" aria-labelledby="audit-title"><div className="section-heading"><div><span className="eyebrow">Read-only history</span><h2 id="audit-title">Recent access changes</h2></div></div>{auditEvents.map((event) => <div className="audit-row" key={event.event_id}><strong>{event.action.replaceAll(".", " ")}</strong><span>{event.target_type}</span><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></div>)}{!loading && !auditEvents.length ? <div className="empty-state">No access changes have been recorded yet.</div> : null}</section> : null}
-    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}><section className="admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title">
+    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}><section ref={formDialogRef} className="admin-form-modal" role="dialog" aria-modal="true" aria-labelledby="user-form-title" tabIndex={-1}>
       <button className="drawer-close" onClick={closeForm} aria-label="Close">x</button><span className="eyebrow">{editing ? "Edit access" : "New administrator"}</span><h2 id="user-form-title">{editing ? editing.email : "Invite a user"}</h2>
-      {!editing ? <label><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoFocus /></label> : null}
+      {!editing ? <label><span>Email</span><input type="email" inputMode="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoFocus /></label> : null}
       <label><span>Role template</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="super_admin">Super Admin</option><option value="country_admin">Country Admin</option><option value="section_scoped">Section-scoped user</option><option value="auditor">Auditor</option></select></label>
       {role !== "super_admin" && role !== "auditor" ? <><fieldset><legend>Markets</legend><div className="choice-grid">{config.countries.map((market) => <label key={market.code}><input type="checkbox" checked={markets.includes(market.code)} onChange={() => setMarkets((current) => current.includes(market.code) ? current.filter((item) => item !== market.code) : [...current, market.code])} />{market.name}</label>)}</div></fieldset><fieldset><legend>Section permissions</legend>{sections.filter((section) => role === "country_admin" ? ["knowledge", "insights", "flow", "support"].includes(section.id) : !["users", "audit"].includes(section.id)).map((section) => <label className="permission-row" key={section.id}><span>{section.label}</span><select value={sectionPermissions[section.id] || ""} onChange={(event) => setSectionPermissions((current) => ({ ...current, [section.id]: event.target.value }))}><option value="">No access</option>{section.permissions.map((permission) => <option key={permission}>{permission}</option>)}</select></label>)}</fieldset></> : null}
       <div className="access-summary">{summary(role, scopes)}</div>

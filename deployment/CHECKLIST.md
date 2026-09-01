@@ -14,6 +14,9 @@ Use this checklist before sending production traffic to ASK Vera.
 - [ ] Secrets Manager RDS secret is available to the EC2 role.
 - [ ] Bedrock Knowledge Base is ready.
 - [ ] Bedrock guardrail is published to a numbered version before production.
+- [ ] Portal WAF and CloudFront access logging are enabled.
+- [ ] GuardDuty Malware Protection is active for the quarantine prefix.
+- [ ] GitHub Actions uses OIDC and no long-lived AWS access keys.
 
 ## Server Bootstrap
 
@@ -28,6 +31,9 @@ Use this checklist before sending production traffic to ASK Vera.
 - [ ] `askvera.service` installed.
 - [ ] `askvera.service` enabled.
 - [ ] `askvera.service` starts successfully.
+- [ ] `askvera-ingestion-worker.service` is enabled and healthy.
+- [ ] `askvera-retention.timer` is enabled and has a successful last run.
+- [ ] `askvera-analytics-reports.timer` is enabled; when reports are enabled, a test aggregate report is delivered.
 - [ ] `journalctl -u askvera` shows no startup errors.
 - [ ] `/health` returns healthy.
 - [ ] `/health/deep` returns healthy.
@@ -58,6 +64,8 @@ Use this checklist before sending production traffic to ASK Vera.
 - [ ] Comprehend PII detection works.
 - [ ] Firehose audit logging works.
 - [ ] SQS feedback enqueue works.
+- [ ] A clean upload receives `GuardDutyMalwareScanStatus=NO_THREATS_FOUND` before ingestion.
+- [ ] A test upload appears in the correct global or country folder and retrieval scope.
 
 ## Release Safety
 
@@ -65,4 +73,6 @@ Use this checklist before sending production traffic to ASK Vera.
 - [ ] `deployment/healthcheck.sh` passed.
 - [ ] `deployment/rollback.sh` tested in a non-production run.
 - [ ] GitHub Actions CI passed.
+- [ ] npm and Python dependency audits report no known vulnerabilities.
+- [ ] Portal and widget production builds contain no source maps.
 - [ ] Current deployed commit recorded.

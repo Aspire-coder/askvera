@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminApi, type AdminCredentials } from "../api";
 import type { AdminConfig, WidgetConfig } from "../types";
+import { useDialogFocus } from "../useDialogFocus";
 
-type Draft = Omit<WidgetConfig, "id" | "public_key" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at">;
+type Draft = Omit<WidgetConfig, "id" | "public_key" | "previous_public_key" | "previous_key_expires_at" | "key_version" | "status" | "embed_code" | "created_at" | "updated_at" | "has_draft">;
 const blank = (): Draft => ({
   name: "", customer: "", allowed_origins: [], markets: [], languages: [],
   default_market: "", default_language: "", display_name: "AskVera",
@@ -46,6 +47,7 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const originIssue = originText ? validateOrigins(originText) : "";
 
   const load = async () => {
@@ -55,12 +57,6 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, [api]);
-  useEffect(() => {
-    if (!showForm) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [showForm]);
 
   const widgetCountries = config.widgetCountries || config.countries;
   const allowedLanguages = useMemo(() => {
@@ -83,17 +79,28 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
     setError("");
   };
   const close = () => { setShowForm(false); setEditing(null); };
+  const formDialogRef = useDialogFocus<HTMLElement>(showForm, close);
 
   const save = async () => {
     const origins = originText.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean);
     const validationError = validateOrigins(originText);
     if (!draft.name.trim() || validationError) { setError(!draft.name.trim() ? "Enter a widget name." : validationError); return; }
+    if (!draft.markets.length) { setError("Select at least one market."); return; }
+    if (!draft.languages.length) { setError("Select at least one language."); return; }
+    if (draft.default_market && !draft.markets.includes(draft.default_market)) {
+      setError("Choose a default market that is enabled for this widget.");
+      return;
+    }
+    if (draft.default_language && !draft.languages.includes(draft.default_language)) {
+      setError("Choose a default language that is enabled for this widget.");
+      return;
+    }
     setSaving(true); setError("");
     try {
       const body = { ...draft, allowed_origins: origins };
-      if (editing) await api.updateWidgetConfig(editing.id, body);
+      if (editing) await api.stageWidgetConfig(editing.id, body);
       else await api.createWidgetConfig(body);
-      setNotice(editing ? "Widget configuration updated." : "Widget instance created.");
+      setNotice(editing ? "Widget changes saved as a draft. Publish after reviewing the preview." : "Widget instance created.");
       close(); await load();
     } catch (nextError) { setError(nextError instanceof Error ? nextError.message : "The widget configuration could not be saved."); }
     finally { setSaving(false); }
@@ -130,12 +137,13 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
       {loading ? <div className="empty-state surface">Loading widget instances...</div> : items.map((item) => <article className="widget-config-card surface" key={item.id}>
         <div><span className={`status-pill ${item.status}`}>{item.status}</span><h2>{item.name}</h2><p>{item.customer || "No customer label"}</p></div>
         <dl><div><dt>Websites</dt><dd>{item.allowed_origins.join(", ")}</dd></div><div><dt>Markets</dt><dd>{item.markets.join(", ")}</dd></div><div><dt>Languages</dt><dd>{item.languages.join(", ")}</dd></div><div><dt>Public instance ID</dt><dd><code>{item.public_key}</code></dd></div></dl>
-        <div className="card-actions"><button className="button secondary" onClick={() => openEdit(item)}>Edit</button><button className="button secondary" onClick={() => void copy(item)}>Copy embed code</button><button className="button secondary" onClick={() => { if (window.confirm("Rotate this public instance ID? Existing embeds will stop working until their snippet is updated.")) void api.rotateWidgetKey(item.id).then(() => { setNotice("Public instance ID rotated."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The key could not be rotated.")); }}>Rotate ID</button>{item.status === "active" ? <button className="button secondary" onClick={() => { if (window.confirm("Disable this widget? Existing embeds will stop working immediately.")) void api.disableWidgetConfig(item.id).then(() => { setNotice("Widget disabled."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The widget could not be disabled.")); }}>Disable</button> : null}</div>
+        <div className="card-actions"><button className="button secondary" onClick={() => openEdit(item)}>Edit draft</button>{item.has_draft ? <button className="button primary" onClick={() => void api.publishWidgetConfig(item.id).then(() => { setNotice("Widget draft published."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The draft could not be published."))}>Publish draft</button> : null}<button className="button secondary" onClick={() => void copy(item)}>Copy embed code</button><button className="button secondary" onClick={() => { if (window.confirm("Rotate this public instance ID? The old ID will remain valid during the grace period.")) void api.rotateWidgetKey(item.id).then(() => { setNotice("Public instance ID rotated with a grace period."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The key could not be rotated.")); }}>Rotate ID</button>{item.status === "active" ? <button className="button secondary" onClick={() => { if (window.confirm("Disable this widget? Existing embeds will stop working immediately.")) void api.disableWidgetConfig(item.id).then(() => { setNotice("Widget disabled."); return load(); }).catch((nextError) => setError(nextError instanceof Error ? nextError.message : "The widget could not be disabled.")); }}>Disable</button> : null}</div>
+        {item.previous_key_expires_at ? <small>Previous instance ID remains valid until {new Date(item.previous_key_expires_at).toLocaleString()}.</small> : null}
         <details className="install-details"><summary>How to install</summary><p>Paste this snippet before the closing body tag on an approved website.</p><pre>{item.embed_code}</pre><button className="button secondary" onClick={() => void copy(item)}>Copy code</button></details>
       </article>)}
       {!loading && !items.length ? <div className="empty-state surface">No widget instances yet. Create one when a customer site is ready.</div> : null}
     </div>
-    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section className="admin-form-modal widget-form-modal" role="dialog" aria-modal="true" aria-labelledby="widget-form-title">
+    {showForm ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><section ref={formDialogRef} className="admin-form-modal widget-form-modal" role="dialog" aria-modal="true" aria-labelledby="widget-form-title" tabIndex={-1}>
       <button className="drawer-close" onClick={close} aria-label="Close">x</button><span className="eyebrow">{editing ? "Edit instance" : "New instance"}</span><h2 id="widget-form-title">{editing ? editing.name : "Create a widget"}</h2>
       <div className="form-grid"><label><span>Name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} autoFocus /></label><label><span>Customer</span><input value={draft.customer} onChange={(event) => setDraft({ ...draft, customer: event.target.value })} /></label></div>
       <label><span>Approved website origins</span><textarea aria-describedby="origin-help origin-error" aria-invalid={Boolean(originIssue)} value={originText} onChange={(event) => setOriginText(event.target.value)} placeholder={"https://www.example.com\nhttps://portal.example.com"} /><small id="origin-help">One exact http or https origin per line. Paths are not accepted.</small>{originIssue ? <small id="origin-error" className="inline-error" role="alert">{originIssue}</small> : null}</label>
@@ -146,8 +154,8 @@ export function WidgetManager({ credentials, config }: { credentials: AdminCrede
       <label className="logo-upload"><span>Widget logo</span><div>{draft.logo_url ? <img src={draft.logo_url} alt="Current widget logo preview" /> : <span className="logo-placeholder">No logo</span>}<div><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadLogo(event.target.files?.[0])} /><small>PNG, JPEG or WebP. Maximum 1 MB.</small>{draft.logo_url ? <button type="button" className="text-button" onClick={() => setDraft({ ...draft, logo_url: "" })}>Remove logo</button> : null}</div></div></label>
       <label><span>Greeting</span><textarea value={draft.greeting} onChange={(event) => setDraft({ ...draft, greeting: event.target.value })} /></label>
       <div className="form-grid"><label><span>Position</span><select value={draft.position} onChange={(event) => setDraft({ ...draft, position: event.target.value as Draft["position"] })}><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option></select></label><label><span>Legal version</span><input value={draft.legal_version} onChange={(event) => setDraft({ ...draft, legal_version: event.target.value })} /></label><label><span>Rate-limit tier</span><select value={draft.rate_limit_tier} onChange={(event) => setDraft({ ...draft, rate_limit_tier: event.target.value })}><option>standard</option><option>low</option><option>high</option></select></label><label><span>Monthly usage cap</span><input type="number" min="1" value={draft.usage_cap || ""} onChange={(event) => setDraft({ ...draft, usage_cap: event.target.value ? Number(event.target.value) : null })} /></label></div>
-      <div className={`widget-mini-preview ${draft.position}`} style={{ borderColor: draft.accent_color }}>{draft.logo_url ? <img src={draft.logo_url} alt="" /> : null}<strong>{draft.display_name || "AskVera"}</strong><p>{draft.greeting || "Hello. How can I help?"}</p><span style={{ background: draft.accent_color }}>Ask a question</span></div>
-      <div className="modal-actions"><button className="button secondary" onClick={close}>Cancel</button><button className="button primary" disabled={saving || Boolean(originIssue)} onClick={() => void save()}>{saving ? "Saving..." : editing ? "Save widget" : "Create widget"}</button></div>
+      <div className="preview-mode"><button className={previewMode === "desktop" ? "selected" : ""} onClick={() => setPreviewMode("desktop")}>Desktop</button><button className={previewMode === "mobile" ? "selected" : ""} onClick={() => setPreviewMode("mobile")}>Mobile</button></div><div className={`widget-preview-frame ${previewMode}`}><div className={`widget-mini-preview ${draft.position}`} style={{ borderColor: draft.accent_color }}>{draft.logo_url ? <img src={draft.logo_url} alt="" /> : null}<strong>{draft.display_name || "AskVera"}</strong><p>{draft.greeting || "Hello. How can I help?"}</p><span style={{ background: draft.accent_color }}>Ask a question</span></div></div>
+      <div className="modal-actions"><button className="button secondary" onClick={close}>Cancel</button><button className="button primary" disabled={saving || Boolean(originIssue)} onClick={() => void save()}>{saving ? "Saving..." : editing ? "Save draft" : "Create widget"}</button></div>
     </section></div> : null}
   </section>;
 }

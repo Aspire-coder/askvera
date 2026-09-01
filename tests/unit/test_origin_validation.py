@@ -61,12 +61,22 @@ def test_localhost_allowed_in_development(monkeypatch) -> None:
     assert result.allowed is True
 
 
-def test_localhost_rejected_in_production(monkeypatch) -> None:
+def test_explicitly_allowlisted_localhost_works_in_production(monkeypatch) -> None:
     from app.widget_auth import origin_validator
 
     monkeypatch.setattr(origin_validator.settings, "WIDGET_ALLOW_LOCALHOST_ORIGINS", False)
 
     result = is_origin_allowed("http://localhost:5173", ["http://localhost:5173"])
+
+    assert result.allowed is True
+
+
+def test_unlisted_localhost_is_still_rejected_in_production(monkeypatch) -> None:
+    from app.widget_auth import origin_validator
+
+    monkeypatch.setattr(origin_validator.settings, "WIDGET_ALLOW_LOCALHOST_ORIGINS", False)
+
+    result = is_origin_allowed("http://localhost:5174", ["https://company.com"])
 
     assert result.allowed is False
     assert result.reason == "localhost_not_allowed"

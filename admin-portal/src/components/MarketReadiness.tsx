@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { AdminApi, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
-import type { AdminConfig, MarketReadiness, ReadinessCheckStatus } from "../types";
+import { AdminApi, withDemoFallback, type AdminCredentials } from "../api";
+import type { AdminConfig, MarketReadiness, ReadinessCheckStatus, View } from "../types";
 
-type Props = { credentials: AdminCredentials; config: AdminConfig };
+type Props = { credentials: AdminCredentials; config: AdminConfig; onNavigate: (view: View) => void };
 type Filter = "all" | ReadinessCheckStatus;
 
 function demoReadiness(config: AdminConfig): MarketReadiness {
@@ -59,16 +59,10 @@ function demoReadiness(config: AdminConfig): MarketReadiness {
           status: "not_verified",
           detail: "Run the market evaluation before production use.",
         },
-      ],
+      ], owner_email: "", deadline: "",
     })),
   };
 }
-
-const emptyReadiness: MarketReadiness = {
-  checked_at: "",
-  summary: { total: 0, ready: 0, needs_review: 0, not_configured: 0 },
-  markets: []
-};
 
 function statusLabel(status: ReadinessCheckStatus) {
   return {
@@ -79,14 +73,17 @@ function statusLabel(status: ReadinessCheckStatus) {
   }[status];
 }
 
-export function MarketReadiness({ credentials, config }: Props) {
-  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
-  const [data, setData] = useState<MarketReadiness>(() => hasCredentials ? emptyReadiness : demoReadiness(config));
-  const [mode, setMode] = useState<DataMode>(hasCredentials ? "unavailable" : "demo");
+export function MarketReadiness({ credentials, config, onNavigate }: Props) {
+  const [data, setData] = useState<MarketReadiness>(() => demoReadiness(config));
+  const [mode, setMode] = useState<"live" | "demo">("demo");
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedMarket, setSelectedMarket] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [compareCodes, setCompareCodes] = useState<string[]>([]);
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [savingGovernance, setSavingGovernance] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -99,15 +96,13 @@ export function MarketReadiness({ credentials, config }: Props) {
         setData(result.data);
         setMode(result.mode);
       })
-      .catch((reason) => {
-        setData(emptyReadiness);
-        setMode("unavailable");
+      .catch((reason) =>
         setError(
           reason instanceof Error
             ? reason.message
             : "Unable to load market readiness.",
-        );
-      })
+        ),
+      )
       .finally(() => setLoading(false));
   };
 
@@ -125,6 +120,26 @@ export function MarketReadiness({ credentials, config }: Props) {
   useEffect(() => {
     if (selected?.code && selected.code !== selectedMarket) setSelectedMarket(selected.code);
   }, [selected?.code, selectedMarket]);
+  useEffect(() => {
+    setOwnerEmail(selected?.owner_email || "");
+    setDeadline(selected?.deadline || "");
+  }, [selected?.code, selected?.owner_email, selected?.deadline]);
+
+  const saveGovernance = async () => {
+    if (!selected) return;
+    setSavingGovernance(true);
+    setError("");
+    try {
+      await new AdminApi(credentials).updateMarketGovernance(selected.code, { owner_email: ownerEmail, deadline });
+      load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Market ownership could not be saved.");
+    } finally {
+      setSavingGovernance(false);
+    }
+  };
+  const fixView = (key: string): View => key === "support" ? "support" : key === "widget" || key === "legal" ? "widget" : key === "retrieval" ? "insights" : "knowledge";
+  const compared = data.markets.filter((market) => compareCodes.includes(market.code));
 
   return (
     <section className="page-section">
@@ -164,14 +179,14 @@ export function MarketReadiness({ credentials, config }: Props) {
       <select value={filter} onChange={(event) => setFilter(event.target.value as Filter)} aria-label="Filter readiness">
         <option value="all">All statuses</option><option value="pass">Ready</option><option value="warning">Needs review</option><option value="not_configured">Not configured</option><option value="not_verified">Not verified</option>
       </select>
+      <label className="toolbar-field compare-field"><span>Compare markets</span><select multiple value={compareCodes} onChange={(event) => setCompareCodes(Array.from(event.currentTarget.selectedOptions).slice(0, 4).map((option) => option.value))} aria-label="Compare up to four markets">{data.markets.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select></label>
       <span className="mode-note">
         {mode === "live"
           ? `Live check - ${new Date(data.checked_at).toLocaleString()}`
-          : mode === "demo"
-            ? "Demo data - connect live operational data to verify"
-            : "Live readiness data is unavailable"}
+        : "Demo data - connect live operational data to verify"}
       </span>
     </div>
+    {compared.length > 1 ? <section className="market-comparison surface"><div className="section-heading"><div><span className="eyebrow">Side-by-side comparison</span><h2>Readiness across {compared.length} markets</h2></div><button className="button secondary" onClick={() => setCompareCodes([])}>Clear</button></div><div className="market-comparison-grid">{compared.map((market) => <article key={market.code}><strong>{market.name}</strong><span className={`readiness-status ${market.overall}`}>{statusLabel(market.overall)}</span><small>{market.owner_email || "Owner unassigned"}</small>{market.checks.map((check) => <div key={check.key}><span>{check.label}</span><b className={check.status}>{statusLabel(check.status)}</b></div>)}</article>)}</div></section> : null}
     <div className="readiness-list">
       {selected ? [selected].map((market) => (
         <article className="readiness-market surface" key={market.code}>
@@ -192,6 +207,7 @@ export function MarketReadiness({ credentials, config }: Props) {
               </span>
             ))}
           </div>
+          <div className="readiness-governance"><label><span>Action owner</span><input type="email" value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} placeholder="owner@company.com" /></label><label><span>Target date</span><input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} /></label><button className="button secondary" disabled={savingGovernance} onClick={() => void saveGovernance()}>{savingGovernance ? "Saving..." : "Save owner and date"}</button></div>
           <div className="readiness-check-grid">
             {market.checks.map((check) => (
               <div className="readiness-check" key={check.key}>
@@ -202,6 +218,7 @@ export function MarketReadiness({ credentials, config }: Props) {
                   </span>
                 </div>
                 <p>{check.detail}</p>
+                {check.status !== "pass" ? <button className="text-button" onClick={() => onNavigate(fixView(check.key))}>Fix this</button> : null}
               </div>
             ))}
           </div>

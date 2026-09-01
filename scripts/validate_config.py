@@ -74,6 +74,67 @@ def _validate_retrieval_experiments(missing: list[str]) -> None:
             missing.append(f"{name} (must be between 0 and 1)")
     if settings.RETRIEVAL_PROMOTION_MAX_LATENCY_MS <= 0:
         missing.append("RETRIEVAL_PROMOTION_MAX_LATENCY_MS (must be greater than 0)")
+    if not 0.0 <= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE <= settings.BEDROCK_MIN_CONFIDENCE:
+        missing.append(
+            "BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE "
+            "(must be between 0 and BEDROCK_MIN_CONFIDENCE)"
+        )
+
+
+def _validate_semantic_cache(missing: list[str]) -> None:
+    """Validate the opt-in semantic cache without enabling it."""
+    if settings.SEMANTIC_CACHE_ENABLED and settings.SEMANTIC_CACHE_SHADOW_ENABLED:
+        missing.append("SEMANTIC_CACHE_ENABLED and SEMANTIC_CACHE_SHADOW_ENABLED (choose only one mode)")
+    if not (settings.SEMANTIC_CACHE_ENABLED or settings.SEMANTIC_CACHE_SHADOW_ENABLED):
+        return
+    for name in ("REDIS_HOST", "REDIS_CACHE_NAME", "REDIS_USER", "SEMANTIC_CACHE_EMBED_MODEL_ID"):
+        _require(missing, name)
+    for name in (
+        "SEMANTIC_CACHE_THRESHOLD",
+        "SEMANTIC_CACHE_MIN_CONFIDENCE",
+        "SEMANTIC_CACHE_SHADOW_MIN_ANSWER_AGREEMENT",
+    ):
+        if not 0.0 <= float(getattr(settings, name)) <= 1.0:
+            missing.append(f"{name} (must be between 0 and 1)")
+    if not 0.0 <= settings.SEMANTIC_CACHE_MIN_SCORE_MARGIN < 1.0:
+        missing.append("SEMANTIC_CACHE_MIN_SCORE_MARGIN (must be at least 0 and less than 1)")
+    for name in (
+        "SEMANTIC_CACHE_MAX_CANDIDATES",
+        "SEMANTIC_CACHE_MAX_ENTRIES",
+        "SEMANTIC_CACHE_TTL_SECONDS",
+        "SEMANTIC_CACHE_MAX_VECTOR_DIMENSIONS",
+    ):
+        if int(getattr(settings, name)) <= 0:
+            missing.append(f"{name} (must be greater than 0)")
+
+
+def _validate_model_routing(missing: list[str]) -> None:
+    """Validate opt-in routing without silently enabling model changes."""
+    for name in (
+        "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION",
+        "MODEL_ROUTING_FAST_OUTPUT_USD_PER_MILLION",
+        "MODEL_ROUTING_COMPLEX_INPUT_USD_PER_MILLION",
+        "MODEL_ROUTING_COMPLEX_OUTPUT_USD_PER_MILLION",
+    ):
+        if float(getattr(settings, name)) < 0:
+            missing.append(f"{name} (must not be negative)")
+    if settings.MODEL_ROUTING_MODE not in {"off", "shadow", "live"}:
+        missing.append("MODEL_ROUTING_MODE (must be off, shadow, or live)")
+        return
+    if settings.MODEL_ROUTING_MODE == "off":
+        return
+    _require(missing, "BEDROCK_FAST_MODEL_ID")
+    _require(missing, "BEDROCK_COMPLEX_MODEL_ID")
+    if settings.BEDROCK_FAST_MODEL_ID == settings.BEDROCK_COMPLEX_MODEL_ID:
+        missing.append("BEDROCK_FAST_MODEL_ID and BEDROCK_COMPLEX_MODEL_ID (must differ)")
+    if not 0.0 <= settings.MODEL_ROUTING_FAST_MIN_CONFIDENCE <= 1.0:
+        missing.append("MODEL_ROUTING_FAST_MIN_CONFIDENCE (must be between 0 and 1)")
+    if settings.MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES <= 0:
+        missing.append("MODEL_ROUTING_FAST_MAX_DISTINCT_SOURCES (must be greater than 0)")
+    if settings.MODEL_ROUTING_FAST_MAX_QUESTION_CHARS <= 0:
+        missing.append("MODEL_ROUTING_FAST_MAX_QUESTION_CHARS (must be greater than 0)")
+    if settings.MODEL_ROUTING_MODE == "live" and not settings.EVIDENCE_GATED_OUTPUT_ENABLED:
+        missing.append("EVIDENCE_GATED_OUTPUT_ENABLED (must be true for live model routing)")
 
 
 def _validate_production_auth(missing: list[str]) -> None:  # noqa: C901
@@ -197,6 +258,8 @@ def validate(*, require_production: bool = False) -> list[str]:
     _validate_allowed_values(missing)
     _validate_shadow_retrieval(missing)
     _validate_retrieval_experiments(missing)
+    _validate_semantic_cache(missing)
+    _validate_model_routing(missing)
     if settings.APP_ENV == "production":
         _validate_production_auth(missing)
         _validate_production_integrations(missing)

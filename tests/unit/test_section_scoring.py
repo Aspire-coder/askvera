@@ -1,6 +1,7 @@
 """Regression tests for document-driven section scoring."""
 
-from app.retrieval.section_index import _source_score
+from app.retrieval.models import RetrievedDocument
+from app.retrieval.section_index import _confidence_from_documents, _source_score
 
 
 def _row(section_id: str, title: str, content: str) -> dict[str, object]:
@@ -62,3 +63,36 @@ def test_document_title_match_is_unicode_safe() -> None:
 
     question = "Quelles sont les conditions pour devenir Manager?"
     assert _source_score(governing, question) > _source_score(nearby, question)
+
+
+def _document(score: float) -> RetrievedDocument:
+    return RetrievedDocument(
+        id=str(score),
+        title="Approved section",
+        content="Approved evidence",
+        source="s3://approved/policy.pdf",
+        score=score,
+    )
+
+
+def test_confidence_uses_capped_corroboration_after_selector_reordering() -> None:
+    confidence = _confidence_from_documents(
+        [_document(2.31), _document(4.62), _document(1.37), _document(2.0)]
+    )
+
+    assert confidence >= 0.35
+
+
+def test_corroboration_cannot_rescue_a_weak_evidence_set() -> None:
+    confidence = _confidence_from_documents(
+        [_document(0.5), _document(1.0), _document(0.4)]
+    )
+
+    assert confidence < 0.35
+
+
+def test_score_sorted_confidence_is_unchanged_by_corroboration() -> None:
+    documents = [_document(4.0), _document(2.0), _document(1.0)]
+    expected = round((4.0 / 10.0) + (2.0 / 10.0) + ((7.0 / 3.0) / 30.0), 3)
+
+    assert _confidence_from_documents(documents) == expected

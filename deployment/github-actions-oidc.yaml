@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Least-privilege GitHub Actions OIDC deployment role for AskVera widget assets.
+
+Parameters:
+  GitHubOrganization:
+    Type: String
+    Default: Aspire-coder
+  GitHubRepository:
+    Type: String
+    Default: askvera
+  WidgetBucketName:
+    Type: String
+    Default: askvera-widget-assets
+  WidgetDistributionId:
+    Type: String
+    Default: E11MOVF0JGC9EM
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      ClientIdList:
+        - sts.amazonaws.com
+      Url: https://token.actions.githubusercontent.com
+      Tags:
+        - Key: Application
+          Value: AskVera
+
+  WidgetDeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AskVeraGitHubWidgetDeploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/tags/*"
+      Policies:
+        - PolicyName: DeployWidgetAssets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListWidgetPrefix
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${WidgetBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - widget/*
+              - Sid: ManageWidgetObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${WidgetBucketName}/widget/*"
+              - Sid: InvalidateWidgetDistribution
+                Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WidgetDistributionId}"
+      Tags:
+        - Key: Application
+          Value: AskVera
+        - Key: Purpose
+          Value: GitHubWidgetDeployment
+
+Outputs:
+  WidgetDeploymentRoleArn:
+    Value: !GetAtt WidgetDeploymentRole.Arn
+    Description: Configure this as the GitHub Actions variable AWS_DEPLOY_ROLE_ARN.
