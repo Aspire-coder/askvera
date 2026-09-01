@@ -14,8 +14,9 @@ const DEFAULT_STORAGE_KEY = "askvera_widget_auth_session";
 export class WidgetSessionStore {
   constructor(
     private readonly storageKey = DEFAULT_STORAGE_KEY,
-    // localStorage (not sessionStorage) so a second tab can resume the same
-    // backend session instead of always minting a new one (TRB-19188).
+    // The local-storage adapter (not the session-scoped one) so a second
+    // tab can resume the same backend session instead of always minting a
+    // new one (TRB-19188).
     private readonly storage: StorageAdapter = createLocalStorageAdapter()
   ) {}
 
