@@ -848,7 +848,13 @@ export function WidgetRuntime({
 
   return (
     <GenericWidgetWrapper
-      key={`${apiConfig ? "configured" : "loading"}:${activeAuthSessionId || "session"}:${selectedLocale.country}:${selectedLocale.language}`}
+      // Keying on loading/session state (previously "configured"/"loading" and
+      // activeAuthSessionId) force-remounted the whole panel - including the
+      // composer and message feed - the moment config or auth resolved right
+      // after the panel first opened (TRB-19158). apiConfig/sessionId are
+      // already passed as their own reactive props below, so only locale
+      // needs to force a fresh instance.
+      key={`${selectedLocale.country}:${selectedLocale.language}`}
       config={config}
       messages={messages}
       loading={loading}
