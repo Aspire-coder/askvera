@@ -717,10 +717,9 @@ class OpenSearchSectionProvider:
         rows = self._select_evidence_rows(message, rows, correlation_id)
         selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
 
+        eligible_rows = self._finalize_eligible_rows(rows)
         documents = [
-            self._document_from_row(row, score)
-            for row, score in rows
-            if score >= settings.SECTION_RETRIEVAL_MIN_SCORE
+            self._document_from_row(row, score) for row, score in eligible_rows
         ][: settings.OPENSEARCH_RESULT_COUNT]
         selector_applied = bool(rows and rows[0][0].get("evidence_selector_selected"))
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
@@ -1039,6 +1038,24 @@ class OpenSearchSectionProvider:
         max_log = math.log1p(max_score)
         for row, raw_score in zip(rows, raw_scores, strict=False):
             row["rank"] = (math.log1p(raw_score) / max_log) * 1.25
+
+    def _finalize_eligible_rows(
+        self, rows: list[tuple[dict[str, Any], float]]
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Apply the score floor, then optional per-parent diversity, before capping."""
+        eligible = [(row, score) for row, score in rows if score >= settings.SECTION_RETRIEVAL_MIN_SCORE]
+        if not settings.RETRIEVAL_PARENT_DIVERSITY_ENABLED or not eligible:
+            return eligible
+
+        from .experiments import diversify_by_parent
+
+        score_by_identity = {id(row): score for row, score in eligible}
+        diversified = diversify_by_parent(
+            [row for row, _ in eligible],
+            max_results=settings.OPENSEARCH_RESULT_COUNT,
+            max_per_parent=settings.RETRIEVAL_MAX_RESULTS_PER_PARENT,
+        )
+        return [(row, score_by_identity[id(row)]) for row in diversified]
 
     def _document_from_row(self, row: dict[str, Any], score: float) -> RetrievedDocument:
         page = str(row.get("start_page") or "")

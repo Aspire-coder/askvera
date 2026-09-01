@@ -405,6 +405,98 @@ def test_hardened_ranking_prefers_direct_return_clause(monkeypatch) -> None:
     assert rows[0][0]["id"] == "return-policy"
 
 
+def test_hardened_ranking_prefers_specific_buyback_clause_over_general_satisfaction_clause(monkeypatch) -> None:
+    """Regression test for the 2026-09-01 live-canary finding: a question about the
+    buy-back window for an unopened product must prefer the specific buy-back
+    clause, not the general satisfaction-guarantee clause that happens to share
+    the word "return"."""
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    satisfaction_guarantee = _hit("satisfaction-guarantee", "Product Satisfaction", 2.1)
+    satisfaction_guarantee["_source"]["section_id"] = "21.03"
+    satisfaction_guarantee["_source"]["content"] = (
+        "Retail/Preferred Customers are guaranteed 100% product satisfaction. Within 30 days..."
+    )
+    satisfaction_guarantee["_source"]["search_text"] = satisfaction_guarantee["_source"]["content"]
+    buyback_clause = _hit("buyback-clause", "Unsold Product Buy-Back", 2.0)
+    buyback_clause["_source"]["section_id"] = "21.05"
+    buyback_clause["_source"]["content"] = (
+        "FLP shall buy back any unsold, salable FLP product, except literature, that has been purchased."
+    )
+    buyback_clause["_source"]["search_text"] = buyback_clause["_source"]["content"]
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [satisfaction_guarantee, buyback_clause],
+        [],
+        "Can I return an unopened product, and within what window?",
+    )
+
+    assert rows[0][0]["id"] == "buyback-clause"
+
+
+def test_hardened_ranking_still_prefers_direct_return_clause_for_generic_questions(monkeypatch) -> None:
+    """The generic-return regression fix above must not weaken the original, already-verified case."""
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    generic = _hit("generic-return", "General customer service", 2.1)
+    direct = _hit("return-policy", "Product Return", 2.0)
+    direct["_source"]["content"] = (
+        "Proper notice, proof of purchase, and timely return of the product are required."
+    )
+    direct["_source"]["search_text"] = direct["_source"]["content"]
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [generic, direct],
+        [],
+        "How do I return a product?",
+    )
+
+    assert rows[0][0]["id"] == "return-policy"
+
+
+def test_finalize_eligible_rows_is_unchanged_when_diversity_is_off(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)
+    rows = [
+        ({"id": "a", "metadata": {"parent_section_id": "5.01"}}, 0.9),
+        ({"id": "b", "metadata": {"parent_section_id": "5.01"}}, 0.8),
+        ({"id": "c", "metadata": {"parent_section_id": "5.02"}}, 0.1),
+    ]
+    monkeypatch.setattr(settings, "SECTION_RETRIEVAL_MIN_SCORE", 0.05)
+
+    result = OpenSearchSectionProvider()._finalize_eligible_rows(rows)
+
+    assert [row["id"] for row, _score in result] == ["a", "b", "c"]
+
+
+def test_finalize_eligible_rows_bounds_repeats_from_the_same_parent_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_PARENT_DIVERSITY_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 1)
+    monkeypatch.setattr(settings, "OPENSEARCH_RESULT_COUNT", 5)
+    monkeypatch.setattr(settings, "SECTION_RETRIEVAL_MIN_SCORE", 0.05)
+    rows = [
+        ({"id": "a", "metadata": {"parent_section_id": "5.01"}}, 0.9),
+        ({"id": "b", "metadata": {"parent_section_id": "5.01"}}, 0.8),
+        ({"id": "c", "metadata": {"parent_section_id": "5.02"}}, 0.7),
+    ]
+
+    result = OpenSearchSectionProvider()._finalize_eligible_rows(rows)
+
+    assert [row["id"] for row, _score in result] == ["a", "c"]
+
+
+def test_finalize_eligible_rows_still_applies_the_score_floor_before_diversity(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "RETRIEVAL_PARENT_DIVERSITY_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 5)
+    monkeypatch.setattr(settings, "OPENSEARCH_RESULT_COUNT", 5)
+    monkeypatch.setattr(settings, "SECTION_RETRIEVAL_MIN_SCORE", 0.5)
+    rows = [
+        ({"id": "a", "metadata": {"parent_section_id": "5.01"}}, 0.9),
+        ({"id": "below-floor", "metadata": {"parent_section_id": "5.02"}}, 0.1),
+    ]
+
+    result = OpenSearchSectionProvider()._finalize_eligible_rows(rows)
+
+    assert [row["id"] for row, _score in result] == ["a"]
+
+
 def test_selector_decision_distinguishes_no_evidence_from_invalid_output() -> None:
     assert _parse_selector_decision(
         '{"relevant_evidence":false,"selected_ranks":[],"reason":"not covered"}'
