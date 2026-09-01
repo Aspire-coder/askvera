@@ -35,6 +35,12 @@ SENSITIVE_PII_PLACEHOLDERS = frozenset(
         "SSN",
     }
 )
+# Every placeholder token that must never survive to a user-visible response
+# unresolved. Built from both sets so a new sensitive category can never be
+# added to detection (SENSITIVE_PII_PLACEHOLDERS) without also being covered
+# by the cleanup pass below - the two silently drifted apart once already.
+_UNRESOLVED_PLACEHOLDER_TOKENS = frozenset({"ADDRESS", "EMAIL", "PHONE", "NAME", "PII"}) | SENSITIVE_PII_PLACEHOLDERS
+_UNRESOLVED_PLACEHOLDER_PATTERN = "|".join(sorted(_UNRESOLVED_PLACEHOLDER_TOKENS))
 
 
 def contains_sensitive_pii_placeholder(text: str) -> bool:
@@ -54,9 +60,15 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
         return text
     kept_lines: list[str] = []
     for line in text.splitlines():
-        if re.search(r"\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\]\s*:", line, flags=re.IGNORECASE):
+        if re.search(rf"\[(?:{_UNRESOLVED_PLACEHOLDER_PATTERN})\]\s*:", line, flags=re.IGNORECASE):
             continue
-        cleaned = re.sub(r"\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\](?:\s*,\s*\[(?:ADDRESS|EMAIL|PHONE|NAME|PII)\])*", "", line, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            rf"\s*\[(?:{_UNRESOLVED_PLACEHOLDER_PATTERN})\]"
+            rf"(?:\s*,\s*\[(?:{_UNRESOLVED_PLACEHOLDER_PATTERN})\])*",
+            "",
+            line,
+            flags=re.IGNORECASE,
+        )
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
@@ -127,7 +139,17 @@ def _scrub_pattern_pii(text: str, allowed_texts: Iterable[str]) -> str:
     def replace_phone(match: re.Match[str]) -> str:
         return match.group(0) if _approved_entity(match.group(0), approved) else "[PHONE]"
 
-    scrubbed = GOVERNMENT_ID_RE.sub("[GOVERNMENT_ID]", text)
+    def replace_government_id(match: re.Match[str]) -> str:
+        # A 3-2-4 digit grouping is shaped like a US SSN, but the same shape
+        # occurs in ordinary international phone/order-line numbers (this
+        # pattern is not locale-aware). When the exact digits are already
+        # grounded in approved evidence - an office directory record, not
+        # user-submitted text - it is a public business contact value, not a
+        # private government ID, so it gets the same exemption phone/email
+        # numbers already have instead of being masked unconditionally.
+        return match.group(0) if _approved_entity(match.group(0), approved) else "[GOVERNMENT_ID]"
+
+    scrubbed = GOVERNMENT_ID_RE.sub(replace_government_id, text)
     scrubbed = redact_payment_cards(scrubbed)
     scrubbed = redact_ibans(scrubbed)
     return PHONE_RE.sub(replace_phone, EMAIL_RE.sub(replace_email, scrubbed))
