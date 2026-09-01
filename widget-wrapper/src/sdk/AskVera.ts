@@ -63,7 +63,7 @@ class AskVeraSdkImpl implements AskVeraSdk {
       ...this.state.config,
       widgetId: config.widgetId,
       apiUrl: config.apiUrl,
-      conversationPersistence: config.conversationPersistence || "session",
+      conversationPersistence: config.conversationPersistence || "local",
       launcherPosition: config.position || this.state.config.launcherPosition,
       defaultCountry: config.defaultCountry || this.state.config.defaultCountry,
       defaultLanguage: config.defaultLanguage || this.state.config.defaultLanguage

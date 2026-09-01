@@ -16,7 +16,7 @@ void AskVera.init({
   widgetId: params.get("widget") || "askvera-demo",
   apiUrl,
   position: "bottom-right",
-  conversationPersistence: "session"
+  conversationPersistence: "local"
 }).catch((error: unknown) => {
   if (status) {
     status.textContent = `AskVera could not connect to ${apiUrl}. ${error instanceof Error ? error.message : "Check the API URL and try again."}`;
