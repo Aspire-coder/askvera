@@ -36,7 +36,23 @@ def test_security_headers_added() -> None:
     response = _run(middleware.dispatch(request, _ok_response))
 
     assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert response.headers["cross-origin-opener-policy"] == "same-origin"
+    assert response.headers["content-security-policy"] == (
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    )
+
+
+def test_api_docs_receive_a_documentation_compatible_csp() -> None:
+    middleware = SecurityHeadersMiddleware(lambda scope, receive, send: None)
+    request = FakeRequest("/docs")
+
+    response = _run(middleware.dispatch(request, _ok_response))
+
+    policy = response.headers["content-security-policy"]
+    assert "script-src 'self' https://cdn.jsdelivr.net" in policy
+    assert "frame-ancestors 'none'" in policy
 
 
 def test_request_size_limit_rejects_oversized_body(monkeypatch) -> None:

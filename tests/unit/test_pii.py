@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import services.pii as pii_module
 from services.pii import (
     _pii_language_code,
     contains_sensitive_pii_placeholder,
@@ -194,3 +195,31 @@ def test_invalid_iban_like_policy_reference_is_not_scrubbed() -> None:
     scrubbed = scrub_pattern_pii("Policy reference GB00 TEST 1234 5678 9012 34")
 
     assert "[BANK_ACCOUNT]" not in scrubbed
+
+
+def test_scrub_pii_checks_content_after_first_comprehend_window() -> None:
+    prefix = "x" * 4500
+    text = f"{prefix} Contact late@example.com"
+    comprehend = MagicMock()
+    comprehend.detect_pii_entities.side_effect = [
+        {"Entities": []},
+        {"Entities": [{"BeginOffset": 9, "EndOffset": 25, "Type": "EMAIL"}]},
+    ]
+    clients = SimpleNamespace(comprehend=comprehend)
+
+    with patch("services.pii.get_aws_clients", return_value=clients):
+        scrubbed = scrub_pii(text, "cid", "en")
+
+    assert scrubbed == f"{prefix} Contact [EMAIL]"
+    assert comprehend.detect_pii_entities.call_count == 2
+
+
+def test_pii_circuit_opens_after_repeated_remote_failures() -> None:
+    pii_module._record_pii_success()
+    for _ in range(pii_module._PII_CIRCUIT_FAILURE_LIMIT):
+        pii_module._record_pii_failure()
+
+    assert pii_module._pii_circuit_is_open() is True
+
+    pii_module._record_pii_success()
+    assert pii_module._pii_circuit_is_open() is False

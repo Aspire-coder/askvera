@@ -52,6 +52,13 @@ sudo -u askvera env PYTHONDONTWRITEBYTECODE=1 \
 This is a dry run. It prevents a typo in an ARN, queue URL, or hardened flag
 from becoming an avoidable restart outage.
 
+Boolean SSM values are parsed strictly. Ambiguous values such as `enabled`,
+`disabled`, or a misspelling are rejected. The full SSM batch is validated
+before any value is applied, so one malformed parameter cannot leave the
+process with a partially updated configuration. Production and hardened
+profiles also reject unknown parameter names; remove stale or misspelled
+parameters before restarting.
+
 ### 2. Deploy Code With Defaults
 
 Deploy the API and widget code with every setting above left at its default.
@@ -218,6 +225,17 @@ then verify legitimate sign-in and portal API traffic after deployment.
 
 Rollback: set `EnableWebAcl=false` if legitimate portal traffic is blocked.
 Cognito MFA rollback requires a deliberate identity-policy decision.
+
+### 13. Deployment Authentication and Diagnostics
+
+GitHub widget deployment uses OpenID Connect to assume an approved, narrowly
+scoped AWS deployment role. Configure `AWS_DEPLOY_ROLE_ARN` in repository
+secrets and do not restore long-lived AWS access-key secrets.
+
+Use unauthenticated `GET /health` for load balancers and availability checks.
+The diagnostic `GET /health/deep` endpoint requires an authenticated operations
+administrator because it reveals dependency state. The operations portal
+production build does not publish JavaScript source maps.
 
 ## Required Verification
 

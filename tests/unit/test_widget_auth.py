@@ -87,8 +87,11 @@ def test_widget_init_resumes_only_an_active_server_session(monkeypatch) -> None:
             "sessionId": "resume-me",
             "widgetId": "widget-1",
             "origin": "https://example.com",
+            "jti": "resume-token-id",
+            "exp": int(time()) + 60,
         },
     )
+    monkeypatch.setattr(service_module, "consume_widget_resume_token_id", lambda *_args: True)
     resumed = service.initialize(
         WidgetInitRequest(
             widgetId="widget-1",
@@ -100,6 +103,41 @@ def test_widget_init_resumes_only_an_active_server_session(monkeypatch) -> None:
     )
     assert resumed.sessionId == "resume-me"
     assert decode_widget_token(resumed.token)["sessionId"] == "resume-me"
+
+
+def test_widget_resume_token_can_only_be_used_once(monkeypatch) -> None:
+    from app.widget_auth import service as service_module
+
+    monkeypatch.setattr(service_module.settings, "WIDGET_REGISTRY_JSON", _registry())
+    monkeypatch.setattr(service_module.settings, "WIDGET_JWT_SECRET", "test-secret")
+    monkeypatch.setattr(service_module, "can_resume_bound_session", lambda *_args: True)
+    service = WidgetAuthService()
+    initial = service.initialize(
+        WidgetInitRequest(widgetId="widget-1", origin="https://example.com"),
+        "cid-initial",
+    )
+
+    first = service.initialize(
+        WidgetInitRequest(
+            widgetId="widget-1",
+            origin="https://example.com",
+            resumeSessionId=initial.sessionId,
+            resumeToken=initial.resumeToken,
+        ),
+        "cid-first",
+    )
+    replay = service.initialize(
+        WidgetInitRequest(
+            widgetId="widget-1",
+            origin="https://example.com",
+            resumeSessionId=initial.sessionId,
+            resumeToken=initial.resumeToken,
+        ),
+        "cid-replay",
+    )
+
+    assert first.sessionId == initial.sessionId
+    assert replay.sessionId != initial.sessionId
 
 
 def test_widget_init_rejects_unapproved_origin(monkeypatch) -> None:

@@ -139,17 +139,20 @@ else
   log "Keeping existing ${ENV_DIR}/production.env."
 fi
 
-log "Installing systemd service."
+log "Installing systemd services."
 cp "${APP_DIR}/deployment/systemd/askvera.service" /etc/systemd/system/askvera.service
+cp "${APP_DIR}/deployment/systemd/askvera-ingestion-worker.service" /etc/systemd/system/askvera-ingestion-worker.service
+cp "${APP_DIR}/deployment/systemd/askvera-retention.service" /etc/systemd/system/askvera-retention.service
+cp "${APP_DIR}/deployment/systemd/askvera-retention.timer" /etc/systemd/system/askvera-retention.timer
 
 log "Creating/updating Python virtual environment."
 sudo -u "${APP_USER}" "${PYTHON_BIN}" -m venv "${APP_DIR}/.venv"
 sudo -u "${APP_USER}" "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip
 sudo -u "${APP_USER}" "${APP_DIR}/.venv/bin/python" -m pip install -r "${APP_DIR}/requirements.txt"
 
-log "Enabling systemd service."
+log "Enabling systemd services."
 systemctl daemon-reload
-systemctl enable askvera
+systemctl enable askvera askvera-ingestion-worker askvera-retention.timer
 
 log "Validating Python package import and application config."
 cd "${APP_DIR}"

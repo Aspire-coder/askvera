@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+import redis
+
 from services import cache
 
 
@@ -82,6 +84,33 @@ def test_get_and_set_cache_value(monkeypatch) -> None:
     assert cache.get_cache_value("k", "cid") == {"response": "ok"}
     cache.set_cache_value("k", {"response": "ok"}, "cid")
     client.setex.assert_called_once()
+
+
+def test_answer_cache_failures_are_non_blocking(monkeypatch) -> None:
+    """An unavailable answer cache must not take chat offline."""
+    client = MagicMock()
+    client.get.side_effect = redis.RedisError("down")
+    client.setex.side_effect = redis.RedisError("down")
+    monkeypatch.setattr(cache, "_redis_client", client)
+
+    assert cache.get_cache_value("k", "cid") is None
+    assert cache.set_cache_value("k", {"response": "ok"}, "cid") is None
+
+
+def test_corrupt_cached_json_is_treated_as_a_miss(monkeypatch) -> None:
+    client = MagicMock()
+    client.get.return_value = b"not-json"
+    monkeypatch.setattr(cache, "_redis_client", client)
+
+    assert cache.get_cache_value("k", "cid") is None
+
+
+def test_semantic_namespace_rotates_with_safety_versions(monkeypatch) -> None:
+    first = cache._semantic_namespace("US", "en", "new_prospect")
+    monkeypatch.setattr(cache.settings, "CONVERSATION_ROUTING_VERSION", "routing-next")
+    second = cache._semantic_namespace("US", "en", "new_prospect")
+
+    assert first != second
 
 
 def test_cache_health_reports_not_configured(monkeypatch) -> None:

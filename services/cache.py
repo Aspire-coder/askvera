@@ -145,26 +145,64 @@ def build_cache_key(message: str, country: str, language: str, role: str) -> str
     return f"ask-vera:{country}:{language}:{role}:{digest}"
 
 
+def _semantic_namespace(country: str, language: str, role: str) -> str:
+    """Build the namespace used by the optional semantic cache.
+
+    Keep this helper here as the cache module's compatibility boundary. The
+    semantic cache has its own implementation, but callers and older tests
+    rely on this module exposing the namespace derivation as well.
+    """
+    versions = "|".join(
+        [
+            settings.SEMANTIC_CACHE_SCHEMA_VERSION,
+            settings.CACHE_SCHEMA_VERSION,
+            settings.KB_VERSION,
+            settings.RETRIEVAL_PIPELINE_VERSION,
+            "retrieval-hardened"
+            if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+            else "retrieval-baseline",
+            settings.CONVERSATION_ROUTING_VERSION,
+            settings.RESPONSE_PIPELINE_VERSION,
+            settings.PROMPT_VERSION,
+            settings.BEDROCK_GUARDRAIL_VERSION,
+            settings.BEDROCK_MODEL_ARN,
+            settings.BEDROCK_FALLBACK_MODEL_ARN,
+            settings.SEMANTIC_CACHE_EMBED_MODEL_ID,
+        ]
+    )
+    digest = hashlib.sha256(versions.encode("utf-8")).hexdigest()[:20]
+    locale = ":".join(part.strip().lower() for part in (country, language, role))
+    return f"ask-vera:semantic:{locale}:{digest}"
+
+
 def get_cache_value(key: str, correlation_id: str) -> dict[str, Any] | None:
-    """Read and decode a cached response."""
+    """Read and decode a cached response, failing open on cache problems."""
     if _redis_client is None:
         return None
     try:
         raw = _redis_client.get(key)
         LOGGER.info("cache_read", correlation_id=correlation_id, hit=bool(raw), key=key)
         return json.loads(raw) if raw else None
-    except redis.RedisError as exc:
-        LOGGER.exception("cache_read_failed", correlation_id=correlation_id)
-        raise CacheConnectionError("Redis cache read failed.") from exc
+    except (redis.RedisError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        LOGGER.warning(
+            "cache_read_failed",
+            correlation_id=correlation_id,
+            error=type(exc).__name__,
+        )
+        return None
 
 
 def set_cache_value(key: str, value: dict[str, Any], correlation_id: str) -> None:
-    """Write a response to Redis with the configured TTL."""
+    """Write a response to Redis, failing open when the cache is unavailable."""
     if _redis_client is None:
         return
     try:
         _redis_client.setex(key, settings.CACHE_TTL_SECONDS, json.dumps(value))
         LOGGER.info("cache_write", correlation_id=correlation_id, key=key, ttl=settings.CACHE_TTL_SECONDS)
-    except redis.RedisError as exc:
-        LOGGER.exception("cache_write_failed", correlation_id=correlation_id)
-        raise CacheConnectionError("Redis cache write failed.") from exc
+    except (redis.RedisError, TypeError, ValueError) as exc:
+        LOGGER.warning(
+            "cache_write_failed",
+            correlation_id=correlation_id,
+            error=type(exc).__name__,
+        )
+        return None

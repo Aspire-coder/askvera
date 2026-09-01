@@ -13,7 +13,7 @@
 - Glossary entries are bounded and validated before they can affect query expansion.
 - Model output limits are separated by purpose: planning, support routing, evidence selection, and translation.
 - Offline evaluation now reports comparison count, same-section rate, evidence overlap, confidence wins, latency percentiles, and country/language failure counts.
-- RRF, parent-section diversity, and bounded neighbor expansion are isolated helpers for controlled experiments. They are not wired into the live path.
+- RRF ranking and parent-section diversity are wired as controlled experiments behind disabled flags. Bounded neighbor expansion remains an isolated helper until reliable neighbor metadata is available.
 - Startup validation rejects invalid experiment limits before a restart can proceed.
 
 ## Safe promotion path
@@ -25,7 +25,26 @@
 5. Run multilingual regression cases and review low-confidence answers before enabling any flag.
 6. Promote one experiment at a time, with a documented rollback to the current provider and index.
 
-## Not enabled by this change
+## Offline comparison command
+
+The comparison report can be JSON, JSONL, or an object containing a `comparisons`
+or `records` array. Run it against a saved shadow sample:
+
+```text
+python scripts/evaluate_retrieval_shadow.py shadow-comparisons.json \
+  --require-locale-gates --enforce-gate \
+  --output retrieval-report.json
+```
+
+The report includes overall and per-country/language metrics for section match,
+evidence overlap, confidence wins, p50/p95 shadow latency, input/output tokens,
+estimated cost, and failure categories. Cost is reported only when the input
+records contain token/cost fields; the evaluator does not invent pricing.
+
+`--enforce-gate` is intended for CI or a promotion review. It does not change
+the live answer path and should be run on a separate vNext comparison sample.
+
+## Available but disabled by default
 
 - RRF ranking
 - Parent-section diversity
@@ -33,7 +52,7 @@
 - Semantic caching
 - A new embedding provider or index
 
-These remain deliberate experiments. UAT behavior is preserved until an approved comparison shows that a specific change improves quality without harming locale isolation, safety, latency, or cost.
+The first two are connected to the OpenSearch section provider but remain disabled unless their settings are explicitly enabled. Neighbor expansion and semantic caching remain isolated experiments. UAT behavior is preserved until an approved comparison shows that a specific change improves quality without harming locale isolation, safety, latency, or cost.
 
 ## Verification note
 

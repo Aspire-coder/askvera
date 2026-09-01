@@ -41,6 +41,11 @@ def is_widget_token_revoked(jti: str | None) -> bool:
     return security_state.is_widget_token_revoked(jti)
 
 
+def consume_widget_resume_token_id(jti: str, expires_at: int) -> bool:
+    """Consume a resume capability once across all API processes."""
+    return security_state.consume_widget_resume_token(jti, expires_at)
+
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
@@ -109,7 +114,10 @@ def decode_widget_token(token: str) -> dict[str, Any]:
     payload = _decode_signed_token(token)
     if payload.get("sub") != "widget-session":
         raise WidgetTokenError("Widget token subject is invalid.")
-    if is_widget_token_revoked(payload.get("jti")):
+    jti = payload.get("jti")
+    if not isinstance(jti, str) or not jti:
+        raise WidgetTokenError("Widget token ID is invalid.")
+    if is_widget_token_revoked(jti):
         raise WidgetTokenRevokedError()
     return payload
 
@@ -124,4 +132,9 @@ def decode_widget_resume_token(token: str) -> dict[str, Any]:
     payload = _decode_signed_token(token)
     if payload.get("sub") != "widget-resume":
         raise WidgetTokenError("Widget resume token subject is invalid.")
+    jti = payload.get("jti")
+    if not isinstance(jti, str) or not jti:
+        raise WidgetTokenError("Widget resume token ID is invalid.")
+    if is_widget_token_revoked(jti) or is_widget_token_revoked(payload.get("parentJti")):
+        raise WidgetTokenRevokedError()
     return payload

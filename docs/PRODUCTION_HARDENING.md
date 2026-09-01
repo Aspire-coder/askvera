@@ -113,3 +113,16 @@ Before production promotion:
 7. Restart the API, run health checks, and execute representative live tests.
 8. Confirm dashboards show no rise in fallbacks, validation failures, or model
    failover before completing the rollout.
+
+## Deployment Authentication
+
+- GitHub Actions assumes a least-privilege AWS role using OpenID Connect and
+  the repository secret `AWS_DEPLOY_ROLE_ARN`.
+- Do not store long-lived AWS access keys in repository or environment secrets.
+- Validate SSM with `scripts/validate_config.py --load-ssm
+  --require-production` before restarting the running production service.
+- Production and hardened configurations reject unknown SSM names, malformed
+  booleans, and the mutable `DRAFT` Bedrock Guardrail version.
+- Use public `GET /health` for uptime checks. `GET /health/deep` is restricted
+  to authenticated administrators.
+- Operations portal production builds omit source maps.

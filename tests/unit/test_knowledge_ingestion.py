@@ -14,6 +14,7 @@ from services.knowledge_ingestion import (
     ExtractedPage,
     _activate_staged_sections,
     _extract_pages_with_textract,
+    _index_sections,
     build_sections,
     detect_upload_format,
     enqueue_ingestion_job,
@@ -403,6 +404,39 @@ def test_staged_publish_rolls_back_partial_activation(monkeypatch) -> None:
 
     assert [action["doc"]["status"] for action in bulk_calls[0]] == ["active", "active"]
     assert [action["doc"]["status"] for action in bulk_calls[1]] == ["staging", "staging"]
+
+
+def test_indexing_never_exposes_a_partial_generation(monkeypatch) -> None:
+    client = MagicMock()
+    client.indices.exists.return_value = True
+    actions: list[dict[str, object]] = []
+
+    def fake_actions(*_args, status, **_kwargs):
+        actions.extend([
+            {"_source": {"id": "one", "status": status}},
+            {"_source": {"id": "two", "status": status}},
+        ])
+        return iter(actions)
+
+    monkeypatch.setattr(knowledge_ingestion, "_client", lambda: client)
+    monkeypatch.setattr(knowledge_ingestion, "_actions", fake_actions)
+    monkeypatch.setattr(
+        knowledge_ingestion.helpers,
+        "bulk",
+        lambda *_args, **_kwargs: (1, [{"index": {"_id": "two", "status": 500}}]),
+    )
+
+    with pytest.raises(RuntimeError, match="rejected 1 chunks"):
+        _index_sections(
+            [{"country": "CA", "language": "en", "source_file": "policy.pdf"}],
+            source_uri="s3://bucket/policy.pdf",
+            document_type="policy",
+            access_scope="country",
+            ingestion_id="generation-1",
+        )
+
+    assert {action["_source"]["status"] for action in actions} == {"staging"}
+    client.delete_by_query.assert_called_once()
 
 
 def test_generation_activation_locks_logical_document_before_read(

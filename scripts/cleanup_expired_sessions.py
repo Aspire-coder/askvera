@@ -11,13 +11,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import settings
-from scripts.validate_config import validate
-from services.aws_clients import init_aws_clients
-from services.db import close_db, init_db
-from services.session import cleanup_expired_sessions
-from utils.exceptions import ConfigurationError
-from utils.logging import configure_logging
+# Direct execution needs the repository root before application imports resolve.
+from config import settings  # noqa: E402
+from scripts.validate_config import validate  # noqa: E402
+from services.aws_clients import init_aws_clients  # noqa: E402
+from services.db import close_db, init_db  # noqa: E402
+from services.session import cleanup_expired_sessions  # noqa: E402
+from utils.exceptions import ConfigurationError  # noqa: E402
+from utils.logging import configure_logging  # noqa: E402
 
 
 def main() -> int:

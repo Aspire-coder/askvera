@@ -105,6 +105,7 @@ are validated when their corresponding feature switches are enabled.
 ## Run Locally
 
 For unit tests, AWS calls are mocked. For the app, use a real AWS environment or mocks around `services.aws_clients`.
+Use Python 3.11 locally to match the EC2 service runtime and CI. Newer interpreters are not part of the release contract.
 
 ```bash
 python -m pip install -r requirements.txt
@@ -115,7 +116,17 @@ make run
 
 ## Deploy
 
-Deploy on EC2 with `ChatbotAppRole`, Nginx, systemd, and HTTPS. Health checks must use `GET /health`, which makes no AWS calls. Use `GET /health/deep` for PostgreSQL, Redis, and dependency diagnostics.
+Deploy on EC2 with `ChatbotAppRole`, Nginx, systemd, and HTTPS. Health checks must use `GET /health`, which makes no AWS calls. `GET /health/deep` exposes PostgreSQL, Redis, and dependency diagnostics and therefore requires authenticated administrator access.
+
+Before restarting a production service, validate the complete SSM configuration while the existing process is still running:
+
+```bash
+sudo -u askvera env PYTHONDONTWRITEBYTECODE=1 \
+  /opt/askvera/.venv/bin/python -B scripts/validate_config.py \
+  --load-ssm --require-production
+```
+
+GitHub widget deployments use short-lived AWS OIDC credentials. Configure the repository secret `AWS_DEPLOY_ROLE_ARN` with the approved deployment role ARN; do not add long-lived AWS access keys to GitHub secrets.
 
 Repeatable deployment assets live in `deployment/`:
 

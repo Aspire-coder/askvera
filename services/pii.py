@@ -2,6 +2,8 @@
 
 import re
 from collections.abc import Iterable
+from threading import Lock
+from time import monotonic, perf_counter
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -18,6 +20,12 @@ from utils.exceptions import AwsServiceError
 from utils.logging import get_logger
 
 LOGGER = get_logger("services.pii")
+COMPREHEND_MAX_TEXT_CHARS = 4500
+_PII_CIRCUIT_FAILURE_LIMIT = 3
+_PII_CIRCUIT_COOLDOWN_SECONDS = 30
+_PII_CIRCUIT_LOCK = Lock()
+_pii_failure_count = 0
+_pii_open_until = 0.0
 SENSITIVE_PII_PLACEHOLDERS = frozenset(
     {
         "BANK_ACCOUNT",
@@ -130,6 +138,44 @@ def scrub_pattern_pii(text: str, *, allowed_texts: Iterable[str] = ()) -> str:
     return _scrub_pattern_pii(text, allowed_texts)
 
 
+def _detect_pii_entities(text: str, language_code: str) -> list[dict[str, object]]:
+    """Detect PII across the complete message using bounded API requests."""
+    if _pii_circuit_is_open():
+        raise AwsServiceError("Comprehend PII detection is temporarily unavailable.")
+    comprehend = get_aws_clients().comprehend
+    entities: list[dict[str, object]] = []
+    for start in range(0, len(text), COMPREHEND_MAX_TEXT_CHARS):
+        chunk = text[start : start + COMPREHEND_MAX_TEXT_CHARS]
+        response = comprehend.detect_pii_entities(Text=chunk, LanguageCode=language_code)
+        for raw_entity in response.get("Entities", []):
+            entity = dict(raw_entity)
+            entity["BeginOffset"] = start + int(raw_entity["BeginOffset"])
+            entity["EndOffset"] = start + int(raw_entity["EndOffset"])
+            entities.append(entity)
+    return entities
+
+
+def _pii_circuit_is_open() -> bool:
+    """Fail closed briefly after repeated Comprehend failures."""
+    with _PII_CIRCUIT_LOCK:
+        return monotonic() < _pii_open_until
+
+
+def _record_pii_success() -> None:
+    global _pii_failure_count, _pii_open_until
+    with _PII_CIRCUIT_LOCK:
+        _pii_failure_count = 0
+        _pii_open_until = 0.0
+
+
+def _record_pii_failure() -> None:
+    global _pii_failure_count, _pii_open_until
+    with _PII_CIRCUIT_LOCK:
+        _pii_failure_count += 1
+        if _pii_failure_count >= _PII_CIRCUIT_FAILURE_LIMIT:
+            _pii_open_until = monotonic() + _PII_CIRCUIT_COOLDOWN_SECONDS
+
+
 def scrub_pii(
     text: str,
     correlation_id: str,
@@ -143,6 +189,7 @@ def scrub_pii(
     """Mask PII entities using Amazon Comprehend."""
     if not text:
         return text
+    started = perf_counter()
     language_code = _pii_language_code(language or settings.COMPREHEND_PII_LANGUAGE_CODE)
     approved = tuple(allowed_texts)
     approved_names = tuple(allowed_name_texts)
@@ -153,18 +200,24 @@ def scrub_pii(
             correlation_id=correlation_id,
             language=(language or "").split("-", 1)[0].lower(),
             changed=scrubbed != text,
+            latency_ms=round((perf_counter() - started) * 1000, 2),
+            remote=False,
         )
         return scrubbed
     try:
-        response = get_aws_clients().comprehend.detect_pii_entities(
-            Text=text[:5000],
-            LanguageCode=language_code,
-        )
+        entities = _detect_pii_entities(text, language_code)
     except (BotoCoreError, ClientError) as exc:
-        LOGGER.exception("pii_scrub_failed", correlation_id=correlation_id)
+        _record_pii_failure()
+        LOGGER.exception(
+            "pii_scrub_failed",
+            correlation_id=correlation_id,
+            latency_ms=round((perf_counter() - started) * 1000, 2),
+            remote=True,
+        )
         raise AwsServiceError("Comprehend PII detection failed.") from exc
+    _record_pii_success()
     scrubbed = text
-    for entity in sorted(response.get("Entities", []), key=lambda item: item["BeginOffset"], reverse=True):
+    for entity in sorted(entities, key=lambda item: int(item["BeginOffset"]), reverse=True):
         start = int(entity["BeginOffset"])
         end = int(entity["EndOffset"])
         entity_text = text[start:end]
@@ -179,5 +232,12 @@ def scrub_pii(
             continue
         scrubbed = f"{scrubbed[:start]}[{entity_type}]{scrubbed[end:]}"
     scrubbed = _scrub_pattern_pii(scrubbed, approved)
-    LOGGER.info("pii_scrubbed", correlation_id=correlation_id, entity_count=len(response.get("Entities", [])), language=language_code)
+    LOGGER.info(
+        "pii_scrubbed",
+        correlation_id=correlation_id,
+        entity_count=len(entities),
+        language=language_code,
+        latency_ms=round((perf_counter() - started) * 1000, 2),
+        remote=True,
+    )
     return scrubbed
