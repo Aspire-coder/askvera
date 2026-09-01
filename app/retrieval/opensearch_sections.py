@@ -6,6 +6,7 @@ import json
 import math
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any
 
@@ -312,20 +313,20 @@ def _directory_text_query(
         should_queries.append(
             {"match_phrase": {"metadata.record_country": {"query": name, "boost": 40}}}
         )
+    filters: list[dict[str, Any]] = [
+        _scope_filter("", "", "global"),
+        {"term": {"status": "active"}},
+        {"terms": {"document_type": list(GLOBAL_DIRECTORY_DOCUMENT_TYPES)}},
+        *_generation_filters("", "en", "global"),
+    ]
+    country_filter = _record_country_filter(target_country_names or set())
+    if country_filter is not None:
+        filters.append(country_filter)
     return {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "bool": {
-                "filter": [
-                    _scope_filter("", "", "global"),
-                    {"term": {"status": "active"}},
-                    {"terms": {"document_type": list(GLOBAL_DIRECTORY_DOCUMENT_TYPES)}},
-                    *_generation_filters(
-                        "",
-                        "en",
-                        "global",
-                    ),
-                ],
+                "filter": filters,
                 "should": should_queries,
                 "minimum_should_match": 1,
             }
@@ -406,6 +407,20 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
 def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
     """Return the named market(s) whose global directory record should lead."""
     mentioned_codes = find_market_mentions(message)
+    if not mentioned_codes:
+        normalized_message = _normalize_text(message)
+        message_tokens = [token for token in normalized_message.split() if len(token) >= 4]
+        for market in get_countries():
+            market_name = _normalize_text(str(market.get("name") or ""))
+            name_tokens = market_name.split()
+            if len(name_tokens) != 1 or not market_name:
+                continue
+            if any(
+                len(token) >= len(market_name) - 1
+                and SequenceMatcher(None, token, market_name).ratio() >= 0.84
+                for token in message_tokens
+            ):
+                mentioned_codes.add(str(market.get("code") or "").upper())
     if not mentioned_codes and not _DIRECTORY_DETAIL_RE.search(message or ""):
         return set()
     target_codes = mentioned_codes or {str(selected_country or "").upper()}
@@ -414,6 +429,22 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
         for country in get_countries()
         if str(country.get("code") or "").upper() in target_codes
     }
+
+
+def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:
+    """Build a case-tolerant filter for explicitly requested global records."""
+    names = sorted({_normalize_text(name) for name in country_names if _normalize_text(name)})
+    if not names:
+        return None
+    should: list[dict[str, Any]] = []
+    for name in names:
+        should.extend(
+            [
+                exact_term_query("metadata.record_country", name),
+                {"match_phrase": {"metadata.record_country": {"query": name}}},
+            ]
+        )
+    return {"bool": {"should": should, "minimum_should_match": 1}}
 
 
 def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, Any]:
@@ -634,9 +665,20 @@ class OpenSearchSectionProvider:
                     index=self.index_name,
                     body=_directory_text_query(global_search_message, target_country_names),
                 )
+                global_vector_query = _vector_query(
+                    global_search_message,
+                    country,
+                    language,
+                    scope="global",
+                )
+                country_filter = _record_country_filter(target_country_names)
+                if country_filter is not None:
+                    global_vector_query["query"]["knn"]["embedding"]["filter"]["bool"]["filter"].append(
+                        country_filter
+                    )
                 global_vector_response = client.search(
                     index=self.index_name,
-                    body=_vector_query(global_search_message, country, language, scope="global"),
+                    body=global_vector_query,
                 )
                 text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
                 vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
