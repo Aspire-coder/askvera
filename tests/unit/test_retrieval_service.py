@@ -194,7 +194,7 @@ def test_shadow_orchestration_failure_cannot_fail_primary_retrieval(monkeypatch)
     assert primary.calls == [("question", "cid")]
 
 
-def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> None:
+def test_reranking_flags_apply_independently_to_primary_and_shadow_providers(monkeypatch) -> None:
     created: list[tuple[str, str | None, bool]] = []
 
     def recording_factory(provider_name, *, index_name=None, enable_bedrock_rerank=False):
@@ -203,6 +203,7 @@ def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> N
 
     monkeypatch.setattr(RetrievalService, "_provider_for_name", staticmethod(recording_factory))
     monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "opensearch_section")
+    monkeypatch.setattr(settings, "OPENSEARCH_LIVE_RERANK_ENABLED", True)
     monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", True)
     monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_SAMPLE_RATE", 1.0)
     monkeypatch.setattr(settings, "RETRIEVAL_VNEXT_PROVIDER", "opensearch_section")
@@ -214,8 +215,25 @@ def test_reranking_flag_is_applied_only_to_the_shadow_provider(monkeypatch) -> N
     service = RetrievalService()
     service.retrieve("question", "CA", "en", "new_prospect", "cid")
 
-    assert created[0] == ("opensearch_section", None, False)
+    assert created[0] == ("opensearch_section", None, True)
     assert created[1] == ("opensearch_section", "vnext-index", True)
+
+
+def test_primary_provider_rerank_follows_live_rerank_flag(monkeypatch) -> None:
+    created: list[tuple[str, str | None, bool]] = []
+
+    def recording_factory(provider_name, *, index_name=None, enable_bedrock_rerank=False):
+        created.append((provider_name, index_name, enable_bedrock_rerank))
+        return _RecordingProvider(provider_name, f"document-{len(created)}")
+
+    monkeypatch.setattr(RetrievalService, "_provider_for_name", staticmethod(recording_factory))
+    monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "opensearch_section")
+    monkeypatch.setattr(settings, "OPENSEARCH_LIVE_RERANK_ENABLED", False)
+    monkeypatch.setattr(settings, "RETRIEVAL_SHADOW_ENABLED", False)
+
+    RetrievalService()
+
+    assert created == [("opensearch_section", None, False)]
 
 
 def test_provider_result_extracts_api_sources() -> None:

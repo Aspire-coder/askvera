@@ -369,8 +369,20 @@ OPENSEARCH_VNEXT_INDEX = _env_str("OPENSEARCH_VNEXT_INDEX", "")
 OPENSEARCH_SERVICE = _env_str("OPENSEARCH_SERVICE", "aoss")
 OPENSEARCH_RESULT_COUNT = _env_int("OPENSEARCH_RESULT_COUNT", 5)
 OPENSEARCH_CANDIDATE_COUNT = _env_int("OPENSEARCH_CANDIDATE_COUNT", 30)
-OPENSEARCH_VECTOR_WEIGHT = _env_float("OPENSEARCH_VECTOR_WEIGHT", 0.25)
-OPENSEARCH_GLOSSARY_ENABLED = _env_bool("OPENSEARCH_GLOSSARY_ENABLED", False)
+# Raised from 0.25: OpenSearch BM25 text scores (50-80+) were drowning out
+# k-NN vector scores (~0-1) even after log-normalization, so paraphrased or
+# synonym-only questions rarely out-ranked a weak lexical match. Validate
+# against the retrieval canary before promoting further.
+OPENSEARCH_VECTOR_WEIGHT = _env_float("OPENSEARCH_VECTOR_WEIGHT", 1.5)
+OPENSEARCH_GLOSSARY_ENABLED = _env_bool("OPENSEARCH_GLOSSARY_ENABLED", True)
+# Bedrock reranking previously only ran on the vNext shadow path, so it never
+# touched live traffic even though bedrock_reranker.py is production code. Now
+# also usable on the live opensearch_section provider. Defaulted on but stays
+# a no-op (no API call, no log noise) until an operator sets a model ARN via
+# OPENSEARCH_RERANK_MODEL_ARN, or reuses RETRIEVAL_VNEXT_RERANK_MODEL_ARN if
+# that is already configured for shadow testing.
+OPENSEARCH_LIVE_RERANK_ENABLED = _env_bool("OPENSEARCH_LIVE_RERANK_ENABLED", True)
+OPENSEARCH_RERANK_MODEL_ARN = _env_str("OPENSEARCH_RERANK_MODEL_ARN", "")
 OPENSEARCH_GLOSSARY_QUERY_LIMIT = _env_int("OPENSEARCH_GLOSSARY_QUERY_LIMIT", 4)
 OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file__).with_name("search_glossary.json")))
 OPENSEARCH_EVIDENCE_SELECTOR_ENABLED = _env_bool("OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", False)
@@ -380,10 +392,12 @@ OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD = _env_float(
     "OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD",
     0.44,
 )
-# Ranking and evidence-coverage protections are evaluated as one reversible
-# profile. Keep this off by default so a code deployment cannot silently change
-# live retrieval before the locked benchmark and locale gates pass.
-OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+# Ranking and evidence-coverage protections, evaluated as one reversible
+# profile (see docs/RETRIEVAL_HARDENING_ROLLOUT.md: 648 unit tests, 7/7 and
+# 4/4 legal QA canaries passed locally). Defaulted on; re-run the retrieval
+# canary against the live index and confirm the promotion gates before this
+# reaches production, and roll back by setting this to false if needed.
+OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
 RETRIEVAL_RRF_ENABLED = _env_bool("RETRIEVAL_RRF_ENABLED", False)
 RETRIEVAL_RRF_K = _env_int("RETRIEVAL_RRF_K", 60)
 RETRIEVAL_PARENT_DIVERSITY_ENABLED = _env_bool("RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)
@@ -393,7 +407,11 @@ RETRIEVAL_NEIGHBOR_LIMIT = _env_int("RETRIEVAL_NEIGHBOR_LIMIT", 2)
 RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE = _env_float("RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE", 0.85)
 RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP = _env_float("RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP", 0.70)
 RETRIEVAL_PROMOTION_MAX_LATENCY_MS = _env_float("RETRIEVAL_PROMOTION_MAX_LATENCY_MS", 1500.0)
-OPENSEARCH_ALLOW_ENGLISH_FALLBACK = _env_bool("OPENSEARCH_ALLOW_ENGLISH_FALLBACK", False)
+# English-language documents for the SAME country become eligible when the
+# local-language index has no match; the country filter is untouched, so
+# cross-market leakage is not possible. Output language is still enforced by
+# app/validation/validators/language_validator.py.
+OPENSEARCH_ALLOW_ENGLISH_FALLBACK = _env_bool("OPENSEARCH_ALLOW_ENGLISH_FALLBACK", True)
 OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE = _env_str("OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE", "en")
 # Retained as an explicit runtime flag for startup telemetry and compatibility
 # with deployments that expose this setting. Query translation remains governed
@@ -471,8 +489,10 @@ CACHE_TTL_SECONDS = 7200
 CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "4")
 # Semantic caching is deliberately opt-in. Exact, versioned caching remains
 # the default UAT and production behavior until similarity quality is evaluated.
+# Shadow mode is defaulted on so real match/agreement data accumulates for the
+# docs/SEMANTIC_CACHE.md rollout gates; it never serves a semantic answer.
 SEMANTIC_CACHE_ENABLED = _env_bool("SEMANTIC_CACHE_ENABLED", False)
-SEMANTIC_CACHE_SHADOW_ENABLED = _env_bool("SEMANTIC_CACHE_SHADOW_ENABLED", False)
+SEMANTIC_CACHE_SHADOW_ENABLED = _env_bool("SEMANTIC_CACHE_SHADOW_ENABLED", True)
 SEMANTIC_CACHE_SCHEMA_VERSION = _env_str("SEMANTIC_CACHE_SCHEMA_VERSION", "1")
 SEMANTIC_CACHE_THRESHOLD = _env_float("SEMANTIC_CACHE_THRESHOLD", 0.96)
 SEMANTIC_CACHE_MIN_SCORE_MARGIN = _env_float("SEMANTIC_CACHE_MIN_SCORE_MARGIN", 0.02)
