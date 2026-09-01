@@ -179,6 +179,26 @@ def test_market_mentions_are_loaded_from_shared_configuration() -> None:
     assert market_config.find_market_mentions("What is required for it to work?") == set()
 
 
+def test_find_probable_market_typo_catches_a_single_character_misspelling() -> None:
+    """TRB-19189: "Nigar" should be recognized as a likely typo for "Niger"."""
+    market_config.load_market_config.cache_clear()
+
+    assert market_config.find_probable_market_typo("What is the minimum ordering size for Nigar?") == "Niger"
+
+
+def test_find_probable_market_typo_ignores_an_exact_market_mention() -> None:
+    """An exact match belongs to find_market_mentions, not the typo path."""
+    market_config.load_market_config.cache_clear()
+
+    assert market_config.find_probable_market_typo("How can I become a member in Mexico?") is None
+
+
+def test_find_probable_market_typo_ignores_unrelated_words() -> None:
+    market_config.load_market_config.cache_clear()
+
+    assert market_config.find_probable_market_typo("What is required for delivery to work?") is None
+
+
 def test_chat_request_accepts_published_sweden_languages() -> None:
     """Sweden accepts only the two company-policy languages being published."""
     market_config.load_market_config.cache_clear()

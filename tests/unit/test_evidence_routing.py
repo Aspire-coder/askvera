@@ -23,6 +23,16 @@ def test_routes_configured_french_greeting_without_retrieval() -> None:
     assert classify_intent("Bonjour", "fr-CA") == "assistant_meta"
 
 
+def test_routes_help_me_phrasing_of_capability_question() -> None:
+    """TRB-19189: "what can you help me with" was falling through to the
+    document-grounded path and getting a generic refusal, since only "what
+    can you help with" (no "me") was a recognized phrase."""
+    assert classify_intent("what can you help me with?", "en") == "assistant_meta"
+    capability = assistant_meta_response("what can you help me with?", "en") or ""
+    assert "company policies" in capability
+    assert "global office directory" in capability
+
+
 def test_routes_substantive_french_question_to_document_grounded_flow() -> None:
     assert classify_intent("Quelles sont les conditions pour devenir Manager?", "fr-CA") == "policy_fact"
 
