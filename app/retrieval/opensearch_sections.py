@@ -421,7 +421,13 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
                 continue
             if any(
                 len(token) >= len(market_name) - 1
-                and SequenceMatcher(None, token, market_name).ratio() >= 0.80
+                and (
+                    SequenceMatcher(None, token, market_name).ratio() >= 0.80
+                    or (
+                        len(token) == len(market_name)
+                        and sorted(token) == sorted(market_name)
+                    )
+                )
                 for token in message_tokens
             ):
                 mentioned_codes.add(str(market.get("code") or "").upper())
