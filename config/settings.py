@@ -451,6 +451,12 @@ ADMIN_INGESTION_PARSER_TIMEOUT_SECONDS = _env_int(
 )
 ADMIN_INGESTION_CHUNK_PROFILE = _env_str("ADMIN_INGESTION_CHUNK_PROFILE", "current").lower()
 CONVERSATION_ROUTES_PATH = _env_str("CONVERSATION_ROUTES_PATH", str(Path(__file__).with_name("conversation_routes.json")))
+# When a country-policy question fails the evidence gate, look up that
+# country's contact record in the global sponsoring/office directory and
+# offer it instead of a bare "contact support" message. Opt-in: this issues
+# one extra retrieval call on the fallback path and has not yet been
+# validated against the live index.
+FALLBACK_OFFICE_CONTACT_ENABLED = _env_bool("FALLBACK_OFFICE_CONTACT_ENABLED", False)
 # Optional staged rollout: require the model to declare the retrieved section IDs
 # that support every factual claim before an answer is released.
 EVIDENCE_GATED_OUTPUT_ENABLED = _env_bool("EVIDENCE_GATED_OUTPUT_ENABLED", False)

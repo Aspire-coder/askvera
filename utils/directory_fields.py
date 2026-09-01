@@ -80,21 +80,34 @@ def restore_missing_directory_contacts(
 
     Only structured fields parsed from retrieved directory evidence are eligible.
     Secondary records must never contribute fields because they may describe a
-    different office returned as supporting retrieval evidence.
+    different office returned as supporting retrieval evidence. When the
+    answer already states that same labeled field with a different value -
+    a mangled number, a dropped digit, a stale placeholder - that line is
+    corrected in place instead of leaving it wrong and appending a duplicate.
     """
     original = (answer or "").strip()
     missing: list[tuple[str, str]] = []
+    corrected_labels: list[str] = []
     seen_values: set[str] = set()
 
     primary_fields = next((fields for fields in field_sets if fields), {})
-    approved_contacts = [
-        str(value).strip()
+    contact_fields = [
+        (str(label).strip(), str(value).strip())
         for label, value in primary_fields.items()
         if _CONTACT_FIELD_RE.search(str(label).strip()) and str(value).strip()
     ]
-    if not any(_value_is_present(original, value) for value in approved_contacts):
+    has_correct_value = any(_value_is_present(original, value) for _, value in contact_fields)
+    # A labeled line for one of these exact fields - even holding a wrong or
+    # placeholder value - is itself evidence the model was answering this
+    # directory question, so a correction is safe even with no correct value
+    # already present anywhere else in the answer.
+    has_labeled_contact_line = any(
+        _replace_labeled_line_value(original, label, value)[1] for label, value in contact_fields
+    )
+    if not has_correct_value and not has_labeled_contact_line:
         return original, []
 
+    corrected = original
     for raw_label, raw_value in primary_fields.items():
         label = str(raw_label).strip()
         value = str(raw_value).strip()
@@ -108,15 +121,32 @@ def restore_missing_directory_contacts(
         ):
             continue
         seen_values.add(normalized_value)
-        if not _value_is_present(original, value):
+        if _value_is_present(corrected, value):
+            continue
+        replaced, replacement_count = _replace_labeled_line_value(corrected, label, value)
+        if replacement_count:
+            corrected = replaced
+            corrected_labels.append(label)
+        else:
             missing.append((label, value))
 
-    if not missing:
+    if not missing and not corrected_labels:
         return original, []
 
-    exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
-    separator = "\n\n" if original else ""
-    return f"{original}{separator}{exact_fields}", [label for label, _ in missing]
+    if missing:
+        exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
+        separator = "\n\n" if corrected.strip() else ""
+        corrected = f"{corrected}{separator}{exact_fields}"
+
+    return corrected, [*corrected_labels, *(label for label, _ in missing)]
+
+
+def _replace_labeled_line_value(text: str, label: str, value: str) -> tuple[str, int]:
+    """Replace an existing 'Label: wrong-value' line's value with the approved one."""
+    pattern = re.compile(
+        rf"(?im)^(\s*\**{re.escape(label)}\**\s*[:#-]\s*\**\s*)(.+)$"
+    )
+    return pattern.subn(lambda match: f"{match.group(1)}{value}", text, count=1)
 
 
 def restore_missing_requested_directory_fields(

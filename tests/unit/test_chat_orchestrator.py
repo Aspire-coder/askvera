@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from config import settings
 from app.governance.engine import GovernanceEngine
 from app.governance.models import GovernanceAction, GovernanceDecision
 from app.models.responses import ModelResponse
@@ -1000,4 +1001,111 @@ def test_bedrock_guardrail_copy_is_replaced_with_neutral_reviewed_message(monkey
     assert "safety checks" in response.answer
     assert "medical advice" not in response.answer
     assert response.metadata["failure_layer"] == "aws_guardrail"
+
+
+def test_office_contact_addendum_is_off_by_default(monkeypatch) -> None:
+    """The lookup never runs unless explicitly enabled, matching the plain fallback today."""
+    monkeypatch.setattr(settings, "FALLBACK_OFFICE_CONTACT_ENABLED", False)
+    retriever = MagicMock()
+    orchestrator = AIOrchestrator(retriever=retriever)
+    body = ChatRequest(message="What is the minimum order size for Belgium?", sessionId="s1", country="US", language="en")
+
+    result = orchestrator._office_contact_addendum(body, "cid")
+
+    assert result is None
+    retriever.retrieve.assert_not_called()
+
+
+def test_office_contact_addendum_returns_none_without_a_global_record(monkeypatch) -> None:
+    """No country-scoped global record means no addendum, not an invented one."""
+    monkeypatch.setattr(settings, "FALLBACK_OFFICE_CONTACT_ENABLED", True)
+    country_document = RetrievedDocument(
+        id="policy-1",
+        title="Policy",
+        content="Some country policy content.",
+        source="s3://approved/policy.pdf",
+        country="US",
+        language="en",
+        score=0.4,
+        metadata={"access_scope": "country"},
+    )
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(documents=[country_document], citations=[], confidence=0.4)
+    orchestrator = AIOrchestrator(retriever=retriever)
+    body = ChatRequest(message="What is the minimum order size for Belgium?", sessionId="s1", country="US", language="en")
+
+    assert orchestrator._office_contact_addendum(body, "cid") is None
+
+
+def test_office_contact_addendum_offers_real_directory_contact_fields(monkeypatch) -> None:
+    """A matching global directory record contributes its exact phone/email, nothing invented."""
+    monkeypatch.setattr(settings, "FALLBACK_OFFICE_CONTACT_ENABLED", True)
+    monkeypatch.setattr(chat_orchestrator, "localized_conversation_response", lambda *_: None)
+    directory_document = RetrievedDocument(
+        id="directory-be",
+        title="Global Directory - Forever Belgium",
+        content="Forever Belgium\nTelephone: +32 2 000 0000\nEmail: belgium@example.com\nWebsite: example.com/be",
+        source="s3://approved/directory.pdf",
+        country="GLOBAL",
+        language="en",
+        score=0.9,
+        metadata={"access_scope": "global"},
+    )
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(documents=[directory_document], citations=[], confidence=0.9)
+    orchestrator = AIOrchestrator(retriever=retriever)
+    body = ChatRequest(message="What is the minimum order size for Belgium?", sessionId="s1", country="US", language="en")
+
+    addendum = orchestrator._office_contact_addendum(body, "cid")
+
+    assert addendum is not None
+    assert "+32 2 000 0000" in addendum
+    assert "belgium@example.com" in addendum
+    assert "direct way to reach" in addendum
+
+
+def test_office_contact_addendum_fails_silently_when_retrieval_errors(monkeypatch) -> None:
+    """A retrieval error never breaks the existing fallback path - it just adds nothing."""
+    monkeypatch.setattr(settings, "FALLBACK_OFFICE_CONTACT_ENABLED", True)
+    retriever = MagicMock()
+    retriever.retrieve.side_effect = RuntimeError("boom")
+    orchestrator = AIOrchestrator(retriever=retriever)
+    body = ChatRequest(message="What is the minimum order size for Belgium?", sessionId="s1", country="US", language="en")
+
+    assert orchestrator._office_contact_addendum(body, "cid") is None
+
+
+def test_insufficient_evidence_fallback_appends_office_contact_when_available(monkeypatch) -> None:
+    """The end-to-end fallback path includes the directory contact info when the lookup finds one."""
+    monkeypatch.setattr(settings, "FALLBACK_OFFICE_CONTACT_ENABLED", True)
+    governance = _FakeGovernance()
+    orchestrator = AIOrchestrator(
+        retriever=MagicMock(),
+        validator=_FakeValidator(),
+        governance=governance,
+    )
+    body = ChatRequest(message="What is the minimum order size for Belgium?", sessionId="s1", country="US", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "set_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(
+        orchestrator,
+        "_office_contact_addendum",
+        lambda *_args, **_kwargs: "In the meantime, here is a direct way to reach that office:\nTelephone: +32 2 000 0000",
+    )
+
+    empty_result = RetrievalResult(documents=[], citations=[], confidence=0.0)
+    orchestrator.retriever.retrieve.return_value = empty_result
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert "+32 2 000 0000" in response.answer
+    assert response.metadata["office_contact_offered"] is True
     assert response.citations == []

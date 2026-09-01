@@ -112,6 +112,38 @@ def test_does_not_append_contacts_to_a_no_match_answer() -> None:
     assert restored == []
 
 
+def test_corrects_a_mangled_phone_number_in_place_instead_of_duplicating() -> None:
+    answer = "Voici le bureau approuve.\n\nTelephone: +99 123 456 0000"
+    fields = {"Telephone": "+99 123 456 7890"}
+
+    completed, restored = restore_missing_directory_contacts(answer, [fields])
+
+    assert "+99 123 456 7890" in completed
+    assert "+99 123 456 0000" not in completed
+    assert completed.count("Telephone:") == 1
+    assert restored == ["Telephone"]
+
+
+def test_corrects_a_placeholder_value_the_model_wrote_instead_of_the_real_one() -> None:
+    answer = "Office Email: not available"
+    fields = {"Office Email": "support@example.test"}
+
+    completed, restored = restore_missing_directory_contacts(answer, [fields])
+
+    assert completed == "Office Email: support@example.test"
+    assert restored == ["Office Email"]
+
+
+def test_corrects_markdown_bold_labeled_line_without_breaking_formatting() -> None:
+    answer = "**Office Phone:** +99 000 000 0000"
+    fields = {"Office Phone": "+99 123 456 7890"}
+
+    completed, restored = restore_missing_directory_contacts(answer, [fields])
+
+    assert completed == "**Office Phone:** +99 123 456 7890"
+    assert restored == ["Office Phone"]
+
+
 def test_never_mixes_contacts_from_secondary_directory_records() -> None:
     answer = "Italy office\nAddress: Via Example 10, Rome"
     italy = {
