@@ -183,6 +183,29 @@ def test_chained_followup_skips_prior_vague_followup() -> None:
     )
 
 
+def test_topic_shift_followup_merges_new_subject_with_prior_topic() -> None:
+    """'What about X' keeps the prior topic and adds the new subject, instead of losing it."""
+    orchestrator = AIOrchestrator()
+    history = "\n".join(
+        [
+            "user: What are the office hours in Kenya?",
+            "vera: Kenya office hours are Monday to Friday, 9am to 5pm.",
+        ]
+    )
+
+    query = orchestrator._build_retrieval_query("What about Uganda?", history, "cid")
+
+    assert query == "What are the office hours in Kenya? What about Uganda?"
+
+
+def test_and_in_country_followup_is_not_yet_recognized_as_topic_shift() -> None:
+    """Documents current scope: only 'what about'/'how about'/'what if' merge new subjects."""
+    orchestrator = AIOrchestrator()
+    history = "user: What are the office hours in Kenya?\nvera: Kenya office hours are Monday to Friday."
+
+    assert orchestrator._build_retrieval_query("And in Uganda?", history, "cid") == "And in Uganda?"
+
+
 def test_short_standalone_question_does_not_inherit_history() -> None:
     """A complete new topic remains independent even when it is concise."""
     orchestrator = AIOrchestrator()

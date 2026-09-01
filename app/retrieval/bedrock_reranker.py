@@ -28,6 +28,11 @@ def _candidate_text(row: dict[str, Any]) -> str:
     return "\n".join(part for part in parts if not part.endswith(": "))
 
 
+def _resolve_model_arn() -> str:
+    """Prefer the live-path ARN; fall back to the vNext ARN if that is already set."""
+    return settings.OPENSEARCH_RERANK_MODEL_ARN or settings.RETRIEVAL_VNEXT_RERANK_MODEL_ARN
+
+
 def rerank_rows(
     query: str,
     rows: list[tuple[dict[str, Any], float]],
@@ -36,6 +41,12 @@ def rerank_rows(
 ) -> list[tuple[dict[str, Any], float]]:
     """Rerank a bounded candidate set, preserving the original order on failure."""
     if not rows:
+        return rows
+
+    model_arn = _resolve_model_arn()
+    if not model_arn:
+        # No reranker configured for this call site. Skip the network call
+        # entirely instead of making a request that is guaranteed to fail.
         return rows
 
     candidate_count = max(
@@ -62,7 +73,7 @@ def rerank_rows(
                 "type": "BEDROCK_RERANKING_MODEL",
                 "bedrockRerankingConfiguration": {
                     "modelConfiguration": {
-                        "modelArn": settings.RETRIEVAL_VNEXT_RERANK_MODEL_ARN,
+                        "modelArn": model_arn,
                     },
                     "numberOfResults": min(
                         len(candidates),

@@ -62,7 +62,10 @@ from utils.logging import get_logger
 from utils.validators import ChatRequest
 
 LOGGER = get_logger("app.orchestrator")
-FOLLOW_UP_CONTEXT_MARKERS = (
+# Reference follow-ups point back at the prior answer with no new subject of
+# their own ("elaborate", "what else") - retrieval should reuse the prior
+# self-contained question as-is.
+FOLLOW_UP_REFERENCE_MARKERS = (
     "that",
     "this",
     "it",
@@ -87,6 +90,16 @@ FOLLOW_UP_CONTEXT_MARKERS = (
     "how so",
     "why is that",
 )
+# Topic-shift follow-ups carry a new subject alongside an implicit reference
+# to the prior question's frame ("what about Kenya?", "and in Kenya?").
+# Retrieval needs both the prior topic and the new subject, so these are
+# merged with the anchor question instead of replacing it.
+FOLLOW_UP_TOPIC_SHIFT_MARKERS = (
+    "what about",
+    "how about",
+    "what if",
+)
+FOLLOW_UP_CONTEXT_MARKERS = FOLLOW_UP_REFERENCE_MARKERS + FOLLOW_UP_TOPIC_SHIFT_MARKERS
 DIRECTORY_DETAIL_TERMS = re.compile(
     r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
     re.IGNORECASE,
@@ -710,13 +723,20 @@ class AIOrchestrator:
             return user_message
 
         anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
+            # A topic-shift follow-up ("what about Kenya?") introduces a new
+            # subject that a bare anchor substitution would silently drop.
+            # Keep both the prior topic and the new subject for retrieval.
+            contextual_query = f"{anchor} {user_message}".strip()
+        else:
+            contextual_query = anchor
         LOGGER.info(
             "chat_followup_context_applied",
             correlation_id=correlation_id,
             original_length=len(user_message),
-            contextual_length=len(anchor),
+            contextual_length=len(contextual_query),
         )
-        return anchor
+        return contextual_query
 
     def _build_request_query(self, user_message: str, retrieval_query: str, history: str = "") -> str:
         """Keep follow-up intent in governance and cache keys, outside retrieval."""
@@ -771,7 +791,14 @@ class AIOrchestrator:
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
-        for marker in FOLLOW_UP_CONTEXT_MARKERS:
+        return self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS)
+
+    def _contains_topic_shift_marker(self, normalized_message: str) -> bool:
+        """Match markers that introduce a new subject alongside a reference cue."""
+        return self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
+
+    def _matches_marker(self, normalized_message: str, markers: tuple[str, ...]) -> bool:
+        for marker in markers:
             escaped_marker = re.escape(marker).replace(r"\ ", r"\s+")
             if re.search(
                 rf"(?<!\w){escaped_marker}(?!\w)",

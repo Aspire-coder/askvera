@@ -55,7 +55,10 @@ class RetrievalService:
 
     def _default_provider(self) -> RetrievalProvider:
         """Select the configured retrieval backend."""
-        return self._provider_for_name(settings.RETRIEVAL_PROVIDER)
+        return self._provider_for_name(
+            settings.RETRIEVAL_PROVIDER,
+            enable_bedrock_rerank=settings.OPENSEARCH_LIVE_RERANK_ENABLED,
+        )
 
     @staticmethod
     def _provider_for_name(

@@ -4,32 +4,63 @@
   "locales": {
     "en": {
       "patterns": {
-        "wellbeing": ["how are you", "how are you doing", "are you doing well", "how is it going"],
+        "wellbeing": [
+          "how are you",
+          "how are you doing",
+          "are you doing well",
+          "how is it going",
+          "how's it going",
+          "how're you",
+          "how you doing",
+          "you good",
+          "you doing ok"
+        ],
         "greeting": [
           "hi",
           "hello",
           "hey",
+          "hiya",
+          "yo",
+          "sup",
+          "what's up",
+          "whats up",
+          "howdy",
           "good morning",
           "good afternoon",
-          "good evening"
+          "good evening",
+          "morning",
+          "evening"
         ],
         "thanks": [
           "thanks",
-          "thank you"
+          "thank you",
+          "thx",
+          "ty",
+          "thank u",
+          "cheers",
+          "appreciate it",
+          "much appreciated"
         ],
         "farewell": [
           "bye",
           "goodbye",
           "see you",
-          "talk to you later"
+          "see ya",
+          "talk to you later",
+          "later",
+          "cya",
+          "take care"
         ],
         "capability": [
           "who are you",
           "are you a robot",
+          "are you a real person",
+          "are you human",
           "what is your name",
           "what's your name",
           "what do you do",
           "what can you help with",
+          "what can you do",
           "help"
         ],
         "casual": [
