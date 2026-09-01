@@ -21,7 +21,6 @@ from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
 from services.market_config import (
     find_market_mentions,
-    get_countries,
     get_document_country_codes,
     load_market_config,
 )
