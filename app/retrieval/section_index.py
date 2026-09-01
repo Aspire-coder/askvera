@@ -290,7 +290,14 @@ def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
         return 0.0
     scores = [float(document.score or 0.0) for document in documents]
     top_score = scores[0]
-    runner_up = scores[1] if len(scores) > 1 else 0.0
+    # A row the selector passed over can still outscore the selected result
+    # on raw lexical terms and land right behind it in the returned order.
+    # That row was rejected as evidence, not a competing runner-up, so using
+    # its score here would zero out the margin for a result the selector
+    # actively preferred. Compare against the next candidate that the raw
+    # score itself doesn't already contradict.
+    trailing_contenders = [score for score in scores[1:] if score <= top_score]
+    runner_up = trailing_contenders[0] if trailing_contenders else 0.0
     avg_score = sum(scores) / len(scores)
     margin = max(top_score - runner_up, 0.0)
     strongest_score = max(scores)

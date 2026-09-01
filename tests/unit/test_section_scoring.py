@@ -96,3 +96,24 @@ def test_score_sorted_confidence_is_unchanged_by_corroboration() -> None:
     expected = round((4.0 / 10.0) + (2.0 / 10.0) + ((7.0 / 3.0) / 30.0), 3)
 
     assert _confidence_from_documents(documents) == expected
+
+
+def test_margin_ignores_a_demoted_candidate_the_selector_rejected() -> None:
+    """A row the evidence selector passed over can still outscore the section
+    it did choose, and lands right behind it once demoted to "remaining"
+    evidence. That demoted row must not stand in as the margin's runner-up -
+    otherwise a confidently selected, correct answer gets zero margin credit
+    just because a topically-adjacent but wrong section scored higher on raw
+    lexical overlap.
+    """
+    documents = [_document(1.396), _document(3.31), _document(1.386), _document(1.381), _document(1.354)]
+
+    top_score, real_runner_up = 1.396, 1.386
+    margin = top_score - real_runner_up
+    avg_score = sum(document.score for document in documents) / len(documents)
+    corroboration = min((3.31 - top_score) / 40.0, 0.1)
+    expected = round((top_score / 10.0) + (margin / 10.0) + (avg_score / 30.0) + corroboration, 3)
+
+    assert _confidence_from_documents(documents) == expected
+    # The demoted 3.31 leader must not zero out the margin term.
+    assert margin > 0
