@@ -21,7 +21,7 @@ The live retrieval provider is `opensearch_section`. Amazon Bedrock is used for 
 | Area | Location | Responsibility |
 |---|---|---|
 | API entry point | `main.py` | Starts FastAPI and application lifecycle |
-| API routes | `api/` | Chat, widget, admin, consent, feedback, support, health, and WhatsApp endpoints |
+| API routes | `api/` | Chat, widget, admin, consent, feedback, support, and health endpoints |
 | Orchestration | `app/` | Chat flow, evidence decisions, model providers, monitoring, and response contracts |
 | Configuration | `config/` | Settings, markets, locales, glossary, guardrail topics, and conversation routes |
 | Services | `services/` | Sessions, consent, legal documents, ingestion, feedback, support, PII, guardrails, and security state |

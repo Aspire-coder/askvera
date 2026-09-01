@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AdminApi, withDemoFallback, type AdminCredentials } from "../api";
+import { AdminApi, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import type { AdminConfig, MarketReadiness, ReadinessCheckStatus } from "../types";
 
 type Props = { credentials: AdminCredentials; config: AdminConfig };
@@ -64,6 +64,12 @@ function demoReadiness(config: AdminConfig): MarketReadiness {
   };
 }
 
+const emptyReadiness: MarketReadiness = {
+  checked_at: "",
+  summary: { total: 0, ready: 0, needs_review: 0, not_configured: 0 },
+  markets: []
+};
+
 function statusLabel(status: ReadinessCheckStatus) {
   return {
     pass: "Ready",
@@ -74,10 +80,11 @@ function statusLabel(status: ReadinessCheckStatus) {
 }
 
 export function MarketReadiness({ credentials, config }: Props) {
-  const [data, setData] = useState<MarketReadiness>(() => demoReadiness(config));
-  const [mode, setMode] = useState<"live" | "demo">("demo");
+  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
+  const [data, setData] = useState<MarketReadiness>(() => hasCredentials ? emptyReadiness : demoReadiness(config));
+  const [mode, setMode] = useState<DataMode>(hasCredentials ? "unavailable" : "demo");
   const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
+  const [selectedMarket, setSelectedMarket] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -92,13 +99,15 @@ export function MarketReadiness({ credentials, config }: Props) {
         setData(result.data);
         setMode(result.mode);
       })
-      .catch((reason) =>
+      .catch((reason) => {
+        setData(emptyReadiness);
+        setMode("unavailable");
         setError(
           reason instanceof Error
             ? reason.message
             : "Unable to load market readiness.",
-        ),
-      )
+        );
+      })
       .finally(() => setLoading(false));
   };
 
@@ -108,9 +117,14 @@ export function MarketReadiness({ credentials, config }: Props) {
     const matchesFilter = filter === "all"
       || market.overall === filter
       || market.checks.some((check) => check.status === filter);
-    const needle = query.trim().toLowerCase();
-    return matchesFilter && (!needle || `${market.code} ${market.name}`.toLowerCase().includes(needle));
-  }), [data.markets, filter, query]);
+    return matchesFilter;
+  }), [data.markets, filter]);
+
+  const selected = markets.find((market) => market.code === selectedMarket) || markets[0];
+
+  useEffect(() => {
+    if (selected?.code && selected.code !== selectedMarket) setSelectedMarket(selected.code);
+  }, [selected?.code, selectedMarket]);
 
   return (
     <section className="page-section">
@@ -144,18 +158,22 @@ export function MarketReadiness({ credentials, config }: Props) {
       </div>
     </div>
     <div className="readiness-toolbar surface">
-      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search market" aria-label="Search market" />
+      <label className="toolbar-field"><span>Market</span><select value={selected?.code || ""} onChange={(event) => setSelectedMarket(event.target.value)} aria-label="Select market">
+        {markets.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}
+      </select></label>
       <select value={filter} onChange={(event) => setFilter(event.target.value as Filter)} aria-label="Filter readiness">
         <option value="all">All statuses</option><option value="pass">Ready</option><option value="warning">Needs review</option><option value="not_configured">Not configured</option><option value="not_verified">Not verified</option>
       </select>
       <span className="mode-note">
         {mode === "live"
           ? `Live check - ${new Date(data.checked_at).toLocaleString()}`
-          : "Demo data - connect live operational data to verify"}
+          : mode === "demo"
+            ? "Demo data - connect live operational data to verify"
+            : "Live readiness data is unavailable"}
       </span>
     </div>
     <div className="readiness-list">
-      {markets.map((market) => (
+      {selected ? [selected].map((market) => (
         <article className="readiness-market surface" key={market.code}>
           <div className="readiness-market-header">
             <div><span className="eyebrow">{market.code}</span><h2>{market.name}</h2></div>
@@ -188,8 +206,8 @@ export function MarketReadiness({ credentials, config }: Props) {
             ))}
           </div>
         </article>
-      ))}
-      {!markets.length ? <div className="empty-state surface">No markets match this filter.</div> : null}
+      )) : []}
+      {!selected ? <div className="empty-state surface">No markets match this filter.</div> : null}
     </div>
     </section>
   );

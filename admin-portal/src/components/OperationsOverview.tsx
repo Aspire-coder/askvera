@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
+import { AdminApi, demo, empty, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { ArrowIcon, CheckIcon, HomeIcon, RefreshIcon } from "../icons";
 import type { AdminAuditEvent, AdminConfig, AnalyticsOverview, IngestionJob, View } from "../types";
 
@@ -12,8 +12,9 @@ type OperationsOverviewProps = {
 const formatNumber = (value: number) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 
 export function OperationsOverview({ credentials, config, onNavigate }: OperationsOverviewProps) {
-  const [overview, setOverview] = useState<AnalyticsOverview>(demo.overview);
-  const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
+  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
+  const [overview, setOverview] = useState<AnalyticsOverview>(hasCredentials ? empty.overview : demo.overview);
+  const [jobs, setJobs] = useState<IngestionJob[]>(hasCredentials ? empty.jobs : demo.jobs);
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [mode, setMode] = useState<DataMode>("demo");
   const [loading, setLoading] = useState(true);
@@ -39,8 +40,18 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
       setOverview(overviewResult.data);
       setJobs(jobsResult.data);
       setAuditEvents(auditResult.data);
-      setMode(overviewResult.mode === "live" || jobsResult.mode === "live" || auditResult.mode === "live" ? "live" : "demo");
+      setMode(
+        overviewResult.mode === "live"
+        && jobsResult.mode === "live"
+        && auditResult.mode === "live"
+          ? "live"
+          : "demo"
+      );
     } catch (loadError) {
+      setOverview(empty.overview);
+      setJobs(empty.jobs);
+      setAuditEvents([]);
+      setMode("unavailable");
       setError(loadError instanceof Error ? loadError.message : "Operational data could not be loaded.");
     } finally {
       setLoading(false);
@@ -64,7 +75,7 @@ export function OperationsOverview({ credentials, config, onNavigate }: Operatio
   return <section className="page-section overview-page">
     <div className="page-heading">
       <div><span className="eyebrow">Operations command center</span><h1>Know what needs attention.</h1><p>A simple starting point for answer quality, approved knowledge, customer support, and widget operations.</p></div>
-      <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span><button className="button secondary" onClick={() => void load()} disabled={loading}><RefreshIcon />{loading ? "Refreshing" : "Refresh"}</button></div>
+      <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : mode === "demo" ? "Demo data" : "Data unavailable"}</span><button className="button secondary" onClick={() => void load()} disabled={loading}><RefreshIcon />{loading ? "Refreshing" : "Refresh"}</button></div>
     </div>
     {error ? <div className="notice error" role="alert">{error}</div> : null}
     <div className="overview-metrics">

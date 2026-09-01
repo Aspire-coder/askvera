@@ -14,6 +14,7 @@ from services.session_service import can_resume_bound_session, register_widget_s
 
 from .jwt import (
     WidgetTokenError,
+    consume_widget_resume_token_id,
     decode_widget_resume_token,
     decode_widget_token,
     encode_widget_resume_token,
@@ -72,6 +73,7 @@ class WidgetAuthService:
         )
 
     def _resume_token(self, claims: WidgetAuthClaims) -> str:
+        issued_at = int(time())
         return encode_widget_resume_token(
             {
                 "iss": settings.WIDGET_JWT_ISSUER,
@@ -80,9 +82,11 @@ class WidgetAuthService:
                 "widgetId": claims.widgetId,
                 "origin": claims.origin,
                 "sessionId": claims.sessionId,
-                "iat": claims.iat,
-                "nbf": claims.nbf,
-                "exp": claims.iat + settings.MAX_SESSION_DAYS * 24 * 60 * 60,
+                "jti": str(uuid4()),
+                "parentJti": claims.jti,
+                "iat": issued_at,
+                "nbf": issued_at,
+                "exp": issued_at + settings.MAX_SESSION_DAYS * 24 * 60 * 60,
             }
         )
 
@@ -132,6 +136,11 @@ class WidgetAuthService:
                         correlation_id,
                     )
                 )
+                if resume_allowed:
+                    resume_allowed = consume_widget_resume_token_id(
+                        str(resume_claims.get("jti", "")),
+                        int(resume_claims.get("exp", 0)),
+                    )
             except WidgetTokenError:
                 LOGGER.info(
                     "widget_session_resume_rejected",

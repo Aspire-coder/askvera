@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
+import { AdminApi, demo, empty, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
 import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest } from "../types";
 
 const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
 export function KnowledgeUploader({ credentials }: { credentials: AdminCredentials }) {
-  const [config, setConfig] = useState<AdminConfig>(demo.config);
-  const [jobs, setJobs] = useState<IngestionJob[]>(demo.jobs);
-  const [mode, setMode] = useState<DataMode>("demo");
+  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
+  const [config, setConfig] = useState<AdminConfig>(hasCredentials ? empty.config : demo.config);
+  const [jobs, setJobs] = useState<IngestionJob[]>(hasCredentials ? empty.jobs : demo.jobs);
+  const [mode, setMode] = useState<DataMode>(hasCredentials ? "unavailable" : "demo");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [country, setCountry] = useState("BE");
@@ -35,14 +36,21 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [publishLoading, setPublishLoading] = useState(false);
 
   const refresh = async () => {
-    const api = new AdminApi(credentials);
-    const [configResult, jobsResult] = await Promise.all([
-      withDemoFallback(() => api.config(), demo.config),
-      withDemoFallback(() => api.ingestions(), demo.jobs)
-    ]);
-    setConfig(configResult.data);
-    setJobs(jobsResult.data);
-    setMode(configResult.mode === "live" && jobsResult.mode === "live" ? "live" : "demo");
+    try {
+      const api = new AdminApi(credentials);
+      const [configResult, jobsResult] = await Promise.all([
+        withDemoFallback(() => api.config(), demo.config),
+        withDemoFallback(() => api.ingestions(), demo.jobs)
+      ]);
+      setConfig(configResult.data);
+      setJobs(jobsResult.data);
+      setMode(configResult.mode === "live" && jobsResult.mode === "live" ? "live" : "demo");
+    } catch (error) {
+      setConfig(empty.config);
+      setJobs(empty.jobs);
+      setMode("unavailable");
+      setNotice(error instanceof Error ? error.message : "Knowledge data could not be loaded.");
+    }
   };
 
   useEffect(() => {
@@ -168,7 +176,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
           <h1 id="knowledge-title">Add knowledge. Keep control.</h1>
           <p>Upload approved content, describe it once, and follow it into the search index.</p>
         </div>
-        <span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Connected" : "Demo data"}</span>
+        <span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Connected" : mode === "demo" ? "Demo data" : "Data unavailable"}</span>
       </div>
 
       <div className="uploader-layout">
@@ -221,7 +229,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
 
       <section className="review-panel surface" aria-labelledby="review-title">
         <div className="section-heading"><div><span className="eyebrow">Staging workspace</span><h2 id="review-title">Review before publish</h2><p>Check the extracted chunks and try a question before a document can affect customer answers.</p></div><span className="review-safety">Staging only</span></div>
-        {mode !== "live" ? <div className="review-empty">Connect the portal to load staging documents. Demo data never publishes anything.</div> : <>
+        {mode !== "live" ? <div className="review-empty">{mode === "demo" ? "Connect the portal to load staging documents. Demo data never publishes anything." : "Staging documents are unavailable until the operations API reconnects."}</div> : <>
           <div className="review-toolbar"><label htmlFor="review-job">Document ready for review</label><select id="review-job" value={selectedJobId} onChange={(event) => void loadPreview(event.target.value)}><option value="">Select a reviewed document</option>{reviewableJobs.map((job) => <option key={job.job_id} value={job.job_id}>{job.filename} ({job.section_count} chunks)</option>)}</select><button className="button secondary" disabled={!selectedJobId || previewLoading} onClick={() => void loadPreview(selectedJobId)}><RefreshIcon /> Check document</button></div>
           {previewLoading ? <div className="review-empty">Loading the extracted chunks...</div> : null}
           {previewError ? <div className="notice error" role="alert">{previewError}</div> : null}

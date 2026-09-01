@@ -45,19 +45,40 @@ const metadataNumber = (stages: Array<TraceStage | undefined>, ...keys: string[]
   for (const stage of stages) for (const key of keys) { const value = numberValue(stage?.metadata?.[key]); if (value) return value; }
   return 0;
 };
+const emptyTrace: PipelineTrace = {
+  correlation_id: "",
+  country: "",
+  language: "",
+  session_id: "",
+  question_preview: "No recent answers",
+  started_at: "",
+  completed_at: "",
+  stages: []
+};
 
 export function FlowVisualizer({ credentials }: { credentials: AdminCredentials }) {
-  const [traces, setTraces] = useState<PipelineTrace[]>(demo.traces);
-  const [selectedId, setSelectedId] = useState(demo.traces[0].correlation_id);
+  const hasCredentials = Boolean(credentials.accessToken || credentials.apiKey);
+  const [traces, setTraces] = useState<PipelineTrace[]>(hasCredentials ? [] : demo.traces);
+  const [selectedId, setSelectedId] = useState(hasCredentials ? "" : demo.traces[0].correlation_id);
   const [selectedStage, setSelectedStage] = useState("request_received");
-  const [mode, setMode] = useState<DataMode>("demo");
+  const [mode, setMode] = useState<DataMode>(hasCredentials ? "unavailable" : "demo");
   const [replayKey, setReplayKey] = useState(0);
+  const [error, setError] = useState("");
 
   const refresh = async () => {
-    const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
-    setTraces(result.data.length ? result.data : demo.traces);
-    setMode(result.mode);
-    if (result.data.length && !result.data.some((trace) => trace.correlation_id === selectedId)) setSelectedId(result.data[0].correlation_id);
+    try {
+      const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
+      setTraces(result.data);
+      setMode(result.mode);
+      setError("");
+      if (result.data.length && !result.data.some((trace) => trace.correlation_id === selectedId)) setSelectedId(result.data[0].correlation_id);
+      if (!result.data.length) setSelectedId("");
+    } catch (nextError) {
+      setTraces([]);
+      setSelectedId("");
+      setMode("unavailable");
+      setError(nextError instanceof Error ? nextError.message : "Live flow data could not be loaded.");
+    }
   };
 
   useEffect(() => {
@@ -66,7 +87,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
     return () => window.clearInterval(timer);
   }, [credentials.accessToken, credentials.apiKey]);
 
-  const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || demo.traces[0], [selectedId, traces]);
+  const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || emptyTrace, [selectedId, traces]);
   const detail = stationById.get(selectedStage) || stations[0];
   const activeStage = stageFor(trace, selectedStage);
   const deliveredStage = stageFor(trace, "response_delivered");
@@ -88,7 +109,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const replay = () => setReplayKey((value) => value + 1);
   const resetView = () => {
     setSelectedStage("request_received");
-    setSelectedId(traces[0]?.correlation_id || demo.traces[0].correlation_id);
+    setSelectedId(traces[0]?.correlation_id || "");
     setReplayKey((value) => value + 1);
     void refresh();
   };
@@ -107,8 +128,9 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
     <section className="page-section" aria-labelledby="flow-title">
       <div className="page-heading">
         <div><span className="eyebrow">Live service trace</span><h1 id="flow-title">See every answer take shape.</h1><p>Follow the AWS services, decisions, latency, token usage and cache savings behind one response.</p></div>
-        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : "Demo data"}</span><button className="button secondary" onClick={resetView}>Reset view</button><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
+        <div className="heading-actions"><span className={`mode-pill ${mode}`}><span />{mode === "live" ? "Live data" : mode === "demo" ? "Demo data" : "Data unavailable"}</span><button className="button secondary" onClick={resetView}>Reset view</button><button className="button secondary" onClick={() => void refresh()}><RefreshIcon /> Refresh</button></div>
       </div>
+      {error ? <div className="notice error" role="alert">{error}</div> : null}
 
       <div className="trace-toolbar surface">
         <label><span>Recent question</span><select value={trace.correlation_id} onChange={(event) => setSelectedId(event.target.value)}>{traces.map((item) => <option key={item.correlation_id} value={item.correlation_id}>{item.question_preview || item.correlation_id}</option>)}</select></label>

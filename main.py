@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse
 from api.middleware import ProtectedRequestLoggingMiddleware, RateLimitMiddleware, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from api.routes import router
 from api.admin_routes import admin_router
-from api.whatsapp_routes import whatsapp_router
 from app.audit import audit_dispatcher, audit_lifecycle
 from app.audit.sinks.firehose import initialize_firehose_sink
 from app.middleware.audit import AuditMiddleware
@@ -82,6 +81,15 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     market_config = load_market_config()
     LOGGER.info("market_config_loaded", market_count=len(market_config["markets"]))
     init_aws_clients()
+    LOGGER.info(
+        "runtime_retrieval_flags",
+        query_planner=settings.BEDROCK_QUERY_PLANNER_ENABLED,
+        evidence_selector=(settings.BEDROCK_EVIDENCE_SELECTOR_ENABLED or settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED),
+        vnext_rerank=settings.RETRIEVAL_VNEXT_RERANK_ENABLED,
+        shadow_retrieval=settings.RETRIEVAL_SHADOW_ENABLED,
+        semantic_cache=settings.SEMANTIC_CACHE_ENABLED,
+        global_translation=settings.OPENSEARCH_GLOBAL_DOCUMENT_TRANSLATION_ENABLED,
+    )
     legal_documents = load_legal_documents()
     LOGGER.info("legal_documents_ready", document_count=len(legal_documents["documents"]))
     init_db()
@@ -115,7 +123,6 @@ app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(DynamicWidgetCorsMiddleware)
 app.include_router(router)
 app.include_router(admin_router)
-app.include_router(whatsapp_router)
 
 
 @app.exception_handler(RequestValidationError)

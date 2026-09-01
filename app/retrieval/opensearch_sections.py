@@ -18,11 +18,12 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
-from services.market_config import get_document_country_codes
+from services.market_config import get_document_country_codes, load_market_config
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
+from .experiments import diversify_by_parent, reciprocal_rank_fusion
 from .providers import RetrievalQueryPlan, _planned_retrieval_plan, _planned_retrieval_queries
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
@@ -262,9 +263,35 @@ def _exact_section_query(section_id: str, country: str, language: str) -> dict[s
     }
 
 
-def _directory_text_query(message: str) -> dict[str, Any]:
+@lru_cache(maxsize=1)
+def _directory_country_aliases() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Return content-managed country names and their unambiguous aliases."""
+    countries = []
+    for market in load_market_config().get("markets", []):
+        name = str(market.get("name") or "").strip()
+        code = str(market.get("code") or "").strip().upper()
+        normalized_name = _normalize_text(name)
+        if not normalized_name:
+            continue
+        acronym = "".join(part[0] for part in normalized_name.split() if part).upper()
+        aliases = tuple(alias for alias in {code, acronym} if len(alias) >= 2)
+        countries.append((name, aliases))
+    return tuple(sorted(countries, key=lambda item: len(item[0]), reverse=True))
+
+
+def _requested_directory_country(message: str) -> str:
+    """Resolve only an explicitly named country; never guess from widget market."""
+    normalized = f" {_normalize_text(message)} "
+    uppercase_tokens = set(re.findall(r"\b[A-Z]{2,3}\b", message or ""))
+    for name, aliases in _directory_country_aliases():
+        if f" {_normalize_text(name)} " in normalized or uppercase_tokens.intersection(aliases):
+            return name
+    return ""
+
+
+def _directory_text_query(message: str, record_country: str = "") -> dict[str, Any]:
     """Build a metadata-aware query for globally available directory records."""
-    return {
+    query = {
         "size": settings.OPENSEARCH_CANDIDATE_COUNT,
         "query": {
             "bool": {
@@ -301,6 +328,11 @@ def _directory_text_query(message: str) -> dict[str, Any]:
             }
         },
     }
+    if record_country:
+        query["query"]["bool"]["filter"].append(
+            exact_term_query("metadata.record_country", record_country)
+        )
+    return query
 
 
 def _outline_text_query(message: str, country: str, language: str) -> dict[str, Any]:
@@ -507,59 +539,16 @@ class OpenSearchSectionProvider:
                         "intent_confidence": search_plan.intent_confidence,
                     },
                 )
-            client = _client()
             search_messages = search_plan.queries
-            global_search_message = ""
-            text_hits: list[dict[str, Any]] = []
-            vector_hits: list[dict[str, Any]] = []
             explicit_section_id = _section_reference(message)
-            if explicit_section_id:
-                exact_response = client.search(
-                    index=self.index_name,
-                    body=_exact_section_query(explicit_section_id, country, language),
-                )
-                text_hits.extend(
-                    {**hit, "_score": max(float(hit.get("_score") or 0.0), 100.0)}
-                    for hit in exact_response.get("hits", {}).get("hits", [])
-                )
-            for index, search_message in enumerate(search_messages):
-                weight = 1.0 if index == 0 else 0.88
-                text_response = client.search(
-                    index=self.index_name,
-                    body=_text_query(search_message, country, language, scope="locale"),
-                )
-                vector_response = client.search(
-                    index=self.index_name,
-                    body=_vector_query(search_message, country, language, scope="locale"),
-                )
-                text_hits.extend(
-                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                    for hit in text_response.get("hits", {}).get("hits", [])
-                )
-                vector_hits.extend(
-                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                    for hit in vector_response.get("hits", {}).get("hits", [])
-                )
-
-            if search_plan.prefer_outline:
-                outline_response = client.search(
-                    index=self.index_name,
-                    body=_outline_text_query(message, country, language),
-                )
-                text_hits.extend(outline_response.get("hits", {}).get("hits", []))
-
-            if search_plan.include_global_documents:
-                global_search_message = self._global_search_query(message, language, correlation_id)
-                global_text_response = client.search(
-                    index=self.index_name,
-                    body=_directory_text_query(global_search_message),
-                )
-                global_vector_response = client.search(
-                    index=self.index_name,
-                    body=_vector_query(global_search_message, country, language, scope="global"),
-                )
-                text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
-                vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
+            text_hits, vector_hits, global_search_message = self._execute_searches(
+                message,
+                country,
+                language,
+                correlation_id,
+                search_plan,
+                explicit_section_id,
+            )
         except OpenSearchException:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
             return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
@@ -575,6 +564,8 @@ class OpenSearchSectionProvider:
 
             rows = rerank_rows(message, rows, correlation_id=correlation_id)
         rows = self._select_evidence_rows(message, rows, correlation_id)
+        if settings.RETRIEVAL_PARENT_DIVERSITY_ENABLED:
+            rows = self._apply_parent_diversity(rows)
 
         documents = [
             self._document_from_row(row, score)
@@ -611,6 +602,68 @@ class OpenSearchSectionProvider:
             confidence=result.confidence,
         )
         return result
+
+    def _execute_searches(
+        self,
+        message: str,
+        country: str,
+        language: str,
+        correlation_id: str,
+        search_plan: RetrievalQueryPlan,
+        explicit_section_id: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+        """Build one OpenSearch multi-search and separate text from vector results."""
+        searches: list[dict[str, Any]] = []
+        result_kinds: list[tuple[str, float]] = []
+
+        def add_search(query: dict[str, Any], kind: str, weight: float = 1.0) -> None:
+            searches.extend(({"index": self.index_name}, query))
+            result_kinds.append((kind, weight))
+
+        if explicit_section_id:
+            add_search(_exact_section_query(explicit_section_id, country, language), "exact")
+        for index, search_message in enumerate(search_plan.queries):
+            weight = 1.0 if index == 0 else 0.88
+            add_search(_text_query(search_message, country, language, scope="locale"), "text", weight)
+            add_search(_vector_query(search_message, country, language, scope="locale"), "vector", weight)
+        if search_plan.prefer_outline:
+            add_search(_outline_text_query(message, country, language), "text")
+
+        global_search_message = ""
+        if search_plan.include_global_documents:
+            global_search_message = self._global_search_query(message, language, correlation_id)
+            requested_country = _requested_directory_country(message)
+            add_search(_directory_text_query(global_search_message, requested_country), "text")
+            global_vector_query = _vector_query(global_search_message, country, language, scope="global")
+            if requested_country:
+                global_vector_query["query"]["knn"]["embedding"]["filter"]["bool"]["filter"].append(
+                    exact_term_query("metadata.record_country", requested_country)
+                )
+            add_search(global_vector_query, "vector")
+
+        responses = _client().msearch(body=searches).get("responses", [])
+        if len(responses) != len(result_kinds):
+            raise OpenSearchException("OpenSearch returned an incomplete multi-search response.")
+
+        text_hits: list[dict[str, Any]] = []
+        vector_hits: list[dict[str, Any]] = []
+        for response, (kind, weight) in zip(responses, result_kinds):
+            if response.get("error"):
+                raise OpenSearchException(str(response["error"]))
+            hits = response.get("hits", {}).get("hits", [])
+            destination = vector_hits if kind == "vector" else text_hits
+            destination.extend(
+                {
+                    **hit,
+                    "_score": (
+                        max(float(hit.get("_score") or 0.0), 100.0)
+                        if kind == "exact"
+                        else float(hit.get("_score") or 0.0) * weight
+                    ),
+                }
+                for hit in hits
+            )
+        return text_hits, vector_hits, global_search_message
 
     def _global_search_query(self, message: str, language: str, correlation_id: str) -> str:
         """Translate a query into the configured language of global documents."""
@@ -681,8 +734,14 @@ class OpenSearchSectionProvider:
         prefer_outline: bool = False,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
-        for hit in text_hits:
-            row = _hit_to_row(hit)
+        text_rows = [_hit_to_row(hit) for hit in text_hits]
+        vector_rows = [
+            _hit_to_row(hit, score_weight=settings.OPENSEARCH_VECTOR_WEIGHT)
+            for hit in vector_hits
+        ]
+        text_ids = [str(row.get("id") or "") for row in text_rows]
+        vector_ids = [str(row.get("id") or "") for row in vector_rows]
+        for row in text_rows:
             row_id = str(row["id"] or "")
             if not row_id:
                 continue
@@ -691,8 +750,7 @@ class OpenSearchSectionProvider:
                 # Original and glossary searches may return the same section. Keep
                 # the strongest text result instead of letting a later query erase it.
                 merged[row_id] = row
-        for hit in vector_hits:
-            row = _hit_to_row(hit, score_weight=settings.OPENSEARCH_VECTOR_WEIGHT)
+        for row in vector_rows:
             if not row["id"]:
                 continue
             existing = merged.get(row["id"])
@@ -711,7 +769,36 @@ class OpenSearchSectionProvider:
             )
             for row in merged.values()
         ]
+        if settings.RETRIEVAL_RRF_ENABLED:
+            fused_scores = reciprocal_rank_fusion(
+                [
+                    [row_id for row_id in text_ids if row_id],
+                    [row_id for row_id in vector_ids if row_id],
+                ],
+                k=settings.RETRIEVAL_RRF_K,
+            )
+            return sorted(
+                scored,
+                key=lambda pair: (fused_scores.get(str(pair[0].get("id") or ""), 0.0), pair[1]),
+                reverse=True,
+            )
         return sorted(scored, key=lambda pair: pair[1], reverse=True)
+
+    def _apply_parent_diversity(
+        self,
+        rows: list[tuple[dict[str, Any], float]],
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Limit repeated chunks from one parent only for the opt-in experiment."""
+        decorated = [
+            {"id": row.get("id"), "metadata": row, "row": row, "score": score}
+            for row, score in rows
+        ]
+        selected = diversify_by_parent(
+            decorated,
+            max_results=settings.OPENSEARCH_RESULT_COUNT,
+            max_per_parent=settings.RETRIEVAL_MAX_RESULTS_PER_PARENT,
+        )
+        return [(item["row"], item["score"]) for item in selected]
 
     def _select_evidence_rows(
         self,

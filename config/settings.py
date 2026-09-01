@@ -10,12 +10,29 @@ from pathlib import Path
 from typing import Any
 
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _parse_bool(raw_value: str, name: str) -> bool:
+    """Parse an explicit boolean and reject ambiguous configuration."""
+    normalized = raw_value.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ValueError(
+        f"Invalid boolean for {name}: {raw_value!r}. "
+        "Use true/false, yes/no, on/off, or 1/0."
+    )
+
+
 def _env_bool(name: str, default: bool) -> bool:
     """Read a boolean from the process environment with a safe default."""
     raw_value = os.environ.get(name)
     if raw_value is None:
         return default
-    return raw_value.lower() in {"1", "true", "yes", "on"}
+    return _parse_bool(raw_value, name)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -100,6 +117,12 @@ DB_SCHEMA_BOOTSTRAP_ON_STARTUP = _env_bool("DB_SCHEMA_BOOTSTRAP_ON_STARTUP", Fal
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
 AWS_MAX_ATTEMPTS = 3
+# Interactive chat dependencies use bounded budgets so a transient dependency
+# cannot consume the entire request latency budget.
+AWS_INTERACTIVE_READ_TIMEOUT_SECONDS = _env_int("AWS_INTERACTIVE_READ_TIMEOUT_SECONDS", 8)
+AWS_INTERACTIVE_MAX_ATTEMPTS = _env_int("AWS_INTERACTIVE_MAX_ATTEMPTS", 1)
+AWS_PII_READ_TIMEOUT_SECONDS = _env_int("AWS_PII_READ_TIMEOUT_SECONDS", 5)
+AWS_PII_MAX_ATTEMPTS = _env_int("AWS_PII_MAX_ATTEMPTS", 1)
 # Per-IP request limiting for public widget endpoints. Production uses Valkey
 # so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60
@@ -475,11 +498,6 @@ SUPPORT_EMAIL_SUBJECT_PREFIX = _env_str("SUPPORT_EMAIL_SUBJECT_PREFIX", "AskVera
 SUPPORT_RECOMMEND_AFTER_FAILURES = _env_int("SUPPORT_RECOMMEND_AFTER_FAILURES", 2)
 SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
 SUPPORT_DEFAULT_ROUTE_JSON: dict[str, str] = json.loads(_env_str("SUPPORT_DEFAULT_ROUTE_JSON", "{}"))
-# WhatsApp is a disabled integration boundary until Meta credentials,
-# verification, and outbound delivery have been provisioned and tested.
-WHATSAPP_ENABLED = _env_bool("WHATSAPP_ENABLED", False)
-WHATSAPP_VERIFY_TOKEN = _env_str("WHATSAPP_VERIFY_TOKEN", "")
-WHATSAPP_APP_SECRET = _env_str("WHATSAPP_APP_SECRET", "")
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.
@@ -506,14 +524,14 @@ WIDGET_DOMAIN = "chat.vera-api.xyz"
 MARKETS_CONFIG_PATH = os.environ.get("MARKETS_CONFIG_PATH", str(Path(__file__).with_name("markets.json")))
 
 SSM_PARAMETER_PATH = os.environ.get("SSM_PARAMETER_PATH", "/askverachat/prod/")
-SSM_CONFIG_ENABLED = os.environ.get("SSM_CONFIG_ENABLED", "true").lower() == "true"
+SSM_CONFIG_ENABLED = _env_bool("SSM_CONFIG_ENABLED", True)
 _SSM_CONFIG: dict[str, str] = {}
 
 
-def _coerce_value(current_value: Any, raw_value: str) -> Any:
+def _coerce_value(name: str, current_value: Any, raw_value: str) -> Any:
     """Coerce SSM strings to the existing setting type where possible."""
     if isinstance(current_value, bool):
-        return raw_value.lower() in {"1", "true", "yes", "on"}
+        return _parse_bool(raw_value, name)
     if isinstance(current_value, int) and not isinstance(current_value, bool):
         return int(raw_value)
     if isinstance(current_value, float):
@@ -531,8 +549,8 @@ def _coerce_value(current_value: Any, raw_value: str) -> Any:
     return raw_value
 
 
-def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
-    """Load config overrides from SSM Parameter Store and apply them to this module."""
+def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:  # noqa: C901
+    """Validate all SSM overrides, then apply the complete batch atomically."""
     global _SSM_CONFIG
     if not SSM_CONFIG_ENABLED:
         return {}
@@ -546,29 +564,45 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
         for parameter in page.get("Parameters", []):
             loaded[parameter["Name"].split("/")[-1]] = parameter["Value"]
 
+    current = globals()
+    target_environment = loaded.get("APP_ENV", str(current["APP_ENV"])).strip().lower()
+    target_profile = loaded.get(
+        "SECURITY_PROFILE",
+        str(current["SECURITY_PROFILE"]),
+    ).strip().lower()
+    strict = target_environment == "production" or target_profile == "hardened"
+
+    unknown = sorted(key for key in loaded if key not in current)
+    if strict and unknown:
+        raise ValueError(f"Unknown SSM configuration parameters: {', '.join(unknown)}")
+
+    staged: dict[str, Any] = {}
     for key, raw_value in loaded.items():
-        if key in globals():
-            globals()[key] = _coerce_value(globals()[key], raw_value)
-        else:
-            globals()[key] = raw_value
+        if key in current:
+            staged[key] = _coerce_value(key, current[key], raw_value)
+
+    def staged_value(name: str) -> Any:
+        return staged.get(name, current[name])
 
     if "REDIS_HOST" in loaded:
-        globals()["ELASTICACHE_REDIS_HOST"] = globals()["REDIS_HOST"]
+        staged["ELASTICACHE_REDIS_HOST"] = staged_value("REDIS_HOST")
     if "REDIS_PORT" in loaded:
-        globals()["ELASTICACHE_REDIS_PORT"] = globals()["REDIS_PORT"]
+        staged["ELASTICACHE_REDIS_PORT"] = staged_value("REDIS_PORT")
     if "FIREHOSE_STREAM_NAME" in loaded:
-        globals()["KINESIS_FIREHOSE_STREAM_NAME"] = globals()["FIREHOSE_STREAM_NAME"]
+        staged["KINESIS_FIREHOSE_STREAM_NAME"] = staged_value("FIREHOSE_STREAM_NAME")
     if "BEDROCK_DATA_SOURCE_ID" in loaded:
-        globals()["BEDROCK_DATASOURCE_ID"] = globals()["BEDROCK_DATA_SOURCE_ID"]
+        staged["BEDROCK_DATASOURCE_ID"] = staged_value("BEDROCK_DATA_SOURCE_ID")
     if "BEDROCK_DATASOURCE_ID" in loaded:
-        globals()["BEDROCK_DATA_SOURCE_ID"] = globals()["BEDROCK_DATASOURCE_ID"]
+        staged["BEDROCK_DATA_SOURCE_ID"] = staged_value("BEDROCK_DATASOURCE_ID")
     if "AWS_REGION" in loaded:
-        globals()["BEDROCK_REGION"] = globals()["AWS_REGION"]
+        staged["BEDROCK_REGION"] = staged_value("AWS_REGION")
     if "BEDROCK_REGION" in loaded and "AWS_REGION" not in loaded:
-        globals()["AWS_REGION"] = globals()["BEDROCK_REGION"]
+        staged["AWS_REGION"] = staged_value("BEDROCK_REGION")
     if "SESSION_IDLE_TIMEOUT_MINUTES" in loaded:
-        globals()["SESSION_TTL_SECONDS"] = int(globals()["SESSION_IDLE_TIMEOUT_MINUTES"]) * 60
-        globals()["SESSION_TIMEOUT_HOURS"] = globals()["SESSION_TTL_SECONDS"] / (60 * 60)
+        staged["SESSION_TTL_SECONDS"] = int(staged_value("SESSION_IDLE_TIMEOUT_MINUTES")) * 60
+        staged["SESSION_TIMEOUT_HOURS"] = staged["SESSION_TTL_SECONDS"] / (60 * 60)
+
+    current.update(staged)
 
     _SSM_CONFIG = loaded
     return loaded

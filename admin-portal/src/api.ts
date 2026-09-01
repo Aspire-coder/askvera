@@ -16,7 +16,7 @@ import type {
   IngestionJob,
   IngestionPreview,
   IngestionPreviewTest,
-  Interaction,
+  InteractionPage,
   MarketReadiness,
   PipelineTrace,
   ShadowReport,
@@ -26,53 +26,71 @@ import type {
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
 const ALLOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_ALLOW_DEMO === "true";
+const REQUEST_TIMEOUT_MS = 15_000;
+const FILE_REQUEST_TIMEOUT_MS = 120_000;
 
 type Envelope<T> = { success: boolean; data?: T; error?: { message?: string } };
 export type AdminCredentials = { accessToken?: string; apiKey?: string };
+type RequestOptions = RequestInit & { timeoutMs?: number };
 
 export class AdminApi {
   constructor(private readonly credentials: AdminCredentials) {}
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      headers: {
-        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
-        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {}),
-        ...(init?.headers || {})
+  private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    const { timeoutMs = REQUEST_TIMEOUT_MS, ...init } = options;
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        signal,
+        headers: {
+          ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+          ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {}),
+          ...(init.headers || {})
+        }
+      });
+    } catch (error) {
+      if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name)) {
+        throw new Error("The operations API did not respond in time.");
       }
-    });
-    const payload = await response.json() as Envelope<T> & { detail?: string };
+      throw new Error("The operations API could not be reached.");
+    }
+    const payload = await response.json().catch(() => ({})) as Envelope<T> & { detail?: string };
     if (!response.ok || payload.success === false || payload.data === undefined) {
       throw new Error(payload.error?.message || payload.detail || `Request failed (${response.status})`);
     }
     return payload.data;
   }
 
+  private async requestBlob(path: string): Promise<Blob> {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        signal: AbortSignal.timeout(FILE_REQUEST_TIMEOUT_MS),
+        headers: {
+          ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
+          ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
+        }
+      });
+    } catch {
+      throw new Error("The export could not be downloaded from the operations API.");
+    }
+    if (!response.ok) throw new Error(`Export failed (${response.status})`);
+    return response.blob();
+  }
+
   config() { return this.request<AdminConfig>("/api/admin/config"); }
   marketReadiness() { return this.request<MarketReadiness>("/api/admin/market-readiness"); }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }
   overview(filters: URLSearchParams) { return this.request<AnalyticsOverview>(`/api/admin/analytics/overview?${filters}`); }
-  interactions(filters: URLSearchParams) { return this.request<Interaction[]>(`/api/admin/analytics/interactions?${filters}`); }
+  interactions(filters: URLSearchParams) { return this.request<InteractionPage>(`/api/admin/analytics/interactions?${filters}`); }
   async exportInteractions(filters: URLSearchParams): Promise<Blob> {
-    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.csv?${filters}`, {
-      headers: {
-        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
-        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
-      }
-    });
-    if (!response.ok) throw new Error(`Export failed (${response.status})`);
-    return response.blob();
+    return this.requestBlob(`/api/admin/analytics/interactions.csv?${filters}`);
   }
   async exportInteractionsXlsx(filters: URLSearchParams): Promise<Blob> {
-    const response = await fetch(`${API_BASE}/api/admin/analytics/interactions.xlsx?${filters}`, {
-      headers: {
-        ...(this.credentials.accessToken ? { Authorization: `Bearer ${this.credentials.accessToken}` } : {}),
-        ...(this.credentials.apiKey ? { "X-Admin-Key": this.credentials.apiKey } : {})
-      }
-    });
-    if (!response.ok) throw new Error(`Excel export failed (${response.status})`);
-    return response.blob();
+    return this.requestBlob(`/api/admin/analytics/interactions.xlsx?${filters}`);
   }
   retrievalShadow(filters: URLSearchParams) {
     return this.request<ShadowReport>(`/api/admin/analytics/retrieval-shadow?${filters}`);
@@ -95,7 +113,8 @@ export class AdminApi {
     return this.request<{ jobId: string; filename: string; detectedFormat?: { format?: string; media_type?: string }; status: string; message: string }>("/api/admin/documents", {
       method: "POST",
       body: formData,
-      signal
+      signal,
+      timeoutMs: FILE_REQUEST_TIMEOUT_MS
     });
   }
   users() { return this.request<AdminUser[]>("/api/admin/users"); }
@@ -146,11 +165,13 @@ export class AdminApi {
   uploadWidgetLogo(file: File) {
     const form = new FormData();
     form.append("file", file);
-    return this.request<{ url: string }>("/api/admin/widget-assets", { method: "POST", body: form });
+    return this.request<{ url: string }>("/api/admin/widget-assets", {
+      method: "POST", body: form, timeoutMs: FILE_REQUEST_TIMEOUT_MS
+    });
   }
 }
 
-export type DataMode = "live" | "demo";
+export type DataMode = "live" | "demo" | "unavailable";
 
 export async function withDemoFallback<T>(live: () => Promise<T>, fallback: T): Promise<{ data: T; mode: DataMode }> {
   try {
@@ -168,4 +189,27 @@ export const demo = {
   shadowReport: demoShadowReport,
   interactions: demoInteractions,
   jobs: demoJobs
+};
+
+export const empty = {
+  config: { ...demoConfig, countries: [], widgetCountries: [], documentTypes: [], accessScopes: [] },
+  overview: {
+    ...demoOverview,
+    totals: {
+      questions: 0, users: 0, liveSessions: 0, inputTokens: 0, outputTokens: 0, tokens: 0,
+      averageConfidence: 0, unanswered: 0, helpful: 0, notHelpful: 0, helpfulRate: 0
+    },
+    topics: [], countries: [], languages: [], trend: []
+  },
+  shadowReport: {
+    ...demoShadowReport,
+    totals: {
+      comparisons: 0, topMatches: 0, topMatchRate: 0, averageOverlap: 0,
+      vnextConfidenceWins: 0, vnextConfidenceWinRate: 0, primaryConfidence: 0,
+      vnextConfidence: 0, averageDurationMs: 0
+    },
+    countries: [], languages: [], trend: [], disagreements: []
+  },
+  interactions: [],
+  jobs: []
 };

@@ -108,25 +108,33 @@ class AIOrchestrator:
         )
         chat_response = self._early_conversation_response(scrubbed_input, body, correlation_id)
         if chat_response:
-            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
-            return chat_response
+            return self._finish_response(chat_response, body, scrubbed_input, correlation_id)
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         governance_decision = self._evaluate_governance(retrieval_query, body, correlation_id)
         if not governance_decision.allowed:
-            return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message
+            return self._finish_response(
+                self._governance_fallback(
+                    governance_decision, correlation_id, body.language, body.country, body.message
+                ),
+                body,
+                scrubbed_input,
+                correlation_id,
             )
 
         cache_key = build_cache_key(retrieval_query, body.country, body.language, body.role)
         cached_response = self._cached_response(cache_key, body, correlation_id)
         if cached_response:
-            return cached_response
+            return self._finish_response(cached_response, body, scrubbed_input, correlation_id)
         semantic_cached = get_semantic_cache_value(
             retrieval_query, body.country, body.language, body.role, correlation_id
         )
         if semantic_cached:
-            return self._cached_response_value(semantic_cached, body, correlation_id, cache_type="semantic")
+            cached_response = self._cached_response_value(
+                semantic_cached, body, correlation_id, cache_type="semantic"
+            )
+            if cached_response:
+                return self._finish_response(cached_response, body, scrubbed_input, correlation_id)
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
@@ -137,7 +145,7 @@ class AIOrchestrator:
             correlation_id,
         )
         if chat_response:
-            return chat_response
+            return self._finish_response(chat_response, body, scrubbed_input, correlation_id)
         assert evidence_decision is not None
         prompt_package = self.prompt_builder.build(
             user_question=scrubbed_input,
@@ -152,42 +160,57 @@ class AIOrchestrator:
             model_response = self.model_router.generate(prompt_package, retrieval_result, correlation_id)
         except LowConfidenceError as exc:
             failure_layer = self._low_confidence_failure_layer(exc)
-            return self._validate_response(
-                self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language),
+            return self._finish_response(
+                self._validate_response(
+                    self.response_builder.fallback(
+                        self._insufficient_evidence_message(body.language),
+                        correlation_id,
+                        metadata={"failure_layer": failure_layer},
+                    ),
+                    body,
                     correlation_id,
-                    metadata={"failure_layer": failure_layer},
+                    retrieval_result=retrieval_result,
                 ),
                 body,
+                scrubbed_input,
                 correlation_id,
-                retrieval_result=retrieval_result,
             )
 
         if model_response.finish_reason == "guardrail_intervened":
-            return self.response_builder.fallback(
-                localized_conversation_response("guardrail_blocked", body.language)
-                or (
-                    "I couldn't provide that response because it did not pass AskVera's safety checks. "
-                    "Please rephrase the question without private information or unsafe claims."
+            return self._finish_response(
+                self.response_builder.fallback(
+                    localized_conversation_response("guardrail_blocked", body.language)
+                    or (
+                        "I couldn't provide that response because it did not pass AskVera's safety checks. "
+                        "Please rephrase the question without private information or unsafe claims."
+                    ),
+                    correlation_id,
+                    metadata={
+                        "failure_layer": "aws_guardrail",
+                        "response_source": "guardrail",
+                    },
                 ),
+                body,
+                scrubbed_input,
                 correlation_id,
-                metadata={
-                    "failure_layer": "aws_guardrail",
-                    "response_source": "guardrail",
-                },
             )
 
         contracted_response = self._apply_evidence_contract(model_response, retrieval_result, correlation_id)
         if contracted_response is None:
-            return self._validate_response(
-                self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language),
+            return self._finish_response(
+                self._validate_response(
+                    self.response_builder.fallback(
+                        self._insufficient_evidence_message(body.language),
+                        correlation_id,
+                        metadata={"failure_layer": "evidence_contract"},
+                    ),
+                    body,
                     correlation_id,
-                    metadata={"failure_layer": "evidence_contract"},
+                    retrieval_result=retrieval_result,
                 ),
                 body,
+                scrubbed_input,
                 correlation_id,
-                retrieval_result=retrieval_result,
             )
         model_response, retrieval_result = contracted_response
 
@@ -220,22 +243,15 @@ class AIOrchestrator:
         )
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
         if not governance_decision.allowed:
-            return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message
+            return self._finish_response(
+                self._governance_fallback(
+                    governance_decision, correlation_id, body.language, body.country, body.message
+                ),
+                body,
+                scrubbed_input,
+                correlation_id,
             )
-        append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
-        write_audit_event(
-            {
-                "type": "chat",
-                "country": body.country,
-                "language": body.language,
-                "confidence": chat_response.confidence,
-                "validation": chat_response.metadata.get("validation"),
-                "failure_layer": chat_response.metadata.get("failure_layer"),
-                "finish_reason": chat_response.metadata.get("finish_reason"),
-            },
-            correlation_id,
-        )
+        self._finish_response(chat_response, body, scrubbed_input, correlation_id)
         if self._should_cache_response(chat_response):
             set_cache_value(cache_key, chat_response.to_cache_value(), correlation_id)
             set_semantic_cache_value(
@@ -252,6 +268,33 @@ class AIOrchestrator:
                 correlation_id=correlation_id,
                 reason="fallback_or_critical_validation",
             )
+        return chat_response
+
+    @staticmethod
+    def _finish_response(
+        chat_response: ChatResponse,
+        body: ChatRequest,
+        scrubbed_input: str,
+        correlation_id: str,
+    ) -> ChatResponse:
+        """Record every delivered turn through one shared path."""
+        try:
+            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
+        except Exception:
+            LOGGER.exception("session_turn_append_failed", correlation_id=correlation_id)
+        write_audit_event(
+            {
+                "type": "chat",
+                "country": body.country,
+                "language": body.language,
+                "confidence": chat_response.confidence,
+                "validation": chat_response.metadata.get("validation"),
+                "failure_layer": chat_response.metadata.get("failure_layer"),
+                "finish_reason": chat_response.metadata.get("finish_reason"),
+                "cache": chat_response.metadata.get("cache"),
+            },
+            correlation_id,
+        )
         return chat_response
 
     def _secure_and_complete_response(
@@ -716,7 +759,6 @@ class AIOrchestrator:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id)
         if routed_response:
-            append_session_turn(body.sessionId, scrubbed_input, routed_response.answer, correlation_id)
             return routed_response, retrieval_result, None
 
         evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)

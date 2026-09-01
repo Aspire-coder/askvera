@@ -2,6 +2,7 @@
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from threading import BoundedSemaphore
 from time import perf_counter
 
 from app.metrics import STAGE_RETRIEVAL
@@ -16,11 +17,26 @@ from .section_index import SectionSearchProvider
 
 LOGGER = get_logger("app.retrieval.shadow")
 _SHADOW_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="retrieval-shadow")
+_SHADOW_CAPACITY = BoundedSemaphore(8)
 
 
 def _submit_shadow_task(task) -> None:
     """Submit a best-effort comparison that cannot change the live response."""
-    _SHADOW_EXECUTOR.submit(task)
+    if not _SHADOW_CAPACITY.acquire(blocking=False):
+        LOGGER.warning("retrieval_shadow_dropped", reason="queue_full")
+        return
+
+    def run() -> None:
+        try:
+            task()
+        finally:
+            _SHADOW_CAPACITY.release()
+
+    try:
+        _SHADOW_EXECUTOR.submit(run)
+    except RuntimeError:
+        _SHADOW_CAPACITY.release()
+        raise
 
 
 class RetrievalService:

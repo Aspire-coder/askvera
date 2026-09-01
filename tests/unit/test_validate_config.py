@@ -44,11 +44,47 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "SUPPORT_ROUTES_JSON", {})
     monkeypatch.setattr(settings, "SUPPORT_DEFAULT_ROUTE_JSON", {})
     monkeypatch.setattr(settings, "SECURITY_PROFILE", "standard")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_QUEUE_ENABLED", True)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_QUEUE_URL", "ingestion-queue")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_DLQ_URL", "ingestion-dlq")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED", True)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", True)
 
 
 def test_valid_production_configuration_passes(monkeypatch) -> None:
     _configure_valid_production(monkeypatch)
     assert validate() == []
+
+
+def test_production_requires_atomic_ingestion(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED", False)
+
+    assert (
+        "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED (must be enabled in production)"
+        in validate()
+    )
+
+
+def test_unknown_configuration_mode_is_rejected(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "experimental_provider")
+
+    failures = validate()
+
+    assert (
+        "RETRIEVAL_PROVIDER (must be one of: bedrock, opensearch_section)"
+        in failures
+    )
+
+
+def test_production_rejects_draft_guardrail_version(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+
+    failures = validate()
+
+    assert "BEDROCK_GUARDRAIL_VERSION (DRAFT is not allowed in production)" in failures
 
 
 def test_retrieval_experiment_limits_are_validated(monkeypatch) -> None:

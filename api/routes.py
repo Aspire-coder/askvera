@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -18,6 +18,7 @@ from app.widget_auth.jwt import WidgetTokenError
 from app.widget_auth.service import WidgetAuthError
 from config import settings
 from services import cache as cache_service
+from services.admin_auth import require_admin_identity
 from services.consent_service import has_valid_consent, record_consent
 from services.session_service import close_session
 from services.db import get_engine
@@ -452,7 +453,7 @@ def health() -> JSONResponse:
 
 
 @router.get("/health/deep")
-def deep_health() -> JSONResponse:
+def deep_health(_: dict[str, Any] = Depends(require_admin_identity)) -> JSONResponse:
     """Return dependency health for debugging and deployment checks."""
     checks: dict[str, str] = {}
     status_code = 200

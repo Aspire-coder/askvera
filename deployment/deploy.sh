@@ -113,6 +113,9 @@ sudo -u "${APP_USER}" .venv/bin/python -m compileall app api config services uti
 log "Validating production configuration before restart."
 sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm --require-production
 
+log "Checking database migrations."
+sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm
+
 if [[ "${RUN_TESTS}" == "true" ]]; then
   log "Running tests."
   sudo -u "${APP_USER}" .venv/bin/python -m pytest tests -q
@@ -120,8 +123,12 @@ else
   log "Skipping tests by explicit request."
 fi
 
-log "Restarting ${SERVICE_NAME}."
+log "Applying database migrations."
+sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm --apply
+
+log "Restarting ${SERVICE_NAME} and ingestion worker."
 systemctl restart "${SERVICE_NAME}"
+systemctl restart askvera-ingestion-worker
 
 log "Running health checks."
 if ! wait_for_local_health ||

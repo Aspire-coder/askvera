@@ -144,9 +144,9 @@ def get_cache_value(key: str, correlation_id: str) -> dict[str, Any] | None:
         raw = _redis_client.get(key)
         LOGGER.info("cache_read", correlation_id=correlation_id, hit=bool(raw), key=key)
         return json.loads(raw) if raw else None
-    except redis.RedisError as exc:
+    except (redis.RedisError, TypeError, ValueError):
         LOGGER.exception("cache_read_failed", correlation_id=correlation_id)
-        raise CacheConnectionError("Redis cache read failed.") from exc
+        return None
 
 
 def set_cache_value(key: str, value: dict[str, Any], correlation_id: str) -> None:
@@ -156,15 +156,23 @@ def set_cache_value(key: str, value: dict[str, Any], correlation_id: str) -> Non
     try:
         _redis_client.setex(key, settings.CACHE_TTL_SECONDS, json.dumps(value))
         LOGGER.info("cache_write", correlation_id=correlation_id, key=key, ttl=settings.CACHE_TTL_SECONDS)
-    except redis.RedisError as exc:
+    except redis.RedisError:
         LOGGER.exception("cache_write_failed", correlation_id=correlation_id)
-        raise CacheConnectionError("Redis cache write failed.") from exc
 
 
 def _semantic_namespace(country: str, language: str, role: str) -> str:
     versions = "|".join(
-        [settings.CACHE_SCHEMA_VERSION, settings.KB_VERSION, settings.RETRIEVAL_PIPELINE_VERSION,
-         settings.RESPONSE_PIPELINE_VERSION, settings.PROMPT_VERSION]
+        [
+            settings.CACHE_SCHEMA_VERSION,
+            settings.KB_VERSION,
+            settings.RETRIEVAL_PIPELINE_VERSION,
+            settings.CONVERSATION_ROUTING_VERSION,
+            settings.RESPONSE_PIPELINE_VERSION,
+            settings.PROMPT_VERSION,
+            settings.BEDROCK_GUARDRAIL_VERSION,
+            settings.BEDROCK_MODEL_ARN,
+            settings.BEDROCK_FALLBACK_MODEL_ARN,
+        ]
     )
     digest = hashlib.sha256(versions.encode("utf-8")).hexdigest()[:16]
     return f"ask-vera:semantic:{country}:{language}:{role}:{digest}"

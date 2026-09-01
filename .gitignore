@@ -23,6 +23,7 @@ tmp/
 graphify-out/
 output/
 outputs/
+exports/
 ASK_VERA*CODE_EXPORT*.md
 ASK_VERA_CODE_EXPORT_*.md
 aws-full-export*.json

@@ -790,8 +790,9 @@ def _index_sections(
     if not client.indices.exists(index=index):
         client.indices.create(index=index, body=_index_body())
     source_prefix = source_uri.rsplit("/", 1)[0] if source_uri else ""
-    keep_staged = review_before_publish or settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED
-    publish_status = "staging" if keep_staged else "active"
+    # Every generation starts invisible. Activation happens only after the
+    # complete bulk write has been verified.
+    publish_status = "staging"
     new_actions = list(
         _actions(
             sections,
@@ -814,17 +815,25 @@ def _index_sections(
     for action in new_actions:
         action["_source"]["logical_document_id"] = stable_document_id
         action["_source"].setdefault("metadata", {})["logical_document_id"] = stable_document_id
-    if keep_staged:
-        for action in new_actions:
-            action["_id"] = action["_source"]["id"]
+    for action in new_actions:
+        action["_id"] = action["_source"]["id"]
     success, errors = helpers.bulk(
         client,
         new_actions,
         raise_on_error=False,
     )
     if errors:
+        try:
+            client.delete_by_query(
+                index=index,
+                body={"query": exact_term_query("ingestion_id", ingestion_id)},
+                conflicts="proceed",
+                refresh=True,
+            )
+        except Exception:
+            LOGGER.exception("partial_staged_generation_cleanup_failed", ingestion_id=ingestion_id)
         raise RuntimeError(f"OpenSearch rejected {len(errors)} chunks.")
-    if settings.ADMIN_INGESTION_STAGED_PUBLISH_ENABLED and not review_before_publish:
+    if not review_before_publish:
         _activate_staged_sections(
             client,
             index=index,

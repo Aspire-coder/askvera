@@ -157,6 +157,22 @@ def _fold_search_text(text: str) -> str:
     return "".join(character for character in decomposed if not unicodedata.combining(character))
 
 
+DIRECTORY_INTENT_TERMS = {
+    "address", "adresse", "adres", "adresa", "адрес",
+    "business hours", "office hours", "opening hours", "horaires", "offnungszeiten",
+    "email", "e-mail", "correo", "courriel", "электронная почта",
+    "office", "bureau", "büro", "oficina", "ufficio", "kantoor", "kontor", "офис",
+    "phone", "telephone", "telefono", "telefon", "téléphone", "телефон",
+    "website", "web site", "sitio web", "site web", "webseite", "sito web",
+}
+
+
+def _looks_like_directory_query(message: str) -> bool:
+    """Keep global office lookups available when the optional planner is unavailable."""
+    folded = _fold_search_text(message)
+    return any(term in folded for term in DIRECTORY_INTENT_TERMS)
+
+
 def _tokens(text: str) -> set[str]:
     """Return meaningful Unicode-aware tokens for lightweight local reranking."""
     return {
@@ -367,10 +383,9 @@ def _planned_retrieval_plan(
     base_queries = _retrieval_queries(message)
     glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
-        # Preserve directory availability when the planner is intentionally off.
         return RetrievalQueryPlan(
             [*base_queries, *glossary],
-            include_global_documents=True,
+            include_global_documents=_looks_like_directory_query(message),
         )
 
     system_prompt = (
@@ -434,7 +449,7 @@ def _planned_retrieval_plan(
         # and document-scope filters still apply downstream.
         return RetrievalQueryPlan(
             [*base_queries, *glossary],
-            include_global_documents=True,
+            include_global_documents=_looks_like_directory_query(message),
         )
 
     if conversation_intent == "assistant_meta":

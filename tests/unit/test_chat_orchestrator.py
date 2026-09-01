@@ -92,13 +92,42 @@ def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
         "get_cache_value",
         lambda *_: {"response": "cached unsafe answer", "sources": [], "confidence": 0.9},
     )
+    append_turn = MagicMock()
+    audit = MagicMock()
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", append_turn)
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", audit)
 
     response = orchestrator.handle_chat(body, "cid")
 
     assert governance.seen_texts == ["What is the FBO Support Fee?", "cached unsafe answer"]
     assert response.answer == "Blocked cached answer."
     assert response.metadata["fallback"] is True
+    append_turn.assert_called_once_with("session-1", body.message, response.answer, "cid")
+    audit.assert_called_once()
     router.generate.assert_not_called()
+
+
+def test_session_write_failure_does_not_hide_a_completed_answer(monkeypatch) -> None:
+    response = ChatResponse(
+        answer="Approved answer",
+        citations=[],
+        confidence=1.0,
+        metadata={},
+        suggestions=[],
+        cards=[],
+        correlation_id="cid",
+    )
+    body = ChatRequest(message="Question", sessionId="session-1", country="US", language="en")
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "append_session_turn",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("session unavailable")),
+    )
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
+
+    completed = AIOrchestrator._finish_response(response, body, body.message, "cid")
+
+    assert completed is response
 
 
 def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -> None:
@@ -118,9 +147,9 @@ def test_followup_about_first_question_uses_history_for_retrieval(monkeypatch) -
     monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
     monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
     monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
-    monkeypatch.setattr(chat_orchestrator, "set_cache_value", lambda *_: None)
     monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
     monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "set_cache_value", lambda *_: None)
     monkeypatch.setattr(
         chat_orchestrator,
         "get_session_history",
@@ -401,6 +430,8 @@ def test_guaranteed_earnings_copy_is_refused_before_retrieval(monkeypatch) -> No
     monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
     monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
     monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
 
     response = orchestrator.handle_chat(body, "cid")
 
@@ -576,6 +607,8 @@ def test_bedrock_guardrail_copy_is_replaced_with_neutral_reviewed_message(monkey
     monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
     monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
     monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "write_audit_event", lambda *_: None)
 
     response = orchestrator.handle_chat(body, "cid")
 

@@ -134,6 +134,26 @@ return 1
             self._prune_revocations()
             return jti in self._revoked_tokens
 
+    def consume_widget_resume_token(self, jti: str, expires_at: int) -> bool:
+        """Atomically mark a resume capability as used and reject replays."""
+        if not jti:
+            return False
+        ttl = max(1, expires_at - int(time()))
+        client = self._client()
+        if client is not None:
+            key = f"{settings.SHARED_SECURITY_STATE_PREFIX}:revoked:{self._digest(jti)}"
+            try:
+                return bool(client.set(key, "1", ex=ttl, nx=True))
+            except redis.RedisError as exc:
+                self._handle_redis_error("resume_token_consume", exc)
+
+        with self._lock:
+            self._prune_revocations()
+            if jti in self._revoked_tokens:
+                return False
+            self._revoked_tokens[jti] = expires_at
+            return True
+
     def _prune_revocations(self) -> None:
         now = int(time())
         expired = [jti for jti, expiry in self._revoked_tokens.items() if expiry <= now]

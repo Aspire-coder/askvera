@@ -31,6 +31,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
   const [roleFilter, setRoleFilter] = useState("");
   const [marketFilter, setMarketFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [showDisabled, setShowDisabled] = useState(false);
   const [page, setPage] = useState(1);
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -73,13 +74,14 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
   const filtered = users.filter((user) => {
     const matchesSearch = !query || user.email.toLowerCase().includes(query.toLowerCase());
     const matchesMarket = !marketFilter || user.scopes.some((scope) => scope.market === marketFilter || scope.market === "*");
+    const matchesVisibility = showDisabled || statusFilter === "disabled" || user.status !== "disabled";
     return matchesSearch && matchesMarket && (!roleFilter || user.role === roleFilter)
-      && (!statusFilter || user.status === statusFilter);
+      && (!statusFilter || user.status === statusFilter) && matchesVisibility;
   });
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visibleUsers = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { setPage(1); }, [query, roleFilter, marketFilter, statusFilter]);
+  useEffect(() => { setPage(1); }, [query, roleFilter, marketFilter, statusFilter, showDisabled]);
   useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
 
   const disabledFor = (disabledAt: string | null) => {
@@ -149,7 +151,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
     <div className="page-heading"><div><span className="eyebrow">Access control</span><h1>Users</h1><p>Invite administrators and give each person only the markets and tools they need.</p></div><button className="button primary" onClick={() => setShowForm(true)}>Add user</button></div>
     {notice ? <div className="admin-toast success" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">x</button></div> : null}
     {error ? <div className="admin-toast error" role="alert">{error}<button onClick={() => setError("")} aria-label="Dismiss">x</button></div> : null}
-    <div className="user-toolbar surface"><input aria-label="Search users" placeholder="Search by email" value={query} onChange={(event) => setQuery(event.target.value)} /><select aria-label="Filter by role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="country_admin">Country Admin</option><option value="section_scoped">Section-scoped</option><option value="auditor">Auditor</option></select><select aria-label="Filter by market" value={marketFilter} onChange={(event) => setMarketFilter(event.target.value)}><option value="">All markets</option>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="invited">Invited</option><option value="disabled">Disabled</option></select></div>
+    <div className="user-toolbar surface"><input aria-label="Search users" placeholder="Search by email" value={query} onChange={(event) => setQuery(event.target.value)} /><select aria-label="Filter by role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="">All roles</option><option value="super_admin">Super Admin</option><option value="country_admin">Country Admin</option><option value="section_scoped">Section-scoped</option><option value="auditor">Auditor</option></select><select aria-label="Filter by market" value={marketFilter} onChange={(event) => setMarketFilter(event.target.value)}><option value="">All markets</option>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name}</option>)}</select><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">Active and invited</option><option value="active">Active</option><option value="invited">Invited</option><option value="disabled">Disabled</option></select><label className="disabled-toggle"><input type="checkbox" checked={showDisabled} onChange={(event) => setShowDisabled(event.target.checked)} />Show disabled</label></div>
     <div className="user-list surface">
       {loading ? <div className="empty-state">Loading users...</div> : visibleUsers.map((user) => <article className="user-row" key={user.id}>
         <div><strong>{user.email}</strong><small>{user.role.replaceAll("_", " ")} / {user.scopes.map((scope) => scope.market).filter((value, index, all) => all.indexOf(value) === index).join(", ") || "All markets"}</small></div>

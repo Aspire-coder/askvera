@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AdminApi, demo, type AdminCredentials } from "./api";
+import { AdminApi, demo, empty, type AdminCredentials } from "./api";
 import { beginSignIn, cognitoConfigured, completeSignIn, demoAllowed, signOut, type AuthSession } from "./auth";
 import { AskVeraMark, ChartIcon, FlowIcon, HomeIcon, KeyIcon, UploadIcon } from "./icons";
 import { FlowVisualizer } from "./components/FlowVisualizer";
@@ -31,7 +31,8 @@ export function App() {
   const [apiKey, setApiKey] = useState(() => window.sessionStorage.getItem("askvera_admin_key") || "");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftKey, setDraftKey] = useState(apiKey);
-  const [adminConfig, setAdminConfig] = useState<AdminConfig>(demo.config);
+  const [adminConfig, setAdminConfig] = useState<AdminConfig>(demoAllowed ? demo.config : empty.config);
+  const [configError, setConfigError] = useState("");
 
   useEffect(() => {
     if (!cognitoConfigured) return;
@@ -67,8 +68,12 @@ export function App() {
     void new AdminApi(credentials).config()
       .then((nextConfig) => {
         setAdminConfig(nextConfig);
+        setConfigError("");
       })
-      .catch(() => setAdminConfig(demo.config));
+      .catch((error) => {
+        setAdminConfig(demoAllowed ? demo.config : empty.config);
+        setConfigError(error instanceof Error ? error.message : "Operations configuration could not be loaded.");
+      });
   }, [session?.accessToken, apiKey]);
   useEffect(() => {
     if (visibleNav.length && !visibleNav.some((item) => item.id === view)) {
@@ -102,6 +107,7 @@ export function App() {
 
       <main className="main-content">
         <header className="mobile-header"><div className="brand"><div className="brand-mark"><AskVeraMark /></div><strong>AskVera Operations</strong></div><button onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /></button></header>
+        {configError ? <div className="notice error" role="alert">{configError}</div> : null}
         {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={setView} /> : null}
         {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}

@@ -191,6 +191,33 @@
   color: color-mix(in srgb, var(--gw-header-text), transparent 58%);
 }
 
+.gw-early-access-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #e5c86a;
+  border-radius: var(--gw-radius-pill);
+  background: #fff8dc;
+  color: #805b00;
+  font-size: 10px;
+  font-weight: var(--gw-weight-bold);
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.gw-early-access-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--gw-radius-pill);
+  background: #e0a900;
+  box-shadow: 0 0 0 3px rgba(224, 169, 0, 0.16);
+}
+
 .gw-header-actions {
   position: static;
   flex: 0 0 auto;
@@ -1715,6 +1742,11 @@
 
   .gw-header-actions {
     gap: var(--gw-space-1);
+  }
+
+  .gw-early-access-badge {
+    padding: 5px 8px;
+    font-size: 9px;
   }
 
   .gw-icon-button,

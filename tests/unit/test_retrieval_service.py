@@ -10,6 +10,7 @@ from app.retrieval import providers as retrieval_providers
 from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
 from app.retrieval.providers import (
     _expanded_retrieval_query,
+    _looks_like_directory_query,
     _tokens,
     _planned_retrieval_plan,
     _planned_retrieval_queries,
@@ -96,6 +97,34 @@ def test_shadow_retrieval_is_inert_by_default(monkeypatch) -> None:
 
     assert result.documents[0].id == "primary-document"
     assert shadow.calls == []
+
+
+def test_shadow_task_is_dropped_when_background_capacity_is_full(monkeypatch) -> None:
+    capacity = MagicMock()
+    capacity.acquire.return_value = False
+    executor = MagicMock()
+    task = MagicMock()
+    monkeypatch.setattr(retrieval_service_module, "_SHADOW_CAPACITY", capacity)
+    monkeypatch.setattr(retrieval_service_module, "_SHADOW_EXECUTOR", executor)
+
+    retrieval_service_module._submit_shadow_task(task)
+
+    task.assert_not_called()
+    executor.submit.assert_not_called()
+
+
+def test_shadow_task_releases_capacity_when_executor_is_unavailable(monkeypatch) -> None:
+    capacity = MagicMock()
+    capacity.acquire.return_value = True
+    executor = MagicMock()
+    executor.submit.side_effect = RuntimeError("executor unavailable")
+    monkeypatch.setattr(retrieval_service_module, "_SHADOW_CAPACITY", capacity)
+    monkeypatch.setattr(retrieval_service_module, "_SHADOW_EXECUTOR", executor)
+
+    with pytest.raises(RuntimeError, match="executor unavailable"):
+        retrieval_service_module._submit_shadow_task(MagicMock())
+
+    capacity.release.assert_called_once_with()
 
 
 def test_shadow_retrieval_never_replaces_primary_result(monkeypatch) -> None:
@@ -465,6 +494,28 @@ def test_multilingual_policy_query_keeps_terms_for_local_expansion() -> None:
 
     assert queries[0] == "Quelles sont les conditions d'inactivité du Manager?"
     assert any("manager" in query for query in queries)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "What is the Mali office telephone number?",
+        "Quelle est l'adresse du bureau au Mali ?",
+        "¿Cuál es el teléfono de la oficina de México?",
+        "Wie sind die Öffnungszeiten des Büros in Deutschland?",
+        "Какой телефон офиса в Гамбии?",
+    ],
+)
+def test_directory_scope_survives_planner_outage_in_supported_languages(message: str) -> None:
+    assert _looks_like_directory_query(message) is True
+
+
+def test_policy_question_does_not_open_global_directory_without_planner(monkeypatch) -> None:
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", False)
+
+    plan = _planned_retrieval_plan("What are the Manager qualification requirements?", "US", "en", "cid")
+
+    assert plan.include_global_documents is False
 
 
 def test_multilingual_query_planner_uses_runtime_question_without_country_aliases(monkeypatch) -> None:

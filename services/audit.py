@@ -34,6 +34,14 @@ async def publish_audit_event(event: dict[str, Any], correlation_id: str) -> Non
     await audit_publisher.publish(audit_event)
 
 
+async def _publish_audit_event_safely(event: dict[str, Any], correlation_id: str) -> None:
+    """Keep audit delivery best-effort so telemetry cannot break a customer answer."""
+    try:
+        await publish_audit_event(event, correlation_id)
+    except Exception:
+        LOGGER.exception("audit_event_publish_failed", correlation_id=correlation_id)
+
+
 def write_audit_event(event: dict[str, Any], correlation_id: str) -> None:
     """Queue one audit event without calling Firehose directly.
 
@@ -45,8 +53,8 @@ def write_audit_event(event: dict[str, Any], correlation_id: str) -> None:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(publish_audit_event(event, correlation_id))
+        asyncio.run(_publish_audit_event_safely(event, correlation_id))
         return
 
-    loop.create_task(publish_audit_event(event, correlation_id))
+    loop.create_task(_publish_audit_event_safely(event, correlation_id))
     LOGGER.info("audit_event_queued", correlation_id=correlation_id, event_type=event.get("type", "unknown"))

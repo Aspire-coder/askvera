@@ -37,7 +37,9 @@ def embed_text(text: str) -> list[float]:
 
     payload = {"inputText": normalized}
     try:
-        response = get_aws_clients().bedrock_runtime.invoke_model(
+        clients = get_aws_clients()
+        runtime = getattr(clients, "bedrock_embedding_runtime", clients.bedrock_runtime)
+        response = runtime.invoke_model(
             modelId=settings.BEDROCK_EMBED_MODEL_ID,
             body=json.dumps(payload),
             contentType="application/json",

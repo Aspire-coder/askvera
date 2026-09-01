@@ -12,6 +12,13 @@ from config import settings  # noqa: E402
 
 PLACEHOLDER_PREFIX = "REPLACE_WITH"
 DEVELOPMENT_SECRETS = {"dev-admin-key", "dev-only-change-before-production"}
+ALLOWED_SETTING_VALUES = {
+    "APP_ENV": {"development", "test", "uat", "production"},
+    "SECURITY_PROFILE": {"standard", "hardened"},
+    "ADMIN_AUTH_MODE": {"cognito", "api_key", "either"},
+    "RETRIEVAL_PROVIDER": {"opensearch_section", "bedrock"},
+    "CHAT_MEMORY_BACKEND": {"memory", "postgres"},
+}
 
 
 def _is_missing(value: object) -> bool:
@@ -21,6 +28,14 @@ def _is_missing(value: object) -> bool:
 def _require(missing: list[str], name: str) -> None:
     if _is_missing(getattr(settings, name, "")):
         missing.append(name)
+
+
+def _validate_allowed_values(missing: list[str]) -> None:
+    for name, allowed_values in ALLOWED_SETTING_VALUES.items():
+        value = str(getattr(settings, name, "") or "").strip().lower()
+        if value not in allowed_values:
+            allowed = ", ".join(sorted(allowed_values))
+            missing.append(f"{name} (must be one of: {allowed})")
 
 
 def _validate_shadow_retrieval(missing: list[str]) -> None:
@@ -61,7 +76,7 @@ def _validate_retrieval_experiments(missing: list[str]) -> None:
         missing.append("RETRIEVAL_PROMOTION_MAX_LATENCY_MS (must be greater than 0)")
 
 
-def _validate_production_auth(missing: list[str]) -> None:
+def _validate_production_auth(missing: list[str]) -> None:  # noqa: C901
     for name in (
         "WIDGET_JWT_SECRET",
         "BEDROCK_MODEL_ARN",
@@ -90,6 +105,8 @@ def _validate_production_auth(missing: list[str]) -> None:
         missing.append("ADMIN_AUTH_ALLOW_API_KEY (must be false in production)")
     if settings.WIDGET_JWT_SECRET in DEVELOPMENT_SECRETS:
         missing.append("WIDGET_JWT_SECRET (development value is not allowed)")
+    if str(settings.BEDROCK_GUARDRAIL_VERSION).strip().upper() == "DRAFT":
+        missing.append("BEDROCK_GUARDRAIL_VERSION (DRAFT is not allowed in production)")
     if not settings.WIDGET_AUTH_REQUIRED:
         missing.append("WIDGET_AUTH_REQUIRED (must be true in production)")
     if settings.WIDGET_ALLOW_LOCALHOST_ORIGINS:
@@ -125,6 +142,19 @@ def _validate_production_integrations(missing: list[str]) -> None:
         )
         if not has_market_routes and not has_default_route:
             missing.append("SUPPORT_ROUTES_JSON or SUPPORT_DEFAULT_ROUTE_JSON")
+
+
+def _validate_production_ingestion(missing: list[str]) -> None:
+    """Require the durable, atomic ingestion path in production."""
+    for name in (
+        "ADMIN_INGESTION_QUEUE_ENABLED",
+        "ADMIN_INGESTION_STAGED_PUBLISH_ENABLED",
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+    ):
+        if not bool(getattr(settings, name, False)):
+            missing.append(f"{name} (must be enabled in production)")
+    for name in ("ADMIN_INGESTION_QUEUE_URL", "ADMIN_INGESTION_DLQ_URL"):
+        _require(missing, name)
 
 
 def _validate_hardened_profile(missing: list[str]) -> None:
@@ -164,11 +194,13 @@ def validate(*, require_production: bool = False) -> list[str]:
     for name in settings.REQUIRED_VALUES:
         _require(missing, name)
 
+    _validate_allowed_values(missing)
     _validate_shadow_retrieval(missing)
     _validate_retrieval_experiments(missing)
     if settings.APP_ENV == "production":
         _validate_production_auth(missing)
         _validate_production_integrations(missing)
+        _validate_production_ingestion(missing)
         _validate_hardened_profile(missing)
     return missing
 

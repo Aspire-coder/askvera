@@ -5,6 +5,7 @@ from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
     _directory_record_country_score,
     _directory_text_query,
+    _requested_directory_country,
     _exact_section_query,
     _generation_filters,
     is_approved_source,
@@ -129,6 +130,45 @@ def test_provider_can_target_an_isolated_vnext_index(monkeypatch) -> None:
 
     assert OpenSearchSectionProvider().index_name == "uat-index"
     assert OpenSearchSectionProvider(index_name="vnext-index").index_name == "vnext-index"
+
+
+def test_rrf_ranking_is_opt_in_and_does_not_change_baseline(monkeypatch) -> None:
+    provider = OpenSearchSectionProvider()
+    text_hits = [_hit("b", "B", 1.0), _hit("a", "A", 1.0)]
+    vector_hits = [_hit("b", "B", 1.0), _hit("c", "C", 1.0)]
+
+    source_scores = {"a": 10.0, "b": 0.0, "c": 0.0}
+    monkeypatch.setattr(
+        opensearch_sections,
+        "_source_score",
+        lambda row, message: source_scores[str(row["id"])],
+    )
+    monkeypatch.setattr(settings, "RETRIEVAL_RRF_ENABLED", False)
+    baseline = provider._merge_hits(text_hits, vector_hits, "question")
+
+    assert [row["id"] for row, _ in baseline] == ["a", "b", "c"]
+
+    monkeypatch.setattr(settings, "RETRIEVAL_RRF_ENABLED", True)
+    monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 1)
+    fused = provider._merge_hits(text_hits, vector_hits, "question")
+
+    assert fused[0][0]["id"] == "b"
+    assert {row["id"] for row, _ in fused} == {"a", "b", "c"}
+
+
+def test_parent_diversity_is_opt_in_and_bounded(monkeypatch) -> None:
+    provider = OpenSearchSectionProvider()
+    rows = [
+        ({"id": "one-a", "parent_section_id": "one", "section_id": "one"}, 3.0),
+        ({"id": "one-b", "parent_section_id": "one", "section_id": "one"}, 2.0),
+        ({"id": "two-a", "parent_section_id": "two", "section_id": "two"}, 1.0),
+    ]
+    monkeypatch.setattr(settings, "OPENSEARCH_RESULT_COUNT", 3)
+    monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 1)
+
+    selected = provider._apply_parent_diversity(rows)
+
+    assert [row["id"] for row, _ in selected] == ["one-a", "two-a"]
 
 
 def test_sponsoring_directory_keeps_source_text_instead_of_office_fields() -> None:
@@ -456,3 +496,15 @@ def test_directory_country_score_derives_acronyms_from_record_metadata() -> None
 
     assert _directory_record_country_score("Give me the UK office address", row) == 2.2
     assert _directory_record_country_score("Give me the United Kingdom office address", row) == 2.4
+
+
+def test_directory_query_hard_filters_an_explicit_country() -> None:
+    assert _requested_directory_country("What is the telephone number for Mali?") == "Mali"
+    assert _requested_directory_country("Give me the UK office address") == "United Kingdom"
+    assert _requested_directory_country("What is the office phone number?") == ""
+
+    filters = _directory_text_query("Mali phone", "Mali")["query"]["bool"]["filter"]
+    assert any(
+        {"term": {"metadata.record_country": "Mali"}} in item.get("bool", {}).get("should", [])
+        for item in filters
+    )
