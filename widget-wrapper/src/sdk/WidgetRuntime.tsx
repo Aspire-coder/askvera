@@ -42,6 +42,12 @@ type WidgetRuntimeProps = {
   widgetId?: string;
   authToken?: string;
   conversationPersistence?: "session" | "local" | "none";
+  // The host page's logged-in user's market/language (TRB-19160). Wins over
+  // session storage, a previously saved preference, and browser language -
+  // none of those can reflect the user's actual profile, only host-supplied
+  // values can.
+  hostDefaultCountry?: string;
+  hostDefaultLanguage?: string;
   onPositionChange?: (position: "bottom-right" | "bottom-left") => void;
   openSignal?: number;
   closeSignal?: number;
@@ -149,7 +155,13 @@ type InitialLocale = {
   explicit: boolean;
 };
 
-function storedLocale(widgetId?: string): InitialLocale {
+function storedLocale(widgetId?: string, hostCountry?: string, hostLanguage?: string): InitialLocale {
+  // A host-supplied user profile value is more authoritative than anything
+  // this widget can infer on its own, so it wins over session metadata, a
+  // saved preference, and the browser's language (TRB-19160).
+  if (hostCountry && hostLanguage) {
+    return { preference: { country: hostCountry.toUpperCase(), language: hostLanguage }, explicit: true };
+  }
   if (typeof window === "undefined") {
     return { preference: { country: "", language: "" }, explicit: false };
   }
@@ -311,6 +323,8 @@ export function WidgetRuntime({
   widgetId,
   authToken,
   conversationPersistence = "session",
+  hostDefaultCountry,
+  hostDefaultLanguage,
   onPositionChange,
   openSignal = 0,
   closeSignal = 0,
@@ -318,7 +332,9 @@ export function WidgetRuntime({
   clearConversationSignal = 0,
   sdkMessage
 }: WidgetRuntimeProps) {
-  const [initialLocale] = useState<InitialLocale>(() => storedLocale(widgetId));
+  const [initialLocale] = useState<InitialLocale>(() =>
+    storedLocale(widgetId, hostDefaultCountry, hostDefaultLanguage)
+  );
   const [apiConfig, setApiConfig] = useState<ConfigResponseData | null>(null);
   const [selectedLocale, setSelectedLocale] = useState<LocalePreference>(initialLocale.preference);
   const [messages, setMessages] = useState<WidgetMessage[]>(() => storedMessages(sessionIdFromToken(authToken), conversationPersistence));
