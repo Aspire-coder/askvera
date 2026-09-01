@@ -103,6 +103,12 @@ DB_SCHEMA_BOOTSTRAP_ON_STARTUP = _env_bool("DB_SCHEMA_BOOTSTRAP_ON_STARTUP", Fal
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
 AWS_MAX_ATTEMPTS = 3
+# Interactive chat calls use a bounded budget so a transient dependency does
+# not consume the entire request latency budget.
+AWS_INTERACTIVE_READ_TIMEOUT_SECONDS = _env_int("AWS_INTERACTIVE_READ_TIMEOUT_SECONDS", 8)
+AWS_INTERACTIVE_MAX_ATTEMPTS = _env_int("AWS_INTERACTIVE_MAX_ATTEMPTS", 1)
+AWS_PII_READ_TIMEOUT_SECONDS = _env_int("AWS_PII_READ_TIMEOUT_SECONDS", 5)
+AWS_PII_MAX_ATTEMPTS = _env_int("AWS_PII_MAX_ATTEMPTS", 1)
 # Per-IP request limiting for public widget endpoints. Production uses Valkey
 # so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60
