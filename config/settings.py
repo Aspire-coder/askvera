@@ -377,11 +377,15 @@ OPENSEARCH_VECTOR_WEIGHT = _env_float("OPENSEARCH_VECTOR_WEIGHT", 1.5)
 OPENSEARCH_GLOSSARY_ENABLED = _env_bool("OPENSEARCH_GLOSSARY_ENABLED", True)
 # Bedrock reranking previously only ran on the vNext shadow path, so it never
 # touched live traffic even though bedrock_reranker.py is production code. Now
-# also usable on the live opensearch_section provider. Defaulted on but stays
-# a no-op (no API call, no log noise) until an operator sets a model ARN via
-# OPENSEARCH_RERANK_MODEL_ARN, or reuses RETRIEVAL_VNEXT_RERANK_MODEL_ARN if
-# that is already configured for shadow testing.
-OPENSEARCH_LIVE_RERANK_ENABLED = _env_bool("OPENSEARCH_LIVE_RERANK_ENABLED", True)
+# also usable on the live opensearch_section provider, but defaulted OFF: a
+# live-index canary run (2026-09-01) showed this environment already has
+# RETRIEVAL_VNEXT_RERANK_MODEL_ARN configured from prior shadow testing, so
+# enabling this by default silently started reranking real traffic with a
+# model that has not been evaluated for that purpose and, in that test,
+# picked a worse candidate (Sec 21.03 over the correct 21.05) than no
+# reranking at all. Enable only after the shadow-testing results for this
+# model are actually reviewed.
+OPENSEARCH_LIVE_RERANK_ENABLED = _env_bool("OPENSEARCH_LIVE_RERANK_ENABLED", False)
 OPENSEARCH_RERANK_MODEL_ARN = _env_str("OPENSEARCH_RERANK_MODEL_ARN", "")
 OPENSEARCH_GLOSSARY_QUERY_LIMIT = _env_int("OPENSEARCH_GLOSSARY_QUERY_LIMIT", 4)
 OPENSEARCH_GLOSSARY_PATH = _env_str("OPENSEARCH_GLOSSARY_PATH", str(Path(__file__).with_name("search_glossary.json")))
