@@ -41,9 +41,13 @@ def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
     )
 
     normalized_prompt = " ".join(prompt.system_prompt.split())
-    assert len(prompt.system_prompt) < 4000
+    # Budget nudged up slightly to fit an explicit paraphrasing permission
+    # ("Restate them naturally; do not quote verbatim.") that fixes the bot
+    # only answering when a user's wording matches the source verbatim.
+    assert len(prompt.system_prompt) < 4100
     assert "complete response in that language" in normalized_prompt
     assert "Use only the retrieved authorised chunks" in normalized_prompt
+    assert "Restate them naturally; do not quote verbatim" in normalized_prompt
     assert "Numbers, percentages, dates, timeframes" in normalized_prompt
     assert "Never combine countries" in normalized_prompt
     assert "history only for conversational continuity" in normalized_prompt

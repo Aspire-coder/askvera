@@ -104,6 +104,11 @@ DIRECTORY_DETAIL_TERMS = re.compile(
     r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
     re.IGNORECASE,
 )
+# Deliberately directory-shaped so the retrieval planner's existing global-
+# directory intent classification picks it up; carries no country name so it
+# falls back to the request's own selected country.
+OFFICE_CONTACT_LOOKUP_QUERY = "What is the office phone number, email address, and website for this country?"
+OFFICE_CONTACT_FIELD_RE = re.compile(r"phone|telephone|email|e-mail", re.IGNORECASE)
 
 
 class ConsentRequiredError(Exception):
@@ -936,6 +941,56 @@ class AIOrchestrator:
             ),
         )
 
+    def _office_contact_addendum(self, body: ChatRequest, correlation_id: str) -> str | None:
+        """Offer a country's directory contact details instead of a bare refusal.
+
+        This is a best-effort, data-driven lookup against the global
+        sponsoring/office directory - never a hardcoded per-country table. Any
+        failure or empty result silently falls back to today's plain
+        insufficient-evidence message; it can only add information, never
+        remove or change it.
+        """
+        if not settings.FALLBACK_OFFICE_CONTACT_ENABLED:
+            return None
+        try:
+            directory_result = self.retriever.retrieve(
+                OFFICE_CONTACT_LOOKUP_QUERY,
+                body.country,
+                body.language,
+                body.role,
+                correlation_id,
+            )
+        except Exception:  # noqa: BLE001 - best-effort addition, must never break the fallback path
+            LOGGER.exception("office_contact_lookup_failed", correlation_id=correlation_id)
+            return None
+
+        record = next(
+            (
+                document
+                for document in directory_result.documents
+                if str(document.metadata.get("access_scope") or "").lower() == "global"
+            ),
+            None,
+        )
+        if record is None:
+            return None
+
+        fields = record.metadata.get("directory_fields")
+        if not isinstance(fields, dict) or not fields:
+            fields = parse_directory_fields(record.content)
+        contact_lines = [
+            f"{label}: {value}"
+            for label, value in fields.items()
+            if OFFICE_CONTACT_FIELD_RE.search(str(label)) and str(value).strip()
+        ]
+        if not contact_lines:
+            return None
+
+        lead_in = localized_conversation_response("office_contact_lead_in", body.language) or (
+            "In the meantime, here is a direct way to reach that office:"
+        )
+        return f"{lead_in}\n" + "\n".join(contact_lines)
+
     def _static_assistant_response(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Return controlled non-policy responses without retrieval."""
         answer = assistant_meta_response(body.message, body.language)
@@ -1101,13 +1156,18 @@ class AIOrchestrator:
         )
         if clarification:
             return clarification, approved_result, evidence_decision
+        fallback_message = self._insufficient_evidence_message(body.language)
+        office_contact_addendum = self._office_contact_addendum(body, correlation_id)
+        if office_contact_addendum:
+            fallback_message = f"{fallback_message}\n\n{office_contact_addendum}"
         fallback = self._validate_response(
             self.response_builder.fallback(
-                self._insufficient_evidence_message(body.language),
+                fallback_message,
                 correlation_id,
                 metadata={
                     "failure_layer": "evidence_gate",
                     "evidence_decision": evidence_decision.to_metadata(),
+                    "office_contact_offered": bool(office_contact_addendum),
                 },
             ),
             body,

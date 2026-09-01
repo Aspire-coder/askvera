@@ -78,6 +78,7 @@
         "casual": "I keep my humor on the safe side, so I’ll skip the joke. I’m happy to help with approved Forever Living company policies or the global office directory.",
         "period_not_covered": "The approved documents available to me do not contain information for {period}. I cannot speculate about policy changes outside the documented period.",
         "insufficient_evidence": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer.",
+        "office_contact_lead_in": "In the meantime, here is a direct way to reach that office:",
         "off_topic": "I'm sorry, but I can't help with that question. AskVera can help with approved Forever Living company policies and information from the global office directory. Please ask me about one of those areas, and I'll be happy to help.",
         "medical_claim": "I'm sorry, but I can't provide medical advice or treatment claims. AskVera is limited to approved Forever Living company policies and information from the global office directory. Please speak with a qualified healthcare professional about medical questions.",
         "income_claim": "I can't predict or guarantee earnings. I can explain approved bonus and compensation-plan rules from the published documents.",
