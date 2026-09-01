@@ -394,10 +394,14 @@ OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD = _env_float(
 )
 # Ranking and evidence-coverage protections, evaluated as one reversible
 # profile (see docs/RETRIEVAL_HARDENING_ROLLOUT.md: 648 unit tests, 7/7 and
-# 4/4 legal QA canaries passed locally). Defaulted on; re-run the retrieval
-# canary against the live index and confirm the promotion gates before this
-# reaches production, and roll back by setting this to false if needed.
-OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+# 4/4 legal QA canaries passed locally). Reverted to off after a live-index
+# canary run (2026-09-01) showed a real regression: _return_policy_score's
+# "100 product satisfaction" phrase match (section_index.py) outranks the
+# correct unopened-product buy-back clause (21.05) with the general
+# satisfaction-guarantee clause (21.03) that happens to contain that phrase.
+# Re-enable only after that heuristic is fixed and re-validated against the
+# retrieval_canary.json release-gate fixture on the live index.
+OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
 RETRIEVAL_RRF_ENABLED = _env_bool("RETRIEVAL_RRF_ENABLED", False)
 RETRIEVAL_RRF_K = _env_int("RETRIEVAL_RRF_K", 60)
 RETRIEVAL_PARENT_DIVERSITY_ENABLED = _env_bool("RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)
