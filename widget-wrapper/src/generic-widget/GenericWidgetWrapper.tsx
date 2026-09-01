@@ -187,6 +187,7 @@ export function GenericWidgetWrapper({
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const wasRequestBusyRef = useRef(false);
   const submitLockRef = useRef(false);
   const resetInFlightRef = useRef(false);
   const idleTimeoutMs = Math.max(1, config.sessionIdleTimeoutMinutes || 30) * 60 * 1000;
@@ -340,6 +341,18 @@ export function GenericWidgetWrapper({
     const focusTimer = window.setTimeout(() => panelRef.current?.focus(), 0);
     return () => window.clearTimeout(focusTimer);
   }, [isOpen]);
+
+  useEffect(() => {
+    // The composer is disabled (and thus blurred by the browser) while a
+    // request is in flight. Nothing re-focused it once the response arrived
+    // and it re-enabled, so the user had to click back into it every time
+    // (TRB-19193). Only refocus once composerDisabled has actually cleared -
+    // e.g. not while consent is still required or the connection is offline.
+    if (wasRequestBusyRef.current && !requestBusy && isOpen && !composerDisabled) {
+      composerTextareaRef.current?.focus();
+    }
+    wasRequestBusyRef.current = requestBusy;
+  }, [requestBusy, isOpen, composerDisabled]);
 
   useEffect(() => {
     if (!isOpen || !rootRef.current) return;

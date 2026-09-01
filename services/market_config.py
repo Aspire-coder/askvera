@@ -244,6 +244,43 @@ def find_market_mentions(message: str) -> set[str]:
     return matches
 
 
+def find_probable_market_typo(message: str) -> str | None:
+    """Return a likely-misspelled market name mentioned in a message, if any.
+
+    Only used when ``find_market_mentions`` found no exact match - this never
+    changes which market is used for an answer, it only powers a clarifying
+    "did you mean X?" question (TRB-19189), so the guard is deliberately
+    tight: single-word market names only (a typo in a multi-word name like
+    "United Kingdom" is much more ambiguous to correct), a same-first-letter
+    check, and a minimum length, mirroring the conservative shape of
+    ``app.evidence._safe_short_phrase_variant``.
+    """
+    from utils.text_similarity import edit_distance_at_most_one
+
+    normalized_message = _normalize_market_text(message)
+    if not normalized_message:
+        return None
+    tokens = [token for token in normalized_message.split() if len(token) >= 4]
+    if not tokens:
+        return None
+
+    for market in load_market_config()["markets"]:
+        if not market.get("enabled", True):
+            continue
+        market_name = str(market.get("name") or "")
+        normalized_name = _normalize_market_text(market_name)
+        if not normalized_name or " " in normalized_name or len(normalized_name) < 4:
+            continue
+        for token in tokens:
+            if token == normalized_name:
+                continue  # an exact match belongs to find_market_mentions, not here
+            if token[:1] != normalized_name[:1]:
+                continue
+            if edit_distance_at_most_one(token, normalized_name):
+                return market_name
+    return None
+
+
 def _normalize_market_text(value: str) -> str:
     """Normalize configured names and user wording for whole-name matching."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()

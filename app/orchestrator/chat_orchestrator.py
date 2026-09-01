@@ -44,6 +44,7 @@ from services.semantic_cache import (
 )
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
+from services.market_config import find_market_mentions, find_probable_market_typo
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -1025,9 +1026,44 @@ class AIOrchestrator:
                     "input_pii_scrubbed": True,
                 },
             )
-        if classify_intent(scrubbed_input, body.language) == "assistant_meta":
+        intent = classify_intent(scrubbed_input, body.language)
+        if intent == "assistant_meta":
             return self._static_assistant_response(body, correlation_id)
+        if intent == "policy_fact" and not find_market_mentions(scrubbed_input):
+            # A named market takes the normal retrieval path; this only fires
+            # when no market was recognized at all, so a likely typo (e.g.
+            # "Nigar" for "Niger", TRB-19189) doesn't fall straight through to
+            # a generic "not enough information" refusal.
+            probable_country = find_probable_market_typo(scrubbed_input)
+            if probable_country:
+                return self._market_typo_confirmation_response(probable_country, body, correlation_id)
         return None
+
+    def _market_typo_confirmation_response(
+        self,
+        probable_country: str,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse:
+        """Ask the user to confirm a likely misspelled market name (TRB-19189).
+
+        Never silently substitutes the corrected country - answering directly
+        risks confidently using the wrong market's policies with no visible
+        signal to the user, so this always asks rather than assumes.
+        """
+        template = localized_conversation_response("country_typo_confirmation", body.language) or (
+            'Did you mean "{country}"? Please confirm, or rephrase your question with the country name.'
+        )
+        answer = template.replace("{country}", probable_country)
+        return self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "fallback": False,
+                "response_source": "market_typo_confirmation",
+                "probable_country": probable_country,
+            },
+        )
 
     def _conversation_route_response(
         self,

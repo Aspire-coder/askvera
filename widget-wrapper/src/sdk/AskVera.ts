@@ -14,6 +14,13 @@ export type AskVeraInitConfig = {
   apiUrl: string;
   position?: "bottom-right" | "bottom-left";
   conversationPersistence?: "session" | "local" | "none";
+  // The host page's logged-in user's market/language, if known. Without
+  // this, the widget can only guess a locale from browser settings or a
+  // previously saved preference, which can disagree with the user's actual
+  // profile (TRB-19160). The host page is responsible for passing the
+  // user's real profile values here - this SDK has no way to look them up.
+  defaultCountry?: string;
+  defaultLanguage?: string;
 };
 
 export type SdkRenderState = {
@@ -57,7 +64,9 @@ class AskVeraSdkImpl implements AskVeraSdk {
       widgetId: config.widgetId,
       apiUrl: config.apiUrl,
       conversationPersistence: config.conversationPersistence || "local",
-      launcherPosition: config.position || this.state.config.launcherPosition
+      launcherPosition: config.position || this.state.config.launcherPosition,
+      defaultCountry: config.defaultCountry || this.state.config.defaultCountry,
+      defaultLanguage: config.defaultLanguage || this.state.config.defaultLanguage
     };
     const auth = await authenticateWidget(nextConfig);
     this.state = {

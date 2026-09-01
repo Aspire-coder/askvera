@@ -14,6 +14,7 @@ from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
 from services.controlled_copy import localize_reviewed_copy
 from services.market_config import get_document_country_codes
+from utils.text_similarity import edit_distance_at_most_one
 
 
 @dataclass(frozen=True)
@@ -232,39 +233,7 @@ def _safe_short_phrase_variant(message: str, phrase: str, category: str) -> bool
         return False
     if compact_message[:1] != compact_phrase[:1]:
         return False
-    return _edit_distance_at_most_one(compact_message, compact_phrase)
-
-
-def _edit_distance_at_most_one(left: str, right: str) -> bool:
-    """Return true for one insertion, deletion, substitution, or transposition."""
-    if left == right:
-        return True
-    if abs(len(left) - len(right)) > 1:
-        return False
-    if len(left) == len(right):
-        differences = [index for index, pair in enumerate(zip(left, right)) if pair[0] != pair[1]]
-        if len(differences) == 1:
-            return True
-        return (
-            len(differences) == 2
-            and differences[1] == differences[0] + 1
-            and left[differences[0]] == right[differences[1]]
-            and left[differences[1]] == right[differences[0]]
-        )
-    shorter, longer = (left, right) if len(left) < len(right) else (right, left)
-    short_index = 0
-    long_index = 0
-    skipped = False
-    while short_index < len(shorter) and long_index < len(longer):
-        if shorter[short_index] == longer[long_index]:
-            short_index += 1
-            long_index += 1
-            continue
-        if skipped:
-            return False
-        skipped = True
-        long_index += 1
-    return True
+    return edit_distance_at_most_one(compact_message, compact_phrase)
 
 
 def _composed_assistant_meta_category(

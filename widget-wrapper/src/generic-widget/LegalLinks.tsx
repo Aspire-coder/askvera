@@ -41,25 +41,28 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   };
 
-  const printDocument = (documentId: string) => {
-    const documentToPrint = config.policyLinks.find((link) => link.id === documentId);
-    if (!documentToPrint?.html) return;
-    const safeHtml = sanitizeLegalHtml(documentToPrint.html);
+  const downloadDocument = (documentId: string) => {
+    // Previously opened a blank window with window.open("", "_blank") and
+    // wrote content into it after the fact, then called print() 250ms
+    // later. That blank-popup-before-content pattern is what left a stuck
+    // about:blank tab showing the browser's print UI, which in turn left
+    // the host site unresponsive if the user navigated back to it before
+    // the popup resolved (TRB-19161). A direct Blob download never opens
+    // a second window at all.
+    const documentToDownload = config.policyLinks.find((link) => link.id === documentId);
+    if (!documentToDownload?.html) return;
+    const safeHtml = sanitizeLegalHtml(documentToDownload.html);
+    const escapedTitle = documentToDownload.label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const documentHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${escapedTitle}</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 28px;color:#1d1d1f;line-height:1.55}h1,h2,h3{line-height:1.25}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d9ddd9;padding:8px;text-align:left}</style></head><body>${safeHtml}</body></html>`;
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      openDocument(documentId);
-      return;
-    }
-
-    printWindow.opener = null;
-    printWindow.document.title = documentToPrint.label;
-    const style = printWindow.document.createElement("style");
-    style.textContent = 'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;max-width:760px;margin:48px auto;padding:0 28px;color:#1d1d1f;line-height:1.55}h1,h2,h3{line-height:1.25}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d9ddd9;padding:8px;text-align:left}@media print{body{margin:0;max-width:none}}';
-    printWindow.document.head.appendChild(style);
-    printWindow.document.body.innerHTML = safeHtml;
-    printWindow.focus();
-    window.setTimeout(() => printWindow.print(), 250);
+    const blobUrl = URL.createObjectURL(new Blob([documentHtml], { type: "text/html" }));
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = `${documentToDownload.label.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "document"}.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(blobUrl);
   };
 
   useEffect(() => {
@@ -108,7 +111,7 @@ export function LegalLinks({ config }: { config: GenericWidgetConfig }) {
             {link.html ? (
               <div className="gw-legal-document-actions">
                 <button type="button" className="gw-legal-link-button" onClick={() => openDocument(link.id)} aria-haspopup="dialog">{link.label}</button>
-                <button type="button" className="gw-legal-print-button" onClick={() => printDocument(link.id)} aria-label={`${config.labels.saveDocumentLabel || "Save as PDF"}: ${link.label}`} title={config.labels.saveDocumentLabel || "Save as PDF"}>
+                <button type="button" className="gw-legal-print-button" onClick={() => downloadDocument(link.id)} aria-label={`${config.labels.saveDocumentLabel || "Save as PDF"}: ${link.label}`} title={config.labels.saveDocumentLabel || "Save as PDF"}>
                   <DownloadIcon />
                 </button>
               </div>
