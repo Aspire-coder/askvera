@@ -217,6 +217,23 @@ def _return_policy_score(message: str, title: str, content: str) -> float:
     if not ({"return", "returns", "refund", "refunds"} & message_terms):
         return 0.0
     evidence = _normalize_text(f"{title} {content[:1800]}")
+
+    # A question about the buy-back window for an unopened or unsold product
+    # is answered by a more specific clause than the general satisfaction-
+    # guarantee return right. A live-index canary (2026-09-01) found that
+    # "100 product satisfaction" alone was matching that general clause even
+    # for this more specific question, outranking the correct buy-back
+    # clause. Prefer the specific clause here, and do not let the generic
+    # phrase compete once the question is this specific.
+    asks_about_buyback_window = bool({"unopened", "window", "unsold"} & message_terms) or (
+        {"buy", "back"} <= message_terms
+    )
+    buyback_terms = ("buy back", "unsold", "salable", "saleable")
+    if asks_about_buyback_window:
+        if any(term in evidence for term in buyback_terms):
+            return 1.8
+        return 0.0
+
     direct_terms = (
         "product return",
         "return of the product",
