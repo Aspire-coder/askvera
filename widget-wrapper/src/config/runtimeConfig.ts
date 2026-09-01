@@ -44,8 +44,3 @@ export type RuntimeConfig = {
   features?: Partial<WidgetFeatureFlags>;
   events?: RuntimeEventCallbacks;
 };
-
-export type NormalizedRuntimeConfig = RuntimeConfig & {
-  launcherPosition: LauncherPosition;
-  debug: boolean;
-};

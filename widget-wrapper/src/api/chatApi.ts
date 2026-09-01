@@ -40,7 +40,3 @@ export type ChatResponseData = {
 export function sendMessage(client: ApiClient, request: ChatRequest) {
   return client.post<ChatResponseData>("/api/chat", request);
 }
-
-export function streamMessage() {
-  throw new Error("Streaming chat is not implemented yet.");
-}

@@ -1,4 +1,4 @@
-export { buildThemeVars, createThemeManager, resolveTheme, ThemeManager } from "./themeManager";
+export { buildThemeVars, resolveTheme } from "./themeManager";
 export { darkTheme } from "./darkTheme";
 export { defaultTheme } from "./defaultTheme";
 export { themeToCssVariables } from "./cssVariables";

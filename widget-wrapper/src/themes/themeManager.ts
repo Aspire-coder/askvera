@@ -17,28 +17,3 @@ export function resolveTheme(theme?: ThemeInput | WidgetTheme, mode: WidgetTheme
 export function buildThemeVars(theme?: ThemeInput | WidgetTheme, mode?: WidgetThemeMode): ThemeCssVariables {
   return themeToCssVariables(resolveTheme(theme, mode));
 }
-
-export class ThemeManager {
-  private theme: WidgetThemeTokens;
-
-  constructor(theme?: ThemeInput | WidgetTheme, mode?: WidgetThemeMode) {
-    this.theme = resolveTheme(theme, mode);
-  }
-
-  getTheme() {
-    return this.theme;
-  }
-
-  update(theme?: ThemeInput | WidgetTheme, mode?: WidgetThemeMode) {
-    this.theme = resolveTheme(theme, mode || this.theme.mode);
-    return this.theme;
-  }
-
-  toCssVariables() {
-    return themeToCssVariables(this.theme);
-  }
-}
-
-export function createThemeManager(theme?: ThemeInput | WidgetTheme, mode?: WidgetThemeMode) {
-  return new ThemeManager(theme, mode);
-}
