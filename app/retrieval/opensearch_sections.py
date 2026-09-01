@@ -19,7 +19,12 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from services.knowledge_generations import active_generation_ids
-from services.market_config import find_market_mentions, get_countries, get_document_country_codes
+from services.market_config import (
+    find_market_mentions,
+    get_countries,
+    get_document_country_codes,
+    load_market_config,
+)
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
@@ -414,7 +419,7 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
     if not mentioned_codes:
         normalized_message = _normalize_text(message)
         message_tokens = [token for token in normalized_message.split() if len(token) >= 4]
-        for market in get_countries():
+        for market in load_market_config().get("markets", []):
             market_name = _normalize_text(str(market.get("name") or ""))
             name_tokens = market_name.split()
             if len(name_tokens) != 1 or not market_name:
@@ -436,7 +441,7 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
     target_codes = mentioned_codes or {str(selected_country or "").upper()}
     return {
         str(country.get("name") or "")
-        for country in get_countries()
+        for country in load_market_config().get("markets", [])
         if str(country.get("code") or "").upper() in target_codes
     }
 
