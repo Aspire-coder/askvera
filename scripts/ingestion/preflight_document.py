@@ -37,7 +37,19 @@ def main() -> int:
         print(f"Extracted characters: {report.extracted_character_count}")
         print(f"OCR required: {report.requires_ocr}")
         print(f"Table-aware extraction recommended: {report.table_aware_extraction_recommended}")
-    return 2 if report.requires_ocr else 0
+        print(f"Garbled (unrecoverable) characters found: {report.garbled_character_count}")
+        if report.encoding_corruption_detected:
+            print(
+                "WARNING: This PDF's embedded font cannot be decoded for at least one "
+                "character (commonly an accented letter). No extraction library can "
+                "recover this text - it needs a corrected source PDF, re-exported with "
+                "a valid font/ToUnicode mapping, before ingestion."
+            )
+    if report.requires_ocr:
+        return 2
+    if report.encoding_corruption_detected:
+        return 3
+    return 0
 
 
 if __name__ == "__main__":

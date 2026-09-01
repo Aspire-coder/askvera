@@ -252,7 +252,7 @@ def extract_sections(
         if len(body) < min_chars:
             continue
 
-        title = _normalize_title(match.group("title"))
+        title = _normalize_title(_extend_title_to_sentence_boundary(match, body))
 
         sections.extend(
             _split_oversized_section(
@@ -461,10 +461,64 @@ def _page_for_offset(page_offsets: list[tuple[int, int, int]], offset: int) -> i
     return page_offsets[-1][0] if page_offsets else 1
 
 
+TITLE_MAX_CHARS = 220
+
+
 def _normalize_title(title: str) -> str:
     title = title.strip()
     title = re.sub(r"\s+", " ", title)
-    return title[:160]
+    if len(title) <= TITLE_MAX_CHARS:
+        return title
+    # Cut at the last complete word instead of a hard character slice, so a
+    # still-too-long sentence trails off cleanly rather than mid-word.
+    truncated = title[:TITLE_MAX_CHARS]
+    last_space = truncated.rfind(" ")
+    if last_space > TITLE_MAX_CHARS // 2:
+        truncated = truncated[:last_space]
+    return truncated.rstrip(",;:-") + "..."
+
+
+SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
+
+
+def _extend_title_to_sentence_boundary(
+    match: re.Match[str], body: str, *, max_chars: int = 400
+) -> str:
+    """Extend a heading captured from one PDF line to a complete sentence.
+
+    PDF text extraction preserves the source document's visual line wraps,
+    so a heading regex anchored to a single line often cuts the title off
+    exactly where the PDF happened to wrap - mid-sentence, mid-word - even
+    though the section body (matched separately, spanning the wrap) has the
+    rest of that same sentence. Many policy sections have no short standalone
+    heading at all; the operative sentence itself is the only heading there
+    is, so it needs to be captured whole rather than truncated at an
+    arbitrary line boundary.
+    """
+    candidate = match.group("title").strip()
+    if not candidate:
+        return candidate
+    # A short heading, or one that already ends at a real sentence/clause
+    # boundary, does not need extending.
+    if len(candidate) < 12 or candidate[-1] in ".!?:;":
+        return candidate
+
+    # `body` starts at the whole match (the section number), so the title
+    # text itself begins partway in - locate that offset precisely instead
+    # of guessing from the candidate string.
+    title_offset = match.start("title") - match.start()
+    if title_offset < 0:
+        return candidate
+
+    window = body[title_offset : title_offset + max_chars + len(candidate)]
+    if not window.startswith(candidate[: min(40, len(candidate))]):
+        return candidate
+
+    sentence_end = SENTENCE_END_RE.search(window, len(candidate))
+    if not sentence_end:
+        return candidate
+    extended = window[: sentence_end.end()]
+    return " ".join(extended.split())
 
 
 def _split_oversized_section(
