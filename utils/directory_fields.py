@@ -17,6 +17,10 @@ _CONTACT_FIELD_RE = re.compile(
     r"fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)$",
     re.IGNORECASE,
 )
+_SELF_REFERENTIAL_VALUE_RE = re.compile(
+    r"^(?:see|as|same as)\s+above$",
+    re.IGNORECASE,
+)
 _INLINE_FIELD_RE = re.compile(
     r"^(?P<label>business\s+hours\s+(?:office|product\s+(?:centre|center))|"
     r"telephone(?:\s+(?:for\s+orders|office))?|phone(?:\s*\d+)?|"
@@ -94,7 +98,9 @@ def restore_missing_directory_contacts(
     contact_fields = [
         (str(label).strip(), str(value).strip())
         for label, value in primary_fields.items()
-        if _CONTACT_FIELD_RE.search(str(label).strip()) and str(value).strip()
+        if _CONTACT_FIELD_RE.search(str(label).strip())
+        and str(value).strip()
+        and not _is_self_referential_value(str(value))
     ]
     has_correct_value = any(_value_is_present(original, value) for _, value in contact_fields)
     # A labeled line for one of these exact fields - even holding a wrong or
@@ -118,6 +124,7 @@ def restore_missing_directory_contacts(
             or not _CONTACT_FIELD_RE.search(label)
             or not normalized_value
             or normalized_value in seen_values
+            or _is_self_referential_value(value)
         ):
             continue
         seen_values.add(normalized_value)
@@ -322,6 +329,18 @@ def correct_directory_source_contradictions(
 
 def _is_field_label(value: str) -> bool:
     return len(value) <= 80 and bool(_FIELD_LABEL_RE.search(value.strip()))
+
+
+def _is_self_referential_value(value: str) -> bool:
+    """Detect a print-layout cross-reference such as "(see above)".
+
+    Source documents sometimes point a field at another one already printed
+    nearby ("Telephone for Orders: (see above)") - a convention that makes
+    sense on a printed page but not as a standalone bullet in a chat answer,
+    where there is nothing visible "above" to refer to. Never restored or
+    used to correct a line; the field is simply omitted rather than guessed.
+    """
+    return bool(_SELF_REFERENTIAL_VALUE_RE.match(value.strip().strip("()")))
 
 
 def _value_is_present(answer: str, value: str) -> bool:
