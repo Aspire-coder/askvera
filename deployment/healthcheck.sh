@@ -39,8 +39,9 @@ check_json_endpoint() {
   echo "[ok] ${label}"
 }
 
+# /health/deep is intentionally admin-protected; deployment readiness must use
+# an unauthenticated endpoint and should not require production credentials.
 check_json_endpoint "Local Health" "${LOCAL_URL}" "/health" 200
-check_json_endpoint "Local Deep Health" "${LOCAL_URL}" "/health/deep" 200
 
 if [[ -n "${PUBLIC_URL}" ]]; then
   check_json_endpoint "HTTPS Health" "${PUBLIC_URL}" "/health" 200
