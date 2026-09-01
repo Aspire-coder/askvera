@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from services.document_preflight import extract_pdf_page_text, is_table_like_layout  # noqa: E402
+from services.document_preflight import extract_pdf_page_text  # noqa: E402
 
 
 # Policies commonly use a mix of top-level headings ("1 Introduction"),
@@ -51,11 +51,15 @@ PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
 SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 MAX_SECTION_CHARS = 8_000
+# vnext (a smaller-chunk retrieval experiment) was retired 2026-09-01 after
+# the retrieval-comparison work found no evidence it improved answers and it
+# had a real ongoing OpenSearch cost. Kept as a distinct profile name (rather
+# than collapsing to a single constant) since existing production records
+# carry chunk_profile="current" in their metadata already.
 VNEXT_MAX_SECTION_CHARS = 2_000
 VNEXT_SECTION_OVERLAP_CHARS = 200
 CHUNK_PROFILES = {
     "current": (MAX_SECTION_CHARS, 0),
-    "vnext": (VNEXT_MAX_SECTION_CHARS, VNEXT_SECTION_OVERLAP_CHARS),
 }
 TEXT_REPLACEMENTS = {
     "â€™": "'",
@@ -147,10 +151,6 @@ def _read_pdf_pages(
     pages: list[tuple[int, str]] = []
     for index, page in enumerate(reader.pages, start=1):
         raw_text = extract_pdf_page_text(page)
-        if chunk_profile == "vnext":
-            layout_text = extract_pdf_page_text(page, preserve_layout=True)
-            if is_table_like_layout(layout_text):
-                raw_text = layout_text
         text = _clean_page_text(raw_text)
         if text:
             pages.append((index, text))
@@ -891,7 +891,6 @@ def parse_args() -> argparse.Namespace:
         "--chunk-profile",
         default="current",
         choices=sorted(CHUNK_PROFILES),
-        help="Use 'vnext' only for an isolated comparison package and index.",
     )
     parser.add_argument(
         "--bedrock-dir",

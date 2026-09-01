@@ -38,25 +38,6 @@ def _validate_allowed_values(missing: list[str]) -> None:
             missing.append(f"{name} (must be one of: {allowed})")
 
 
-def _validate_shadow_retrieval(missing: list[str]) -> None:
-    if not settings.RETRIEVAL_SHADOW_ENABLED:
-        return
-    if settings.RETRIEVAL_VNEXT_PROVIDER != "opensearch_section":
-        missing.append("RETRIEVAL_VNEXT_PROVIDER (must be opensearch_section for isolated shadow testing)")
-    _require(missing, "OPENSEARCH_VNEXT_INDEX")
-    if settings.OPENSEARCH_VNEXT_INDEX == settings.OPENSEARCH_INDEX:
-        missing.append("OPENSEARCH_VNEXT_INDEX (must differ from OPENSEARCH_INDEX)")
-    if not 0.0 < settings.RETRIEVAL_SHADOW_SAMPLE_RATE <= 1.0:
-        missing.append("RETRIEVAL_SHADOW_SAMPLE_RATE (must be greater than 0 and at most 1)")
-    if settings.RETRIEVAL_VNEXT_RERANK_ENABLED:
-        _require(missing, "RETRIEVAL_VNEXT_RERANK_MODEL_ARN")
-        if settings.RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT < settings.OPENSEARCH_RESULT_COUNT:
-            missing.append(
-                "RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT "
-                "(must be at least OPENSEARCH_RESULT_COUNT)"
-            )
-
-
 def _validate_retrieval_experiments(missing: list[str]) -> None:
     """Validate opt-in retrieval controls without enabling any of them."""
     if settings.RETRIEVAL_RRF_K <= 0:
@@ -256,7 +237,6 @@ def validate(*, require_production: bool = False) -> list[str]:
         _require(missing, name)
 
     _validate_allowed_values(missing)
-    _validate_shadow_retrieval(missing)
     _validate_retrieval_experiments(missing)
     _validate_semantic_cache(missing)
     _validate_model_routing(missing)

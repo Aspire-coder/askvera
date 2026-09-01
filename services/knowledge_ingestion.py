@@ -32,7 +32,7 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
     _older_source_actions,
 )
 from services.aws_clients import get_aws_clients
-from services.document_preflight import analyze_pdf_with_timeout, extract_pdf_page_text, is_table_like_layout
+from services.document_preflight import analyze_pdf_with_timeout, extract_pdf_page_text
 from services.db import get_engine
 from services.knowledge_generations import (
     build_logical_document_id,
@@ -53,11 +53,8 @@ HEADING_RE = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?\s+)?[^.!?]{3,120}$")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 MAX_CHUNK_CHARS = 4_500
 CHUNK_OVERLAP_CHARS = 450
-VNEXT_MAX_CHUNK_CHARS = 2_000
-VNEXT_CHUNK_OVERLAP_CHARS = 200
 CHUNK_PROFILES = {
     "current": (MAX_CHUNK_CHARS, CHUNK_OVERLAP_CHARS),
-    "vnext": (VNEXT_MAX_CHUNK_CHARS, VNEXT_CHUNK_OVERLAP_CHARS),
 }
 
 
@@ -645,10 +642,6 @@ def extract_pages(path: Path, *, chunk_profile: str = "current") -> list[Extract
         pages: list[ExtractedPage] = []
         for index, page in enumerate(reader.pages, start=1):
             raw_text = extract_pdf_page_text(page)
-            if chunk_profile == "vnext":
-                layout_text = extract_pdf_page_text(page, preserve_layout=True)
-                if is_table_like_layout(layout_text):
-                    raw_text = layout_text
             content = _clean_text(raw_text)
             if content:
                 pages.append(ExtractedPage(index, content))

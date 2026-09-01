@@ -85,8 +85,6 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
         "runtime_retrieval_flags",
         query_planner=settings.BEDROCK_QUERY_PLANNER_ENABLED,
         evidence_selector=(settings.BEDROCK_EVIDENCE_SELECTOR_ENABLED or settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED),
-        vnext_rerank=settings.RETRIEVAL_VNEXT_RERANK_ENABLED,
-        shadow_retrieval=settings.RETRIEVAL_SHADOW_ENABLED,
         semantic_cache=settings.SEMANTIC_CACHE_ENABLED,
         global_translation=settings.OPENSEARCH_GLOBAL_DOCUMENT_TRANSLATION_ENABLED,
     )

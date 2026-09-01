@@ -5,7 +5,6 @@ import {
   demoJobs,
   demoModelRouting,
   demoOverview,
-  demoShadowReport,
   demoTrace
 } from "./demoData";
 import type {
@@ -23,10 +22,8 @@ import type {
   MarketReadiness,
   ModelRoutingReport,
   OperationsStatus,
-  RetrievalProfileStatus,
   CacheResetResult,
   PipelineTrace,
-  ShadowReport,
   SupportRoute,
   WidgetConfig
 } from "./types";
@@ -97,12 +94,6 @@ export class AdminApi {
     });
   }
   operationsStatus() { return this.request<OperationsStatus>("/api/admin/operations/status"); }
-  retrievalProfile() { return this.request<RetrievalProfileStatus>("/api/admin/operations/retrieval-profile"); }
-  updateRetrievalProfile(body: { mode: "current" | "shadow"; sample_rate: number; reason: string; confirmation: string }) {
-    return this.request<RetrievalProfileStatus>("/api/admin/operations/retrieval-profile", {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-    });
-  }
   resetAnswerCache(body: { country: string; mode: "exact" | "exact_and_semantic"; reason: string; confirmation: string }) {
     return this.request<CacheResetResult>("/api/admin/operations/cache/reset", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
@@ -170,9 +161,6 @@ export class AdminApi {
     });
     if (!response.ok) throw await responseError(response, "Excel export failed");
     return response.blob();
-  }
-  retrievalShadow(filters: URLSearchParams) {
-    return this.request<ShadowReport>(`/api/admin/analytics/retrieval-shadow?${filters}`);
   }
   ingestions() { return this.request<IngestionJob[]>("/api/admin/ingestions?limit=50"); }
   ingestionPreview(jobId: string, limit = 12) {
@@ -280,7 +268,6 @@ export const demo = {
   traces: [demoTrace, demoCachedTrace],
   overview: demoOverview,
   modelRouting: demoModelRouting,
-  shadowReport: demoShadowReport,
   interactions: demoInteractions,
   jobs: demoJobs
 };

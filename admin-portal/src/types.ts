@@ -39,37 +39,6 @@ export type CacheResetResult = {
   duration_ms: number;
 };
 
-export type RetrievalProfileStatus = {
-  control: {
-    mode: "current" | "shadow";
-    sample_rate: number;
-    source: "deployment_config" | "operations_portal" | string;
-    updated_by: string;
-    reason: string;
-    updated_at: string;
-  };
-  customer_serving_profile: "current";
-  shadow_changes_customer_answers: false;
-  primary: { provider: string; index: string; pipeline_version: string; chunk_profile: string };
-  candidate: {
-    provider: string;
-    index: string;
-    pipeline_version: string;
-    chunk_profile: string;
-    configured: boolean;
-    isolated: boolean;
-    index_exists: boolean | null;
-    ready: boolean;
-    readiness_error: string;
-    reranking_enabled: boolean;
-  };
-  parsing: {
-    runtime_switch_reprocesses_documents: false;
-    current_chunk_profile: string;
-    candidate_chunk_profile: string;
-  };
-};
-
 export type MarketLanguage = { code: string; name: string };
 export type Market = { code: string; name: string; languages: MarketLanguage[] };
 
@@ -363,34 +332,3 @@ export type InteractionPage = {
   totalPages: number;
 };
 
-export type ShadowDisagreement = {
-  correlation_id: string;
-  country: string;
-  language: string;
-  primary_top_id: string;
-  vnext_top_id: string;
-  primary_confidence: number;
-  vnext_confidence: number;
-  result_overlap: number;
-  duration_ms: number;
-  created_at: string;
-};
-
-export type ShadowReport = {
-  rangeDays: number;
-  totals: {
-    comparisons: number;
-    topMatches: number;
-    topMatchRate: number;
-    averageOverlap: number;
-    vnextConfidenceWins: number;
-    vnextConfidenceWinRate: number;
-    primaryConfidence: number;
-    vnextConfidence: number;
-    averageDurationMs: number;
-  };
-  countries: Array<{ label: string; comparisons: number; matchRate: number }>;
-  languages: Array<{ label: string; comparisons: number; matchRate: number }>;
-  trend: Array<{ date: string; comparisons: number; topMatches: number; averageOverlap: number }>;
-  disagreements: ShadowDisagreement[];
-};

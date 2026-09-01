@@ -345,17 +345,6 @@ BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
 # Retrieval backend. The deployed and evaluated path is OpenSearch section
 # retrieval. A missing value must not silently route requests to a retired KB.
 RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "opensearch_section").lower()
-# Optional retrieval-vNext shadow evaluation. These defaults are deliberately
-# inert so deployments continue to use only the established UAT path until an
-# operator explicitly enables a separate-index comparison.
-RETRIEVAL_SHADOW_ENABLED = _env_bool("RETRIEVAL_SHADOW_ENABLED", False)
-RETRIEVAL_SHADOW_SAMPLE_RATE = _env_float("RETRIEVAL_SHADOW_SAMPLE_RATE", 0.0)
-RETRIEVAL_VNEXT_PROVIDER = _env_str("RETRIEVAL_VNEXT_PROVIDER", "opensearch_section").lower()
-RETRIEVAL_VNEXT_PIPELINE_VERSION = _env_str("RETRIEVAL_VNEXT_PIPELINE_VERSION", "disabled")
-RETRIEVAL_VNEXT_RERANK_ENABLED = _env_bool("RETRIEVAL_VNEXT_RERANK_ENABLED", False)
-RETRIEVAL_VNEXT_RERANK_MODEL_ARN = _env_str("RETRIEVAL_VNEXT_RERANK_MODEL_ARN", "")
-RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT = _env_int("RETRIEVAL_VNEXT_RERANK_CANDIDATE_COUNT", 20)
-RETRIEVAL_VNEXT_RERANK_RESULT_COUNT = _env_int("RETRIEVAL_VNEXT_RERANK_RESULT_COUNT", 10)
 SECTION_RETRIEVAL_RESULT_COUNT = _env_int("SECTION_RETRIEVAL_RESULT_COUNT", 5)
 SECTION_RETRIEVAL_CANDIDATE_COUNT = _env_int("SECTION_RETRIEVAL_CANDIDATE_COUNT", 30)
 SECTION_RETRIEVAL_MIN_SCORE = _env_float("SECTION_RETRIEVAL_MIN_SCORE", 0.05)
@@ -365,7 +354,6 @@ SECTION_RETRIEVAL_VECTOR_WEIGHT = _env_float("SECTION_RETRIEVAL_VECTOR_WEIGHT", 
 SECTION_RETRIEVAL_FALLBACK_MIN_SCORE = _env_float("SECTION_RETRIEVAL_FALLBACK_MIN_SCORE", 3.0)
 OPENSEARCH_ENDPOINT = _env_str("OPENSEARCH_ENDPOINT", "")
 OPENSEARCH_INDEX = _env_str("OPENSEARCH_INDEX", "askvera-policy-sections")
-OPENSEARCH_VNEXT_INDEX = _env_str("OPENSEARCH_VNEXT_INDEX", "")
 OPENSEARCH_SERVICE = _env_str("OPENSEARCH_SERVICE", "aoss")
 OPENSEARCH_RESULT_COUNT = _env_int("OPENSEARCH_RESULT_COUNT", 5)
 OPENSEARCH_CANDIDATE_COUNT = _env_int("OPENSEARCH_CANDIDATE_COUNT", 30)
@@ -375,16 +363,14 @@ OPENSEARCH_CANDIDATE_COUNT = _env_int("OPENSEARCH_CANDIDATE_COUNT", 30)
 # against the retrieval canary before promoting further.
 OPENSEARCH_VECTOR_WEIGHT = _env_float("OPENSEARCH_VECTOR_WEIGHT", 1.5)
 OPENSEARCH_GLOSSARY_ENABLED = _env_bool("OPENSEARCH_GLOSSARY_ENABLED", True)
-# Bedrock reranking previously only ran on the vNext shadow path, so it never
-# touched live traffic even though bedrock_reranker.py is production code. Now
-# also usable on the live opensearch_section provider, but defaulted OFF: a
-# live-index canary run (2026-09-01) showed this environment already has
-# RETRIEVAL_VNEXT_RERANK_MODEL_ARN configured from prior shadow testing, so
-# enabling this by default silently started reranking real traffic with a
-# model that has not been evaluated for that purpose and, in that test,
+# Bedrock reranking on the live opensearch_section provider, defaulted OFF: a
+# live-index canary run (2026-09-01) showed this environment already had a
+# reranker model ARN configured from a prior (now-retired) shadow experiment,
+# so enabling this by default silently started reranking real traffic with a
+# model that had not been evaluated for that purpose and, in that test,
 # picked a worse candidate (Sec 21.03 over the correct 21.05) than no
-# reranking at all. Enable only after the shadow-testing results for this
-# model are actually reviewed.
+# reranking at all. Enable only after the model is actually evaluated for the
+# live path.
 OPENSEARCH_LIVE_RERANK_ENABLED = _env_bool("OPENSEARCH_LIVE_RERANK_ENABLED", False)
 OPENSEARCH_RERANK_MODEL_ARN = _env_str("OPENSEARCH_RERANK_MODEL_ARN", "")
 OPENSEARCH_GLOSSARY_QUERY_LIMIT = _env_int("OPENSEARCH_GLOSSARY_QUERY_LIMIT", 4)
@@ -482,7 +468,6 @@ CHAT_TRANSCRIPT_RETENTION_DAYS = _env_int("CHAT_TRANSCRIPT_RETENTION_DAYS", 90)
 CHAT_ANALYTICS_RETENTION_DAYS = _env_int("CHAT_ANALYTICS_RETENTION_DAYS", 180)
 FEEDBACK_RETENTION_DAYS = _env_int("FEEDBACK_RETENTION_DAYS", 365)
 SUPPORT_REQUEST_RETENTION_DAYS = _env_int("SUPPORT_REQUEST_RETENTION_DAYS", 365)
-RETRIEVAL_SHADOW_RETENTION_DAYS = _env_int("RETRIEVAL_SHADOW_RETENTION_DAYS", 30)
 INGESTION_JOB_RETENTION_DAYS = _env_int("INGESTION_JOB_RETENTION_DAYS", 90)
 CONSENT_LOG_RETENTION_DAYS = _env_int("CONSENT_LOG_RETENTION_DAYS", 2555)
 # ElastiCache Valkey cache name. Found in ElastiCache -> Valkey caches.
