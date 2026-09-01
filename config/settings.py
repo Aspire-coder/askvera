@@ -386,15 +386,8 @@ OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD = _env_float(
 # Re-enable only after that heuristic is fixed and re-validated against the
 # retrieval_canary.json release-gate fixture on the live index.
 OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
-RETRIEVAL_RRF_ENABLED = _env_bool("RETRIEVAL_RRF_ENABLED", False)
-RETRIEVAL_RRF_K = _env_int("RETRIEVAL_RRF_K", 60)
 RETRIEVAL_PARENT_DIVERSITY_ENABLED = _env_bool("RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)
 RETRIEVAL_MAX_RESULTS_PER_PARENT = _env_int("RETRIEVAL_MAX_RESULTS_PER_PARENT", 2)
-RETRIEVAL_NEIGHBOR_EXPANSION_ENABLED = _env_bool("RETRIEVAL_NEIGHBOR_EXPANSION_ENABLED", False)
-RETRIEVAL_NEIGHBOR_LIMIT = _env_int("RETRIEVAL_NEIGHBOR_LIMIT", 2)
-RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE = _env_float("RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE", 0.85)
-RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP = _env_float("RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP", 0.70)
-RETRIEVAL_PROMOTION_MAX_LATENCY_MS = _env_float("RETRIEVAL_PROMOTION_MAX_LATENCY_MS", 1500.0)
 # English-language documents for the SAME country become eligible when the
 # local-language index has no match; the country filter is untouched, so
 # cross-market leakage is not possible. Output language is still enforced by

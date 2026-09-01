@@ -13,16 +13,21 @@
 - Glossary entries are bounded and validated before they can affect query expansion.
 - Model output limits are separated by purpose: planning, support routing, evidence selection, and translation.
 - Offline evaluation now reports comparison count, same-section rate, evidence overlap, confidence wins, latency percentiles, and country/language failure counts.
-- RRF ranking and parent-section diversity are wired as controlled experiments behind disabled flags. Bounded neighbor expansion remains an isolated helper until reliable neighbor metadata is available.
+- Parent-section diversity is wired as a controlled experiment behind a disabled flag (`RETRIEVAL_PARENT_DIVERSITY_ENABLED`).
 - Startup validation rejects invalid experiment limits before a restart can proceed.
+
+RRF ranking and bounded neighbor expansion were removed 2026-09-01 as part of
+a dead-code cleanup: both were built and validated at startup, but never
+actually wired into the live retrieval path even when their flags were
+enabled - a different, more unfinished situation than the vNext experiment
+above. Re-implement from scratch if a future experiment needs them.
 
 ## Safe promotion path
 
 1. Capture a locked baseline from the current `opensearch_section` path.
 2. Compare retrieval quality by country and language, including citations, locale isolation, latency, and cost.
-3. Require the configured promotion thresholds for same-section match, evidence overlap, and latency.
-4. Run multilingual regression cases and review low-confidence answers before enabling any flag.
-5. Promote one experiment at a time, with a documented rollback to the current provider and index.
+3. Run multilingual regression cases and review low-confidence answers before enabling any flag.
+4. Promote one experiment at a time, with a documented rollback to the current provider and index.
 
 (A separate-index shadow-comparison mechanism against `OPENSEARCH_VNEXT_INDEX`
 existed for this purpose and was retired 2026-09-01 - see
@@ -31,13 +36,11 @@ live-traffic comparison would need to re-implement that pattern.)
 
 ## Available but disabled by default
 
-- RRF ranking
 - Parent-section diversity
-- Neighbor-context expansion
 - Semantic caching
 - A new embedding provider or index
 
-The first two are connected to the OpenSearch section provider but remain disabled unless their settings are explicitly enabled. Neighbor expansion and semantic caching remain isolated experiments. UAT behavior is preserved until an approved comparison shows that a specific change improves quality without harming locale isolation, safety, latency, or cost.
+Parent-section diversity is connected to the OpenSearch section provider but remains disabled unless its setting is explicitly enabled. Semantic caching remains an isolated experiment. UAT behavior is preserved until an approved comparison shows that a specific change improves quality without harming locale isolation, safety, latency, or cost.
 
 ## Verification note
 

@@ -3,23 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Hashable, Iterable, Sequence
-
-
-def reciprocal_rank_fusion(
-    rankings: Sequence[Iterable[Hashable]], *, k: int = 60
-) -> dict[Hashable, float]:
-    """Fuse ranked candidate IDs without changing either source ranking."""
-    denominator = max(1, int(k))
-    scores: dict[Hashable, float] = defaultdict(float)
-    for ranking in rankings:
-        seen: set[Hashable] = set()
-        for position, key in enumerate(ranking, start=1):
-            if key in seen:
-                continue
-            seen.add(key)
-            scores[key] += 1.0 / (denominator + position)
-    return dict(scores)
+from typing import Any, Sequence
 
 
 def diversify_by_parent(
@@ -43,21 +27,5 @@ def diversify_by_parent(
         result.append(document)
         counts[parent] += 1
         if len(result) >= limit:
-            break
-    return result
-
-
-def bounded_neighbor_ids(
-    selected_ids: Iterable[str], neighbor_ids: Iterable[str], *, limit: int
-) -> list[str]:
-    """Return a deterministic, bounded union for optional context expansion."""
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in [*selected_ids, *neighbor_ids]:
-        cleaned = str(value).strip()
-        if cleaned and cleaned not in seen:
-            seen.add(cleaned)
-            result.append(cleaned)
-        if len(result) >= max(0, int(limit)):
             break
     return result
