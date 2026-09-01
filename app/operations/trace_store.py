@@ -133,10 +133,6 @@ class PipelineTraceStore:
             trace = self._traces.get(correlation_id)
             return trace.to_dict() if trace else None
 
-    def reset(self) -> None:
-        with self._lock:
-            self._traces.clear()
-
     def _record(
         self,
         trace: PipelineTrace,
