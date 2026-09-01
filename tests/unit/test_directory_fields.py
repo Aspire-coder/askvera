@@ -88,6 +88,33 @@ def test_does_not_duplicate_reformatted_phone_number() -> None:
     assert restored == []
 
 
+def test_does_not_append_a_see_above_cross_reference_as_a_standalone_answer() -> None:
+    """A print-layout cross reference ("(see above)") means something on a
+    printed page but is meaningless as an isolated bullet in a chat answer -
+    live example: Chile's answer ended with "Telephone for Orders: (see
+    above)" and nothing for it to visibly refer to."""
+    answer = "Contact Forever Chile for support:\n- Phone: +56 9 44727070"
+    fields = {
+        "Phone": "+56 9 44727070",
+        "Telephone for Orders": "(see above)",
+    }
+
+    completed, restored = restore_missing_directory_contacts(answer, [fields])
+
+    assert "see above" not in completed.lower()
+    assert "Telephone for Orders" not in restored
+
+
+def test_does_not_correct_a_labeled_line_into_a_see_above_reference() -> None:
+    answer = "Telephone for Orders: +56 9 00000000"
+    fields = {"Telephone for Orders": "(see above)"}
+
+    completed, restored = restore_missing_directory_contacts(answer, [fields])
+
+    assert completed == answer
+    assert restored == []
+
+
 def test_ignores_non_contact_directory_metadata() -> None:
     answer = "The office is in Exampleland."
     fields = {"Country": "Exampleland", "Main Admin. Title": "Director"}
