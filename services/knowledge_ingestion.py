@@ -430,11 +430,6 @@ def fail_ingestion_job(job_id: str, message: str) -> None:
     )
 
 
-def record_ingestion_attempt(job_id: str) -> None:
-    """Deprecated compatibility wrapper; workers should claim atomically."""
-    claim_ingestion_job(job_id, "legacy-worker", settings.ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS)
-
-
 def process_ingestion_job(
     job_id: str,
     local_path: str,
