@@ -904,6 +904,42 @@ def test_exact_assistant_capability_returns_controlled_response_before_retrieval
     router.generate.assert_not_called()
 
 
+def test_probable_country_typo_asks_for_confirmation_before_retrieval(monkeypatch) -> None:
+    """TRB-19189: a likely misspelled market name should prompt for
+    confirmation rather than silently guessing or falling through to a
+    generic "not enough information" refusal after a wasted retrieval call.
+    """
+    retriever = MagicMock()
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="What is the minimum ordering size for Nigar?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert '"Niger"' in response.answer
+    assert response.metadata["response_source"] == "market_typo_confirmation"
+    retriever.retrieve.assert_not_called()
+    router.generate.assert_not_called()
+
+
 def test_semantic_assistant_route_cannot_turn_unrelated_question_into_greeting(monkeypatch) -> None:
     retriever = MagicMock()
     retriever.retrieve.return_value = RetrievalResult(
