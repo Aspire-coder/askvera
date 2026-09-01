@@ -56,7 +56,7 @@ class AskVeraSdkImpl implements AskVeraSdk {
       ...this.state.config,
       widgetId: config.widgetId,
       apiUrl: config.apiUrl,
-      conversationPersistence: config.conversationPersistence || "session",
+      conversationPersistence: config.conversationPersistence || "local",
       launcherPosition: config.position || this.state.config.launcherPosition
     };
     const auth = await authenticateWidget(nextConfig);

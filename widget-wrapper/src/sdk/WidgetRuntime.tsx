@@ -310,7 +310,9 @@ export function WidgetRuntime({
   apiBaseUrl,
   widgetId,
   authToken,
-  conversationPersistence = "session",
+  // localStorage (not sessionStorage) so a conversation started in one tab
+  // is visible in a second tab opened afterward for the same user (TRB-19188).
+  conversationPersistence = "local",
   onPositionChange,
   openSignal = 0,
   closeSignal = 0,

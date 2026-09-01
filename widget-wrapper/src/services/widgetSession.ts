@@ -1,5 +1,5 @@
 import type { WidgetInitResponseData } from "../api";
-import { createSessionStorageAdapter, type StorageAdapter } from "../storage";
+import { createLocalStorageAdapter, type StorageAdapter } from "../storage";
 
 export type WidgetAuthSession = {
   token: string;
@@ -14,7 +14,9 @@ const DEFAULT_STORAGE_KEY = "askvera_widget_auth_session";
 export class WidgetSessionStore {
   constructor(
     private readonly storageKey = DEFAULT_STORAGE_KEY,
-    private readonly storage: StorageAdapter = createSessionStorageAdapter()
+    // localStorage (not sessionStorage) so a second tab can resume the same
+    // backend session instead of always minting a new one (TRB-19188).
+    private readonly storage: StorageAdapter = createLocalStorageAdapter()
   ) {}
 
   read(): WidgetAuthSession | undefined {
