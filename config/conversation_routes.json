@@ -60,7 +60,9 @@
           "what's your name",
           "what do you do",
           "what can you help with",
+          "what can you help me with",
           "what can you do",
+          "what can you do for me",
           "help"
         ],
         "casual": [
