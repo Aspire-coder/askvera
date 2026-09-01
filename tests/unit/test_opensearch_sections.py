@@ -5,6 +5,7 @@ from app.retrieval import opensearch_sections
 from app.retrieval.models import RetrievalResult
 from app.retrieval.opensearch_sections import (
     OpenSearchSectionProvider,
+    _directory_target_country_names,
     _directory_record_country_score,
     _directory_text_query,
     _exact_section_query,
@@ -649,6 +650,24 @@ def test_directory_query_filters_to_active_global_directory_records() -> None:
             ]
         }
     } in filters
+
+
+def test_directory_query_hard_filters_explicit_target_country() -> None:
+    filters = _directory_text_query(
+        "What is the phone number for Uruguay?", {"Uruguay"}
+    )["query"]["bool"]["filter"]
+
+    assert any(
+        value.get("bool", {}).get("minimum_should_match") == 1
+        for value in filters
+        if isinstance(value, dict)
+    )
+
+
+def test_directory_target_country_recovers_close_typo() -> None:
+    assert _directory_target_country_names(
+        "How can I join Mexcio through international sponsoring?", "US"
+    ) == {"Mexico"}
 
 
 def test_outline_query_is_locale_isolated_and_outline_only() -> None:
