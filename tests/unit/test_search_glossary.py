@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from app.retrieval import glossary
 from config import settings
@@ -152,3 +153,23 @@ def test_joined_term_matching_does_not_fuzz_or_expand_normal_phrases(tmp_path, m
     assert glossary.approved_joined_term_queries(
         "How can I become a recognizdmanager?", "US", "en"
     ) == []
+
+
+def test_production_glossary_has_no_english_only_entries() -> None:
+    """Regression guard: three entries (including the arbitration/class-
+    action-waiver one) were previously scoped to language: ["en"], so an
+    English trigger word typed by a user on a non-English-configured market
+    (a real scenario - most markets default to a non-English language)
+    would never expand, even though every other entry uses ["*"]. If a
+    genuinely locale-restricted entry is added later, update this test
+    deliberately rather than widen it reflexively.
+    """
+    path = Path(settings.OPENSEARCH_GLOSSARY_PATH)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    non_wildcard = [
+        entry["id"]
+        for entry in payload["entries"]
+        if entry.get("language") != ["*"]
+    ]
+    assert non_wildcard == []

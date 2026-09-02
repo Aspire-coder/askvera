@@ -348,7 +348,6 @@ BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
 # retrieval. A missing value must not silently route requests to a retired KB.
 RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "opensearch_section").lower()
 SECTION_RETRIEVAL_MIN_SCORE = _env_float("SECTION_RETRIEVAL_MIN_SCORE", 0.05)
-SECTION_RETRIEVAL_MODE = _env_str("SECTION_RETRIEVAL_MODE", "keyword").lower()
 OPENSEARCH_ENDPOINT = _env_str("OPENSEARCH_ENDPOINT", "")
 OPENSEARCH_INDEX = _env_str("OPENSEARCH_INDEX", "askvera-policy-sections")
 OPENSEARCH_SERVICE = _env_str("OPENSEARCH_SERVICE", "aoss")
