@@ -935,7 +935,7 @@ def test_guaranteed_earnings_copy_is_refused_before_retrieval(monkeypatch) -> No
 
     response = orchestrator.handle_chat(body, "cid")
 
-    assert "guarantee earnings" in response.answer.lower()
+    assert "income disclosure statement" in response.answer.lower()
     assert response.metadata["failure_layer"] == "risk_policy"
     retriever.retrieve.assert_not_called()
     router.generate.assert_not_called()
@@ -1010,7 +1010,7 @@ def test_exact_assistant_capability_returns_controlled_response_before_retrieval
 
     response = orchestrator.handle_chat(body, "cid")
 
-    assert "approved knowledge assistant" in response.answer
+    assert "your guide to Forever Living" in response.answer
     assert response.metadata["response_source"] == "template"
     retriever.retrieve.assert_not_called()
     router.generate.assert_not_called()

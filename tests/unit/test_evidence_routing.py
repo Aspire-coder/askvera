@@ -13,8 +13,8 @@ from services.market_config import get_countries, load_policy_locales
 def test_routes_configured_english_greeting_without_retrieval() -> None:
     assert classify_intent("Hello!", "en") == "assistant_meta"
     greeting = assistant_meta_response("Hello!", "en") or ""
-    assert "company policies" in greeting
-    assert "global office directory" in greeting
+    assert "AskVera" in greeting
+    assert "policy questions" in greeting
     assert "products" not in greeting
     assert "ordering" not in greeting
 
@@ -29,7 +29,7 @@ def test_routes_help_me_phrasing_of_capability_question() -> None:
     can you help with" (no "me") was a recognized phrase."""
     assert classify_intent("what can you help me with?", "en") == "assistant_meta"
     capability = assistant_meta_response("what can you help me with?", "en") or ""
-    assert "company policies" in capability
+    assert "official policies" in capability
     assert "global office directory" in capability
 
 
@@ -47,7 +47,7 @@ def test_routes_launched_language_greetings_without_model_tokens() -> None:
     assert classify_intent("Hoi", "nl-BE") == "assistant_meta"
     assert "AskVera" in (assistant_meta_response("Hola", "es") or "")
     capability = assistant_meta_response("what can you help with", "en") or ""
-    assert "company policies" in capability
+    assert "official policies" in capability
     assert "global office directory" in capability
     assert "products" not in capability
     assert "ordering" not in capability
@@ -57,13 +57,13 @@ def test_routes_configured_greeting_even_when_widget_language_differs() -> None:
     """A visitor may greet in another configured language without changing locale."""
     assert classify_intent("Hola", "en-US") == "assistant_meta"
     response = assistant_meta_response("Hola", "en-US") or ""
-    assert response.startswith("Hello")
+    assert response.startswith("Hi there")
 
 
 def test_routes_bounded_social_typos_without_fuzzy_policy_routing() -> None:
     assert classify_intent("goo dmorning", "en") == "assistant_meta"
     assert classify_intent("byee", "en") == "assistant_meta"
-    assert "Goodbye" in (assistant_meta_response("byee", "en") or "")
+    assert "Take care" in (assistant_meta_response("byee", "en") or "")
     assert classify_intent("recognizedmanager", "en") == "policy_fact"
     assert classify_intent("can aloe cur cancer", "en") == "policy_fact"
 
@@ -72,15 +72,14 @@ def test_routes_wellbeing_question_without_retrieval() -> None:
     assert classify_intent("How are you?", "en") == "assistant_meta"
     response = assistant_meta_response("How are you?", "en") or ""
     assert "doing well" in response.lower()
-    assert "company policies" in response
-    assert "global office directory" in response
+    assert "products" not in response
+    assert "ordering" not in response
 
 
 def test_composed_greeting_and_wellbeing_question_uses_reviewed_small_talk() -> None:
     assert classify_intent("Hello, how are you?", "en") == "assistant_meta"
     response = assistant_meta_response("Hello, how are you?", "en") or ""
     assert "doing well" in response.lower()
-    assert "company policies" in response
 
 
 def test_composed_small_talk_allows_a_safe_joiner() -> None:
