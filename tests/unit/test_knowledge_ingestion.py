@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from scripts.ingestion.extract_global_office_directory import DirectoryRecord
+from scripts.ingestion.extract_global_sponsoring_directory import SponsoringRecord
 from scripts.ingestion.extract_policy_sections import PolicySection
 from services import knowledge_generations, knowledge_ingestion
 from services.knowledge_ingestion import (
@@ -158,6 +160,165 @@ def test_policy_pdf_uses_policy_aware_extractor(monkeypatch, tmp_path: Path) -> 
     ) is True
     assert indexed_sections[0]["section_id"] == "4.01"
     assert indexed_sections[0]["content"] == policy_section.content
+
+
+def _office_directory_common_mocks(monkeypatch, indexed_sections: list[dict[str, object]]) -> None:
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_CHUNK_PROFILE", "current")
+    monkeypatch.setattr(knowledge_ingestion, "extract_pages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "build_sections",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("generic chunking must not handle office_directory PDFs")
+        ),
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "_index_sections",
+        lambda sections, **_kwargs: indexed_sections.extend(sections) or len(sections),
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "_upload_source",
+        lambda *_args, **_kwargs: "s3://approved/global/directory.pdf",
+    )
+    monkeypatch.setattr(knowledge_ingestion, "_record_document", lambda **_kwargs: None)
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+
+def test_office_directory_pdf_uses_sponsoring_extractor_when_it_matches(monkeypatch, tmp_path: Path) -> None:
+    """A country-sponsoring-directory-shaped PDF must keep record_country and
+    directory_kind metadata, not lose it to the generic chunker."""
+    source = tmp_path / "International-Sponsoring-Directory.pdf"
+    source.write_bytes(b"%PDF-1.7\n")
+    record = SponsoringRecord(
+        source_file=source.name,
+        section_id="sponsoring-037-kyrgyzstan",
+        title="Forever Kyrgyzstan",
+        start_page=40,
+        end_page=41,
+        content="Welcome to Forever Kyrgyzstan!",
+        record_country="Kyrgyzstan",
+    )
+    indexed_sections: list[dict[str, object]] = []
+    _office_directory_common_mocks(monkeypatch, indexed_sections)
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_sponsoring_directory",
+        lambda *_args, **_kwargs: [record],
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_office_directory",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("office/staff extractor must not run once the sponsoring extractor matched")
+        ),
+    )
+
+    assert process_ingestion_job(
+        "generation-1",
+        str(source),
+        filename=source.name,
+        country="GLOBAL",
+        language="en",
+        document_type="office_directory",
+        access_scope="global",
+        version="2026.1",
+        effective_date="2026-07-01",
+    ) is True
+    assert indexed_sections[0]["section_id"] == "sponsoring-037-kyrgyzstan"
+    assert indexed_sections[0]["metadata"]["record_country"] == "Kyrgyzstan"
+    assert indexed_sections[0]["metadata"]["directory_kind"] == "international_sponsoring"
+
+
+def test_office_directory_pdf_falls_back_to_office_staff_extractor(monkeypatch, tmp_path: Path) -> None:
+    """A PDF that isn't the sponsoring-directory format must still be tried
+    against the office/staff contact directory format before giving up."""
+    source = tmp_path / "International-Office-Directory.pdf"
+    source.write_bytes(b"%PDF-1.7\n")
+    record = DirectoryRecord(
+        source_file=source.name,
+        section_id="office-001-forever-uruguay",
+        title="Forever Uruguay",
+        start_page=5,
+        end_page=5,
+        content="Forever Uruguay\nCountry\nUruguay",
+        record_type="office",
+        record_country="Uruguay",
+    )
+    indexed_sections: list[dict[str, object]] = []
+    _office_directory_common_mocks(monkeypatch, indexed_sections)
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_sponsoring_directory",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("No country sponsoring sections were found in the PDF.")),
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_office_directory",
+        lambda *_args, **_kwargs: ([record], []),
+    )
+
+    assert process_ingestion_job(
+        "generation-2",
+        str(source),
+        filename=source.name,
+        country="GLOBAL",
+        language="en",
+        document_type="office_directory",
+        access_scope="global",
+        version="2026.1",
+        effective_date="2026-07-01",
+    ) is True
+    assert indexed_sections[0]["section_id"] == "office-001-forever-uruguay"
+    assert indexed_sections[0]["metadata"]["record_country"] == "Uruguay"
+    assert indexed_sections[0]["metadata"]["directory_section"] == "office"
+
+
+def test_office_directory_pdf_raises_instead_of_silently_using_generic_chunker(monkeypatch, tmp_path: Path) -> None:
+    """A document matching neither known directory format must fail loudly,
+    not silently fall through to the generic chunker and lose all
+    directory-specific metadata with no error."""
+    source = tmp_path / "unrecognized-directory.pdf"
+    source.write_bytes(b"%PDF-1.7\n")
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_CHUNK_PROFILE", "current")
+    monkeypatch.setattr(knowledge_ingestion, "extract_pages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_sponsoring_directory",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("No country sponsoring sections were found in the PDF.")),
+    )
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "extract_office_directory",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+    releases: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "release_ingestion_claim",
+        lambda job_id, message, **kwargs: releases.append({"job_id": job_id, "message": message, **kwargs}),
+    )
+
+    result = process_ingestion_job(
+        "generation-3",
+        str(source),
+        filename=source.name,
+        country="GLOBAL",
+        language="en",
+        document_type="office_directory",
+        access_scope="global",
+        version="2026.1",
+        effective_date="2026-07-01",
+    )
+
+    assert result is False
+    assert releases
+    assert "known office directory format" in releases[0]["message"]
+    assert releases[0]["retryable"] is False
 
 
 def test_release_claim_marks_exhausted_retry_as_terminal(monkeypatch) -> None:

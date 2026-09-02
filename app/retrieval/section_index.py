@@ -311,9 +311,23 @@ def _return_policy_score(message: str, title: str, content: str) -> float:
     evidence = _normalize_text(f"{title} {content[:1800]}")
 
     if _intent_matches(message_terms, rule["buyback_window"]):
+        # The message itself signals the specific buy-back scenario - only
+        # the narrow buy-back clause can win here, so a generic
+        # satisfaction-guarantee phrase can't outrank it. This is the
+        # documented 2026-09-01 canary fix; do not widen this branch to
+        # also check the general phrases.
         return _evidence_score(evidence, rule["buyback_window"])
 
-    return _evidence_score(evidence, rule["general"])
+    # The message didn't use a buy-back trigger word, but the candidate's
+    # own content might still be the specific buy-back clause the question
+    # is substantively about (e.g. "I never opened it, can I get a
+    # refund?"). Score against both phrase sets and keep the stronger
+    # match, rather than zeroing out a genuinely on-topic buy-back clause
+    # just because the question happened to be phrased differently.
+    return max(
+        _evidence_score(evidence, rule["general"]),
+        _evidence_score(evidence, rule["buyback_window"]),
+    )
 
 
 def _source_score(row: dict[str, Any], message: str) -> float:
@@ -343,11 +357,23 @@ def _source_score(row: dict[str, Any], message: str) -> float:
     score += _fragment_quality_score(row, message)
     score += _purchase_channel_score(message, title, content)
     score += _return_policy_score(message, title, content)
+    # _key_phrases returns overlapping n-grams (4-word, then its own 3-word
+    # and 2-word sub-spans) from the same question. A title that matches the
+    # 4-word phrase necessarily also matches its sub-phrases, so summing a
+    # bonus per matching phrase let one genuine match count 2-3x over -
+    # disproportionately rewarding a title that closely restates the
+    # question's wording versus one that's an equally good topical match
+    # phrased differently. Keep only the single best bonus, same as
+    # _exact_topic_score's max()-based phrase scoring above.
+    best_phrase_bonus = 0.0
+    normalized_title = _normalize_text(title)
+    normalized_content_prefix = _normalize_text(content[:800])
     for phrase in phrases:
-        if phrase in _normalize_text(title):
-            score += 0.35
-        elif phrase in _normalize_text(content[:800]):
-            score += 0.12
+        if phrase in normalized_title:
+            best_phrase_bonus = max(best_phrase_bonus, 0.35)
+        elif phrase in normalized_content_prefix:
+            best_phrase_bonus = max(best_phrase_bonus, 0.12)
+    score += best_phrase_bonus
     return round(score, 6)
 
 
@@ -369,9 +395,14 @@ def _confidence_from_documents(documents: list[RetrievedDocument]) -> float:
     # actively preferred. Compare against the next candidate that the raw
     # score itself doesn't already contradict.
     trailing_contenders = [score for score in scores[1:] if score <= top_score]
-    runner_up = trailing_contenders[0] if trailing_contenders else 0.0
     avg_score = sum(scores) / len(scores)
-    margin = max(top_score - runner_up, 0.0)
+    # A missing runner-up (a single retrieved document, or every other
+    # candidate already excluded above) is the absence of competition, not a
+    # win against one - defaulting the runner-up to 0.0 here previously made
+    # margin equal top_score, silently doubling the top-score term below and
+    # letting a single, uncorroborated, mediocre match clear the confidence
+    # gate on its own. No runner-up must mean no margin bonus.
+    margin = max(top_score - trailing_contenders[0], 0.0) if trailing_contenders else 0.0
     strongest_score = max(scores)
     corroboration = min(max(strongest_score - top_score, 0.0) / 40.0, 0.1)
     normalized = min(

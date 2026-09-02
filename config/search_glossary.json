@@ -1,11 +1,11 @@
 {
-  "version": "2026-08-11",
-  "description": "Approved search glossary for converting user wording into policy-document wording. This file is data, not code; expand it as new reviewed wording gaps are found.",
+  "version": "2026-09-02",
+  "description": "Approved search glossary for converting user wording into policy-document wording. This file is data, not code; expand it as new reviewed wording gaps are found. Entries scoped to language: [\"en\"] only fire when the request's own language is English - since a market's UI language and a user's actual wording can still be English (code-switching), most entries use [\"*\"] instead so an English trigger word still matches regardless of the configured widget language. Adding real localized trigger phrases per language is a separate, larger effort needing native-speaker review, tracked outside this file.",
   "entries": [
     {
       "id": "case-credit-ogcc-new-cc",
       "country": ["*"],
-      "language": ["en"],
+      "language": ["*"],
       "triggers": [
         "ogcc",
         "open group case credit",
@@ -24,7 +24,7 @@
     {
       "id": "earned-incentive-forever2drive",
       "country": ["*"],
-      "language": ["en"],
+      "language": ["*"],
       "triggers": [
         "forever2drive",
         "forever 2 drive",
@@ -40,7 +40,7 @@
     {
       "id": "legal-dispute-court-arbitration",
       "country": ["*"],
-      "language": ["en"],
+      "language": ["*"],
       "triggers": [
         "sue",
         "court",

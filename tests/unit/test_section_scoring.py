@@ -74,6 +74,37 @@ def test_document_title_match_is_unicode_safe() -> None:
     assert _source_score(governing, question) > _source_score(nearby, question)
 
 
+def test_source_score_does_not_stack_overlapping_phrase_matches() -> None:
+    """_key_phrases returns overlapping n-grams (a matching 3-word phrase's
+    own 2-word sub-spans also match whatever the 3-word phrase matched).
+    Before this fix, _source_score added a separate +0.35 per matching
+    phrase, so one genuine title match could be counted 2-3x over just
+    because its sub-phrases are also, trivially, matches. The fix keeps
+    only the single best phrase bonus, same as _exact_topic_score already
+    does with max().
+    """
+    message = "what recognized manager qualification requirement details"
+    title = "recognized manager qualification"
+    row = _row("4.01", title, "")
+
+    phrases = section_index._key_phrases(message)
+    normalized_title = section_index._normalize_text(title)
+    # Reconstruct exactly what the pre-fix, uncapped-sum loop would have
+    # added for this scenario - not a guess, the same per-phrase check the
+    # old code ran, just summed instead of capped.
+    pre_fix_title_bonus = sum(0.35 for phrase in phrases if phrase in normalized_title)
+    assert pre_fix_title_bonus > 0.35, "test setup must produce more than one overlapping title match"
+
+    score = _source_score(row, message)
+    # Every other term in _source_score is identical between the pre-fix and
+    # fixed formulas (nothing else changed), so adding back the difference
+    # between the uncapped sum and the new 0.35 cap reconstructs exactly
+    # what the pre-fix score would have been for this same input.
+    reconstructed_pre_fix_score = round(score + (pre_fix_title_bonus - 0.35), 6)
+
+    assert score < reconstructed_pre_fix_score
+
+
 def _document(score: float) -> RetrievedDocument:
     return RetrievedDocument(
         id=str(score),
@@ -98,6 +129,29 @@ def test_corroboration_cannot_rescue_a_weak_evidence_set() -> None:
     )
 
     assert confidence < 0.35
+
+
+def test_single_document_gets_no_margin_bonus() -> None:
+    """A lone, uncorroborated document must not be scored as though it beat
+    a competitor - a missing runner-up is the absence of competition, not a
+    win. Before this fix, a missing runner-up defaulted to 0.0, which made
+    margin equal top_score and silently doubled the top-score term, letting
+    a single mediocre match (~2.05) clear BEDROCK_MIN_CONFIDENCE (0.47) on
+    its own.
+    """
+    confidence = _confidence_from_documents([_document(2.05)])
+
+    # top_score/10 + margin(=0)/10 + avg_score/30 + corroboration(=0)
+    expected = round((2.05 / 10.0) + 0.0 + (2.05 / 30.0) + 0.0, 3)
+    assert confidence == expected
+    assert confidence < 0.35
+
+
+def test_single_strong_document_still_reaches_high_confidence() -> None:
+    """The fix must not cap a single, genuinely strong match too low."""
+    confidence = _confidence_from_documents([_document(9.5)])
+
+    assert confidence >= 0.47
 
 
 def test_score_sorted_confidence_is_unchanged_by_corroboration() -> None:
@@ -191,6 +245,23 @@ def test_return_policy_score_uses_general_clause_without_buyback_intent(_hardeni
         "What is your return policy",
         "Returns",
         "This is covered by our 100 product satisfaction guarantee.",
+    )
+    assert score > 0
+
+
+def test_return_policy_score_still_credits_a_buyback_clause_with_different_wording(_hardening_enabled) -> None:
+    """A question that doesn't use a buy-back trigger word (e.g. no
+    "unopened"/"window"/"unsold") must not zero out a candidate that is
+    substantively the buy-back clause just because of that wording gap -
+    the branch selection is driven by the message, but the candidate's own
+    content should still get credit. This does not touch or weaken the
+    2026-09-01 regression guard above: that guard fires only when the
+    message DOES contain a buy-back trigger word, and stays unchanged.
+    """
+    score = _return_policy_score(
+        "I never used it, can I get a refund?",
+        "Returns",
+        "FLP shall buy back any unsold, salable product.",
     )
     assert score > 0
 

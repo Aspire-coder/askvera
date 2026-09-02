@@ -21,14 +21,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from services.document_preflight import extract_pdf_page_text  # noqa: E402
+from services.document_preflight import TABLE_GAP_RE, extract_pdf_page_text  # noqa: E402
 
 
 # Policies commonly use a mix of top-level headings ("1 Introduction"),
 # one-digit subsections ("1.3."), and two-digit subsections ("11.01").
 # Require a letter in the title so PDF page-number pairs are not headings.
+# Allow up to two ".NN" groups (e.g. "21.05.3") - a heading with a third
+# numbering level that this pattern didn't match would silently fold into
+# the previous section's body instead of becoming its own section, with no
+# error and a wrong page/section citation for that content.
 SECTION_RE = re.compile(
-    r"(?m)^(?P<section>\d{1,2}(?:\.\d{1,2})?)\.?\s+"
+    r"(?m)^(?P<section>\d{1,2}(?:\.\d{1,2}){0,2})\.?\s+"
     r"(?P<title>(?:\([a-z0-9]+\)\s+)?[^\W\d_].+)$",
     flags=re.IGNORECASE,
 )
@@ -53,13 +57,23 @@ SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 MAX_SECTION_CHARS = 8_000
 # vnext (a smaller-chunk retrieval experiment) was retired 2026-09-01 after
 # the retrieval-comparison work found no evidence it improved answers and it
-# had a real ongoing OpenSearch cost. Kept as a distinct profile name (rather
-# than collapsing to a single constant) since existing production records
-# carry chunk_profile="current" in their metadata already.
-VNEXT_MAX_SECTION_CHARS = 2_000
-VNEXT_SECTION_OVERLAP_CHARS = 200
+# had a real ongoing OpenSearch cost. "vnext" is kept as a recognized
+# chunk_profile *value* (scripts/ingestion/load_policy_sections_to_opensearch.py
+# still checks for it) since existing production records carry that value in
+# their stored metadata - but every extractor-side code path that could
+# produce a new vnext-profiled chunk has been removed, since CHUNK_PROFILES
+# only registers "current" and extract_sections() rejects any other profile
+# before reaching them.
+# The generic (non-policy) chunker overlaps split chunks by 450 chars, 10%
+# of its 4,500-char max, specifically so a sentence/clause straddling a
+# split boundary is still retrievable from at least one side. Policy
+# sections used 0-char overlap - a clause straddling an oversized-section
+# split boundary could be unretrievable in either -part-N chunk. Apply the
+# same 10% ratio here rather than reusing 450 verbatim, since this
+# profile's max_chars (8,000) is proportionally larger.
+SECTION_OVERLAP_CHARS = 800
 CHUNK_PROFILES = {
-    "current": (MAX_SECTION_CHARS, 0),
+    "current": (MAX_SECTION_CHARS, SECTION_OVERLAP_CHARS),
 }
 TEXT_REPLACEMENTS = {
     "â€™": "'",
@@ -292,7 +306,7 @@ def extract_sections(
         chunk_profile=chunk_profile,
     )
     expanded = [*front_matter, *outlines, *_expand_structured_chunks(sections)]
-    return _ensure_unique_section_ids(_bound_vnext_chunks(expanded))
+    return _ensure_unique_section_ids(expanded)
 
 
 def _front_matter_chunks(
@@ -349,90 +363,24 @@ def _outline_chunks(
         if not _looks_like_contents_page(text):
             continue
 
-        if chunk_profile == "current" or len(text) <= VNEXT_MAX_SECTION_CHARS:
-            page_parts = [text]
-        else:
-            page_parts = _split_vnext_text(text)
-
-        for part_number, content in enumerate(page_parts, start=1):
-            base_id = f"outline-page-{page_number}"
-            is_split = len(page_parts) > 1
-            chunks.append(
-                PolicySection(
-                    source_file=source_file,
-                    country=country,
-                    language=language,
-                    section_id=f"{base_id}-part-{part_number}" if is_split else base_id,
-                    title="Policy document outline",
-                    start_page=page_number,
-                    end_page=page_number,
-                    content=content,
-                    document_version=document_version,
-                    effective_date=effective_date,
-                    status=status,
-                    chunk_type="document_outline",
-                    parent_section_id=base_id if is_split else "",
-                    chunk_profile=chunk_profile,
-                )
-            )
-    return chunks
-
-
-def _split_vnext_text(content: str) -> list[str]:
-    """Split auxiliary policy text with the vNext structural boundaries."""
-    chunks: list[str] = []
-    start = 0
-    while start < len(content):
-        end = min(start + VNEXT_MAX_SECTION_CHARS, len(content))
-        if end < len(content):
-            boundaries = [
-                (content.rfind("\n\n", start, end), 0),
-                (content.rfind("\n", start, end), 0),
-                (content.rfind(". ", start, end), 2),
-            ]
-            boundary, suffix_length = max(boundaries)
-            if boundary > start + VNEXT_MAX_SECTION_CHARS // 2:
-                end = boundary + suffix_length
-
-        chunk = content[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= len(content):
-            break
-
-        start = max(end - VNEXT_SECTION_OVERLAP_CHARS, start + 1)
-        while start < end and not content[start].isspace():
-            start += 1
-        while start < len(content) and content[start].isspace():
-            start += 1
-    return chunks
-
-
-def _bound_vnext_chunks(sections: list[PolicySection]) -> list[PolicySection]:
-    """Apply the vNext size ceiling after contextual child chunks are added."""
-    bounded: list[PolicySection] = []
-    for section in sections:
-        if (
-            section.chunk_profile != "vnext"
-            or len(section.content) <= VNEXT_MAX_SECTION_CHARS
-        ):
-            bounded.append(section)
-            continue
-
-        parent_section_id = section.parent_section_id or section.section_id
-        bounded.extend(
-            replace(
-                section,
-                section_id=f"{section.section_id}-part-{part_number}",
-                content=content,
-                parent_section_id=parent_section_id,
-            )
-            for part_number, content in enumerate(
-                _split_vnext_text(section.content),
-                start=1,
+        chunks.append(
+            PolicySection(
+                source_file=source_file,
+                country=country,
+                language=language,
+                section_id=f"outline-page-{page_number}",
+                title="Policy document outline",
+                start_page=page_number,
+                end_page=page_number,
+                content=text,
+                document_version=document_version,
+                effective_date=effective_date,
+                status=status,
+                chunk_type="document_outline",
+                chunk_profile=chunk_profile,
             )
         )
-    return bounded
+    return chunks
 
 
 def _ensure_unique_section_ids(sections: list[PolicySection]) -> list[PolicySection]:
@@ -611,13 +559,23 @@ def _split_oversized_section(
     ]
 
 
-def _compact_numeric_fact(line: str) -> bool:
-    """Recognize a compact table/list row containing a numeric policy fact."""
-    cleaned = " ".join(line.split())
+def _compact_numeric_fact(cleaned: str, raw_line: str) -> bool:
+    """Recognize a compact table/list row containing a numeric policy fact.
+
+    `cleaned` (whitespace-collapsed) drives the length/digit/letter checks;
+    `raw_line` (original, whitespace intact) is checked against
+    TABLE_GAP_RE - the same aligned-column signal document_preflight
+    already uses to flag table-shaped pages - since whitespace-collapsing
+    destroys that signal. Requiring it rules out an ordinary prose sentence
+    that merely mentions a number (a phone number, a date reference, "see
+    clause 5.2"): those don't have a table's multi-space column gaps in the
+    original text, only a genuine tabular row does.
+    """
     return (
         12 <= len(cleaned) <= 360
         and any(character.isdigit() for character in cleaned)
         and bool(re.search(r"[^\W\d_]", cleaned, flags=re.UNICODE))
+        and bool(TABLE_GAP_RE.search(raw_line))
     )
 
 
@@ -627,7 +585,20 @@ def _contextual_content(section: PolicySection, content: str) -> str:
 
 
 def _definition_chunks(section: PolicySection) -> list[PolicySection]:
-    """Create atomic chunks from language-neutral ``label: definition`` entries."""
+    """Create atomic chunks from language-neutral ``label: definition`` entries.
+
+    Nothing about DEFINITION_ENTRY_RE requires the section to actually be a
+    glossary - an ordinary clause containing "Note: contact your local
+    office." or "Example: an FBO who submits an order..." matches the same
+    ``label: text`` shape and would otherwise become its own spurious,
+    duplicate atomic chunk. A section title match (e.g. "Definitions") isn't
+    a safe gate here - this codebase's glossary sections are titled in every
+    supported language ("Definisjoner", etc.), and hardcoding translations
+    would defeat the point. A genuine glossary instead reliably has multiple
+    colon-entries in a row; require at least two, mirroring the same
+    density-based gate _compact_numeric_fact used before it could rely on
+    TABLE_GAP_RE for a stronger per-line signal.
+    """
     matches = [
         match
         for match in DEFINITION_ENTRY_RE.finditer(section.content)
@@ -635,7 +606,7 @@ def _definition_chunks(section: PolicySection) -> list[PolicySection]:
         and not SECTION_RE.match(match.group(0))
         and not LIST_ITEM_RE.match(match.group(0))
     ]
-    if not matches:
+    if len(matches) < 2:
         return []
 
     parent_section_id = section.parent_section_id or section.section_id
@@ -708,13 +679,19 @@ def _expand_structured_chunks(sections: list[PolicySection]) -> list[PolicySecti
                 )
             )
 
-        lines = [" ".join(line.split()) for line in section.content.splitlines()]
+        raw_lines = section.content.splitlines()
+        lines = [" ".join(line.split()) for line in raw_lines]
         fact_rows = [
             (index, line)
-            for index, line in enumerate(lines[1:], start=1)
-            if _compact_numeric_fact(line) and not LIST_ITEM_RE.match(line)
+            for index, (raw_line, line) in enumerate(zip(raw_lines[1:], lines[1:]), start=1)
+            if _compact_numeric_fact(line, raw_line) and not LIST_ITEM_RE.match(line)
         ]
-        if len(fact_rows) < 2:
+        # The TABLE_GAP_RE requirement above already rules out most false
+        # positives from ordinary prose, so a single qualifying row no
+        # longer needs a second corroborating row to be trusted - the
+        # previous >=2 minimum buried a legitimate single-tier numeric fact
+        # (e.g. one commission threshold) in the parent chunk only.
+        if not fact_rows:
             continue
         for row_number, line in fact_rows:
             expanded.append(

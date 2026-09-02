@@ -99,6 +99,14 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     score_margin = top_score - second_score
     current_document = _has_current_locale_document(documents, country, language)
     exact_topic_match = any(_has_topic_match(query, document) for document in documents)
+    # The `top_score >= SECTION_RETRIEVAL_MIN_SCORE` clause below is a no-op
+    # for the live opensearch_section provider: it already drops any
+    # candidate below that same floor before documents are returned
+    # (OpenSearchSectionProvider._finalize_eligible_rows), so every top_score
+    # reaching here already clears it - this branch collapses to just the
+    # confidence check on that path. It remains a real, non-tautological
+    # check for the legacy Bedrock Knowledge Base provider, which applies no
+    # equivalent floor, so it is kept rather than removed.
     enough_score = retrieval_result.confidence >= settings.BEDROCK_MIN_CONFIDENCE or (
         retrieval_result.confidence >= settings.BEDROCK_CONFIDENCE_EVIDENCE_MIN_CONFIDENCE
         and top_score >= settings.SECTION_RETRIEVAL_MIN_SCORE
