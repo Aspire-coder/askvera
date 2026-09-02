@@ -1164,6 +1164,23 @@ class AIOrchestrator:
             return routed_response, retrieval_result, None
 
         evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
+        if evidence_decision.approved and self._is_cross_market_local_evidence(scrubbed_input, retrieval_result, body):
+            # The message names a market other than this session's own, and the
+            # top-ranked evidence is a country-scoped document (this session's
+            # market, never the one named) rather than a global/cross-market
+            # one - answering would misrepresent the named country's policy, so
+            # this downgrades to the same insufficient-evidence path a real
+            # retrieval miss takes instead of switching scope or inventing a
+            # new response template.
+            evidence_decision = EvidenceDecision(
+                approved=False,
+                reason="cross_market_local_evidence",
+                evidence=[],
+                query_intent=evidence_decision.query_intent,
+                exact_topic_match=evidence_decision.exact_topic_match,
+                top_score=evidence_decision.top_score,
+                score_margin=evidence_decision.score_margin,
+            )
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
         if evidence_decision.approved:
             unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
@@ -1226,6 +1243,27 @@ class AIOrchestrator:
             retrieval_result=approved_result,
         )
         return fallback, approved_result, evidence_decision
+
+    def _is_cross_market_local_evidence(
+        self,
+        scrubbed_input: str,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+    ) -> bool:
+        """Return true when the message asks about a market this session's own evidence cannot cover.
+
+        Only the raw current-turn message is checked, not the history-expanded
+        retrieval query - a topic-shift follow-up query merges in the prior
+        question's own market (e.g. "delivery cost for Belgium? What about
+        Canada?"), which would make this session's own market look mentioned
+        too and mask the mismatch.
+        """
+        mentioned_markets = {code.upper() for code in find_market_mentions(scrubbed_input)}
+        if not mentioned_markets or body.country.upper() in mentioned_markets:
+            return False
+        if not retrieval_result.documents:
+            return False
+        return retrieval_result.documents[0].metadata.get("access_scope") != "global"
 
     def _directory_clarification_response(
         self,
