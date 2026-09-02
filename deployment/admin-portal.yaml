@@ -170,7 +170,16 @@ Resources:
           EmailMessage: "<p>You have been invited to AskVera Operations.</p><p>Username: <strong>{username}</strong></p><p>Temporary password:</p><p><strong>{####}</strong></p><p>Sign in and choose a new password when prompted.</p>"
       AutoVerifiedAttributes:
         - email
-      MfaConfiguration: "ON"
+      # Reverted from "ON" (2026-08 hardening pass) back to OPTIONAL: new
+      # administrators were unable to complete sign-in - Cognito's hosted UI
+      # forces authenticator-app (TOTP) enrollment before it will ever
+      # return control to the app, and that step was blocking onboarding.
+      # TOTP stays available (EnabledMfas unchanged) for anyone who wants it,
+      # it just isn't forced. Notify existing administrators of this change
+      # before applying it, per docs/security-hardening-rollout.md's
+      # guidance that Cognito MFA policy changes are a deliberate identity
+      # decision, not a routine config flip.
+      MfaConfiguration: OPTIONAL
       EnabledMfas:
         - SOFTWARE_TOKEN_MFA
       Policies:
