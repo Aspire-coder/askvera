@@ -167,9 +167,27 @@
 .gw-legal-item a,
 .gw-legal-link-button {
   border-color: var(--gw-reference-line);
-  background: var(--gw-reference-panel);
   color: var(--gw-reference-ink);
   box-shadow: none;
+}
+
+.gw-legal-item a,
+.gw-legal-link-button {
+  background: var(--gw-reference-panel);
+}
+
+.gw-field select {
+  /* This theme's flat background color previously replaced the base
+     stylesheet's chevron entirely (a CSS shorthand `background` wipes out
+     any background-image set elsewhere), leaving the select with no visual
+     cue that it's a dropdown - reported as confusing. Reinstated with an
+     explicit chevron here instead of relying on the base rule. */
+  background-color: var(--gw-reference-panel);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23686a65' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 10px 6px;
+  padding-right: 34px;
 }
 
 .gw-field select:hover,
