@@ -57,11 +57,13 @@ SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 MAX_SECTION_CHARS = 8_000
 # vnext (a smaller-chunk retrieval experiment) was retired 2026-09-01 after
 # the retrieval-comparison work found no evidence it improved answers and it
-# had a real ongoing OpenSearch cost. Kept as a distinct profile name (rather
-# than collapsing to a single constant) since existing production records
-# carry chunk_profile="current" in their metadata already.
-VNEXT_MAX_SECTION_CHARS = 2_000
-VNEXT_SECTION_OVERLAP_CHARS = 200
+# had a real ongoing OpenSearch cost. "vnext" is kept as a recognized
+# chunk_profile *value* (scripts/ingestion/load_policy_sections_to_opensearch.py
+# still checks for it) since existing production records carry that value in
+# their stored metadata - but every extractor-side code path that could
+# produce a new vnext-profiled chunk has been removed, since CHUNK_PROFILES
+# only registers "current" and extract_sections() rejects any other profile
+# before reaching them.
 # The generic (non-policy) chunker overlaps split chunks by 450 chars, 10%
 # of its 4,500-char max, specifically so a sentence/clause straddling a
 # split boundary is still retrievable from at least one side. Policy
@@ -304,7 +306,7 @@ def extract_sections(
         chunk_profile=chunk_profile,
     )
     expanded = [*front_matter, *outlines, *_expand_structured_chunks(sections)]
-    return _ensure_unique_section_ids(_bound_vnext_chunks(expanded))
+    return _ensure_unique_section_ids(expanded)
 
 
 def _front_matter_chunks(
@@ -361,90 +363,24 @@ def _outline_chunks(
         if not _looks_like_contents_page(text):
             continue
 
-        if chunk_profile == "current" or len(text) <= VNEXT_MAX_SECTION_CHARS:
-            page_parts = [text]
-        else:
-            page_parts = _split_vnext_text(text)
-
-        for part_number, content in enumerate(page_parts, start=1):
-            base_id = f"outline-page-{page_number}"
-            is_split = len(page_parts) > 1
-            chunks.append(
-                PolicySection(
-                    source_file=source_file,
-                    country=country,
-                    language=language,
-                    section_id=f"{base_id}-part-{part_number}" if is_split else base_id,
-                    title="Policy document outline",
-                    start_page=page_number,
-                    end_page=page_number,
-                    content=content,
-                    document_version=document_version,
-                    effective_date=effective_date,
-                    status=status,
-                    chunk_type="document_outline",
-                    parent_section_id=base_id if is_split else "",
-                    chunk_profile=chunk_profile,
-                )
-            )
-    return chunks
-
-
-def _split_vnext_text(content: str) -> list[str]:
-    """Split auxiliary policy text with the vNext structural boundaries."""
-    chunks: list[str] = []
-    start = 0
-    while start < len(content):
-        end = min(start + VNEXT_MAX_SECTION_CHARS, len(content))
-        if end < len(content):
-            boundaries = [
-                (content.rfind("\n\n", start, end), 0),
-                (content.rfind("\n", start, end), 0),
-                (content.rfind(". ", start, end), 2),
-            ]
-            boundary, suffix_length = max(boundaries)
-            if boundary > start + VNEXT_MAX_SECTION_CHARS // 2:
-                end = boundary + suffix_length
-
-        chunk = content[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= len(content):
-            break
-
-        start = max(end - VNEXT_SECTION_OVERLAP_CHARS, start + 1)
-        while start < end and not content[start].isspace():
-            start += 1
-        while start < len(content) and content[start].isspace():
-            start += 1
-    return chunks
-
-
-def _bound_vnext_chunks(sections: list[PolicySection]) -> list[PolicySection]:
-    """Apply the vNext size ceiling after contextual child chunks are added."""
-    bounded: list[PolicySection] = []
-    for section in sections:
-        if (
-            section.chunk_profile != "vnext"
-            or len(section.content) <= VNEXT_MAX_SECTION_CHARS
-        ):
-            bounded.append(section)
-            continue
-
-        parent_section_id = section.parent_section_id or section.section_id
-        bounded.extend(
-            replace(
-                section,
-                section_id=f"{section.section_id}-part-{part_number}",
-                content=content,
-                parent_section_id=parent_section_id,
-            )
-            for part_number, content in enumerate(
-                _split_vnext_text(section.content),
-                start=1,
+        chunks.append(
+            PolicySection(
+                source_file=source_file,
+                country=country,
+                language=language,
+                section_id=f"outline-page-{page_number}",
+                title="Policy document outline",
+                start_page=page_number,
+                end_page=page_number,
+                content=text,
+                document_version=document_version,
+                effective_date=effective_date,
+                status=status,
+                chunk_type="document_outline",
+                chunk_profile=chunk_profile,
             )
         )
-    return bounded
+    return chunks
 
 
 def _ensure_unique_section_ids(sections: list[PolicySection]) -> list[PolicySection]:
