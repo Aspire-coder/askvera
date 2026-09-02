@@ -105,6 +105,21 @@ DIRECTORY_DETAIL_TERMS = re.compile(
     r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
     re.IGNORECASE,
 )
+# Maps a directory clarification card's id to the wording that names that
+# specific field unambiguously. "office"/"contact" are deliberately absent -
+# both are too generic to pin down a single field on their own, so a message
+# containing only those still counts as ambiguous. Used to detect when the
+# user already named exactly one field, so _directory_clarification_response
+# doesn't ask them to choose again from a card that duplicates what they
+# already said (TRB-19189-follow-up, reported after deploy).
+DIRECTORY_FIELD_TERMS: dict[str, re.Pattern[str]] = {
+    "directory-telephone": re.compile(r"\b(telephone|phone)\b", re.IGNORECASE),
+    "directory-hours": re.compile(r"\b(business\s+hours?|office\s+hours?|hours)\b", re.IGNORECASE),
+    "directory-email": re.compile(r"\bemail\b", re.IGNORECASE),
+    "directory-address": re.compile(r"\baddress\b", re.IGNORECASE),
+    "directory-website": re.compile(r"\bwebsite\b", re.IGNORECASE),
+    "directory-sponsoring": re.compile(r"\bsponsor\w*\b", re.IGNORECASE),
+}
 # Deliberately directory-shaped so the retrieval planner's existing global-
 # directory intent classification picks it up; carries no country name so it
 # falls back to the request's own selected country.
@@ -1230,6 +1245,16 @@ class AIOrchestrator:
         if not metadata.get("global_documents_searched"):
             return None
         if not metadata.get("candidate_count") or not DIRECTORY_DETAIL_TERMS.search(body.message or ""):
+            return None
+        named_fields = {
+            field_id for field_id, pattern in DIRECTORY_FIELD_TERMS.items() if pattern.search(body.message or "")
+        }
+        if len(named_fields) == 1:
+            # The user already said which single field they want (e.g. "do you
+            # have a telephone number?") - asking them to choose it again from
+            # a list that includes what they just said isn't a real
+            # clarification. Fall through to the normal insufficient-evidence
+            # path instead.
             return None
         answer = (
             "I found approved directory information, but I need one more detail to answer accurately. "
