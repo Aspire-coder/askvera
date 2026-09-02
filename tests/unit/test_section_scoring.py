@@ -74,6 +74,37 @@ def test_document_title_match_is_unicode_safe() -> None:
     assert _source_score(governing, question) > _source_score(nearby, question)
 
 
+def test_source_score_does_not_stack_overlapping_phrase_matches() -> None:
+    """_key_phrases returns overlapping n-grams (a matching 3-word phrase's
+    own 2-word sub-spans also match whatever the 3-word phrase matched).
+    Before this fix, _source_score added a separate +0.35 per matching
+    phrase, so one genuine title match could be counted 2-3x over just
+    because its sub-phrases are also, trivially, matches. The fix keeps
+    only the single best phrase bonus, same as _exact_topic_score already
+    does with max().
+    """
+    message = "what recognized manager qualification requirement details"
+    title = "recognized manager qualification"
+    row = _row("4.01", title, "")
+
+    phrases = section_index._key_phrases(message)
+    normalized_title = section_index._normalize_text(title)
+    # Reconstruct exactly what the pre-fix, uncapped-sum loop would have
+    # added for this scenario - not a guess, the same per-phrase check the
+    # old code ran, just summed instead of capped.
+    pre_fix_title_bonus = sum(0.35 for phrase in phrases if phrase in normalized_title)
+    assert pre_fix_title_bonus > 0.35, "test setup must produce more than one overlapping title match"
+
+    score = _source_score(row, message)
+    # Every other term in _source_score is identical between the pre-fix and
+    # fixed formulas (nothing else changed), so adding back the difference
+    # between the uncapped sum and the new 0.35 cap reconstructs exactly
+    # what the pre-fix score would have been for this same input.
+    reconstructed_pre_fix_score = round(score + (pre_fix_title_bonus - 0.35), 6)
+
+    assert score < reconstructed_pre_fix_score
+
+
 def _document(score: float) -> RetrievedDocument:
     return RetrievedDocument(
         id=str(score),

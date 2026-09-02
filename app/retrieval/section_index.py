@@ -357,11 +357,23 @@ def _source_score(row: dict[str, Any], message: str) -> float:
     score += _fragment_quality_score(row, message)
     score += _purchase_channel_score(message, title, content)
     score += _return_policy_score(message, title, content)
+    # _key_phrases returns overlapping n-grams (4-word, then its own 3-word
+    # and 2-word sub-spans) from the same question. A title that matches the
+    # 4-word phrase necessarily also matches its sub-phrases, so summing a
+    # bonus per matching phrase let one genuine match count 2-3x over -
+    # disproportionately rewarding a title that closely restates the
+    # question's wording versus one that's an equally good topical match
+    # phrased differently. Keep only the single best bonus, same as
+    # _exact_topic_score's max()-based phrase scoring above.
+    best_phrase_bonus = 0.0
+    normalized_title = _normalize_text(title)
+    normalized_content_prefix = _normalize_text(content[:800])
     for phrase in phrases:
-        if phrase in _normalize_text(title):
-            score += 0.35
-        elif phrase in _normalize_text(content[:800]):
-            score += 0.12
+        if phrase in normalized_title:
+            best_phrase_bonus = max(best_phrase_bonus, 0.35)
+        elif phrase in normalized_content_prefix:
+            best_phrase_bonus = max(best_phrase_bonus, 0.12)
+    score += best_phrase_bonus
     return round(score, 6)
 
 
