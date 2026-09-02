@@ -1,7 +1,10 @@
-import AskVera from "../src/sdk/index";
-import "../src/generic-widget/generic-widget.css";
-import "../src/generic-widget/reference-polish.css";
+// Imported before AskVera so its :root custom properties (shared names
+// with the widget's own .gw-root theme tokens, e.g. --gw-text-caption-size)
+// lose the cascade tie instead of silently overriding the widget's actual
+// values - this was making the demo render text ~1px larger than
+// production, which had been throwing off pixel-level layout checks here.
 import "../src/styles/index.css";
+import AskVera from "../src/sdk/index";
 
 const params = new URLSearchParams(window.location.search);
 const apiUrl = params.get("api") || "https://api.vera-api.xyz";

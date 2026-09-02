@@ -25,12 +25,12 @@
   --gw-field-bg: #f0eee9;
   --gw-field-text: var(--gw-reference-ink);
   --gw-focus-ring: rgba(232, 183, 0, 0.28);
-  --gw-text-title-size: 16px;
-  --gw-text-heading-size: 15px;
-  --gw-text-body-size: 14px;
+  --gw-text-title-size: 15px;
+  --gw-text-heading-size: 14px;
+  --gw-text-body-size: 13px;
   --gw-text-chat-size: 15px;
-  --gw-text-caption-size: 12px;
-  --gw-text-label-size: 11px;
+  --gw-text-caption-size: 11px;
+  --gw-text-label-size: 10px;
   --gw-line-body: 1.52;
   --gw-line-relaxed: 1.58;
   --gw-weight-regular: 400;
@@ -91,7 +91,17 @@
   line-height: 1.25;
 }
 
-.gw-subtitle,
+.gw-subtitle {
+  /* Hardcoded independently of --gw-text-caption-size (which this rule was
+     silently overriding at 12px regardless of the token) - sized down
+     specifically so "Enterprise Knowledge Assistant" fits on one line at
+     the current panel width instead of wrapping. */
+  color: var(--gw-reference-muted);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
 .gw-status {
   color: var(--gw-reference-muted);
   font-size: 12px;
@@ -167,9 +177,27 @@
 .gw-legal-item a,
 .gw-legal-link-button {
   border-color: var(--gw-reference-line);
-  background: var(--gw-reference-panel);
   color: var(--gw-reference-ink);
   box-shadow: none;
+}
+
+.gw-legal-item a,
+.gw-legal-link-button {
+  background: var(--gw-reference-panel);
+}
+
+.gw-field select {
+  /* This theme's flat background color previously replaced the base
+     stylesheet's chevron entirely (a CSS shorthand `background` wipes out
+     any background-image set elsewhere), leaving the select with no visual
+     cue that it's a dropdown - reported as confusing. Reinstated with an
+     explicit chevron here instead of relying on the base rule. */
+  background-color: var(--gw-reference-panel);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23686a65' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 10px 6px;
+  padding-right: 34px;
 }
 
 .gw-field select:hover,

@@ -39,12 +39,18 @@ export const detectInitialLocale = (
   const [browserLanguageCode, browserCountryCode] = browserLanguage.split("-");
   // An explicit configuration or saved choice wins. Otherwise use the
   // browser's country hint only when it maps to a supported market. Never
-  // silently scope an unknown visitor to the first configured market.
+  // silently scope an unknown visitor to the first configured market - and
+  // never pre-select a language on its own when the market couldn't be
+  // determined either, since that leaves a confusing half-filled selector
+  // (a language already chosen, but market still saying "Select a market").
   const browserMarket = countries.find((option) => option.code === browserCountryCode?.toUpperCase());
   const country = countries.find((option) => option.code === defaultCountryCode) || browserMarket;
-  const languageOptions = filterLanguagesByCountry(languages, country?.code, countries);
+  if (!country) {
+    return { country: undefined, language: undefined };
+  }
+  const languageOptions = filterLanguagesByCountry(languages, country.code, countries);
   const languageCode = defaultLanguageCode || browserLanguageCode || languageOptions[0]?.code || "";
-  const language = languageOptions.find((option) => option.code === languageCode) || languageOptions[0] || languages[0];
+  const language = languageOptions.find((option) => option.code === languageCode) || languageOptions[0];
 
   return { country, language };
 };
