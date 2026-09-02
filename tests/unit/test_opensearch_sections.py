@@ -500,24 +500,37 @@ def test_finalize_eligible_rows_still_applies_the_score_floor_before_diversity(m
 def test_selector_decision_distinguishes_no_evidence_from_invalid_output() -> None:
     assert _parse_selector_decision(
         '{"relevant_evidence":false,"selected_ranks":[],"reason":"not covered"}'
-    ) == ([], False, None)
+    ) == ([], False, None, None)
     assert _parse_selector_decision("not json") is None
 
 
 def test_selector_decision_parses_and_clamps_top_rank_confidence() -> None:
     assert _parse_selector_decision(
         '{"selected_ranks":[2],"top_rank_confidence":0.92,"reason":"direct clause"}'
-    ) == ([2], None, 0.92)
+    ) == ([2], None, 0.92, None)
     # Out-of-range and malformed values are clamped/ignored rather than trusted verbatim.
     assert _parse_selector_decision(
         '{"selected_ranks":[2],"top_rank_confidence":1.4,"reason":"x"}'
-    ) == ([2], None, 1.0)
+    ) == ([2], None, 1.0, None)
     assert _parse_selector_decision(
         '{"selected_ranks":[2],"top_rank_confidence":"not a number","reason":"x"}'
-    ) == ([2], None, None)
+    ) == ([2], None, None, None)
     assert _parse_selector_decision(
         '{"selected_ranks":[2],"reason":"no confidence field at all"}'
-    ) == ([2], None, None)
+    ) == ([2], None, None, None)
+
+
+def test_selector_decision_parses_directly_answers_top_rank() -> None:
+    assert _parse_selector_decision(
+        '{"selected_ranks":[2],"directly_answers_top_rank":true,"top_rank_confidence":0.9,"reason":"x"}'
+    ) == ([2], None, 0.9, True)
+    assert _parse_selector_decision(
+        '{"selected_ranks":[2],"directly_answers_top_rank":false,"top_rank_confidence":0.75,"reason":"x"}'
+    ) == ([2], None, 0.75, False)
+    # A malformed value (not a real bool) is treated as unknown, not trusted as true.
+    assert _parse_selector_decision(
+        '{"selected_ranks":[2],"directly_answers_top_rank":"yes","top_rank_confidence":0.9,"reason":"x"}'
+    ) == ([2], None, 0.9, None)
 
 
 def test_hardened_selector_can_reject_unrelated_candidates(monkeypatch) -> None:
@@ -608,7 +621,8 @@ def test_selector_confidence_marks_only_the_top_ranked_pick(monkeypatch) -> None
                         "content": [
                             {
                                 "text": (
-                                    '{"selected_ranks":[2,1],"top_rank_confidence":0.9,'
+                                    '{"selected_ranks":[2,1],"directly_answers_top_rank":true,'
+                                    '"top_rank_confidence":0.9,'
                                     '"reason":"direct clause, then supporting context"}'
                                 )
                             }
@@ -633,6 +647,42 @@ def test_selector_confidence_marks_only_the_top_ranked_pick(monkeypatch) -> None
     assert selected[0][0]["id"] == "direct"
     assert selected[0][0]["evidence_selector_confidence"] == 0.9
     assert "evidence_selector_confidence" not in selected[1][0]
+
+
+def test_selector_confidence_is_withheld_when_pick_is_not_a_direct_answer(monkeypatch) -> None:
+    """A high top_rank_confidence alone must not rescue a candidate the model
+    itself flagged as only related, not a direct answer (a plain 0-1 rating
+    was not a reliable enough signal on its own - it rated a topically
+    related but wrong clause just as confidently as a correct one)."""
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "text": (
+                                    '{"selected_ranks":[1],"directly_answers_top_rank":false,'
+                                    '"top_rank_confidence":0.75,"reason":"related but different scenario"}'
+                                )
+                            }
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [({"id": "related", "metadata": {}, "content": "Related but different scenario."}, 1.5)]
+
+    selected = OpenSearchSectionProvider()._select_evidence_rows("Question", rows, "cid")
+
+    assert selected[0][0]["evidence_selector_selected"] is True
+    assert "evidence_selector_confidence" not in selected[0][0]
 
 
 def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None:
