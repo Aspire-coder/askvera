@@ -1,0 +1,35 @@
+{
+  "version": "2026-09-02",
+  "description": "Approved evidence-phrase scoring rules for section retrieval, consumed by app/retrieval/section_index.py and only active while OPENSEARCH_RETRIEVAL_HARDENING_ENABLED is on. This file is data, not code; expand it as new reviewed retrieval-quality gaps are found here, never by adding literal phrases back into section_index.py.",
+  "purchase_channel": {
+    "intent_any_terms": ["buy", "purchase", "purchasing", "shop"],
+    "intent_all_terms": ["where", "order"],
+    "evidence_any_phrases": [
+      "selling products online",
+      "personal forever web shop",
+      "approved fbo website",
+      "online shop",
+      "purchase products online"
+    ],
+    "score": 1.8
+  },
+  "return_policy": {
+    "intent_any_terms": ["return", "returns", "refund", "refunds"],
+    "buyback_window": {
+      "intent_any_terms": ["unopened", "window", "unsold"],
+      "intent_all_terms": ["buy", "back"],
+      "evidence_any_phrases": ["buy back", "unsold", "salable", "saleable"],
+      "score": 1.8
+    },
+    "general": {
+      "evidence_any_phrases": [
+        "product return",
+        "return of the product",
+        "timely return",
+        "100 product satisfaction",
+        "proof of purchase"
+      ],
+      "score": 1.8
+    }
+  }
+}
