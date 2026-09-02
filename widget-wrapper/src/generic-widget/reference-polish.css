@@ -91,7 +91,17 @@
   line-height: 1.25;
 }
 
-.gw-subtitle,
+.gw-subtitle {
+  /* Hardcoded independently of --gw-text-caption-size (which this rule was
+     silently overriding at 12px regardless of the token) - sized down
+     specifically so "Enterprise Knowledge Assistant" fits on one line at
+     the current panel width instead of wrapping. */
+  color: var(--gw-reference-muted);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
 .gw-status {
   color: var(--gw-reference-muted);
   font-size: 12px;

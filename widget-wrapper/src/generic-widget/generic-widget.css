@@ -147,10 +147,13 @@
   font-size: var(--gw-text-caption-size);
   font-weight: var(--gw-weight-medium);
   line-height: var(--gw-line-tight);
-  /* Wraps instead of truncating so a narrower panel doesn't silently cut
-     off "Enterprise Knowledge Assistant" - .gw-header's min-height (not a
-     fixed height) already accommodates a second line. */
-  overflow-wrap: break-word;
+  /* reference-polish.css sizes this specifically to fit "Enterprise
+     Knowledge Assistant" on one line at the current panel width. Ellipsis
+     stays only as a graceful fallback (a longer subtitle string, a
+     narrower host viewport) - it should not trigger in the normal case. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gw-status {
