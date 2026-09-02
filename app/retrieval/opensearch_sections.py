@@ -557,7 +557,23 @@ def _parse_selector_ranks(text: str) -> list[int]:
     return parsed
 
 
-def _parse_selector_decision(text: str) -> tuple[list[int], bool | None] | None:
+def _parse_selector_confidence(value: object) -> float | None:
+    """Clamp the selector's self-reported top-rank confidence to [0, 1].
+
+    Missing or unparseable values return None so callers fall back to the
+    lexical confidence calculation, rather than treating a malformed field
+    as zero confidence.
+    """
+    try:
+        confidence = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if confidence != confidence:  # NaN never equals itself
+        return None
+    return max(0.0, min(confidence, 1.0))
+
+
+def _parse_selector_decision(text: str) -> tuple[list[int], bool | None, float | None] | None:
     """Parse a selector decision while distinguishing rejection from failure."""
     stripped = text.strip()
     try:
@@ -576,7 +592,8 @@ def _parse_selector_decision(text: str) -> tuple[list[int], bool | None] | None:
     relevant = payload.get("relevant_evidence")
     if relevant is not True and relevant is not False and relevant is not None:
         return None
-    return _parse_selector_ranks(json.dumps(payload)), relevant
+    confidence = _parse_selector_confidence(payload.get("top_rank_confidence"))
+    return _parse_selector_ranks(json.dumps(payload)), relevant, confidence
 
 
 class OpenSearchSectionProvider:
@@ -713,15 +730,29 @@ class OpenSearchSectionProvider:
             self._document_from_row(row, score) for row, score in eligible_rows
         ][: settings.OPENSEARCH_RESULT_COUNT]
         selector_applied = bool(rows and rows[0][0].get("evidence_selector_selected"))
+        selector_confidence = rows[0][0].get("evidence_selector_confidence") if selector_applied else None
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
         strong_local_match = bool(
             selector_applied
             and max_local_relevance >= settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
         )
+        lexical_confidence = _confidence_from_documents(documents)
+        # The evidence selector reads the actual candidate text and the
+        # question together, so when it reports how confident it is in its
+        # own top pick, that semantic judgment can see things raw lexical
+        # scoring can't (a paraphrase with almost no shared vocabulary with
+        # a correct, narrowly-worded policy clause). Never let it lower the
+        # lexical score - only rescue a correct pick that scored low on
+        # lexical grounds alone.
+        confidence = (
+            max(lexical_confidence, float(selector_confidence))
+            if selector_confidence is not None
+            else lexical_confidence
+        )
         result = RetrievalResult(
             documents=documents,
             citations=[document.to_source() for document in documents],
-            confidence=_confidence_from_documents(documents),
+            confidence=confidence,
             metadata={
                 "provider": "opensearch_section",
                 "candidate_count": len(raw_rows),
@@ -737,6 +768,8 @@ class OpenSearchSectionProvider:
                 "explicit_section_reference": explicit_section_id,
                 "evidence_selector_rejected": selector_rejected,
                 "evidence_selector_applied": selector_applied,
+                "evidence_selector_confidence": selector_confidence,
+                "lexical_confidence": lexical_confidence,
                 "max_local_relevance": round(max_local_relevance, 6),
                 "strong_local_match": strong_local_match,
                 "candidate_sources": [
@@ -920,6 +953,14 @@ class OpenSearchSectionProvider:
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
             "When a return question says a product is unopened, unused, unsold, or salable and asks for a time window, "
             "prefer the FBO buy-back or unsold-salable-product clause over a general Retail/Preferred Customer satisfaction clause. "
+            "List selected_ranks in order of relevance, most relevant first. "
+            "Also rate top_rank_confidence from 0.0 to 1.0: how directly and completely the FIRST candidate in "
+            "selected_ranks answers the user's question on its own, independent of how differently it is worded "
+            "from the question - a paraphrased question and a formally-worded candidate can still deserve a high "
+            "rating if the candidate's actual content states the fact, rule, or amount asked for. Base this on "
+            "the candidate's content, not on how many of the question's words it shares. Use 0.85-1.0 when it "
+            "states the exact answer. Use 0.5-0.7 when it is clearly on-topic but only partially answers or needs "
+            "minor inference. Use below 0.4 when it is only loosely related or you are guessing. "
         )
         if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
             system_prompt += (
@@ -933,9 +974,9 @@ class OpenSearchSectionProvider:
             )
         system_prompt += "Return only JSON."
         response_example = (
-            '{"relevant_evidence":true,"selected_ranks":[1,2,3],"reason":"short reason"}'
+            '{"relevant_evidence":true,"selected_ranks":[1,2,3],"top_rank_confidence":0.9,"reason":"short reason"}'
             if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
-            else '{"selected_ranks":[1,2,3],"reason":"short reason"}'
+            else '{"selected_ranks":[1,2,3],"top_rank_confidence":0.9,"reason":"short reason"}'
         )
         user_prompt = (
             f"User question:\n{message}\n\n"
@@ -959,7 +1000,7 @@ class OpenSearchSectionProvider:
         if decision is None:
             LOGGER.warning("opensearch_evidence_selector_invalid", correlation_id=correlation_id)
             return rows
-        ranks, relevant_evidence = decision
+        ranks, relevant_evidence, top_rank_confidence = decision
         if (
             settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
             and relevant_evidence is False
@@ -974,12 +1015,17 @@ class OpenSearchSectionProvider:
 
         selected: list[tuple[dict[str, Any], float]] = []
         selected_ids: set[str] = set()
-        for rank in ranks:
+        for position, rank in enumerate(ranks):
             if 1 <= rank <= len(candidates):
                 candidate = candidates[rank - 1]
                 row_id = str(candidate[0].get("id") or "")
                 if row_id not in selected_ids:
                     candidate[0]["evidence_selector_selected"] = True
+                    # Only the model's own first-ranked pick carries a
+                    # confidence rating - it describes that specific
+                    # candidate, not the whole selected set.
+                    if position == 0 and top_rank_confidence is not None:
+                        candidate[0]["evidence_selector_confidence"] = top_rank_confidence
                     selected.append(candidate)
                     selected_ids.add(row_id)
 
@@ -996,6 +1042,7 @@ class OpenSearchSectionProvider:
             correlation_id=correlation_id,
             selected_count=len(selected),
             candidate_count=len(candidates),
+            top_rank_confidence=top_rank_confidence,
         )
         return [*selected, *remaining]
 
