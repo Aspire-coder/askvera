@@ -573,7 +573,9 @@ def _parse_selector_confidence(value: object) -> float | None:
     return max(0.0, min(confidence, 1.0))
 
 
-def _parse_selector_decision(text: str) -> tuple[list[int], bool | None, float | None] | None:
+def _parse_selector_decision(
+    text: str,
+) -> tuple[list[int], bool | None, float | None, bool | None] | None:
     """Parse a selector decision while distinguishing rejection from failure."""
     stripped = text.strip()
     try:
@@ -593,7 +595,10 @@ def _parse_selector_decision(text: str) -> tuple[list[int], bool | None, float |
     if relevant is not True and relevant is not False and relevant is not None:
         return None
     confidence = _parse_selector_confidence(payload.get("top_rank_confidence"))
-    return _parse_selector_ranks(json.dumps(payload)), relevant, confidence
+    directly_answers = payload.get("directly_answers_top_rank")
+    if directly_answers is not True and directly_answers is not False:
+        directly_answers = None
+    return _parse_selector_ranks(json.dumps(payload)), relevant, confidence, directly_answers
 
 
 class OpenSearchSectionProvider:
@@ -954,13 +959,23 @@ class OpenSearchSectionProvider:
             "When a return question says a product is unopened, unused, unsold, or salable and asks for a time window, "
             "prefer the FBO buy-back or unsold-salable-product clause over a general Retail/Preferred Customer satisfaction clause. "
             "List selected_ranks in order of relevance, most relevant first. "
+            "Also set directly_answers_top_rank to true only if the FIRST candidate in selected_ranks explicitly "
+            "states the specific fact, rule, amount, or mechanism the question asks about - not merely the same "
+            "general topic. Check the specific scenario, not just the subject: a candidate about a different "
+            "trigger, category, or type of action than the one asked about is NOT a direct answer, even if it "
+            "shares the topic and vocabulary. For example, a clause about a member voluntarily choosing to leave "
+            "does not directly answer a question about automatically losing status through inactivity; a clause "
+            "about disputing a bonus or discount calculation does not directly answer a question about a damaged "
+            "or incorrect physical order. When in doubt, set this to false - it is safer to say a candidate is "
+            "only related than to claim it directly answers something it does not. "
             "Also rate top_rank_confidence from 0.0 to 1.0: how directly and completely the FIRST candidate in "
             "selected_ranks answers the user's question on its own, independent of how differently it is worded "
             "from the question - a paraphrased question and a formally-worded candidate can still deserve a high "
             "rating if the candidate's actual content states the fact, rule, or amount asked for. Base this on "
-            "the candidate's content, not on how many of the question's words it shares. Use 0.85-1.0 when it "
-            "states the exact answer. Use 0.5-0.7 when it is clearly on-topic but only partially answers or needs "
-            "minor inference. Use below 0.4 when it is only loosely related or you are guessing. "
+            "the candidate's content, not on how many of the question's words it shares. Use 0.85-1.0 only when "
+            "directly_answers_top_rank is also true. Use 0.5-0.7 when it is clearly on-topic but only partially "
+            "answers, needs minor inference, or addresses a related-but-different scenario. Use below 0.4 when it "
+            "is only loosely related or you are guessing. "
         )
         if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
             system_prompt += (
@@ -974,9 +989,10 @@ class OpenSearchSectionProvider:
             )
         system_prompt += "Return only JSON."
         response_example = (
-            '{"relevant_evidence":true,"selected_ranks":[1,2,3],"top_rank_confidence":0.9,"reason":"short reason"}'
+            '{"relevant_evidence":true,"selected_ranks":[1,2,3],"directly_answers_top_rank":true,'
+            '"top_rank_confidence":0.9,"reason":"short reason"}'
             if settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
-            else '{"selected_ranks":[1,2,3],"top_rank_confidence":0.9,"reason":"short reason"}'
+            else '{"selected_ranks":[1,2,3],"directly_answers_top_rank":true,"top_rank_confidence":0.9,"reason":"short reason"}'
         )
         user_prompt = (
             f"User question:\n{message}\n\n"
@@ -1000,7 +1016,7 @@ class OpenSearchSectionProvider:
         if decision is None:
             LOGGER.warning("opensearch_evidence_selector_invalid", correlation_id=correlation_id)
             return rows
-        ranks, relevant_evidence, top_rank_confidence = decision
+        ranks, relevant_evidence, top_rank_confidence, directly_answers_top_rank = decision
         if (
             settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
             and relevant_evidence is False
@@ -1023,8 +1039,15 @@ class OpenSearchSectionProvider:
                     candidate[0]["evidence_selector_selected"] = True
                     # Only the model's own first-ranked pick carries a
                     # confidence rating - it describes that specific
-                    # candidate, not the whole selected set.
-                    if position == 0 and top_rank_confidence is not None:
+                    # candidate, not the whole selected set. The rating is
+                    # only trusted to rescue a low lexical score when the
+                    # model also explicitly confirmed this candidate
+                    # directly answers the question, not merely that it's
+                    # topically related - a plain 0-1 rating alone was not
+                    # a reliable enough signal (it rated a voluntary-
+                    # termination clause 0.75 confident for a question
+                    # about automatic loss from inactivity).
+                    if position == 0 and top_rank_confidence is not None and directly_answers_top_rank is True:
                         candidate[0]["evidence_selector_confidence"] = top_rank_confidence
                     selected.append(candidate)
                     selected_ids.add(row_id)
@@ -1043,6 +1066,7 @@ class OpenSearchSectionProvider:
             selected_count=len(selected),
             candidate_count=len(candidates),
             top_rank_confidence=top_rank_confidence,
+            directly_answers_top_rank=directly_answers_top_rank,
         )
         return [*selected, *remaining]
 
