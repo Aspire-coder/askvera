@@ -195,6 +195,13 @@ ADMIN_INGESTION_RETIRED_GENERATION_RETENTION_DAYS = _env_int(
     "ADMIN_INGESTION_RETIRED_GENERATION_RETENTION_DAYS",
     30,
 )
+# A document activating with very few chunks can be a genuinely small
+# document, or a silent extraction/chunking shortfall with no error raised
+# (the office_directory routing gap found and fixed 2026-09 collapsed a
+# large multi-record PDF to a handful of generic chunks this way). Flag any
+# active document below this count for admin review rather than assume it's
+# fine - see services/operations_status.py's low-coverage check.
+ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD = _env_int("ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD", 2)
 SECURITY_PROFILE = _env_str("SECURITY_PROFILE", "standard").lower()
 # Widget authentication. Keep disabled by default for local/dev until production
 # registry values and JWT secret are configured.

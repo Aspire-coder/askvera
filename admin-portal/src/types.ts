@@ -23,7 +23,7 @@ export type OperationsStatus = {
   status: "healthy" | "degraded";
   checked_at: string;
   services: Record<string, { status: string; detail: string }>;
-  knowledge_sync: { status: string; active_jobs: number; failed_jobs: number; last_change_at: string; expiring_documents: number };
+  knowledge_sync: { status: string; active_jobs: number; failed_jobs: number; last_change_at: string; expiring_documents: number; low_coverage_documents: number };
   assigned_actions: Array<{ label: string; owner: string; reason: string }>;
   versions: Record<string, string>;
   metrics: { cache_hit_ratio: number; retrieval_failure_rate: number; validation_failures: number; audit_queue_depth: number };

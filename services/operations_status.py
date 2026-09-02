@@ -31,6 +31,32 @@ def _check_cache() -> dict[str, str]:
         return {"status": "unhealthy", "detail": "Shared response cache is not reachable."}
 
 
+def _low_coverage_documents(limit: int = 50) -> list[dict[str, Any]]:
+    """Return active documents whose indexed chunk count looks suspiciously
+    low - a fleet-wide safety net that no ingestion coverage check
+    previously existed for. This does not replace validating a specific
+    document at upload time; it only flags what's already recorded in
+    knowledge_documents.section_count for admin follow-up.
+    """
+    try:
+        with get_engine().connect() as connection:
+            rows = connection.execute(
+                text(
+                    """
+                    SELECT filename, country, document_type, section_count, logical_document_id
+                    FROM knowledge_documents
+                    WHERE status = 'active' AND section_count < :threshold
+                    ORDER BY section_count ASC, filename ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"threshold": settings.ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD, "limit": limit},
+            ).mappings()
+            return [dict(row) for row in rows]
+    except Exception:
+        return []
+
+
 def operations_status() -> dict[str, Any]:
     """Return safe health, version and knowledge synchronization signals."""
     jobs = list_ingestion_jobs(200)
@@ -49,6 +75,7 @@ def operations_status() -> dict[str, Any]:
             expiry = None
         if expiry and expiry <= expiry_cutoff and str(job.get("status") or "") not in {"deleted", "superseded"}:
             expiring.append(job)
+    low_coverage = _low_coverage_documents()
     health = metrics_collector.health_summary()
     services = {
         "api": {"status": health.status, "detail": "Request pipeline and validators are reporting."},
@@ -73,6 +100,7 @@ def operations_status() -> dict[str, Any]:
             "failed_jobs": len(failed),
             "last_change_at": latest,
             "expiring_documents": len(expiring),
+            "low_coverage_documents": len(low_coverage),
         },
         "assigned_actions": [
             {
@@ -88,6 +116,13 @@ def operations_status() -> dict[str, Any]:
                 "reason": f"Expires {job.get('expiry_date')}",
             }
             for job in expiring[:5]
+        ] + [
+            {
+                "label": str(doc.get("filename") or "Document"),
+                "owner": "Unassigned",
+                "reason": f"Only {doc.get('section_count')} chunk(s) indexed - check extraction coverage",
+            }
+            for doc in low_coverage[:5]
         ],
         "versions": {
             "application": settings.APP_VERSION,
