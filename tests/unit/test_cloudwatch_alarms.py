@@ -54,7 +54,10 @@ def test_alarm_descriptions_include_operational_context() -> None:
 
     assert "Impact:" in definition.description
     assert "First step:" in definition.description
-    assert "Runbook:" in definition.description
+    # No real per-alarm runbook exists yet - the description must not claim
+    # one does (previously "Runbook: Sprint 9 runbook placeholder.").
+    assert "Runbook" not in definition.description
+    assert "placeholder" not in definition.description.lower()
 
 
 def test_alarm_definition_validation_requires_metric_or_query() -> None:

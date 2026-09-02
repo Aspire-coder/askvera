@@ -1,4 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { getWidgetCopy } from "../localization/widgetCopy";
+
+const englishCopy = getWidgetCopy("en");
 
 export type SupportFormLabels = {
   title: string;
@@ -7,6 +10,7 @@ export type SupportFormLabels = {
   email: string;
   question: string;
   submit: string;
+  submitting?: string;
   cancel: string;
   privacy: string;
   invalidEmail: string;
@@ -40,7 +44,7 @@ export function SupportRequestForm({
     try {
       await onSubmit({ firstName: firstName.trim(), email: email.trim(), question: question.trim() });
     } catch (submissionError) {
-      setError(submissionError instanceof Error ? submissionError.message : "The support request could not be sent.");
+      setError(submissionError instanceof Error ? submissionError.message : englishCopy.supportFailed);
       setSubmitting(false);
     }
   };
@@ -67,7 +71,7 @@ export function SupportRequestForm({
       {error ? <p className="gw-support-form-error" role="alert">{error}</p> : null}
       <div className="gw-support-form-actions">
         <button type="button" className="gw-secondary-button" onClick={onCancel} disabled={submitting}>{labels.cancel}</button>
-        <button type="submit" className="gw-primary-button" disabled={submitting}>{submitting ? "..." : labels.submit}</button>
+        <button type="submit" className="gw-primary-button" disabled={submitting}>{submitting ? labels.submitting || englishCopy.supportCreating : labels.submit}</button>
       </div>
     </form>
   );

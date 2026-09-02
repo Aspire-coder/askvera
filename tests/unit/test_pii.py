@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from config import settings
 import services.pii as pii_module
 from services.pii import (
     _pii_language_code,
@@ -252,10 +253,21 @@ def test_scrub_pii_checks_content_after_first_comprehend_window() -> None:
 
 def test_pii_circuit_opens_after_repeated_remote_failures() -> None:
     pii_module._record_pii_success()
-    for _ in range(pii_module._PII_CIRCUIT_FAILURE_LIMIT):
+    for _ in range(settings.PII_CIRCUIT_BREAKER_FAILURE_THRESHOLD):
         pii_module._record_pii_failure()
 
     assert pii_module._pii_circuit_is_open() is True
 
     pii_module._record_pii_success()
     assert pii_module._pii_circuit_is_open() is False
+
+
+def test_pii_circuit_threshold_is_read_from_settings(monkeypatch) -> None:
+    """The failure threshold must be a live settings read, not a fixed constant."""
+    pii_module._record_pii_success()
+    monkeypatch.setattr(settings, "PII_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 1)
+
+    pii_module._record_pii_failure()
+
+    assert pii_module._pii_circuit_is_open() is True
+    pii_module._record_pii_success()

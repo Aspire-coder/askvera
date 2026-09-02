@@ -21,8 +21,6 @@ from utils.logging import get_logger
 
 LOGGER = get_logger("services.pii")
 COMPREHEND_MAX_TEXT_CHARS = 4500
-_PII_CIRCUIT_FAILURE_LIMIT = 3
-_PII_CIRCUIT_COOLDOWN_SECONDS = 30
 _PII_CIRCUIT_LOCK = Lock()
 _pii_failure_count = 0
 _pii_open_until = 0.0
@@ -194,8 +192,8 @@ def _record_pii_failure() -> None:
     global _pii_failure_count, _pii_open_until
     with _PII_CIRCUIT_LOCK:
         _pii_failure_count += 1
-        if _pii_failure_count >= _PII_CIRCUIT_FAILURE_LIMIT:
-            _pii_open_until = monotonic() + _PII_CIRCUIT_COOLDOWN_SECONDS
+        if _pii_failure_count >= settings.PII_CIRCUIT_BREAKER_FAILURE_THRESHOLD:
+            _pii_open_until = monotonic() + settings.PII_CIRCUIT_BREAKER_RESET_SECONDS
 
 
 def scrub_pii(

@@ -491,7 +491,4 @@ def _environment() -> str:
 
 
 def _description(trigger: str, impact: str, first_step: str) -> str:
-    return (
-        f"{trigger} Impact: {impact} "
-        f"First step: {first_step} Runbook: Sprint 9 runbook placeholder."
-    )
+    return f"{trigger} Impact: {impact} First step: {first_step}"
