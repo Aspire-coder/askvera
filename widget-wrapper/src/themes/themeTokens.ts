@@ -29,7 +29,7 @@ export const lightTheme: WidgetThemeTokens = {
   bodyWeight: "400",
   fontScale: "1",
   zIndex: 2147483000,
-  panelWidth: "min(400px, calc(100vw - 24px))",
+  panelWidth: "min(440px, calc(100vw - 24px))",
   panelHeight: "min(640px, calc(100vh - 28px))",
   launcherSize: "58px",
   animationDuration: "220ms",
