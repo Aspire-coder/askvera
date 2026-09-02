@@ -1,7 +1,16 @@
 """Regression tests for document-driven section scoring."""
 
+import pytest
+
+from app.retrieval import section_index
 from app.retrieval.models import RetrievedDocument
-from app.retrieval.section_index import _confidence_from_documents, _source_score
+from app.retrieval.section_index import (
+    _confidence_from_documents,
+    _purchase_channel_score,
+    _return_policy_score,
+    _source_score,
+)
+from config import settings
 
 
 def _row(section_id: str, title: str, content: str) -> dict[str, object]:
@@ -117,3 +126,136 @@ def test_margin_ignores_a_demoted_candidate_the_selector_rejected() -> None:
     assert _confidence_from_documents(documents) == expected
     # The demoted 3.31 leader must not zero out the margin term.
     assert margin > 0
+
+
+@pytest.fixture
+def _hardening_enabled(monkeypatch):
+    """Enable the flag these two scorers are gated behind, using the real
+    config/retrieval_scoring_rules.json (their reviewed data source)."""
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
+    section_index._load_scoring_rules.cache_clear()
+    yield
+    section_index._load_scoring_rules.cache_clear()
+
+
+def test_purchase_channel_score_rewards_a_named_direct_channel(_hardening_enabled) -> None:
+    score = _purchase_channel_score(
+        "Can I buy products online?",
+        "Selling",
+        "You may engage in Selling Products Online via the approved FBO website.",
+    )
+    assert score > 0
+
+
+def test_purchase_channel_score_ignores_unrelated_evidence(_hardening_enabled) -> None:
+    assert _purchase_channel_score("Can I buy products online?", "Other", "Unrelated content here.") == 0.0
+
+
+def test_purchase_channel_score_requires_purchase_intent(_hardening_enabled) -> None:
+    assert _purchase_channel_score("What is the weather", "Other", "Selling Products Online") == 0.0
+
+
+def test_purchase_channel_score_fires_on_where_to_order_combo(_hardening_enabled) -> None:
+    score = _purchase_channel_score(
+        "Where do I order from?", "Other", "You may use your personal Forever web shop."
+    )
+    assert score > 0
+
+
+def test_return_policy_score_prefers_buyback_clause_for_unopened_product(_hardening_enabled) -> None:
+    score = _return_policy_score(
+        "Can I return an unopened product and within what window",
+        "Returns",
+        "FLP shall buy back any unsold, salable product.",
+    )
+    assert score > 0
+
+
+def test_return_policy_score_does_not_fall_back_to_general_satisfaction_phrase(_hardening_enabled) -> None:
+    """Regression guard for the 2026-09-01 live-index canary failure: a
+    buy-back-window question must not be answered by the general
+    satisfaction-guarantee clause just because that clause happens to
+    contain a phrase like "100 product satisfaction" - see the comment on
+    _return_policy_score and OPENSEARCH_RETRIEVAL_HARDENING_ENABLED.
+    """
+    score = _return_policy_score(
+        "Can I return an unopened product and within what window",
+        "Returns",
+        "This is covered by our 100 product satisfaction guarantee.",
+    )
+    assert score == 0.0
+
+
+def test_return_policy_score_uses_general_clause_without_buyback_intent(_hardening_enabled) -> None:
+    score = _return_policy_score(
+        "What is your return policy",
+        "Returns",
+        "This is covered by our 100 product satisfaction guarantee.",
+    )
+    assert score > 0
+
+
+def test_return_policy_score_requires_return_intent(_hardening_enabled) -> None:
+    assert _return_policy_score("What is the weather", "Returns", "buy back unsold") == 0.0
+
+
+def test_scoring_rules_are_disabled_when_hardening_flag_is_off() -> None:
+    """These scorers must stay inert by default - OPENSEARCH_RETRIEVAL_HARDENING_ENABLED is False in production."""
+    assert not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
+    score = _purchase_channel_score(
+        "Can I buy products online?", "Selling", "Selling Products Online via the approved FBO website."
+    )
+    assert score == 0.0
+
+
+def test_scoring_rules_fail_open_on_a_missing_config_file(monkeypatch, tmp_path, _hardening_enabled) -> None:
+    """A missing or malformed rules file must not break retrieval - it should
+    just leave these optional scorers inert, the same fail-open behavior the
+    glossary loader uses for missing config."""
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_SCORING_RULES_PATH", str(tmp_path / "missing.json"))
+    section_index._load_scoring_rules.cache_clear()
+
+    score = _purchase_channel_score(
+        "Can I buy products online?", "Selling", "Selling Products Online via the approved FBO website."
+    )
+
+    assert score == 0.0
+
+
+def test_scoring_rules_fail_open_on_malformed_json(monkeypatch, tmp_path, _hardening_enabled) -> None:
+    bad_path = tmp_path / "bad_rules.json"
+    bad_path.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_SCORING_RULES_PATH", str(bad_path))
+    section_index._load_scoring_rules.cache_clear()
+
+    score = _return_policy_score("What is your return policy", "Returns", "100 product satisfaction")
+
+    assert score == 0.0
+
+
+def test_scoring_rules_file_matches_the_previously_hardcoded_values(_hardening_enabled) -> None:
+    """Pin the reviewed data file's content so a future edit is a deliberate,
+    visible change rather than a silent drift from what shipped before this
+    was externalized from section_index.py."""
+    rules = section_index._load_scoring_rules(settings.OPENSEARCH_RETRIEVAL_SCORING_RULES_PATH)
+
+    assert set(rules["purchase_channel"]["evidence"]) == {
+        "selling products online",
+        "personal forever web shop",
+        "approved fbo website",
+        "online shop",
+        "purchase products online",
+    }
+    assert set(rules["return_policy"]["buyback_window"]["evidence"]) == {
+        "buy back",
+        "unsold",
+        "salable",
+        "saleable",
+    }
+    assert set(rules["return_policy"]["general"]["evidence"]) == {
+        "product return",
+        "return of the product",
+        "timely return",
+        "100 product satisfaction",
+        "proof of purchase",
+    }

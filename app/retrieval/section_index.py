@@ -7,8 +7,11 @@ relevance. They are used by the live OpenSearch retrieval path
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from config import settings
@@ -17,6 +20,89 @@ from utils.logging import get_logger
 from .models import RetrievedDocument
 
 LOGGER = get_logger("app.retrieval.section_index")
+
+_SCORING_RULES_MAX_TERMS = 32
+_SCORING_RULES_MAX_TERM_CHARS = 40
+_SCORING_RULES_MAX_PHRASES = 32
+_SCORING_RULES_MAX_PHRASE_CHARS = 120
+
+
+def _bounded_lower_strings(value: Any, *, limit: int, max_chars: int) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    result: list[str] = []
+    for item in value[:limit]:
+        if not isinstance(item, str):
+            continue
+        cleaned = " ".join(item.split()).strip().lower()
+        if cleaned and len(cleaned) <= max_chars and cleaned not in result:
+            result.append(cleaned)
+    return tuple(result)
+
+
+def _valid_evidence_rule(payload: Any) -> dict[str, Any] | None:
+    """Validate one {intent terms -> evidence phrases -> score} rule."""
+    if not isinstance(payload, dict):
+        return None
+    evidence = _bounded_lower_strings(
+        payload.get("evidence_any_phrases"), limit=_SCORING_RULES_MAX_PHRASES, max_chars=_SCORING_RULES_MAX_PHRASE_CHARS
+    )
+    score = payload.get("score")
+    if not evidence or not isinstance(score, (int, float)) or isinstance(score, bool):
+        return None
+    return {
+        "intent_any": frozenset(
+            _bounded_lower_strings(payload.get("intent_any_terms"), limit=_SCORING_RULES_MAX_TERMS, max_chars=_SCORING_RULES_MAX_TERM_CHARS)
+        ),
+        "intent_all": frozenset(
+            _bounded_lower_strings(payload.get("intent_all_terms"), limit=_SCORING_RULES_MAX_TERMS, max_chars=_SCORING_RULES_MAX_TERM_CHARS)
+        ),
+        "evidence": evidence,
+        "score": float(score),
+    }
+
+
+@lru_cache(maxsize=1)
+def _load_scoring_rules(path: str) -> dict[str, Any]:
+    """Load optional evidence-phrase scoring rules without failing retrieval closed."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, TypeError, ValueError) as exc:
+        LOGGER.warning("retrieval_scoring_rules_unavailable", path=path, error=str(exc))
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    rules: dict[str, Any] = {}
+    purchase_channel = _valid_evidence_rule(payload.get("purchase_channel"))
+    if purchase_channel:
+        rules["purchase_channel"] = purchase_channel
+
+    return_policy_raw = payload.get("return_policy")
+    if isinstance(return_policy_raw, dict):
+        intent_any = _bounded_lower_strings(
+            return_policy_raw.get("intent_any_terms"), limit=_SCORING_RULES_MAX_TERMS, max_chars=_SCORING_RULES_MAX_TERM_CHARS
+        )
+        buyback_window = _valid_evidence_rule(return_policy_raw.get("buyback_window"))
+        general = _valid_evidence_rule(return_policy_raw.get("general"))
+        if intent_any and buyback_window and general:
+            rules["return_policy"] = {
+                "intent_any": frozenset(intent_any),
+                "buyback_window": buyback_window,
+                "general": general,
+            }
+    return rules
+
+
+def _intent_matches(message_terms: set[str], rule: dict[str, Any]) -> bool:
+    """A rule fires when the message contains any listed term, or all terms in the combo."""
+    intent_any: frozenset[str] = rule.get("intent_any", frozenset())
+    intent_all: frozenset[str] = rule.get("intent_all", frozenset())
+    return bool(message_terms & intent_any) or bool(intent_all and intent_all <= message_terms)
+
+
+def _evidence_score(evidence_text: str, rule: dict[str, Any]) -> float:
+    return rule["score"] if any(phrase in evidence_text for phrase in rule["evidence"]) else 0.0
 
 
 def _tokens(text_value: str) -> list[str]:
@@ -184,57 +270,50 @@ def _fragment_quality_score(row: dict[str, Any], message: str) -> float:
 
 
 def _purchase_channel_score(message: str, title: str, content: str) -> float:
-    """Prefer clauses that explicitly identify a permitted sales channel."""
+    """Prefer clauses that explicitly identify a permitted sales channel.
+
+    The intent terms, evidence phrases, and score are reviewed data, not
+    code - see config/retrieval_scoring_rules.json.
+    """
     if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
         return 0.0
+    rule = _load_scoring_rules(settings.OPENSEARCH_RETRIEVAL_SCORING_RULES_PATH).get("purchase_channel")
+    if not rule:
+        return 0.0
     message_terms = set(_tokens(message))
-    asks_where_to_order = "where" in message_terms and "order" in message_terms
-    if not ({"buy", "purchase", "purchasing", "shop"} & message_terms or asks_where_to_order):
+    if not _intent_matches(message_terms, rule):
         return 0.0
     evidence = _normalize_text(f"{title} {content[:1800]}")
-    direct_channels = (
-        "selling products online",
-        "personal forever web shop",
-        "approved fbo website",
-        "online shop",
-        "purchase products online",
-    )
-    return 1.8 if any(channel in evidence for channel in direct_channels) else 0.0
+    return _evidence_score(evidence, rule)
 
 
 def _return_policy_score(message: str, title: str, content: str) -> float:
-    """Prefer clauses that directly state product-return rights or conditions."""
+    """Prefer clauses that directly state product-return rights or conditions.
+
+    The intent terms, evidence phrases, and score are reviewed data, not
+    code - see config/retrieval_scoring_rules.json. A question about the
+    buy-back window for an unopened or unsold product is answered by a more
+    specific clause than the general satisfaction-guarantee return right. A
+    live-index canary (2026-09-01) found that "100 product satisfaction"
+    alone was matching that general clause even for this more specific
+    question, outranking the correct buy-back clause. Prefer the specific
+    clause here, and do not let the generic phrase compete once the
+    question is this specific.
+    """
     if not settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED:
         return 0.0
+    rule = _load_scoring_rules(settings.OPENSEARCH_RETRIEVAL_SCORING_RULES_PATH).get("return_policy")
+    if not rule:
+        return 0.0
     message_terms = set(_tokens(message))
-    if not ({"return", "returns", "refund", "refunds"} & message_terms):
+    if not (message_terms & rule["intent_any"]):
         return 0.0
     evidence = _normalize_text(f"{title} {content[:1800]}")
 
-    # A question about the buy-back window for an unopened or unsold product
-    # is answered by a more specific clause than the general satisfaction-
-    # guarantee return right. A live-index canary (2026-09-01) found that
-    # "100 product satisfaction" alone was matching that general clause even
-    # for this more specific question, outranking the correct buy-back
-    # clause. Prefer the specific clause here, and do not let the generic
-    # phrase compete once the question is this specific.
-    asks_about_buyback_window = bool({"unopened", "window", "unsold"} & message_terms) or (
-        {"buy", "back"} <= message_terms
-    )
-    buyback_terms = ("buy back", "unsold", "salable", "saleable")
-    if asks_about_buyback_window:
-        if any(term in evidence for term in buyback_terms):
-            return 1.8
-        return 0.0
+    if _intent_matches(message_terms, rule["buyback_window"]):
+        return _evidence_score(evidence, rule["buyback_window"])
 
-    direct_terms = (
-        "product return",
-        "return of the product",
-        "timely return",
-        "100 product satisfaction",
-        "proof of purchase",
-    )
-    return 1.8 if any(term in evidence for term in direct_terms) else 0.0
+    return _evidence_score(evidence, rule["general"])
 
 
 def _source_score(row: dict[str, Any], message: str) -> float:
