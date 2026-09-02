@@ -200,6 +200,76 @@ def test_oversized_sections_are_split_into_bounded_parts() -> None:
     assert sections[0].section_id == "1-part-1"
 
 
+def test_oversized_section_split_parts_overlap() -> None:
+    """Split parts must share trailing/leading context so a clause
+    straddling the split boundary is still retrievable from at least one
+    part - the generic (non-policy) chunker already does this with a 450
+    char overlap; policy sections previously used 0.
+    """
+    content = "1 General\n" + ("Approved policy text.\n" * 1_000)
+
+    sections = extractor._split_oversized_section(
+        source_file="policy.pdf",
+        country="DE",
+        language="de",
+        section_id="1",
+        title="General",
+        content=content,
+        content_offset=0,
+        page_offsets=[(1, 0, len(content) + 1)],
+    )
+
+    assert len(sections) > 1
+    tail_of_first_part = sections[0].content[-40:]
+    assert tail_of_first_part in sections[1].content
+
+
+def test_section_match_supports_a_third_numbering_level() -> None:
+    """A heading like "21.05.3" (three numeric levels) must become its own
+    section instead of silently folding into the previous section's body
+    with no error and a wrong page/section citation for that content.
+    """
+    text = "\n".join(
+        [
+            "21.05 Product returns",
+            "General return policy text.",
+            "21.05.3 Combination pak exceptions",
+            "Specific exception text.",
+        ]
+    )
+
+    matches = list(extractor._iter_section_matches(text))
+
+    assert [match.group("section") for match in matches] == ["21.05", "21.05.3"]
+
+
+def test_single_colon_line_in_an_ordinary_clause_does_not_become_a_definition_chunk() -> None:
+    """A single "Label: text" line in an ordinary policy clause (e.g. "Note:
+    contact your local office.") must not be treated as a glossary entry -
+    only a section with multiple colon-entries in a row (a real glossary
+    pattern, in any language) should produce definition chunks.
+    """
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="US",
+        language="en",
+        section_id="16.02",
+        title="Prohibited activities",
+        start_page=40,
+        end_page=40,
+        content=(
+            "16.02 Prohibited activities\n"
+            "An FBO may not make unapproved product claims.\n"
+            "Note: contact your local office for the current approved claims list."
+        ),
+    )
+
+    chunks = extractor._expand_structured_chunks([parent])
+    definitions = [chunk for chunk in chunks if chunk.chunk_type == "definition"]
+
+    assert definitions == []
+
+
 def test_current_policy_chunk_profile_remains_the_default() -> None:
     section = extractor.PolicySection(
         "policy.pdf",
@@ -217,6 +287,11 @@ def test_current_policy_chunk_profile_remains_the_default() -> None:
 
 
 def test_numeric_table_rows_become_country_agnostic_atomic_facts() -> None:
+    # Realistic PDF layout-mode extraction preserves table column gaps as
+    # multiple spaces (matching how document_preflight.py's own tests
+    # represent this same class of content) - _compact_numeric_fact now
+    # requires that gap (TABLE_GAP_RE) to tell a genuine table row apart
+    # from an ordinary sentence that merely mentions a number.
     parent = extractor.PolicySection(
         source_file="policy.pdf",
         country="NL",
@@ -225,7 +300,12 @@ def test_numeric_table_rows_become_country_agnostic_atomic_facts() -> None:
         title="Marketingplan",
         start_page=8,
         end_page=8,
-        content="4.01 Marketingplan\nAssistant Supervisor 2 CC in twee maanden\nSupervisor 10 CC in één maand\nManager 120 CC in twee maanden",
+        content=(
+            "4.01 Marketingplan\n"
+            "Assistant Supervisor      2 CC in twee maanden\n"
+            "Supervisor      10 CC in één maand\n"
+            "Manager      120 CC in twee maanden"
+        ),
         document_version="2025-05",
         effective_date="2025-06-15",
     )
@@ -237,6 +317,59 @@ def test_numeric_table_rows_become_country_agnostic_atomic_facts() -> None:
     assert any("Supervisor 10 CC" in fact.content for fact in facts)
     assert all(fact.parent_section_id == "4.01" for fact in facts)
     assert all(fact.metadata["status"] == "active" for fact in facts)
+
+
+def test_ordinary_prose_sentence_with_a_number_is_not_treated_as_a_numeric_fact() -> None:
+    """A sentence that merely mentions a number (a page/clause reference,
+    normal single-space prose) must not become a numeric_fact chunk - only
+    genuine table-shaped rows (TABLE_GAP_RE) should.
+    """
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="US",
+        language="en",
+        section_id="16.02",
+        title="Prohibited activities",
+        start_page=40,
+        end_page=40,
+        content=(
+            "16.02 Prohibited activities\n"
+            "See clause 5.2 for the complete list of restricted conduct types.\n"
+            "Contact your local office at extension 4 for further guidance."
+        ),
+    )
+
+    chunks = extractor._expand_structured_chunks([parent])
+    facts = [chunk for chunk in chunks if chunk.chunk_type == "numeric_fact"]
+
+    assert facts == []
+
+
+def test_single_qualifying_numeric_fact_row_is_no_longer_buried_in_the_parent() -> None:
+    """Now that TABLE_GAP_RE already filters out false positives, a lone
+    genuine table row should not need a second corroborating row to be
+    extracted as its own atomic fact.
+    """
+    parent = extractor.PolicySection(
+        source_file="policy.pdf",
+        country="US",
+        language="en",
+        section_id="4.01",
+        title="Commission threshold",
+        start_page=10,
+        end_page=10,
+        content=(
+            "4.01 Commission threshold\n"
+            "Standard tier      15 CC per month\n"
+            "The remainder of this section explains general eligibility in prose."
+        ),
+    )
+
+    chunks = extractor._expand_structured_chunks([parent])
+    facts = [chunk for chunk in chunks if chunk.chunk_type == "numeric_fact"]
+
+    assert len(facts) == 1
+    assert "15 CC" in facts[0].content
 
 
 def test_definition_entries_inside_large_section_parts_become_atomic_chunks() -> None:
@@ -298,5 +431,3 @@ def test_contents_pages_are_preserved_as_document_outline_chunks() -> None:
     assert outlines[0].section_id == "outline-page-1"
     assert outlines[0].chunk_type == "document_outline"
     assert "6 Leadership Bonus" in outlines[0].content
-
-
