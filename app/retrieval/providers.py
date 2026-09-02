@@ -948,7 +948,19 @@ def _is_managed_kb_configuration_error(exc: ClientError) -> bool:
 
 
 class BedrockRetrievalProvider:
-    """Retrieve approved source documents from Bedrock Knowledge Bases."""
+    """Retrieve approved source documents from Bedrock Knowledge Bases.
+
+    Legacy/retired: RETRIEVAL_PROVIDER defaults to "opensearch_section"
+    (config/settings.py), which is the deployed and evaluated path -
+    OpenSearchSectionProvider (opensearch_sections.py) is where retrieval
+    development actually happens now. This class only activates if
+    RETRIEVAL_PROVIDER is explicitly set to something else. Its evidence-
+    selector helpers below (_selector_candidate_text, _parse_selector_ranks,
+    _select_evidence_documents) independently duplicate similar logic in
+    OpenSearchSectionProvider - if you're fixing a selector prompt/parsing
+    issue, check whether it needs the same fix here too, or whether this
+    path even still needs to exist.
+    """
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         """Call the standalone Retrieve API for reliable source scores."""
