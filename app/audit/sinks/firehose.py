@@ -241,6 +241,7 @@ class FirehoseAuditSink:
         delay = self._retry_base_delay * (2**attempt)
         return min(delay, self._retry_max_delay)
 
+
 def initialize_firehose_sink() -> FirehoseAuditSink:
     """Initialise the Firehose sink configuration during startup."""
     return FirehoseAuditSink()
