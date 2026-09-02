@@ -874,7 +874,7 @@ def test_local_guardrail_topics_use_the_matching_localized_message() -> None:
     )
 
     assert "conseils médicaux" in orchestrator._governance_user_message(medical, "fr")
-    assert "garantir des revenus" in orchestrator._governance_user_message(income, "fr")
+    assert "projections de revenus" in orchestrator._governance_user_message(income, "fr")
 
 
 def test_sensitive_identifier_returns_privacy_response_before_retrieval(monkeypatch) -> None:
