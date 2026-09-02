@@ -684,6 +684,82 @@ def test_requested_year_outside_approved_document_scope_fails_closed(monkeypatch
     assert response.metadata["failure_layer"] == "document_period_not_covered"
 
 
+def test_cross_market_question_with_local_evidence_falls_back(monkeypatch) -> None:
+    """Naming a different country than the session's own market must not
+    answer from this session's own country-scoped document - that document
+    is this session's market, never the one the user actually asked about.
+    """
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="What about Canada?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    document = RetrievedDocument(
+        id="us-policy",
+        title="US Company Policy",
+        content="Minimum order size is $50.",
+        source="s3://approved/us/policy.pdf",
+        country="US",
+        language="en",
+        score=0.9,
+        metadata={"access_scope": "country"},
+    )
+    result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.9)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response, _, decision = orchestrator._route_or_approve_evidence(
+        body.message,
+        result,
+        body.message,
+        body,
+        "cid",
+    )
+
+    assert decision is not None and decision.approved is False
+    assert decision.reason == "cross_market_local_evidence"
+    assert response is not None
+    assert response.metadata["failure_layer"] == "evidence_gate"
+
+
+def test_cross_market_question_with_global_evidence_still_answers(monkeypatch) -> None:
+    """A different country in the message is fine when the actual evidence
+    is a global/cross-market document (e.g. international sponsoring rules)
+    that legitimately covers every market, not just this session's own.
+    """
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="What about Canada?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    document = RetrievedDocument(
+        id="global-sponsoring",
+        title="International Sponsoring Guide",
+        content="International sponsoring rules apply the same way in every market.",
+        source="s3://approved/global/sponsoring.pdf",
+        country="",
+        language="en",
+        score=0.9,
+        metadata={"access_scope": "global"},
+    )
+    result = RetrievalResult(documents=[document], citations=[document.to_source()], confidence=0.9)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response, _, decision = orchestrator._route_or_approve_evidence(
+        body.message,
+        result,
+        body.message,
+        body,
+        "cid",
+    )
+
+    assert decision is not None and decision.approved is True
+    assert response is None
+
+
 def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> None:
     """Ambiguous directory requests should invite clarification, not dead-end."""
     orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
