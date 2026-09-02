@@ -1,6 +1,14 @@
 import { useState } from "react";
 import type { GenericWidgetConfig } from "./types";
 import { LegalLinks } from "./LegalLinks";
+import { getWidgetCopy } from "../localization/widgetCopy";
+
+// Runtime config almost always supplies these (WidgetRuntime.tsx wires them
+// from the same localized copy), but the config type marks them optional for
+// callers that don't - falling back to this English text keeps that rare
+// case in sync with the widget's own localization source instead of a
+// second, hand-typed copy of the same strings.
+const englishCopy = getWidgetCopy("en");
 
 export function ConsentPanel({
   config,
@@ -32,7 +40,7 @@ export function ConsentPanel({
       <LegalLinks config={config} />
       {!legalDocumentsReady ? (
         <p className="gw-consent-loading" role="status">
-          {config.consent.loadingText || "Loading legal documents before consent can be recorded."}
+          {config.consent.loadingText || englishCopy.privacyLoading}
         </p>
       ) : null}
       <label className="gw-consent-ack">
@@ -42,13 +50,13 @@ export function ConsentPanel({
           onChange={(event) => setAcknowledged(event.target.checked)}
           disabled={!legalDocumentsReady || accepting}
         />
-        <span>{config.consent.acknowledgmentLabel || "I have read and agree to all of the above documents."}</span>
+        <span>{config.consent.acknowledgmentLabel || englishCopy.privacyAcknowledgment}</span>
       </label>
       {error ? <p className="gw-consent-error" role="alert">{error}</p> : null}
       <div className="gw-consent-actions">
         <button type="button" className="gw-consent-skip" onClick={onReject} disabled={accepting}>{config.labels.rejectConsentLabel}</button>
         <button type="button" className="gw-primary-button" onClick={onAccept} disabled={acceptDisabled}>
-          {accepting ? config.labels.savingConsentLabel || "Saving..." : config.labels.acceptConsentLabel}
+          {accepting ? config.labels.savingConsentLabel || englishCopy.privacySaving : config.labels.acceptConsentLabel}
         </button>
       </div>
     </section>
