@@ -719,6 +719,42 @@ def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> N
     assert response.cards[0]["prompt"] == "What is the telephone number for that country?"
 
 
+def test_directory_evidence_failure_skips_clarification_when_field_already_named(monkeypatch) -> None:
+    """Reported after deploy: asking "do you have a telephone number?" got
+    the generic "which detail?" clarification anyway, offering telephone
+    number as one of six choices despite the user already naming it. The
+    field is only genuinely ambiguous when the message doesn't already name
+    exactly one of it.
+    """
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="do you have a telephone number?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    document = RetrievedDocument(
+        id="us-directory",
+        title="Office Directory - United States",
+        content="United States office directory record.",
+        source="s3://approved/global/directory.pdf",
+        country="",
+        language="en",
+        score=0.2,
+        metadata={"access_scope": "global", "directory_kind": "international_sponsoring"},
+    )
+    result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.2,
+        metadata={"global_documents_searched": True, "candidate_count": 3},
+    )
+
+    response = orchestrator._directory_clarification_response(result, body, "cid", body.message)
+
+    assert response is None
+
+
 def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:
     """Accidentally spaced letters are reconstructed before retrieval."""
     orchestrator = AIOrchestrator()
