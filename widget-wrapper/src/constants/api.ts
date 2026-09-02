@@ -8,5 +8,3 @@ export const ApiErrorCodes = {
   RATE_LIMITED: "RATE_LIMITED",
   WIDGET_AUTH_REQUIRED: "WIDGET_AUTH_REQUIRED"
 } as const;
-
-export type ApiErrorCode = (typeof ApiErrorCodes)[keyof typeof ApiErrorCodes];

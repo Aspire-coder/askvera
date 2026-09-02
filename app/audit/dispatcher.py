@@ -16,11 +16,6 @@ class AuditDispatcher:
     def __init__(self, sinks: Sequence[AuditSink] | None = None) -> None:
         self._sinks = list(sinks or [LoggerAuditSink()])
 
-    @property
-    def sinks(self) -> tuple[AuditSink, ...]:
-        """Return registered sinks."""
-        return tuple(self._sinks)
-
     def add_sink(self, sink: AuditSink) -> None:
         """Register or replace a sink by name."""
         sink_name = getattr(sink, "name", sink.__class__.__name__)

@@ -76,23 +76,6 @@ class ChatRequest(BaseModel):
         return self
 
 
-class Source(BaseModel):
-    """Source citation returned to the widget."""
-
-    title: str
-    uri: str
-    excerpt: str = ""
-
-
-class ChatData(BaseModel):
-    """Successful chat response data."""
-
-    response: str
-    sources: list[Source]
-    confidence: float
-    correlationId: str
-
-
 class ConsentRequest(BaseModel):
     """Validated consent logging body."""
 

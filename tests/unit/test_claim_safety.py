@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 from services.claim_safety import (
-    approved_regulatory_reference,
     classify_claim_scope,
     localized_claim_response,
 )
@@ -73,11 +72,6 @@ def test_every_configured_language_has_clean_product_claim_copy():
         assert response, language
         assert "\ufffd" not in response, language
         assert "\u00c3" not in response, language
-
-
-def test_regulator_labels_require_explicit_approval():
-    assert approved_regulatory_reference("US", "medical") is None
-    assert approved_regulatory_reference("US", "income") is None
 
 
 def test_classification_accepts_language_variants():

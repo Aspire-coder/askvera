@@ -32,12 +32,7 @@ def _configure_valid_production(monkeypatch) -> None:
     monkeypatch.setattr(settings, "RETRIEVAL_PROVIDER", "opensearch_section")
     monkeypatch.setattr(settings, "OPENSEARCH_ENDPOINT", "https://example.aoss.amazonaws.com")
     monkeypatch.setattr(settings, "OPENSEARCH_INDEX", "sections")
-    monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 60)
     monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 2)
-    monkeypatch.setattr(settings, "RETRIEVAL_NEIGHBOR_LIMIT", 2)
-    monkeypatch.setattr(settings, "RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE", 0.85)
-    monkeypatch.setattr(settings, "RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP", 0.70)
-    monkeypatch.setattr(settings, "RETRIEVAL_PROMOTION_MAX_LATENCY_MS", 1500.0)
     monkeypatch.setattr(settings, "AUDIT_FIREHOSE_ENABLED", False)
     monkeypatch.setattr(settings, "SUPPORT_EMAIL_ENABLED", False)
     monkeypatch.setattr(settings, "SUPPORT_ROUTES_JSON", {})
@@ -88,21 +83,11 @@ def test_production_rejects_draft_guardrail_version(monkeypatch) -> None:
 
 def test_retrieval_experiment_limits_are_validated(monkeypatch) -> None:
     _configure_valid_production(monkeypatch)
-    monkeypatch.setattr(settings, "RETRIEVAL_RRF_K", 0)
     monkeypatch.setattr(settings, "RETRIEVAL_MAX_RESULTS_PER_PARENT", 0)
-    monkeypatch.setattr(settings, "RETRIEVAL_NEIGHBOR_LIMIT", -1)
-    monkeypatch.setattr(settings, "RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE", 1.1)
-    monkeypatch.setattr(settings, "RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP", -0.1)
-    monkeypatch.setattr(settings, "RETRIEVAL_PROMOTION_MAX_LATENCY_MS", 0)
 
     failures = validate()
 
-    assert "RETRIEVAL_RRF_K (must be greater than 0)" in failures
     assert "RETRIEVAL_MAX_RESULTS_PER_PARENT (must be greater than 0)" in failures
-    assert "RETRIEVAL_NEIGHBOR_LIMIT (must not be negative)" in failures
-    assert "RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE (must be between 0 and 1)" in failures
-    assert "RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP (must be between 0 and 1)" in failures
-    assert "RETRIEVAL_PROMOTION_MAX_LATENCY_MS (must be greater than 0)" in failures
 
 
 def test_production_restart_validation_rejects_non_production_environment(monkeypatch) -> None:

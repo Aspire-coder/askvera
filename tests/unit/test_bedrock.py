@@ -134,12 +134,12 @@ def test_bedrock_provider_returns_sources() -> None:
             build_prompt_package("q", "US", "en", "new_prospect", retrieval_result),
             retrieval_result,
             "cid",
-        ).to_chat_result()
-    assert result["response"] == "Answer"
-    assert result["confidence"] >= 0.65
-    assert result["sources"][0]["uri"] == "s3://kb/doc.pdf"
-    assert result["sources"][0]["page"] == "4"
-    assert result["sources"][0]["documentVersion"] == "v2"
+        )
+    assert result.text == "Answer"
+    assert result.confidence >= 0.65
+    assert result.citations[0]["uri"] == "s3://kb/doc.pdf"
+    assert result.citations[0]["page"] == "4"
+    assert result.citations[0]["documentVersion"] == "v2"
     converse_params = runtime.converse.call_args.kwargs
     assert converse_params["inferenceConfig"] == {"maxTokens": 1024}
 
@@ -230,9 +230,9 @@ def test_bedrock_provider_allows_borderline_confidence_with_enough_evidence() ->
             ),
             retrieval_result,
             "cid",
-        ).to_chat_result()
+        )
 
-    assert result["response"] == "Personal Retail Bonus answer"
+    assert result.text == "Personal Retail Bonus answer"
     runtime.converse.assert_called_once()
 
 

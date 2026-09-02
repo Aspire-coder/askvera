@@ -41,9 +41,6 @@ class RetrievedDocument:
         return source
 
 
-RetrievalDocument = RetrievedDocument
-
-
 @dataclass(frozen=True)
 class RetrievalResult:
     """Normalized retrieval output."""

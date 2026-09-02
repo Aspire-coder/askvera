@@ -58,10 +58,3 @@ def localized_claim_response(message: str, governance_topic: str, country: str, 
     responses = _config().get("responses", {})
     locale = _locale(language)
     return responses.get(locale, responses.get("en")), scope
-
-
-def approved_regulatory_reference(country: str, claim_type: str) -> str | None:
-    """Return a regulator label only after approved local wording is configured."""
-    references = _config().get("regulatory_references", {})
-    reference = references.get(country.upper(), references.get("default", {})).get(claim_type, {})
-    return reference.get("label") if reference.get("approved") is True else None

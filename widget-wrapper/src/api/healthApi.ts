@@ -8,7 +8,3 @@ export type HealthResponseData = {
 export function healthCheck(client: ApiClient) {
   return client.get<HealthResponseData>("/health");
 }
-
-export function deepHealthCheck(client: ApiClient) {
-  return client.get<HealthResponseData>("/health/deep");
-}

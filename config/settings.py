@@ -112,7 +112,6 @@ AWS_PII_MAX_ATTEMPTS = _env_int("AWS_PII_MAX_ATTEMPTS", 1)
 # Per-IP request limiting for public widget endpoints. Production uses Valkey
 # so limits and token revocations remain consistent across API processes.
 RATE_LIMIT_WINDOW_SECONDS = 60
-RATE_LIMIT_MAX_REQUESTS = 30
 RATE_LIMIT_PATHS = ["/api/chat", "/api/consent", "/api/feedback", "/api/support", "/api/source-link"]
 RATE_LIMIT_POLICIES = {
     "/api/chat": _env_int("RATE_LIMIT_CHAT_PER_MINUTE", 30),
@@ -345,13 +344,8 @@ BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
 # Retrieval backend. The deployed and evaluated path is OpenSearch section
 # retrieval. A missing value must not silently route requests to a retired KB.
 RETRIEVAL_PROVIDER = _env_str("RETRIEVAL_PROVIDER", "opensearch_section").lower()
-SECTION_RETRIEVAL_RESULT_COUNT = _env_int("SECTION_RETRIEVAL_RESULT_COUNT", 5)
-SECTION_RETRIEVAL_CANDIDATE_COUNT = _env_int("SECTION_RETRIEVAL_CANDIDATE_COUNT", 30)
 SECTION_RETRIEVAL_MIN_SCORE = _env_float("SECTION_RETRIEVAL_MIN_SCORE", 0.05)
 SECTION_RETRIEVAL_MODE = _env_str("SECTION_RETRIEVAL_MODE", "keyword").lower()
-SECTION_RETRIEVAL_VECTOR_CANDIDATE_COUNT = _env_int("SECTION_RETRIEVAL_VECTOR_CANDIDATE_COUNT", 30)
-SECTION_RETRIEVAL_VECTOR_WEIGHT = _env_float("SECTION_RETRIEVAL_VECTOR_WEIGHT", 8.0)
-SECTION_RETRIEVAL_FALLBACK_MIN_SCORE = _env_float("SECTION_RETRIEVAL_FALLBACK_MIN_SCORE", 3.0)
 OPENSEARCH_ENDPOINT = _env_str("OPENSEARCH_ENDPOINT", "")
 OPENSEARCH_INDEX = _env_str("OPENSEARCH_INDEX", "askvera-policy-sections")
 OPENSEARCH_SERVICE = _env_str("OPENSEARCH_SERVICE", "aoss")
@@ -392,15 +386,8 @@ OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD = _env_float(
 # Re-enable only after that heuristic is fixed and re-validated against the
 # retrieval_canary.json release-gate fixture on the live index.
 OPENSEARCH_RETRIEVAL_HARDENING_ENABLED = _env_bool("OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
-RETRIEVAL_RRF_ENABLED = _env_bool("RETRIEVAL_RRF_ENABLED", False)
-RETRIEVAL_RRF_K = _env_int("RETRIEVAL_RRF_K", 60)
 RETRIEVAL_PARENT_DIVERSITY_ENABLED = _env_bool("RETRIEVAL_PARENT_DIVERSITY_ENABLED", False)
 RETRIEVAL_MAX_RESULTS_PER_PARENT = _env_int("RETRIEVAL_MAX_RESULTS_PER_PARENT", 2)
-RETRIEVAL_NEIGHBOR_EXPANSION_ENABLED = _env_bool("RETRIEVAL_NEIGHBOR_EXPANSION_ENABLED", False)
-RETRIEVAL_NEIGHBOR_LIMIT = _env_int("RETRIEVAL_NEIGHBOR_LIMIT", 2)
-RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE = _env_float("RETRIEVAL_PROMOTION_MIN_SAME_SECTION_RATE", 0.85)
-RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP = _env_float("RETRIEVAL_PROMOTION_MIN_EVIDENCE_OVERLAP", 0.70)
-RETRIEVAL_PROMOTION_MAX_LATENCY_MS = _env_float("RETRIEVAL_PROMOTION_MAX_LATENCY_MS", 1500.0)
 # English-language documents for the SAME country become eligible when the
 # local-language index has no match; the country filter is untouched, so
 # cross-market leakage is not possible. Output language is still enforced by
@@ -456,8 +443,6 @@ LEGAL_VERSION = _env_str("LEGAL_VERSION", "2026.1")
 # retention/audit purposes, but cannot receive additional chat messages.
 SESSION_IDLE_TIMEOUT_MINUTES = _env_int("SESSION_IDLE_TIMEOUT_MINUTES", 30)
 SESSION_TTL_SECONDS = SESSION_IDLE_TIMEOUT_MINUTES * 60
-# Backward-compatible alias for integrations that still read the old setting.
-SESSION_TIMEOUT_HOURS = SESSION_TTL_SECONDS / (60 * 60)
 MAX_SESSION_DAYS = 7
 
 # Chat memory storage for conversation history.
@@ -476,13 +461,8 @@ REDIS_CACHE_NAME = _env_str("REDIS_CACHE_NAME", "")
 REDIS_HOST = _env_str("REDIS_HOST", "")
 # ElastiCache Valkey TLS port. Found in ElastiCache -> Valkey cache details -> Port.
 REDIS_PORT = 6379
-# Whether Valkey requires in-transit TLS. Found in ElastiCache -> Valkey cache -> Security.
-ELASTICACHE_REDIS_TLS = True
 # Valkey user configured for the application. Found in ElastiCache -> User groups.
 REDIS_USER = _env_str("REDIS_USER", "")
-# Backward-compatible aliases used by older cache code paths.
-ELASTICACHE_REDIS_HOST = REDIS_HOST
-ELASTICACHE_REDIS_PORT = REDIS_PORT
 # Redis TTL for answer cache in seconds. Found in architecture plan for cache layer.
 CACHE_TTL_SECONDS = 7200
 CACHE_SCHEMA_VERSION = _env_str("CACHE_SCHEMA_VERSION", "4")
@@ -517,9 +497,6 @@ AUDIT_RETRY_MAX_ATTEMPTS = _env_int("AUDIT_RETRY_MAX_ATTEMPTS", 4)
 AUDIT_RETRY_BASE_DELAY_SECONDS = _env_float("AUDIT_RETRY_BASE_DELAY_SECONDS", 1.0)
 # Maximum delay in seconds between future Firehose retries.
 AUDIT_RETRY_MAX_DELAY_SECONDS = _env_float("AUDIT_RETRY_MAX_DELAY_SECONDS", 8.0)
-# Kinesis Firehose delivery stream for audit logs. Found in Kinesis -> Delivery streams.
-FIREHOSE_STREAM_NAME = "vera-audit-stream"
-KINESIS_FIREHOSE_STREAM_NAME = FIREHOSE_STREAM_NAME
 # Metrics provider selection and CloudWatch backend configuration.
 ENABLE_METRICS = _env_bool("ENABLE_METRICS", True)
 METRICS_PROVIDER = _env_str("METRICS_PROVIDER", "null")
@@ -564,11 +541,6 @@ ANALYTICS_REPORT_FROM = _env_str("ANALYTICS_REPORT_FROM", SUPPORT_EMAIL_FROM)
 SUPPORT_RECOMMEND_AFTER_FAILURES = _env_int("SUPPORT_RECOMMEND_AFTER_FAILURES", 2)
 SUPPORT_ROUTES_JSON: dict[str, dict[str, str]] = json.loads(_env_str("SUPPORT_ROUTES_JSON", "{}"))
 SUPPORT_DEFAULT_ROUTE_JSON: dict[str, str] = json.loads(_env_str("SUPPORT_DEFAULT_ROUTE_JSON", "{}"))
-# WhatsApp is a disabled integration boundary until Meta credentials,
-# verification, and outbound delivery have been provisioned and tested.
-WHATSAPP_ENABLED = _env_bool("WHATSAPP_ENABLED", False)
-WHATSAPP_VERIFY_TOKEN = _env_str("WHATSAPP_VERIFY_TOKEN", "")
-WHATSAPP_APP_SECRET = _env_str("WHATSAPP_APP_SECRET", "")
 # AWS Comprehend PII language code for PII detection. Found in Comprehend supported language docs.
 COMPREHEND_PII_LANGUAGE_CODE = "en"
 # Languages supported by Amazon Comprehend DetectPiiEntities.
@@ -591,7 +563,6 @@ ALLOWED_ORIGINS = [
     "http://localhost:5176",
 ]
 API_DOMAIN = "api.vera-api.xyz"
-WIDGET_DOMAIN = "chat.vera-api.xyz"
 MARKETS_CONFIG_PATH = os.environ.get("MARKETS_CONFIG_PATH", str(Path(__file__).with_name("markets.json")))
 
 SSM_PARAMETER_PATH = os.environ.get("SSM_PARAMETER_PATH", "/askverachat/prod/")
@@ -656,12 +627,6 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
 
     _apply_ssm_values(loaded)
 
-    if "REDIS_HOST" in loaded:
-        globals()["ELASTICACHE_REDIS_HOST"] = globals()["REDIS_HOST"]
-    if "REDIS_PORT" in loaded:
-        globals()["ELASTICACHE_REDIS_PORT"] = globals()["REDIS_PORT"]
-    if "FIREHOSE_STREAM_NAME" in loaded:
-        globals()["KINESIS_FIREHOSE_STREAM_NAME"] = globals()["FIREHOSE_STREAM_NAME"]
     if "BEDROCK_DATA_SOURCE_ID" in loaded:
         globals()["BEDROCK_DATASOURCE_ID"] = globals()["BEDROCK_DATA_SOURCE_ID"]
     if "BEDROCK_DATASOURCE_ID" in loaded:
@@ -674,7 +639,6 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
         globals()["SEMANTIC_CACHE_EMBED_MODEL_ID"] = globals()["BEDROCK_EMBED_MODEL_ID"]
     if "SESSION_IDLE_TIMEOUT_MINUTES" in loaded:
         globals()["SESSION_TTL_SECONDS"] = int(globals()["SESSION_IDLE_TIMEOUT_MINUTES"]) * 60
-        globals()["SESSION_TIMEOUT_HOURS"] = globals()["SESSION_TTL_SECONDS"] / (60 * 60)
 
     _SSM_CONFIG = loaded
     return loaded

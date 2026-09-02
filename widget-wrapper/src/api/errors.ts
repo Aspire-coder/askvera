@@ -28,13 +28,6 @@ export class ApiNetworkError extends Error {
   }
 }
 
-export class ApiValidationError extends Error {
-  constructor(message = "The API request is invalid.") {
-    super(message);
-    this.name = "ApiValidationError";
-  }
-}
-
 export class ApiUnauthorizedError extends Error {
   code?: string;
   status?: number;

@@ -81,16 +81,6 @@ class MetricsCollector:
         self.increment_system_metric("retrieval_failures")
         self.record_system(SystemMetric(name="retrieval_health", value=0.0, unit="None"))
 
-    def record_low_confidence(self) -> None:
-        """Track one low-confidence retrieval/model outcome."""
-        self.increment_system_metric("low_confidence")
-        self.record_system(SystemMetric(name="retrieval_health", value=0.0, unit="None"))
-
-    def record_empty_retrieval(self) -> None:
-        """Track one empty retrieval result."""
-        self.increment_system_metric("empty_retrievals")
-        self.record_system(SystemMetric(name="retrieval_health", value=0.0, unit="None"))
-
     def record_governance_allow(self) -> None:
         """Track one governance allow decision."""
         self.increment_system_metric("governance_allows")
@@ -99,11 +89,6 @@ class MetricsCollector:
     def record_governance_block(self) -> None:
         """Track one governance block decision."""
         self.increment_system_metric("governance_blocks")
-
-    def record_governance_critical(self) -> None:
-        """Track one critical governance decision."""
-        self.increment_system_metric("governance_critical")
-        self.record_system(SystemMetric(name="governance_health", value=0.0, unit="None"))
 
     def record_governance_provider_failure(self) -> None:
         """Track one governance provider failure."""
@@ -114,10 +99,6 @@ class MetricsCollector:
         """Track one passed validation."""
         self.increment_system_metric("validation_passed")
         self.record_system(SystemMetric(name="validation_health", value=1.0, unit="None"))
-
-    def record_validation_warning(self) -> None:
-        """Track one warning validation result."""
-        self.increment_system_metric("validation_warnings")
 
     def record_validation_critical(self) -> None:
         """Track one critical validation result."""

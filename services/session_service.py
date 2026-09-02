@@ -65,23 +65,6 @@ def validate_and_touch_session(session_id: str, correlation_id: str = "system") 
     return True
 
 
-def can_resume_session(
-    session_id: str,
-    correlation_id: str = "widget-init",
-    *,
-    widget_id: str = "",
-    origin: str = "",
-) -> bool:
-    """Return whether a browser may resume a widget-bound conversation.
-
-    The legacy helper remains available for callers, but an unbound call now
-    fails closed instead of allowing an existence-only session check.
-    """
-    if not widget_id or not origin:
-        return False
-    return can_resume_bound_session(session_id, widget_id, origin, correlation_id)
-
-
 def can_resume_bound_session(
     session_id: str,
     widget_id: str,

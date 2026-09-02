@@ -12,5 +12,3 @@ export const WidgetFeatures = {
   streaming: false,
   typingIndicator: true
 } as const;
-
-export type WidgetFeatureKey = keyof typeof WidgetFeatures;

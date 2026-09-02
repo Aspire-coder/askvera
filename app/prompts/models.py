@@ -16,8 +16,3 @@ class PromptPackage:
     role: str
     prompt_version: str = "v1"
     metadata: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def text_prompt_template(self) -> str:
-        """Return the Bedrock retrieve-and-generate prompt template."""
-        return f"{self.system_prompt}\n\n{self.user_prompt}"

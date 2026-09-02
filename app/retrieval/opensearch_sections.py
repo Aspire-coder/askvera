@@ -32,7 +32,6 @@ from .providers import (
     RetrievalQueryPlan,
     _document_relevance,
     _planned_retrieval_plan,
-    _planned_retrieval_queries,
 )
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
@@ -80,14 +79,6 @@ def _client() -> OpenSearch:
         max_retries=settings.AWS_MAX_ATTEMPTS,
         retry_on_timeout=True,
     )
-
-
-def opensearch_index_exists(index_name: str) -> bool:
-    """Return whether a named retrieval index exists without exposing client details."""
-    normalized = str(index_name or "").strip()
-    if not normalized:
-        return False
-    return bool(_client().indices.exists(index=normalized))
 
 
 def _language_filter(language: str) -> dict[str, Any]:
@@ -801,19 +792,6 @@ class OpenSearchSectionProvider:
             target_language=target_language,
         )
         return translated.strip('"')
-
-    def _build_search_queries(
-        self,
-        message: str,
-        country: str,
-        language: str,
-        correlation_id: str,
-    ) -> list[str]:
-        """Build runtime multilingual queries without country-specific aliases."""
-        original = message.strip()
-        if not original:
-            return [original]
-        return _planned_retrieval_queries(original, country, language, correlation_id)
 
     def _build_search_plan(
         self,

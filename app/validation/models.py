@@ -47,10 +47,6 @@ class ValidationResult:
         if _severity_rank(issue.severity) > _severity_rank(self.highest_severity):
             self.highest_severity = issue.severity
 
-    def has_errors(self) -> bool:
-        """Return true when any error or critical issue exists."""
-        return any(issue.severity in {ValidationSeverity.ERROR, ValidationSeverity.CRITICAL} for issue in self.issues)
-
     def has_critical(self) -> bool:
         """Return true when any critical issue exists."""
         return any(issue.severity == ValidationSeverity.CRITICAL for issue in self.issues)

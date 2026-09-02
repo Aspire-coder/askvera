@@ -241,19 +241,6 @@ class FirehoseAuditSink:
         delay = self._retry_base_delay * (2**attempt)
         return min(delay, self._retry_max_delay)
 
-    def batch_size(self) -> int:
-        """Return the current number of buffered records."""
-        return len(self._batch)
-
-    def batch_config(self) -> dict[str, Any]:
-        """Return the active batch configuration."""
-        return {
-            "batch_size": self._batch_size,
-            "batch_timeout_seconds": self._batch_timeout,
-            "last_flush": self._last_flush,
-        }
-
-
 def initialize_firehose_sink() -> FirehoseAuditSink:
     """Initialise the Firehose sink configuration during startup."""
     return FirehoseAuditSink()

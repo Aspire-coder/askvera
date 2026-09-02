@@ -7,6 +7,6 @@ export type { ConfigValidationResult } from "./configValidator";
 export { defaultRuntimeConfig } from "./defaults";
 export { defaultFeatureFlags, mergeFeatureFlags } from "./featureFlags";
 export type { WidgetFeatureFlags } from "./featureFlags";
-export type { LauncherPosition, NormalizedRuntimeConfig, RuntimeConfig, RuntimeEventCallbacks } from "./runtimeConfig";
+export type { LauncherPosition, RuntimeConfig, RuntimeEventCallbacks } from "./runtimeConfig";
 export { buildThemeConfig } from "./themeConfig";
 export type { ThemeConfig, ThemeMode } from "./themeConfig";
