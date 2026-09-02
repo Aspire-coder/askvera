@@ -92,7 +92,10 @@
 .gw-header-identity {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
-  align-items: center;
+  /* start, not center: at a narrow panel width the subtitle can wrap to 2-3
+     lines, and centering a fixed-size icon against that whole stack pulls
+     it down away from the title line it's meant to sit next to. */
+  align-items: start;
   gap: var(--gw-space-3);
   min-width: 0;
 }
