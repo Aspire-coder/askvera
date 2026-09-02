@@ -25,12 +25,12 @@
   --gw-field-bg: #f0eee9;
   --gw-field-text: var(--gw-reference-ink);
   --gw-focus-ring: rgba(232, 183, 0, 0.28);
-  --gw-text-title-size: 16px;
-  --gw-text-heading-size: 15px;
-  --gw-text-body-size: 14px;
+  --gw-text-title-size: 15px;
+  --gw-text-heading-size: 14px;
+  --gw-text-body-size: 13px;
   --gw-text-chat-size: 15px;
-  --gw-text-caption-size: 12px;
-  --gw-text-label-size: 11px;
+  --gw-text-caption-size: 11px;
+  --gw-text-label-size: 10px;
   --gw-line-body: 1.52;
   --gw-line-relaxed: 1.58;
   --gw-weight-regular: 400;
