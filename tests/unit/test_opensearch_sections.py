@@ -683,6 +683,11 @@ def test_selector_confidence_is_withheld_when_pick_is_not_a_direct_answer(monkey
 
     assert selected[0][0]["evidence_selector_selected"] is True
     assert "evidence_selector_confidence" not in selected[0][0]
+    # Confidence blending never lets this lower the approval score - a
+    # correct paraphrase can score this way too - but generation still needs
+    # the signal, so it must be threaded through even though the rescue
+    # confidence above is deliberately withheld.
+    assert selected[0][0]["evidence_selector_directly_answers"] is False
 
 
 def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None:

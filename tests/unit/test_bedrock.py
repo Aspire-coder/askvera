@@ -43,8 +43,11 @@ def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
     normalized_prompt = " ".join(prompt.system_prompt.split())
     # Budget nudged up slightly to fit an explicit paraphrasing permission
     # ("Restate them naturally; do not quote verbatim.") that fixes the bot
-    # only answering when a user's wording matches the source verbatim.
-    assert len(prompt.system_prompt) < 4100
+    # only answering when a user's wording matches the source verbatim, and
+    # again for an explicit rule against a literal "[AGE]"-style bracket
+    # placeholder appearing in an answer even when the chunks state the real
+    # value elsewhere in the same response.
+    assert len(prompt.system_prompt) < 4250
     assert "complete response in that language" in normalized_prompt
     assert "Use only the retrieved authorised chunks" in normalized_prompt
     assert "Restate them naturally; do not quote verbatim" in normalized_prompt
@@ -76,6 +79,60 @@ def test_prompt_context_exposes_exact_evidence_identity_and_location() -> None:
     assert "Page: 18" in prompt.retrieved_context
     assert document.to_source()["section"] == "4.01e"
     assert document.to_source()["sectionTitle"] == "Case Credits"
+
+
+def test_prompt_warns_generation_when_top_source_does_not_directly_answer() -> None:
+    """The evidence selector can find the top source topically relevant
+    without it stating the specific detail asked (e.g. an office record with
+    no listed business hours for an hours question). Confidence blending
+    never lets that lower the approval score, so generation needs its own
+    warning here or it can mislabel a contact-only reply "Office Hours"."""
+    document = RetrievedDocument(
+        id="directory-algeria",
+        title="Global directory - Algeria",
+        content="Welcome to Forever Algeria!\n+213 982 400 660",
+        source="s3://kb/global-directory.pdf",
+        metadata={},
+    )
+    prompt = PromptBuilder().build(
+        user_question="What are the office hours for Forever Algeria?",
+        conversation="",
+        country="NO",
+        language="en",
+        role="new_prospect",
+        retrieval_result=RetrievalResult(
+            documents=[document],
+            citations=[],
+            confidence=0.95,
+            metadata={"top_source_directly_answers": False},
+        ),
+    )
+    assert "not directly stating the specific detail" in prompt.retrieved_context
+    assert "never label or imply an answer to that detail" in prompt.retrieved_context
+
+
+def test_prompt_omits_warning_when_top_source_directly_answers() -> None:
+    document = RetrievedDocument(
+        id="directory-germany",
+        title="Global directory - Germany",
+        content="Welcome to Forever Germany!\nMinimum order size FBO: 100,00",
+        source="s3://kb/global-directory.pdf",
+        metadata={},
+    )
+    prompt = PromptBuilder().build(
+        user_question="What are the ordering requirements in Germany?",
+        conversation="",
+        country="US",
+        language="en",
+        role="new_prospect",
+        retrieval_result=RetrievalResult(
+            documents=[document],
+            citations=[],
+            confidence=0.95,
+            metadata={"top_source_directly_answers": True},
+        ),
+    )
+    assert "not directly stating the specific detail" not in prompt.retrieved_context
 
 
 def test_prompt_context_exposes_structured_directory_fields() -> None:

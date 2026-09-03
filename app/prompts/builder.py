@@ -111,6 +111,14 @@ class PromptBuilder:
         """Render retrieved documents into model-ready context."""
         if retrieval_result is None or not retrieval_result.documents:
             return ""
+        # The evidence selector can find the top source topically relevant
+        # without it actually stating the specific detail asked (e.g. an
+        # office's directory record with no listed business hours for an
+        # hours question). Confidence blending never lets that lower the
+        # approval score - a correct paraphrase can score this way too - so
+        # the only place left to prevent a misleading answer (like labeling
+        # a contact-only reply "Office Hours") is telling generation here.
+        top_source_directly_answers = (retrieval_result.metadata or {}).get("top_source_directly_answers")
         chunks: list[str] = []
         for index, document in enumerate(retrieval_result.documents, start=1):
             section = str(
@@ -138,6 +146,14 @@ class PromptBuilder:
             ]
             if directory_fields:
                 source_lines.extend(["Approved directory fields:", directory_fields])
+            if index == 1 and top_source_directly_answers is False:
+                source_lines.append(
+                    "Note: this source is topically relevant but was flagged as not directly "
+                    "stating the specific detail the question asked for. Only state facts this "
+                    "source actually contains, and say plainly if the specific detail requested "
+                    "(e.g. a field like hours, a number, a date) is not present here - never label "
+                    "or imply an answer to that detail when the source doesn't state it."
+                )
             source_lines.append(f"Content: {document.content or document.excerpt}")
             chunks.append(
                 "\n".join(
