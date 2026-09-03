@@ -11,6 +11,7 @@ from app.evidence import (
     assistant_meta_response,
     approve_evidence,
     classify_intent,
+    is_planner_trusted_low_risk_subtype,
     localized_conversation_response,
     with_approved_evidence,
 )
@@ -1107,9 +1108,15 @@ class AIOrchestrator:
 
         response_key = ""
         if intent == "assistant_meta":
-            # The planner is advisory. Only reviewed exact phrases may produce
-            # assistant identity/capability copy.
-            if classify_intent(body.message, body.language) == "assistant_meta":
+            # The planner is advisory. Reviewed exact phrases always produce
+            # assistant identity/capability copy; a "thanks" classification is
+            # additionally trusted on its own once it clears every guard in
+            # is_planner_trusted_low_risk_subtype - see that function for why
+            # only "thanks" is safe to trust without an exact phrase match.
+            intent_confidence = float(metadata.get("intent_confidence") or 0.0)
+            if classify_intent(body.message, body.language) == "assistant_meta" or is_planner_trusted_low_risk_subtype(
+                body.message, intent, subtype, intent_confidence
+            ):
                 response_key = (
                     subtype
                     if subtype in {"greeting", "capability", "thanks", "wellbeing", "casual"}

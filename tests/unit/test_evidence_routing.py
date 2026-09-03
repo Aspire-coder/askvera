@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
-from app.evidence import approve_evidence, assistant_meta_response, classify_intent, localized_conversation_response
+from app.evidence import (
+    approve_evidence,
+    assistant_meta_response,
+    classify_intent,
+    is_planner_trusted_low_risk_subtype,
+    localized_conversation_response,
+)
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
 from services import controlled_copy
@@ -50,6 +56,39 @@ def test_routes_greeting_composed_with_how_can_you_help_me() -> None:
     assert classify_intent("hello, how can you help me", "en") == "assistant_meta"
     response = assistant_meta_response("hello, how can you help me", "en") or ""
     assert "official policies" in response
+
+
+def test_planner_trusted_low_risk_subtype_accepts_a_clean_thanks_elaboration() -> None:
+    assert is_planner_trusted_low_risk_subtype(
+        "Thanks a bunch for that detailed answer", "assistant_meta", "thanks", 0.97
+    ) is True
+
+
+def test_planner_trusted_low_risk_subtype_rejects_every_other_subtype(monkeypatch) -> None:
+    """Only "thanks" is trusted without an exact phrase match - greeting and
+    capability collide far more plausibly with a real policy question."""
+    for subtype in ("greeting", "capability", "wellbeing", "casual", ""):
+        assert is_planner_trusted_low_risk_subtype("Hi there, hope you're well", "assistant_meta", subtype, 0.99) is False
+
+
+def test_planner_trusted_low_risk_subtype_rejects_non_assistant_meta_intent() -> None:
+    assert is_planner_trusted_low_risk_subtype("Thanks a lot", "knowledge", "thanks", 0.99) is False
+
+
+def test_planner_trusted_low_risk_subtype_rejects_low_confidence() -> None:
+    assert is_planner_trusted_low_risk_subtype("Thanks a lot for the help", "assistant_meta", "thanks", 0.6) is False
+
+
+def test_planner_trusted_low_risk_subtype_rejects_a_question_mark() -> None:
+    """A "?" anywhere in the message is a strong, cheap signal of a real
+    ask hiding inside the gratitude - never trust the planner alone here."""
+    assert is_planner_trusted_low_risk_subtype("Thanks, but what about Kenya?", "assistant_meta", "thanks", 0.99) is False
+
+
+def test_planner_trusted_low_risk_subtype_rejects_a_long_message() -> None:
+    long_message = "Thanks so much for that incredibly detailed and thorough response about the policy today"
+    assert len(long_message.split()) > 12
+    assert is_planner_trusted_low_risk_subtype(long_message, "assistant_meta", "thanks", 0.99) is False
 
 
 def test_routes_thanks_with_trailing_words_not_just_the_bare_phrase() -> None:

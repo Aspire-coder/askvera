@@ -56,6 +56,44 @@ def classify_intent(message: str, language: str = "") -> str:
     return "assistant_meta" if _assistant_meta_category(normalized, language) else "policy_fact"
 
 
+def is_planner_trusted_low_risk_subtype(
+    message: str,
+    conversation_intent: str,
+    conversation_subtype: str,
+    intent_confidence: float,
+) -> bool:
+    """Return True when the query planner's own semantic classification can
+    be trusted for a low-risk conversational subtype without an exact
+    reviewed phrase match.
+
+    Only "thanks" is a candidate - a real information need essentially never
+    hides inside pure gratitude, unlike "capability"/"greeting" which collide
+    far more plausibly with an actual policy question ("hi, what's the
+    minimum order for Belgium"). Even then, every one of these deterministic
+    guards must also hold, so a genuine compound "thanks, and also..."
+    message still falls through to the normal document-grounded path:
+      - intent_confidence clears a high, dedicated bar (not the general
+        BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE used elsewhere)
+      - the message contains no "?" - a cheap, strong signal of a real ask
+      - the message is short enough that an embedded real question is unlikely
+    This exists because the exact-phrase list (config/conversation_routes.json)
+    can never keep pace with every natural elaboration of "thanks" across
+    every configured language, and the planner already runs on every message
+    that reaches this check - trusting it here for this one narrow case adds
+    no new cost or latency.
+    """
+    if conversation_intent != "assistant_meta" or conversation_subtype != "thanks":
+        return False
+    if intent_confidence < settings.PLANNER_TRUSTED_THANKS_MIN_CONFIDENCE:
+        return False
+    normalized_message = message or ""
+    if "?" in normalized_message:
+        return False
+    if len(normalized_message.split()) > settings.PLANNER_TRUSTED_THANKS_MAX_WORDS:
+        return False
+    return True
+
+
 def assistant_meta_response(message: str, language: str = "") -> str | None:
     """Return a configured response for a controlled greeting/capability message."""
     category = _assistant_meta_category(_normalize_text(message), language)

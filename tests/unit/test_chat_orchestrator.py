@@ -1090,6 +1090,95 @@ def test_semantic_assistant_route_cannot_turn_unrelated_question_into_greeting(m
     router.generate.assert_not_called()
 
 
+def test_semantic_thanks_route_is_trusted_without_an_exact_phrase_match(monkeypatch) -> None:
+    """A natural gratitude elaboration the exact-phrase list has never seen
+    ("thanks a bunch for that detailed answer") must still get the thanks
+    reply, not the generic refusal - unlike "greeting", which still requires
+    an exact phrase match (see the sibling test above)."""
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=1.0,
+        metadata={
+            "conversation_intent": "assistant_meta",
+            "conversation_subtype": "thanks",
+            "intent_confidence": 0.97,
+        },
+    )
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="Thanks a bunch for that detailed answer",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.answer == "Anytime! I'm here if anything else comes up."
+    assert response.metadata["intent"] == "assistant_meta"
+    router.generate.assert_not_called()
+
+
+def test_semantic_thanks_route_still_refuses_a_compound_question(monkeypatch) -> None:
+    """A "?" anywhere in the message must always fall through to the normal
+    document-grounded path, even when the planner classifies the message as
+    assistant_meta/thanks with high confidence - this is the guard against
+    silently swallowing a real embedded question."""
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=1.0,
+        metadata={
+            "conversation_intent": "assistant_meta",
+            "conversation_subtype": "thanks",
+            "intent_confidence": 0.97,
+        },
+    )
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever,
+        router=router,
+        validator=_FakeValidator(),
+        governance=_FakeGovernance(),
+    )
+    body = ChatRequest(
+        message="Thanks, but what about Kenya?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.metadata["intent"] == "off_topic"
+    router.generate.assert_not_called()
+
+
 def test_semantic_medical_route_never_opens_support_form(monkeypatch) -> None:
     retriever = MagicMock()
     retriever.retrieve.return_value = RetrievalResult(
