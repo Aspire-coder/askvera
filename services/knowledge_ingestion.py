@@ -556,6 +556,20 @@ def process_ingestion_job(
             )
         if not sections:
             raise ValueError("No readable text was found in the document.")
+        if len(sections) < settings.ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD:
+            # A near-empty extraction (e.g. a directory PDF whose format the
+            # extractor didn't recognize, or a policy PDF that lost its
+            # section structure) previously succeeded silently with a
+            # single-digit section count and no error - see the fleet audit
+            # that found International-Office-Directory-April-2026.pdf
+            # indexed with zero sections. Fail loudly instead, matching the
+            # zero-section case above.
+            raise ValueError(
+                f"Only {len(sections)} section(s) were extracted from this document, below "
+                f"the {settings.ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD}-section minimum expected "
+                "for a policy or office directory. Extraction likely failed silently - check the "
+                "source document's formatting before retrying."
+            )
 
         _update_job(job_id, status="uploading", progress=35, section_count=len(sections))
         source_uri = _upload_source(
@@ -995,6 +1009,23 @@ def _activate_generation_pointer(
                     """
                 ),
                 {"ingestion_id": previous_ingestion_id},
+            )
+            # knowledge_documents is the admin-facing flat list (and what the
+            # low-coverage fleet check reads) - without this it never learns
+            # a generation was superseded here, so the prior version keeps
+            # showing as status='active' (with its now-stale section count)
+            # indefinitely alongside the new one, exactly like
+            # rollback_document_generation and delete_ingestion_job already
+            # retire it in their own paths.
+            connection.execute(
+                text(
+                    """
+                    UPDATE knowledge_documents
+                    SET status = 'retired', updated_at = now()
+                    WHERE document_id = :document_id AND status = 'active'
+                    """
+                ),
+                {"document_id": previous_ingestion_id},
             )
         connection.execute(
             text(

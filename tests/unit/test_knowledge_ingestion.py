@@ -117,6 +117,7 @@ def test_policy_pdf_uses_policy_aware_extractor(monkeypatch, tmp_path: Path) -> 
         "ADMIN_INGESTION_CHUNK_PROFILE",
         "current",
     )
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD", 1)
     monkeypatch.setattr(
         knowledge_ingestion,
         "extract_pages",
@@ -165,6 +166,7 @@ def test_policy_pdf_uses_policy_aware_extractor(monkeypatch, tmp_path: Path) -> 
 def _office_directory_common_mocks(monkeypatch, indexed_sections: list[dict[str, object]]) -> None:
     monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_DOCUMENT_PREFLIGHT_ENABLED", False)
     monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_CHUNK_PROFILE", "current")
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD", 1)
     monkeypatch.setattr(knowledge_ingestion, "extract_pages", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         knowledge_ingestion,
@@ -319,6 +321,68 @@ def test_office_directory_pdf_raises_instead_of_silently_using_generic_chunker(m
     assert releases
     assert "known office directory format" in releases[0]["message"]
     assert releases[0]["retryable"] is False
+
+
+def test_process_ingestion_job_rejects_suspiciously_low_section_count(monkeypatch, tmp_path: Path) -> None:
+    """A near-empty extraction (a handful of sections instead of the dozens
+    or hundreds a real policy/directory document produces) must fail loudly
+    at upload time instead of completing silently - this is the same class
+    of bug that let International-Office-Directory-April-2026.pdf sit
+    active in production with zero indexed sections for months with no
+    error raised anywhere."""
+    source = tmp_path / "sparse.md"
+    source.write_text("content", encoding="utf-8")
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD", 2)
+    monkeypatch.setattr(knowledge_ingestion, "build_sections", lambda *_args, **_kwargs: [{"dummy": "one-section"}])
+    releases: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "release_ingestion_claim",
+        lambda job_id, message, **kwargs: releases.append({"job_id": job_id, "message": message, **kwargs}),
+    )
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+    result = process_ingestion_job(
+        "generation-sparse",
+        str(source),
+        filename=source.name,
+        country="US",
+        language="en",
+        document_type="product_information",
+        access_scope="country",
+        version="2026.1",
+        effective_date="2026-07-01",
+    )
+
+    assert result is False
+    assert releases
+    assert "below the 2-section minimum" in releases[0]["message"]
+    assert releases[0]["retryable"] is False
+
+
+def test_process_ingestion_job_accepts_section_count_at_the_threshold(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "product.md"
+    source.write_text(
+        "PRODUCT BENEFITS\nAloe Vera Gel supports everyday wellness.\n\nUSAGE\nTake 30 ml daily.",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(knowledge_ingestion.settings, "ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD", 2)
+    monkeypatch.setattr(knowledge_ingestion, "_index_sections", lambda sections, **_kwargs: len(sections))
+    monkeypatch.setattr(knowledge_ingestion, "_upload_source", lambda *_args, **_kwargs: "s3://approved/product.md")
+    monkeypatch.setattr(knowledge_ingestion, "_record_document", lambda **_kwargs: None)
+    monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
+
+    assert process_ingestion_job(
+        "generation-ok",
+        str(source),
+        filename=source.name,
+        country="BE",
+        language="en",
+        document_type="product_information",
+        access_scope="country",
+        version="2026.1",
+        effective_date="2026-07-01",
+    ) is True
 
 
 def test_release_claim_marks_exhausted_retry_as_terminal(monkeypatch) -> None:
@@ -614,6 +678,83 @@ def test_generation_activation_locks_logical_document_before_read(
     second_statement = str(connection.execute.call_args_list[1].args[0])
     assert "pg_advisory_xact_lock" in first_statement
     assert "FOR UPDATE" in second_statement
+
+
+def test_generation_activation_retires_the_previous_flat_document_row(
+    monkeypatch,
+) -> None:
+    """When a new generation supersedes a prior one, the flat
+    knowledge_documents row for that prior generation must also flip to
+    'retired' - otherwise it lingers as status='active' with a stale
+    section count forever, exactly like International-Office-Directory-
+    April-2026.pdf did (a pre-pipeline legacy row, but the same failure
+    mode applies to any normal re-upload once a generation pointer already
+    exists), confusing both the admin document list and the low-coverage
+    fleet check."""
+    connection = MagicMock()
+    connection.execute.return_value.scalar.return_value = "generation-1"
+    transaction = MagicMock()
+    transaction.__enter__.return_value = connection
+    engine = MagicMock()
+    engine.begin.return_value = transaction
+    monkeypatch.setattr(knowledge_ingestion, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "clear_active_generation_cache",
+        lambda: None,
+    )
+
+    knowledge_ingestion._activate_generation_pointer(
+        logical_document_id="country:CA:en:policy:company-policy",
+        ingestion_id="generation-2",
+        country="CA",
+        language="en",
+        source_file="CA-EN-Company-Policy.pdf",
+        document_type="policy",
+        access_scope="country",
+        activated_by="reviewer@example.invalid",
+    )
+
+    retire_calls = [
+        call for call in connection.execute.call_args_list
+        if "UPDATE knowledge_documents" in str(call.args[0])
+    ]
+    assert len(retire_calls) == 1
+    assert "status = 'retired'" in str(retire_calls[0].args[0])
+    assert retire_calls[0].args[1]["document_id"] == "generation-1"
+
+
+def test_generation_activation_skips_flat_row_retirement_when_no_prior_generation(
+    monkeypatch,
+) -> None:
+    connection = MagicMock()
+    connection.execute.return_value.scalar.return_value = ""
+    transaction = MagicMock()
+    transaction.__enter__.return_value = connection
+    engine = MagicMock()
+    engine.begin.return_value = transaction
+    monkeypatch.setattr(knowledge_ingestion, "get_engine", lambda: engine)
+    monkeypatch.setattr(
+        knowledge_ingestion,
+        "clear_active_generation_cache",
+        lambda: None,
+    )
+
+    knowledge_ingestion._activate_generation_pointer(
+        logical_document_id="country:CA:en:policy:company-policy",
+        ingestion_id="generation-1",
+        country="CA",
+        language="en",
+        source_file="CA-EN-Company-Policy.pdf",
+        document_type="policy",
+        access_scope="country",
+        activated_by="reviewer@example.invalid",
+    )
+
+    assert not any(
+        "UPDATE knowledge_documents" in str(call.args[0])
+        for call in connection.execute.call_args_list
+    )
 
 
 def test_logical_document_ids_are_namespaced_by_locale() -> None:
