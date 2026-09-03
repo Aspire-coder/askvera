@@ -785,6 +785,121 @@ def test_query_planner_preserves_directory_lookup_when_assistant_meta_is_overbro
     assert plan.conversation_subtype == ""
 
 
+def test_query_planner_trusts_thanks_without_exact_phrase_when_guards_pass(monkeypatch) -> None:
+    """A natural gratitude elaboration the exact-phrase list has never seen
+    must still route as assistant_meta/thanks when the planner is confident,
+    the message has no "?", and it's short - the exact-phrase list can never
+    keep pace with every phrasing across every configured language."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"assistant_meta",'
+                    '"intent_subtype":"thanks","intent_confidence":0.97,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Thanks a bunch for that detailed answer", "US", "en", "thanks-trusted-cid")
+
+    assert plan.conversation_intent == "assistant_meta"
+    assert plan.conversation_subtype == "thanks"
+
+
+def test_query_planner_still_rejects_thanks_containing_a_question_mark(monkeypatch) -> None:
+    """A compound "thanks, but what about..." message must never be
+    swallowed by the trusted-thanks path - the "?" guard exists exactly for
+    this case."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"assistant_meta",'
+                    '"intent_subtype":"thanks","intent_confidence":0.97,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Thanks, but what about Kenya?", "US", "en", "thanks-question-cid")
+
+    assert plan.conversation_intent == "knowledge"
+    assert plan.conversation_subtype == ""
+
+
+def test_query_planner_still_rejects_thanks_below_the_dedicated_confidence_bar(monkeypatch) -> None:
+    """The trusted-thanks path uses its own high confidence bar, separate
+    from the general conversation-route threshold, and must reject anything
+    below it."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"assistant_meta",'
+                    '"intent_subtype":"thanks","intent_confidence":0.86,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Thanks a bunch for that detailed answer", "US", "en", "thanks-low-conf-cid")
+
+    assert plan.conversation_intent == "off_topic"
+
+
+def test_query_planner_still_requires_exact_phrase_for_greeting_not_just_thanks(monkeypatch) -> None:
+    """Only "thanks" is trusted without an exact phrase match - "greeting"
+    and every other subtype must stay exact-phrase-only, since those collide
+    far more plausibly with a real policy question."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":[],"document_scopes":[],"intent":"assistant_meta",'
+                    '"intent_subtype":"greeting","intent_confidence":0.99,'
+                    '"explicit_support_request":false}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan("Good to see you today, hope you're well", "US", "en", "greeting-not-trusted-cid")
+
+    assert plan.conversation_intent == "off_topic"
+
+
 def test_unverified_support_intent_fails_closed_to_knowledge(monkeypatch) -> None:
     runtime = MagicMock()
     runtime.converse.side_effect = [

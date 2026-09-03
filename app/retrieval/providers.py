@@ -611,12 +611,25 @@ def _planned_retrieval_plan(
 
     if conversation_intent == "assistant_meta":
         # Exact, reviewed phrases are already handled before retrieval. Do not let
-        # a broad semantic "who" classification impersonate that trusted route.
-        from app.evidence import classify_intent
+        # a broad semantic "who" classification impersonate that trusted route -
+        # except for "thanks", which is trusted on its own once it clears every
+        # guard in is_planner_trusted_low_risk_subtype, since the exact-phrase
+        # list can never keep pace with every natural elaboration of gratitude
+        # across every configured language.
+        from app.evidence import classify_intent, is_planner_trusted_low_risk_subtype
 
         if classify_intent(message, language) != "assistant_meta":
-            conversation_intent = "knowledge" if include_global_documents else "off_topic"
-            conversation_subtype = ""
+            if is_planner_trusted_low_risk_subtype(
+                message, conversation_intent, conversation_subtype, intent_confidence
+            ):
+                LOGGER.info(
+                    "query_planner_thanks_trusted_without_exact_phrase",
+                    correlation_id=correlation_id,
+                    intent_confidence=intent_confidence,
+                )
+            else:
+                conversation_intent = "knowledge" if include_global_documents else "off_topic"
+                conversation_subtype = ""
 
     client_action = ""
     if (
