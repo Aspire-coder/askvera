@@ -1,0 +1,33 @@
+{
+  "version": "2026-09-03",
+  "description": "Country names covered by the global sponsoring/office directory that find_market_mentions() would otherwise miss - either because the market has no widget deployment and so no entry in markets.json at all (e.g. Japan), or because the directory spells an already-configured market's name differently than markets.json does (e.g. 'Tanzania' vs markets.json's 'Tanzania, United Republic of'). This never changes which country's policy documents a session can access - that stays governed entirely by markets.json/policy_locales.json - it only widens what find_market_mentions() recognizes as a named market for global-directory query planning and the cross-market evidence gate. Deliberately excludes regional groupings the directory lists as a single record covering multiple countries (Central America, North America, Scandinavia, Kenya/East Africa) and constituent countries of an already-configured market (England, Scotland are part of the existing United Kingdom (GB) market) - both need a content-team decision on the right mapping, not a guess.",
+  "markets": [
+    { "name": "Tanzania", "code": "TZ" },
+    { "name": "Bosnia & Herzegovina", "code": "BA" },
+    { "name": "Ivory Coast", "code": "CI" },
+    { "name": "Luxemburg", "code": "LU" },
+    { "name": "Netherlands Benelux", "code": "NL" },
+    { "name": "Reunion Island", "code": "RE" },
+    { "name": "Democratic Rep. of Congo", "code": "CD" },
+    { "name": "Algeria", "code": "DZ" },
+    { "name": "Bangladesh", "code": "BD" },
+    { "name": "Brunei", "code": "BN" },
+    { "name": "Cambodia", "code": "KH" },
+    { "name": "China", "code": "CN" },
+    { "name": "Estonia", "code": "EE" },
+    { "name": "Hong Kong", "code": "HK" },
+    { "name": "India", "code": "IN" },
+    { "name": "Indonesia", "code": "ID" },
+    { "name": "Japan", "code": "JP" },
+    { "name": "Korea", "code": "KR" },
+    { "name": "Liberia", "code": "LR" },
+    { "name": "Lithuania", "code": "LT" },
+    { "name": "Malaysia", "code": "MY" },
+    { "name": "Mongolia", "code": "MN" },
+    { "name": "Philippines", "code": "PH" },
+    { "name": "Singapore", "code": "SG" },
+    { "name": "Taiwan", "code": "TW" },
+    { "name": "Thailand", "code": "TH" },
+    { "name": "Vietnam", "code": "VN" }
+  ]
+}

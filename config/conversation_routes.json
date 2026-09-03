@@ -39,7 +39,19 @@
           "thank u",
           "cheers",
           "appreciate it",
-          "much appreciated"
+          "much appreciated",
+          "thanks for the response",
+          "thank you for the response",
+          "thanks for your response",
+          "thank you for your response",
+          "thanks for the help",
+          "thank you for the help",
+          "thanks for your help",
+          "thank you for your help",
+          "thanks for that",
+          "thank you for that",
+          "thanks for the information",
+          "thank you for the information"
         ],
         "farewell": [
           "bye",
@@ -63,6 +75,11 @@
           "what can you help me with",
           "what can you do",
           "what can you do for me",
+          "how can you help",
+          "how can you help me",
+          "how can you help me with",
+          "how do you help",
+          "how do you help me",
           "help"
         ],
         "casual": [

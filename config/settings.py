@@ -577,6 +577,9 @@ ALLOWED_ORIGINS = [
 ]
 API_DOMAIN = "api.vera-api.xyz"
 MARKETS_CONFIG_PATH = os.environ.get("MARKETS_CONFIG_PATH", str(Path(__file__).with_name("markets.json")))
+GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH = os.environ.get(
+    "GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH", str(Path(__file__).with_name("global_directory_markets.json"))
+)
 
 SSM_PARAMETER_PATH = os.environ.get("SSM_PARAMETER_PATH", "/askverachat/prod/")
 SSM_CONFIG_ENABLED = os.environ.get("SSM_CONFIG_ENABLED", "true").lower() == "true"
