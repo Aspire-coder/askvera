@@ -179,6 +179,40 @@ def test_market_mentions_are_loaded_from_shared_configuration() -> None:
     assert market_config.find_market_mentions("What is required for it to work?") == set()
 
 
+def test_market_mentions_include_global_directory_markets_without_a_widget() -> None:
+    """Japan has real content in the global sponsoring directory but no
+    widget deployment, so it has no entry in markets.json at all. Retrieval
+    was refusing Japan/office-address questions because find_market_mentions
+    found no match and the query planner never expanded the query for it -
+    this must recognize it via the supplementary global-directory list."""
+    market_config.load_market_config.cache_clear()
+    market_config.load_global_directory_markets.cache_clear()
+
+    assert market_config.find_market_mentions("What is the office address in Japan?") == {"JP"}
+
+
+def test_market_mentions_recognize_a_directory_spelling_of_an_existing_market() -> None:
+    """The sponsoring directory spells this market "Tanzania"; markets.json
+    spells the same TZ market "Tanzania, United Republic of" - a plain-text
+    "Tanzania" mention must still resolve to the existing TZ code, not go
+    unrecognized."""
+    market_config.load_market_config.cache_clear()
+    market_config.load_global_directory_markets.cache_clear()
+
+    assert market_config.find_market_mentions("Delivery cost for Tanzania") == {"TZ"}
+
+
+def test_load_global_directory_markets_fails_open_when_file_is_missing(tmp_path, monkeypatch) -> None:
+    """This supplementary list only widens market-mention recognition - a
+    missing or malformed file must never block a chat request, so it fails
+    open to an empty list rather than raising."""
+    monkeypatch.setenv("GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH", str(tmp_path / "missing.json"))
+    market_config.load_global_directory_markets.cache_clear()
+
+    assert market_config.load_global_directory_markets() == []
+    market_config.load_global_directory_markets.cache_clear()
+
+
 def test_find_probable_market_typo_catches_a_single_character_misspelling() -> None:
     """TRB-19189: "Nigar" should be recognized as a likely typo for "Niger"."""
     market_config.load_market_config.cache_clear()

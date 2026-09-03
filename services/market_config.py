@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MARKETS_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "markets.json"
+DEFAULT_GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "global_directory_markets.json"
+)
 DEFAULT_POLICY_LOCALES_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "policy_locales.json"
 REQUIRED_MARKET_FIELDS = {"code", "name", "enabled", "defaultLanguage", "languages", "privacyVersion", "displayOrder"}
 REQUIRED_LANGUAGE_FIELDS = {"code", "name", "enabled"}
@@ -24,6 +27,47 @@ def _config_path() -> Path:
     except ImportError:
         configured_path = None
     return Path(os.environ.get("MARKETS_CONFIG_PATH", configured_path or DEFAULT_MARKETS_CONFIG_PATH))
+
+
+def _global_directory_markets_path() -> Path:
+    try:
+        from config import settings
+
+        configured_path = getattr(settings, "GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH", None)
+    except ImportError:
+        configured_path = None
+    return Path(
+        os.environ.get("GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH", configured_path or DEFAULT_GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH)
+    )
+
+
+@lru_cache(maxsize=1)
+def load_global_directory_markets() -> list[dict[str, str]]:
+    """Load the supplementary market names covered by the global sponsoring/
+    office directory but absent from markets.json - either because no widget
+    is deployed there (e.g. Japan) or because the directory spells an
+    already-configured market's name differently (e.g. "Tanzania" vs
+    markets.json's "Tanzania, United Republic of"). This only widens what
+    find_market_mentions() recognizes for query planning and the cross-
+    market evidence gate; it never changes which country's policy documents
+    a session can access. A missing or malformed file fails open to an empty
+    list rather than blocking chat requests, matching how conversation
+    routing copy already degrades gracefully.
+    """
+    path = _global_directory_markets_path()
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return []
+    markets = payload.get("markets")
+    if not isinstance(markets, list):
+        return []
+    return [
+        {"name": str(entry["name"]), "code": str(entry["code"]).upper()}
+        for entry in markets
+        if isinstance(entry, dict) and entry.get("name") and entry.get("code")
+    ]
 
 
 def _policy_locales_path() -> Path:
@@ -224,10 +268,15 @@ def get_widget_country_codes() -> set[str]:
 def find_market_mentions(message: str) -> set[str]:
     """Return enabled markets whose configured name is present in a message.
 
-    Market discovery is driven entirely by ``markets.json`` so newly configured
-    countries work without adding retrieval-specific source code. Short market
-    codes are deliberately not matched because ordinary words such as ``it``
-    and ``us`` would otherwise create false global-directory searches.
+    Market discovery is driven by ``markets.json`` so newly configured
+    countries work without adding retrieval-specific source code, plus the
+    supplementary names in ``global_directory_markets.json`` for content
+    covered by the global sponsoring/office directory that markets.json
+    doesn't reflect (no widget deployment there, or a differently-spelled
+    name for a market markets.json already has under a different code).
+    Short market codes are deliberately not matched because ordinary words
+    such as ``it`` and ``us`` would otherwise create false global-directory
+    searches.
     """
     normalized_message = _normalize_market_text(message)
     if not normalized_message:
@@ -241,6 +290,10 @@ def find_market_mentions(message: str) -> set[str]:
         normalized_name = _normalize_market_text(str(market.get("name") or ""))
         if normalized_name and f" {normalized_name} " in padded_message:
             matches.add(str(market["code"]).upper())
+    for market in load_global_directory_markets():
+        normalized_name = _normalize_market_text(market["name"])
+        if normalized_name and f" {normalized_name} " in padded_message:
+            matches.add(market["code"])
     return matches
 
 

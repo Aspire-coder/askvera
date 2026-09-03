@@ -33,6 +33,79 @@ def test_routes_help_me_phrasing_of_capability_question() -> None:
     assert "global office directory" in capability
 
 
+def test_routes_how_can_you_help_me_phrasing_of_capability_question() -> None:
+    """"How can you help me" was falling through to the document-grounded
+    path, since only "what can you help..." phrasings were recognized, not
+    the equally natural "how" phrasing."""
+    assert classify_intent("how can you help me?", "en") == "assistant_meta"
+    capability = assistant_meta_response("how can you help me?", "en") or ""
+    assert "official policies" in capability
+    assert "global office directory" in capability
+
+
+def test_routes_greeting_composed_with_how_can_you_help_me() -> None:
+    """"Hello, how can you help me" combines a greeting with the "how"
+    capability phrasing - both halves are reviewed phrases, so the composed
+    matcher should recognize the whole message rather than refusing it."""
+    assert classify_intent("hello, how can you help me", "en") == "assistant_meta"
+    response = assistant_meta_response("hello, how can you help me", "en") or ""
+    assert "official policies" in response
+
+
+def test_routes_thanks_with_trailing_words_not_just_the_bare_phrase() -> None:
+    """"Thanks for the response" and "thank you for the response" were
+    falling through to the document-grounded path and getting a generic
+    refusal, since only the bare "thanks"/"thank you" (no trailing words)
+    was a recognized phrase."""
+    for message in (
+        "Thanks for the response",
+        "thank you for the response",
+        "Thanks for your help",
+        "thank you for that",
+    ):
+        assert classify_intent(message, "en") == "assistant_meta", message
+        response = assistant_meta_response(message, "en") or ""
+        assert response == "Anytime! I'm here if anything else comes up."
+
+
+def test_routes_thanks_with_trailing_words_across_configured_locales() -> None:
+    """The English-only fix must not be the only locale that got it - every
+    configured locale had the exact same bare-phrase-only gap in its own
+    language."""
+    cases = {
+        "fr": "merci pour la reponse",
+        "es": "gracias por la respuesta",
+        "de": "danke für die antwort",
+        "nl": "bedankt voor de reactie",
+        "it": "grazie per la risposta",
+        "da": "tak for svaret",
+        "fi": "kiitos vastauksesta",
+        "no": "takk for svaret",
+        "sr": "hvala na odgovoru",
+        "sv": "tack för svaret",
+        "ru": "спасибо за ответ",
+    }
+    for language, message in cases.items():
+        assert classify_intent(message, language) == "assistant_meta", (language, message)
+        response = assistant_meta_response(message, language)
+        assert response, (language, message)
+
+
+def test_routes_how_can_you_help_me_across_locales_missing_that_phrasing() -> None:
+    """French, Spanish, German, and Dutch had no "how can you help me"-style
+    capability trigger at all, unlike the other configured locales."""
+    cases = {
+        "fr": "comment peux tu m'aider",
+        "es": "como puedes ayudarme",
+        "de": "wie kannst du mir helfen",
+        "nl": "hoe kun je me helpen",
+    }
+    for language, message in cases.items():
+        assert classify_intent(message, language) == "assistant_meta", (language, message)
+        response = assistant_meta_response(message, language)
+        assert response, (language, message)
+
+
 def test_routes_substantive_french_question_to_document_grounded_flow() -> None:
     assert classify_intent("Quelles sont les conditions pour devenir Manager?", "fr-CA") == "policy_fact"
 
