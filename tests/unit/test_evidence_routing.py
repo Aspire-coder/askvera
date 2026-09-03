@@ -68,6 +68,44 @@ def test_routes_thanks_with_trailing_words_not_just_the_bare_phrase() -> None:
         assert response == "Anytime! I'm here if anything else comes up."
 
 
+def test_routes_thanks_with_trailing_words_across_configured_locales() -> None:
+    """The English-only fix must not be the only locale that got it - every
+    configured locale had the exact same bare-phrase-only gap in its own
+    language."""
+    cases = {
+        "fr": "merci pour la reponse",
+        "es": "gracias por la respuesta",
+        "de": "danke für die antwort",
+        "nl": "bedankt voor de reactie",
+        "it": "grazie per la risposta",
+        "da": "tak for svaret",
+        "fi": "kiitos vastauksesta",
+        "no": "takk for svaret",
+        "sr": "hvala na odgovoru",
+        "sv": "tack för svaret",
+        "ru": "спасибо за ответ",
+    }
+    for language, message in cases.items():
+        assert classify_intent(message, language) == "assistant_meta", (language, message)
+        response = assistant_meta_response(message, language)
+        assert response, (language, message)
+
+
+def test_routes_how_can_you_help_me_across_locales_missing_that_phrasing() -> None:
+    """French, Spanish, German, and Dutch had no "how can you help me"-style
+    capability trigger at all, unlike the other configured locales."""
+    cases = {
+        "fr": "comment peux tu m'aider",
+        "es": "como puedes ayudarme",
+        "de": "wie kannst du mir helfen",
+        "nl": "hoe kun je me helpen",
+    }
+    for language, message in cases.items():
+        assert classify_intent(message, language) == "assistant_meta", (language, message)
+        response = assistant_meta_response(message, language)
+        assert response, (language, message)
+
+
 def test_routes_substantive_french_question_to_document_grounded_flow() -> None:
     assert classify_intent("Quelles sont les conditions pour devenir Manager?", "fr-CA") == "policy_fact"
 

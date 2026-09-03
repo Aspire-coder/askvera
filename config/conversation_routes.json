@@ -117,12 +117,17 @@
         ],
         "thanks": [
           "merci",
-          "merci beaucoup"
+          "merci beaucoup",
+          "merci pour la reponse",
+          "merci pour votre aide",
+          "merci pour l'aide"
         ],
         "capability": [
           "qui es tu",
           "qui etes vous",
           "que peux tu faire",
+          "comment peux tu m'aider",
+          "comment pouvez vous m'aider",
           "aide"
         ]
       },
@@ -151,11 +156,16 @@
         ],
         "thanks": [
           "gracias",
-          "muchas gracias"
+          "muchas gracias",
+          "gracias por la respuesta",
+          "gracias por tu ayuda",
+          "gracias por la ayuda"
         ],
         "capability": [
           "quien eres",
           "que puedes hacer",
+          "como puedes ayudarme",
+          "como me puedes ayudar",
           "ayuda"
         ]
       },
@@ -184,11 +194,16 @@
         ],
         "thanks": [
           "danke",
-          "vielen dank"
+          "vielen dank",
+          "danke für die antwort",
+          "danke für deine hilfe",
+          "danke für die hilfe"
         ],
         "capability": [
           "wer bist du",
           "was kannst du",
+          "wie kannst du mir helfen",
+          "wie kannst du helfen",
           "hilfe"
         ]
       },
@@ -219,11 +234,16 @@
         "thanks": [
           "bedankt",
           "dank je",
-          "dank u"
+          "dank u",
+          "bedankt voor de reactie",
+          "bedankt voor je hulp",
+          "dank je voor de hulp"
         ],
         "capability": [
           "wie ben je",
           "wat kun je",
+          "hoe kun je me helpen",
+          "hoe kun je helpen",
           "help"
         ]
       },
@@ -245,7 +265,7 @@
       "patterns": {
         "wellbeing": ["come stai", "come sta", "come va", "stai bene"],
         "greeting": ["ciao", "buongiorno", "buonasera"],
-        "thanks": ["grazie", "grazie mille"],
+        "thanks": ["grazie", "grazie mille", "grazie per la risposta", "grazie per il tuo aiuto", "grazie per l'aiuto"],
         "capability": ["chi sei", "cosa puoi fare", "come puoi aiutarmi", "aiuto"]
       },
       "responses": {
@@ -262,7 +282,7 @@
       "patterns": {
         "wellbeing": ["hvordan har du det", "hvordan går det", "har du det godt"],
         "greeting": ["hej", "godmorgen", "god eftermiddag", "god aften"],
-        "thanks": ["tak", "mange tak"],
+        "thanks": ["tak", "mange tak", "tak for svaret", "tak for hjælpen", "mange tak for hjælpen"],
         "capability": ["hvem er du", "hvad kan du", "hvordan kan du hjælpe", "hjælp"]
       },
       "responses": {
@@ -279,7 +299,7 @@
       "patterns": {
         "wellbeing": ["mitä kuuluu", "kuinka voit", "voitko hyvin"],
         "greeting": ["hei", "terve", "hyvää huomenta", "hyvää iltaa"],
-        "thanks": ["kiitos", "paljon kiitos"],
+        "thanks": ["kiitos", "paljon kiitos", "kiitos vastauksesta", "kiitos avusta"],
         "capability": ["kuka olet", "mitä voit tehdä", "miten voit auttaa", "apu"]
       },
       "responses": {
@@ -296,7 +316,7 @@
       "patterns": {
         "wellbeing": ["hvordan har du det", "hvordan går det", "har du det bra"],
         "greeting": ["hei", "hallo", "god morgen", "god kveld"],
-        "thanks": ["takk", "tusen takk"],
+        "thanks": ["takk", "tusen takk", "takk for svaret", "takk for hjelpen", "tusen takk for hjelpen"],
         "capability": ["hvem er du", "hva kan du gjøre", "hvordan kan du hjelpe", "hjelp"]
       },
       "responses": {
@@ -313,7 +333,7 @@
       "patterns": {
         "wellbeing": ["kako si", "kako ste", "da li si dobro"],
         "greeting": ["zdravo", "dobar dan", "dobro jutro", "dobro veče"],
-        "thanks": ["hvala", "hvala puno"],
+        "thanks": ["hvala", "hvala puno", "hvala na odgovoru", "hvala na pomoći"],
         "capability": ["ko si ti", "šta možeš", "kako možeš da pomogneš", "pomoć"]
       },
       "responses": {
@@ -330,7 +350,7 @@
       "patterns": {
         "wellbeing": ["hur mår du", "hur går det", "mår du bra"],
         "greeting": ["hej", "hallå", "god morgon", "god kväll"],
-        "thanks": ["tack", "tack så mycket"],
+        "thanks": ["tack", "tack så mycket", "tack för svaret", "tack för hjälpen"],
         "capability": ["vem är du", "vad kan du göra", "hur kan du hjälpa", "hjälp"]
       },
       "responses": {
@@ -347,7 +367,7 @@
       "patterns": {
         "wellbeing": ["как дела", "как вы", "ты в порядке"],
         "greeting": ["здравствуйте", "привет", "доброе утро", "добрый вечер"],
-        "thanks": ["спасибо", "большое спасибо"],
+        "thanks": ["спасибо", "большое спасибо", "спасибо за ответ", "спасибо за помощь"],
         "capability": ["кто вы", "что вы умеете", "чем вы можете помочь", "помощь"]
       },
       "responses": {
