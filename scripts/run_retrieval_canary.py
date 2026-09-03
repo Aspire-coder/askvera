@@ -6,10 +6,21 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+# This canary is a blocking, batch, pre-deploy quality gate, not a live user
+# request - it can afford a couple of retries on a transient Bedrock blip,
+# unlike the deliberately zero-retry client production uses so an
+# interactive chat request never hangs through multiple backoff cycles. Must
+# be set before `from config import settings` first runs in this process
+# (settings.AWS_INTERACTIVE_MAX_ATTEMPTS is read once, at import time), and
+# only affects this standalone script's own process - never the live
+# askvera service, which is a separate process with its own environment.
+os.environ.setdefault("AWS_INTERACTIVE_MAX_ATTEMPTS", "3")
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
