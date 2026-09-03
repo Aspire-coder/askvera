@@ -736,6 +736,9 @@ class OpenSearchSectionProvider:
         ][: settings.OPENSEARCH_RESULT_COUNT]
         selector_applied = bool(rows and rows[0][0].get("evidence_selector_selected"))
         selector_confidence = rows[0][0].get("evidence_selector_confidence") if selector_applied else None
+        top_source_directly_answers = (
+            rows[0][0].get("evidence_selector_directly_answers") if selector_applied else None
+        )
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
         strong_local_match = bool(
             selector_applied
@@ -774,6 +777,7 @@ class OpenSearchSectionProvider:
                 "evidence_selector_rejected": selector_rejected,
                 "evidence_selector_applied": selector_applied,
                 "evidence_selector_confidence": selector_confidence,
+                "top_source_directly_answers": top_source_directly_answers,
                 "lexical_confidence": lexical_confidence,
                 "max_local_relevance": round(max_local_relevance, 6),
                 "strong_local_match": strong_local_match,
@@ -1049,6 +1053,17 @@ class OpenSearchSectionProvider:
                     # about automatic loss from inactivity).
                     if position == 0 and top_rank_confidence is not None and directly_answers_top_rank is True:
                         candidate[0]["evidence_selector_confidence"] = top_rank_confidence
+                    if position == 0 and directly_answers_top_rank is False:
+                        # The selector explicitly found the top pick topically
+                        # relevant but not a direct answer (e.g. an office's
+                        # directory record with no stated business hours for
+                        # an hours question). Confidence blending deliberately
+                        # never lets this lower the lexical score - a
+                        # paraphrase can score this way on a genuinely correct
+                        # pick too - but the prompt still needs the signal so
+                        # generation doesn't present a field the source never
+                        # actually states.
+                        candidate[0]["evidence_selector_directly_answers"] = False
                     selected.append(candidate)
                     selected_ids.add(row_id)
 

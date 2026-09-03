@@ -186,8 +186,13 @@
 }
 
 .gw-status-region {
-  display: inline-flex;
+  /* inline-block, not inline-flex: text-overflow:ellipsis is silently
+     ignored on flex containers in most browsers, which hard-clipped a
+     long market name (e.g. "United Kingdom") with no ellipsis instead of
+     truncating it cleanly. */
+  display: inline-block;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
