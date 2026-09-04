@@ -121,7 +121,13 @@ DIRECTORY_FIELD_TERMS: dict[str, re.Pattern[str]] = {
     "directory-telephone": re.compile(r"\b(telephone|phone)\b", re.IGNORECASE),
     "directory-hours": re.compile(r"\b(business\s+hours?|office\s+hours?|hours)\b", re.IGNORECASE),
     "directory-email": re.compile(r"\bemail\b", re.IGNORECASE),
-    "directory-address": re.compile(r"\baddress\b", re.IGNORECASE),
+    # Excludes "address" inside "email address" (e.g. "what's the email
+    # address for the UK office?") - without this, that phrase matches both
+    # directory-email and directory-address, so len(named_fields) != 1 and
+    # the field is (wrongly) never treated as already specified, producing
+    # an unresolvable loop: the generic "which detail?" clarification fires
+    # again even after the user names or clicks "Email address".
+    "directory-address": re.compile(r"(?<!email\s)\baddress\b", re.IGNORECASE),
     "directory-website": re.compile(r"\bwebsite\b", re.IGNORECASE),
     "directory-sponsoring": re.compile(r"\bsponsor\w*\b", re.IGNORECASE),
 }
@@ -211,6 +217,7 @@ class AIOrchestrator:
             body,
             correlation_id,
             candidate_flags,
+            history,
         )
         if chat_response:
             return chat_response
@@ -234,7 +241,7 @@ class AIOrchestrator:
         except LowConfidenceError as exc:
             failure_layer = self._low_confidence_failure_layer(exc)
             if candidate_flags.narrowing_fallback:
-                narrowing_response = self._candidate_narrowing_response(body, correlation_id)
+                narrowing_response = self._candidate_narrowing_response(body, correlation_id, history)
                 if narrowing_response:
                     return self._validate_response(
                         narrowing_response,
@@ -1000,6 +1007,7 @@ class AIOrchestrator:
         self,
         body: ChatRequest,
         correlation_id: str,
+        history: str = "",
     ) -> ChatResponse | None:
         """Experimental: ask a narrowing question instead of a flat refusal.
 
@@ -1009,21 +1017,35 @@ class AIOrchestrator:
         returns None so the caller falls through to today's
         _insufficient_evidence_message - this can only ever add helpfulness,
         never break the base fallback path.
+
+        history is passed so the model can see it already asked a clarifying
+        question on a prior turn - without it, each turn only sees the
+        latest message in isolation and re-asks a similarly generic
+        question forever instead of ever converging (observed live: asking
+        about a product's price looped through "which product?" ->
+        "which detail?" -> "which product?" without ever answering or
+        admitting the detail isn't available).
         """
         try:
             system_prompt = (
                 "You are AskVera, a company-policy assistant. The user's question "
                 "could not be answered from the approved documents available to you. "
-                "Ask ONE short, specific clarifying question that would help narrow "
-                "down what they actually need. Do not answer the question, do not "
-                "invent facts, and do not mention documents, search, or retrieval. "
-                "Reply in the same language as the user's question. Return only the "
-                "clarifying question and nothing else."
+                "If the conversation so far shows you already asked a clarifying "
+                "question about this same topic (even if worded differently), do "
+                "NOT ask another clarifying question - instead say plainly that you "
+                "don't have that specific detail in the approved documents, and "
+                "suggest contacting Forever Living support or their upline for an "
+                "official answer. Otherwise, ask ONE short, specific clarifying "
+                "question that would help narrow down what they actually need. Do "
+                "not answer the question, do not invent facts, and do not mention "
+                "documents, search, or retrieval. Reply in the same language as the "
+                "user's question. Return only your response and nothing else."
             )
+            user_prompt = f"Conversation so far:\n{history}\n\nLatest message: {body.message}" if history else body.message
             response = get_aws_clients().bedrock_runtime.converse(
                 modelId=settings.BEDROCK_MODEL_ARN,
                 system=[{"text": system_prompt}],
-                messages=[{"role": "user", "content": [{"text": body.message}]}],
+                messages=[{"role": "user", "content": [{"text": user_prompt}]}],
                 inferenceConfig={"maxTokens": settings.BEDROCK_CANDIDATE_NARROWING_MAX_OUTPUT_TOKENS},
             )
             text_out = response["output"]["message"]["content"][0].get("text", "").strip()
@@ -1345,6 +1367,7 @@ class AIOrchestrator:
         body: ChatRequest,
         correlation_id: str,
         candidate_flags: CandidateFlags = CandidateFlags(),
+        history: str = "",
     ) -> tuple[ChatResponse | None, RetrievalResult, EvidenceDecision | None]:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id, candidate_flags)
@@ -1414,7 +1437,7 @@ class AIOrchestrator:
         if clarification:
             return clarification, approved_result, evidence_decision
         if candidate_flags.narrowing_fallback:
-            narrowing_response = self._candidate_narrowing_response(body, correlation_id)
+            narrowing_response = self._candidate_narrowing_response(body, correlation_id, history)
             if narrowing_response:
                 append_session_turn(body.sessionId, scrubbed_input, narrowing_response.answer, correlation_id)
                 return narrowing_response, approved_result, evidence_decision
