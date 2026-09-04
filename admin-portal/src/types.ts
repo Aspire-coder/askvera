@@ -39,6 +39,12 @@ export type CacheResetResult = {
   duration_ms: number;
 };
 
+export type CandidateModeFlags = {
+  narrowingFallback: boolean;
+  inVoiceGuardrail: boolean;
+  widerTypoTolerance: boolean;
+};
+
 export type MarketLanguage = { code: string; name: string };
 export type Market = { code: string; name: string; languages: MarketLanguage[] };
 

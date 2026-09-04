@@ -3,6 +3,8 @@
 import re
 from time import perf_counter
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from app.models.responses import ModelResponse
 from app.operations import pipeline_trace_store
 from app.models.router import ModelRouter, model_router
@@ -32,6 +34,8 @@ from app.validation.validators.numeric_grounding_validator import remove_unsuppo
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
+from services.aws_clients import get_aws_clients
+from services.candidate_control import CandidateFlags, get_candidate_flags
 from services.cache import (
     build_cache_key,
     get_cache_value,
@@ -166,6 +170,12 @@ class AIOrchestrator:
         if not has_valid_consent(body.sessionId, correlation_id):
             raise ConsentRequiredError()
 
+        # Admin-portal "current vs experimental" toggle (services/candidate_control.py) -
+        # read once per request and threaded down explicitly, rather than each
+        # hook point calling get_candidate_flags() itself, so every function
+        # below stays a pure, DB-free call when exercised directly (as most
+        # unit tests do) and only this one entry point pays the lookup cost.
+        candidate_flags = get_candidate_flags()
         scrubbed_input = scrub_pii(
             body.message,
             correlation_id,
@@ -173,7 +183,9 @@ class AIOrchestrator:
             preserve_location_names=True,
             preserve_person_names=True,
         )
-        chat_response = self._early_conversation_response(scrubbed_input, body, correlation_id)
+        chat_response = self._early_conversation_response(
+            scrubbed_input, body, correlation_id, candidate_flags
+        )
         if chat_response:
             append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
             return chat_response
@@ -183,7 +195,7 @@ class AIOrchestrator:
         governance_decision = self._evaluate_governance(request_query, body, correlation_id)
         if not governance_decision.allowed:
             return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message
+                governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
             )
 
         cache_key = build_cache_key(request_query, body.country, body.language, body.role)
@@ -198,6 +210,7 @@ class AIOrchestrator:
             scrubbed_input,
             body,
             correlation_id,
+            candidate_flags,
         )
         if chat_response:
             return chat_response
@@ -220,6 +233,15 @@ class AIOrchestrator:
             model_response = self.model_router.generate(prompt_package, retrieval_result, correlation_id)
         except LowConfidenceError as exc:
             failure_layer = self._low_confidence_failure_layer(exc)
+            if candidate_flags.narrowing_fallback:
+                narrowing_response = self._candidate_narrowing_response(body, correlation_id)
+                if narrowing_response:
+                    return self._validate_response(
+                        narrowing_response,
+                        body,
+                        correlation_id,
+                        retrieval_result=retrieval_result,
+                    )
             return self._validate_response(
                 self.response_builder.fallback(
                     self._insufficient_evidence_message(body.language),
@@ -290,7 +312,7 @@ class AIOrchestrator:
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
         if not governance_decision.allowed:
             return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message
+                governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
             )
         self._record_semantic_shadow_result(
             semantic_candidate,
@@ -872,9 +894,12 @@ class AIOrchestrator:
         language: str = "en",
         country: str = "",
         message: str = "",
+        candidate_flags: CandidateFlags = CandidateFlags(),
     ) -> ChatResponse:
         """Return a safe fallback when governance blocks the request or response."""
-        user_message = self._governance_user_message(decision, language, country, message)
+        user_message = self._governance_user_message(
+            decision, language, country, message, correlation_id, candidate_flags
+        )
         failure_layer = self._governance_failure_layer(decision)
         LOGGER.warning(
             "governance_fallback_response",
@@ -918,20 +943,33 @@ class AIOrchestrator:
         language: str = "en",
         country: str = "",
         message: str = "",
+        correlation_id: str = "",
+        candidate_flags: CandidateFlags = CandidateFlags(),
     ) -> str:
         """Convert internal governance reasons into user-friendly copy."""
         risk_issues = (decision.metadata or {}).get("risk", {}).get("issues", [])
         issue_codes = {str(issue.get("code", "")).lower() for issue in risk_issues}
         guardrail_topic = str((decision.metadata or {}).get("topic", "")).lower()
 
-        if guardrail_topic == "income_claim" or any("income" in code for code in issue_codes):
+        is_income = guardrail_topic == "income_claim" or any("income" in code for code in issue_codes)
+        is_medical = guardrail_topic == "medical_claim" or any(
+            "medical" in code or "health" in code for code in issue_codes
+        )
+        is_off_topic = guardrail_topic == "off_topic"
+        if (is_income or is_medical or is_off_topic) and candidate_flags.in_voice_guardrail:
+            candidate_topic = "income_claim" if is_income else "medical_claim" if is_medical else "off_topic"
+            candidate = self._candidate_guardrail_phrasing(candidate_topic, language, country, correlation_id)
+            if candidate:
+                return candidate
+
+        if is_income:
             return localized_conversation_response("income_claim", language) or FALLBACK_RESPONSES["income_claim"]
-        if guardrail_topic == "medical_claim" or any("medical" in code or "health" in code for code in issue_codes):
+        if is_medical:
             claim_response, _ = localized_claim_response(message, "medical_claim", country, language)
             if claim_response:
                 return claim_response
             return localized_conversation_response("medical_claim", language) or FALLBACK_RESPONSES["medical_claim"]
-        if guardrail_topic == "off_topic":
+        if is_off_topic:
             return localized_conversation_response("off_topic", language) or FALLBACK_RESPONSES["off_topic"]
         if decision.reason == "Governance provider failed.":
             return localized_conversation_response("bedrock_error", language) or FALLBACK_RESPONSES["bedrock_error"]
@@ -957,6 +995,110 @@ class AIOrchestrator:
                 "I couldn't find a clear answer in the approved information available to me.",
             ),
         )
+
+    def _candidate_narrowing_response(
+        self,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse | None:
+        """Experimental: ask a narrowing question instead of a flat refusal.
+
+        Gated behind chat_candidate_control.narrowing_fallback_enabled (admin
+        portal toggle, services/candidate_control.py). Best-effort only, same
+        contract as _office_contact_addendum above: any failure here silently
+        returns None so the caller falls through to today's
+        _insufficient_evidence_message - this can only ever add helpfulness,
+        never break the base fallback path.
+        """
+        try:
+            system_prompt = (
+                "You are AskVera, a company-policy assistant. The user's question "
+                "could not be answered from the approved documents available to you. "
+                "Ask ONE short, specific clarifying question that would help narrow "
+                "down what they actually need. Do not answer the question, do not "
+                "invent facts, and do not mention documents, search, or retrieval. "
+                "Reply in the same language as the user's question. Return only the "
+                "clarifying question and nothing else."
+            )
+            response = get_aws_clients().bedrock_runtime.converse(
+                modelId=settings.BEDROCK_MODEL_ARN,
+                system=[{"text": system_prompt}],
+                messages=[{"role": "user", "content": [{"text": body.message}]}],
+                inferenceConfig={"maxTokens": settings.BEDROCK_CANDIDATE_NARROWING_MAX_OUTPUT_TOKENS},
+            )
+            text_out = response["output"]["message"]["content"][0].get("text", "").strip()
+            if not text_out:
+                return None
+            return self.response_builder.fallback(
+                text_out,
+                correlation_id,
+                metadata={
+                    "failure_layer": "candidate_narrowing_fallback",
+                    "response_source": "candidate_narrowing_fallback",
+                    "fallback": False,
+                },
+            )
+        except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError):
+            LOGGER.exception("candidate_narrowing_fallback_failed", correlation_id=correlation_id)
+            return None
+
+    def _candidate_guardrail_phrasing(
+        self,
+        topic: str,
+        language: str,
+        country: str,
+        correlation_id: str,
+    ) -> str | None:
+        """Experimental: phrase a guardrail decline in the model's own words.
+
+        EXPERIMENTAL PLACEHOLDER WORDING - not reviewed by Legal. Only
+        reachable via chat_candidate_control.in_voice_guardrail_enabled
+        (admin portal toggle), which must stay off anywhere real users could
+        see it until Legal's final medical/income-claim wording lands (a
+        separate, already-in-flight task). The decision to decline stays
+        fully deterministic - the governance/risk-policy layer that reached
+        this point is unchanged; only the phrasing below is generated.
+        """
+        mandatory_elements = {
+            "medical_claim": (
+                "You must not make or imply any claim that a product can treat, cure, "
+                "or prevent a disease or medical condition. You must tell the user to "
+                "speak with a qualified healthcare professional for medical questions."
+            ),
+            "income_claim": (
+                "You must not guarantee, predict, or imply any specific earnings or "
+                "income outcome. You must make clear individual results vary and "
+                "there is no guaranteed income."
+            ),
+            "off_topic": (
+                "You must make clear you can only help with approved Forever Living "
+                "company policy and global office directory information."
+            ),
+        }.get(topic)
+        if mandatory_elements is None:
+            return None
+        try:
+            system_prompt = (
+                "You are AskVera, a company-policy assistant. You must decline the "
+                "user's request. Write ONE short, natural paragraph declining, in "
+                f"the requested language ({language}). {mandatory_elements} Do not "
+                "soften, hedge around, or omit these requirements. Do not answer the "
+                "underlying question. Return only the decline paragraph and nothing "
+                "else."
+            )
+            response = get_aws_clients().bedrock_runtime.converse(
+                modelId=settings.BEDROCK_MODEL_ARN,
+                system=[{"text": system_prompt}],
+                messages=[{"role": "user", "content": [{"text": f"Country: {country}. Topic: {topic}."}]}],
+                inferenceConfig={"maxTokens": settings.BEDROCK_CANDIDATE_GUARDRAIL_MAX_OUTPUT_TOKENS},
+            )
+            text_out = response["output"]["message"]["content"][0].get("text", "").strip()
+            return text_out or None
+        except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError):
+            LOGGER.exception(
+                "candidate_guardrail_phrasing_failed", correlation_id=correlation_id, topic=topic
+            )
+            return None
 
     def _office_contact_addendum(self, body: ChatRequest, correlation_id: str) -> str | None:
         """Offer a country's directory contact details instead of a bare refusal.
@@ -1008,9 +1150,16 @@ class AIOrchestrator:
         )
         return f"{lead_in}\n" + "\n".join(contact_lines)
 
-    def _static_assistant_response(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
+    def _static_assistant_response(
+        self,
+        body: ChatRequest,
+        correlation_id: str,
+        candidate_flags: CandidateFlags = CandidateFlags(),
+    ) -> ChatResponse:
         """Return controlled non-policy responses without retrieval."""
-        answer = assistant_meta_response(body.message, body.language)
+        answer = assistant_meta_response(
+            body.message, body.language, relaxed_typo_tolerance=candidate_flags.wider_typo_tolerance
+        )
         if not answer:
             answer = localized_conversation_response("greeting", body.language) or "Hello, I'm AskVera. How can I help?"
         return self.response_builder.fallback(
@@ -1024,6 +1173,7 @@ class AIOrchestrator:
         scrubbed_input: str,
         body: ChatRequest,
         correlation_id: str,
+        candidate_flags: CandidateFlags = CandidateFlags(),
     ) -> ChatResponse | None:
         """Handle privacy and exact zero-token conversation routes before retrieval."""
         if contains_sensitive_pii_placeholder(scrubbed_input):
@@ -1042,9 +1192,11 @@ class AIOrchestrator:
                     "input_pii_scrubbed": True,
                 },
             )
-        intent = classify_intent(scrubbed_input, body.language)
+        intent = classify_intent(
+            scrubbed_input, body.language, relaxed_typo_tolerance=candidate_flags.wider_typo_tolerance
+        )
         if intent == "assistant_meta":
-            return self._static_assistant_response(body, correlation_id)
+            return self._static_assistant_response(body, correlation_id, candidate_flags)
         if intent == "policy_fact" and not find_market_mentions(scrubbed_input):
             # A named market takes the normal retrieval path; this only fires
             # when no market was recognized at all, so a likely typo (e.g.
@@ -1086,6 +1238,7 @@ class AIOrchestrator:
         retrieval_result: RetrievalResult,
         body: ChatRequest,
         correlation_id: str,
+        candidate_flags: CandidateFlags = CandidateFlags(),
     ) -> ChatResponse | None:
         """Convert a high-confidence semantic route into controlled response copy."""
         metadata = retrieval_result.metadata or {}
@@ -1114,7 +1267,9 @@ class AIOrchestrator:
             # is_planner_trusted_low_risk_subtype - see that function for why
             # only "thanks" is safe to trust without an exact phrase match.
             intent_confidence = float(metadata.get("intent_confidence") or 0.0)
-            if classify_intent(body.message, body.language) == "assistant_meta" or is_planner_trusted_low_risk_subtype(
+            if classify_intent(
+                body.message, body.language, relaxed_typo_tolerance=candidate_flags.wider_typo_tolerance
+            ) == "assistant_meta" or is_planner_trusted_low_risk_subtype(
                 body.message, intent, subtype, intent_confidence
             ):
                 response_key = (
@@ -1126,6 +1281,20 @@ class AIOrchestrator:
                 intent = "off_topic"
                 response_key = "off_topic"
         elif intent == "medical_claim":
+            if candidate_flags.in_voice_guardrail:
+                candidate = self._candidate_guardrail_phrasing(
+                    "medical_claim", body.language, body.country, correlation_id
+                )
+                if candidate:
+                    return self.response_builder.fallback(
+                        candidate,
+                        correlation_id,
+                        metadata={
+                            "intent": "medical_claim",
+                            "fallback": False,
+                            "response_source": "candidate_guardrail_phrasing",
+                        },
+                    )
             answer, claim_scope = localized_claim_response(body.message, intent, body.country, body.language)
             if answer:
                 return self.response_builder.fallback(
@@ -1139,6 +1308,18 @@ class AIOrchestrator:
                 )
             response_key = intent
         elif intent in {"income_claim", "off_topic"}:
+            if candidate_flags.in_voice_guardrail:
+                candidate = self._candidate_guardrail_phrasing(intent, body.language, body.country, correlation_id)
+                if candidate:
+                    return self.response_builder.fallback(
+                        candidate,
+                        correlation_id,
+                        metadata={
+                            "intent": intent,
+                            "fallback": False,
+                            "response_source": "candidate_guardrail_phrasing",
+                        },
+                    )
             response_key = intent
         if not response_key:
             return None
@@ -1163,9 +1344,10 @@ class AIOrchestrator:
         scrubbed_input: str,
         body: ChatRequest,
         correlation_id: str,
+        candidate_flags: CandidateFlags = CandidateFlags(),
     ) -> tuple[ChatResponse | None, RetrievalResult, EvidenceDecision | None]:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
-        routed_response = self._conversation_route_response(retrieval_result, body, correlation_id)
+        routed_response = self._conversation_route_response(retrieval_result, body, correlation_id, candidate_flags)
         if routed_response:
             append_session_turn(body.sessionId, scrubbed_input, routed_response.answer, correlation_id)
             return routed_response, retrieval_result, None
@@ -1231,6 +1413,11 @@ class AIOrchestrator:
         )
         if clarification:
             return clarification, approved_result, evidence_decision
+        if candidate_flags.narrowing_fallback:
+            narrowing_response = self._candidate_narrowing_response(body, correlation_id)
+            if narrowing_response:
+                append_session_turn(body.sessionId, scrubbed_input, narrowing_response.answer, correlation_id)
+                return narrowing_response, approved_result, evidence_decision
         fallback_message = self._insufficient_evidence_message(body.language)
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:

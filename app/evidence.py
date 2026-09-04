@@ -43,17 +43,26 @@ class EvidenceDecision:
         }
 
 
-def classify_intent(message: str, language: str = "") -> str:
+def classify_intent(message: str, language: str = "", *, relaxed_typo_tolerance: bool = False) -> str:
     """Route only narrowly-controlled assistant messages around document retrieval.
 
     Every substantive message, including unknown wording or an unsupported
     request, follows the document-grounded path and fails closed if evidence is
     insufficient. Business vocabulary does not belong in this router.
+
+    relaxed_typo_tolerance is the admin-portal "current vs experimental" chat
+    toggle (services/candidate_control.py) - callers thread it through from a
+    CandidateFlags value they already hold rather than this module reading it
+    itself, so this stays a pure function with no I/O.
     """
     normalized = _normalize_text(message)
     if not normalized:
         return "empty"
-    return "assistant_meta" if _assistant_meta_category(normalized, language) else "policy_fact"
+    return (
+        "assistant_meta"
+        if _assistant_meta_category(normalized, language, relaxed_typo_tolerance)
+        else "policy_fact"
+    )
 
 
 def is_planner_trusted_low_risk_subtype(
@@ -94,9 +103,11 @@ def is_planner_trusted_low_risk_subtype(
     return True
 
 
-def assistant_meta_response(message: str, language: str = "") -> str | None:
+def assistant_meta_response(
+    message: str, language: str = "", *, relaxed_typo_tolerance: bool = False
+) -> str | None:
     """Return a configured response for a controlled greeting/capability message."""
-    category = _assistant_meta_category(_normalize_text(message), language)
+    category = _assistant_meta_category(_normalize_text(message), language, relaxed_typo_tolerance)
     if not category:
         return None
     locale = _locale_key(language)
@@ -223,7 +234,9 @@ def _conversation_routes() -> dict[str, dict[str, Any]]:
     return locales if isinstance(locales, dict) else {}
 
 
-def _assistant_meta_category(normalized_message: str, language: str) -> str | None:
+def _assistant_meta_category(
+    normalized_message: str, language: str, relaxed_typo_tolerance: bool = False
+) -> str | None:
     if not normalized_message:
         return None
     all_routes = _conversation_routes()
@@ -250,7 +263,9 @@ def _assistant_meta_category(normalized_message: str, language: str) -> str | No
             if normalized_message in normalized_phrases:
                 return str(category)
             if any(
-                _safe_short_phrase_variant(normalized_message, phrase, str(category))
+                _safe_short_phrase_variant(
+                    normalized_message, phrase, str(category), relaxed_typo_tolerance
+                )
                 for phrase in normalized_phrases
             ):
                 return str(category)
@@ -265,11 +280,27 @@ def _assistant_meta_category(normalized_message: str, language: str) -> str | No
     return None
 
 
-def _safe_short_phrase_variant(message: str, phrase: str, category: str) -> bool:
-    """Allow only tightly bounded typos for reviewed social phrases."""
-    if category not in {"greeting", "thanks", "farewell"}:
+def _safe_short_phrase_variant(
+    message: str, phrase: str, category: str, relaxed: bool = False
+) -> bool:
+    """Allow only tightly bounded typos for reviewed social phrases.
+
+    Experimental: relaxed is the admin-portal "current vs experimental" chat
+    toggle's wider_typo_tolerance flag (services/candidate_control.py),
+    threaded in by the caller rather than read here - when on, "capability"
+    phrases are also covered and the word/character span is wider. The
+    edit-distance-1 + first-letter-match strictness below is unchanged in
+    both modes - only the reach (categories/length) grows, not the match
+    tolerance itself.
+    """
+    allowed_categories = (
+        {"greeting", "thanks", "farewell", "capability"} if relaxed else {"greeting", "thanks", "farewell"}
+    )
+    if category not in allowed_categories:
         return False
-    if not message or not phrase or len(message.split()) > 3 or len(message) > 32:
+    max_words = 6 if relaxed else 3
+    max_chars = 60 if relaxed else 32
+    if not message or not phrase or len(message.split()) > max_words or len(message) > max_chars:
         return False
     compact_message = message.replace(" ", "")
     compact_phrase = phrase.replace(" ", "")

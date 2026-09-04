@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+from botocore.exceptions import BotoCoreError
+
 from config import settings
 from app.governance.engine import GovernanceEngine
 from app.governance.models import GovernanceAction, GovernanceDecision
@@ -11,6 +13,7 @@ from app.orchestrator.chat_orchestrator import AIOrchestrator
 from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationResult
+from services.candidate_control import CandidateFlags
 from services.semantic_cache import SemanticCacheHit
 from utils.validators import ChatRequest
 
@@ -877,6 +880,190 @@ def test_local_guardrail_topics_use_the_matching_localized_message() -> None:
     assert "projections de revenus" in orchestrator._governance_user_message(income, "fr")
 
 
+class _StubBedrockRuntime:
+    """Minimal stand-in for the AWS Bedrock runtime client's converse() call."""
+
+    def __init__(self, text: str | None = "Could you tell me which country you're asking about?") -> None:
+        self._text = text
+        self.calls: list[dict] = []
+
+    def converse(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._text is None:
+            raise BotoCoreError()
+        return {"output": {"message": {"content": [{"text": self._text}]}}}
+
+
+def test_governance_user_message_uses_canned_copy_when_candidate_flag_is_off() -> None:
+    """Regression guard: an absent/default CandidateFlags must be byte-identical to today."""
+    orchestrator = AIOrchestrator()
+    medical = GovernanceDecision(
+        allowed=False,
+        action=GovernanceAction.BLOCK,
+        provider="bedrock_guardrails",
+        reason="raw provider copy",
+        metadata={"topic": "medical_claim"},
+    )
+
+    assert "conseils médicaux" in orchestrator._governance_user_message(medical, "fr")
+
+
+def test_governance_user_message_uses_candidate_phrasing_when_flag_enabled(monkeypatch) -> None:
+    orchestrator = AIOrchestrator()
+    stub_runtime = _StubBedrockRuntime("I'm not able to help with medical questions like that.")
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": stub_runtime})(),
+    )
+    medical = GovernanceDecision(
+        allowed=False,
+        action=GovernanceAction.BLOCK,
+        provider="bedrock_guardrails",
+        reason="raw provider copy",
+        metadata={"topic": "medical_claim"},
+    )
+
+    message = orchestrator._governance_user_message(
+        medical, "en", "US", "does this cure my rash", "cid", CandidateFlags(in_voice_guardrail=True)
+    )
+
+    assert message == "I'm not able to help with medical questions like that."
+    assert stub_runtime.calls, "expected the candidate phrasing path to call Bedrock"
+
+
+def test_governance_user_message_falls_back_to_canned_copy_on_bedrock_failure(monkeypatch) -> None:
+    orchestrator = AIOrchestrator()
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": _StubBedrockRuntime(None)})(),
+    )
+    medical = GovernanceDecision(
+        allowed=False,
+        action=GovernanceAction.BLOCK,
+        provider="bedrock_guardrails",
+        reason="raw provider copy",
+        metadata={"topic": "medical_claim"},
+    )
+
+    message = orchestrator._governance_user_message(
+        medical, "fr", "FR", "est-ce que ca guerit", "cid", CandidateFlags(in_voice_guardrail=True)
+    )
+
+    assert "conseils médicaux" in message
+
+
+def test_conversation_route_medical_claim_uses_candidate_phrasing_when_flag_enabled(monkeypatch) -> None:
+    orchestrator = AIOrchestrator()
+    stub_runtime = _StubBedrockRuntime("Sorry, I can't make that claim.")
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": stub_runtime})(),
+    )
+    body = ChatRequest(
+        message="does this product cure my rash",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    retrieval_result = RetrievalResult(
+        documents=[],
+        citations=[],
+        confidence=0.0,
+        metadata={"conversation_intent": "medical_claim", "conversation_subtype": ""},
+    )
+
+    response = orchestrator._conversation_route_response(
+        retrieval_result, body, "cid", CandidateFlags(in_voice_guardrail=True)
+    )
+
+    assert response is not None
+    assert response.answer == "Sorry, I can't make that claim."
+    assert response.metadata["response_source"] == "candidate_guardrail_phrasing"
+
+
+def test_candidate_narrowing_response_asks_a_clarifying_question(monkeypatch) -> None:
+    orchestrator = AIOrchestrator()
+    stub_runtime = _StubBedrockRuntime("Which country's policy are you asking about?")
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": stub_runtime})(),
+    )
+    body = ChatRequest(message="what is the cost", sessionId="session-1", country="US", language="en")
+
+    response = orchestrator._candidate_narrowing_response(body, "cid")
+
+    assert response is not None
+    assert response.answer == "Which country's policy are you asking about?"
+    assert response.metadata["response_source"] == "candidate_narrowing_fallback"
+
+
+def test_candidate_narrowing_response_returns_none_on_bedrock_failure(monkeypatch) -> None:
+    orchestrator = AIOrchestrator()
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": _StubBedrockRuntime(None)})(),
+    )
+    body = ChatRequest(message="what is the cost", sessionId="session-1", country="US", language="en")
+
+    assert orchestrator._candidate_narrowing_response(body, "cid") is None
+
+
+def test_low_confidence_uses_narrowing_fallback_when_candidate_flag_enabled(monkeypatch) -> None:
+    router = MagicMock()
+    router.generate.side_effect = chat_orchestrator.RetrievalMissError("no evidence")
+    orchestrator = AIOrchestrator(
+        retriever=_FakeRetriever(), router=router, validator=_FakeValidator(), governance=_FakeGovernance()
+    )
+    stub_runtime = _StubBedrockRuntime("Could you tell me which country you're asking about?")
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": stub_runtime})(),
+    )
+    monkeypatch.setattr(chat_orchestrator, "get_candidate_flags", lambda: CandidateFlags(narrowing_fallback=True))
+    body = ChatRequest(message="what does it cost", sessionId="session-1", country="US", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.answer == "Could you tell me which country you're asking about?"
+    assert response.metadata["response_source"] == "candidate_narrowing_fallback"
+
+
+def test_low_confidence_uses_flat_refusal_when_candidate_flag_is_off(monkeypatch) -> None:
+    """Regression guard: default CandidateFlags() must reproduce today's flat refusal."""
+    router = MagicMock()
+    router.generate.side_effect = chat_orchestrator.RetrievalMissError("no evidence")
+    orchestrator = AIOrchestrator(
+        retriever=_FakeRetriever(), router=router, validator=_FakeValidator(), governance=_FakeGovernance()
+    )
+    body = ChatRequest(message="what does it cost", sessionId="session-1", country="US", language="en")
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.metadata.get("response_source") != "candidate_narrowing_fallback"
+
+
 def test_sensitive_identifier_returns_privacy_response_before_retrieval(monkeypatch) -> None:
     retriever = MagicMock()
     router = MagicMock()
@@ -1014,6 +1201,56 @@ def test_exact_assistant_capability_returns_controlled_response_before_retrieval
     assert response.metadata["response_source"] == "template"
     retriever.retrieve.assert_not_called()
     router.generate.assert_not_called()
+
+
+def test_typo_d_capability_phrase_falls_through_to_retrieval_when_candidate_flag_is_off(monkeypatch) -> None:
+    """Regression guard: default CandidateFlags() must reproduce today's routing."""
+    retriever = MagicMock()
+    retriever.retrieve.return_value = RetrievalResult(documents=[], citations=[], confidence=0.0)
+    router = MagicMock()
+    router.generate.side_effect = chat_orchestrator.RetrievalMissError("no evidence")
+    orchestrator = AIOrchestrator(
+        retriever=retriever, router=router, validator=_FakeValidator(), governance=_FakeGovernance()
+    )
+    body = ChatRequest(
+        message="whst can you help me with", sessionId="session-1", country="US", language="en"
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "get_session_history", lambda *_: "")
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key", lambda *_: "cache-key")
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    orchestrator.handle_chat(body, "cid")
+
+    retriever.retrieve.assert_called_once()
+
+
+def test_typo_d_capability_phrase_routes_as_assistant_meta_when_candidate_flag_enabled(monkeypatch) -> None:
+    retriever = MagicMock()
+    router = MagicMock()
+    orchestrator = AIOrchestrator(
+        retriever=retriever, router=router, validator=_FakeValidator(), governance=_FakeGovernance()
+    )
+    monkeypatch.setattr(
+        chat_orchestrator, "get_candidate_flags", lambda: CandidateFlags(wider_typo_tolerance=True)
+    )
+    body = ChatRequest(
+        message="whst can you help me with", sessionId="session-1", country="US", language="en"
+    )
+
+    monkeypatch.setattr(chat_orchestrator, "validate_and_touch_session", lambda *_: None)
+    monkeypatch.setattr(chat_orchestrator, "has_valid_consent", lambda *_: True)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+
+    response = orchestrator.handle_chat(body, "cid")
+
+    assert response.metadata["intent"] == "assistant_meta"
+    retriever.retrieve.assert_not_called()
 
 
 def test_probable_country_typo_asks_for_confirmation_before_retrieval(monkeypatch) -> None:

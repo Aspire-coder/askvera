@@ -22,6 +22,7 @@ from app.operations import pipeline_trace_store
 from config import settings
 from services.admin_auth import require_admin_identity
 from services.answer_cache_admin import AnswerCacheUnavailable, reset_answer_cache
+from services.candidate_control import CandidateFlags, get_candidate_flags, set_candidate_flags
 from services.admin_users import (
     ADMIN_ROLES,
     ADMIN_SECTIONS,
@@ -208,6 +209,17 @@ class CacheResetInput(BaseModel):
     confirmation: str = Field(min_length=5, max_length=32)
 
 
+CANDIDATE_MODE_CONFIRMATION_PHRASE = "UPDATE CANDIDATE MODE"
+
+
+class CandidateModeInput(BaseModel):
+    narrowing_fallback: bool = False
+    in_voice_guardrail: bool = False
+    wider_typo_tolerance: bool = False
+    reason: str = Field(min_length=8, max_length=500)
+    confirmation: str = Field(min_length=5, max_length=32)
+
+
 def _payload(data: Any, request: Request) -> dict[str, Any]:
     return {
         "success": True,
@@ -321,6 +333,66 @@ def operational_cache_reset(body: CacheResetInput, request: Request) -> dict[str
         },
     )
     return _payload(result, request)
+
+
+@admin_router.get("/experiments/candidate-mode")
+def experiments_candidate_mode(request: Request) -> dict[str, Any]:
+    """Return the active current-vs-experimental chat behavior flags."""
+    require_admin_access(request, "flow", "view")
+    flags = get_candidate_flags()
+    return _payload(
+        {
+            "narrowingFallback": flags.narrowing_fallback,
+            "inVoiceGuardrail": flags.in_voice_guardrail,
+            "widerTypoTolerance": flags.wider_typo_tolerance,
+        },
+        request,
+    )
+
+
+@admin_router.put("/experiments/candidate-mode")
+def experiments_candidate_mode_update(body: CandidateModeInput, request: Request) -> dict[str, Any]:
+    """Toggle the experimental chat behaviors after explicit Super Admin confirmation.
+
+    Test-environment only: this changes live behavior for every request until
+    toggled back, not just an admin preview - see docs/RETRIEVAL_PROFILE_CONTROL.md
+    for the safety contract this mirrors. in_voice_guardrail's phrasing is an
+    unreviewed placeholder pending Legal sign-off and must stay off outside
+    the test environment.
+    """
+    principal = getattr(request.state, "admin_identity", {}) or {}
+    if principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can change candidate mode.")
+    if body.confirmation.strip().upper() != CANDIDATE_MODE_CONFIRMATION_PHRASE:
+        raise HTTPException(
+            status_code=400, detail=f'Type "{CANDIDATE_MODE_CONFIRMATION_PHRASE}" to confirm.'
+        )
+
+    flags = CandidateFlags(
+        narrowing_fallback=body.narrowing_fallback,
+        in_voice_guardrail=body.in_voice_guardrail,
+        wider_typo_tolerance=body.wider_typo_tolerance,
+    )
+    result = set_candidate_flags(flags, _actor(request), body.reason.strip())
+    record_admin_audit_event(
+        _actor(request),
+        "experiments.candidate_mode_updated",
+        "primary",
+        metadata={
+            "reason": body.reason.strip(),
+            "narrowing_fallback": result.narrowing_fallback,
+            "in_voice_guardrail": result.in_voice_guardrail,
+            "wider_typo_tolerance": result.wider_typo_tolerance,
+        },
+    )
+    return _payload(
+        {
+            "narrowingFallback": result.narrowing_fallback,
+            "inVoiceGuardrail": result.in_voice_guardrail,
+            "widerTypoTolerance": result.wider_typo_tolerance,
+        },
+        request,
+    )
 
 
 @admin_router.get("/analytics/overview")
