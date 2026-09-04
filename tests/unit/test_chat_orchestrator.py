@@ -834,6 +834,53 @@ def test_directory_evidence_failure_skips_clarification_when_field_already_named
     assert response is None
 
 
+def test_directory_evidence_failure_skips_clarification_for_email_address(monkeypatch) -> None:
+    """Live-tested regression: "email address" contains the word "address",
+    so it used to match both the email and address field patterns, making
+    len(named_fields) == 2 - never treated as already specified. That
+    produced an unresolvable loop (confirmed live: clicking the "Email
+    address" quick-reply card re-triggered the same "which detail?"
+    clarification indefinitely). Only email should match here.
+    """
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(
+        message="What is the email address for the UK office?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    document = RetrievedDocument(
+        id="uk-directory",
+        title="Office Directory - United Kingdom",
+        content="United Kingdom office directory record.",
+        source="s3://approved/global/directory.pdf",
+        country="",
+        language="en",
+        score=0.2,
+        metadata={"access_scope": "global", "directory_kind": "international_sponsoring"},
+    )
+    result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.2,
+        metadata={"global_documents_searched": True, "candidate_count": 3},
+    )
+
+    response = orchestrator._directory_clarification_response(result, body, "cid", body.message)
+
+    assert response is None
+
+
+def test_directory_field_terms_still_match_office_address() -> None:
+    """The "email address" exclusion must not blunt plain "address" matches."""
+    assert chat_orchestrator.DIRECTORY_FIELD_TERMS["directory-address"].search(
+        "What is the office address for Belgium?"
+    )
+    assert not chat_orchestrator.DIRECTORY_FIELD_TERMS["directory-address"].search(
+        "What is the email address for the UK office?"
+    )
+
+
 def test_character_spaced_question_is_repaired_without_language_dictionary() -> None:
     """Accidentally spaced letters are reconstructed before retrieval."""
     orchestrator = AIOrchestrator()
@@ -999,6 +1046,39 @@ def test_candidate_narrowing_response_asks_a_clarifying_question(monkeypatch) ->
     assert response is not None
     assert response.answer == "Which country's policy are you asking about?"
     assert response.metadata["response_source"] == "candidate_narrowing_fallback"
+
+
+def test_candidate_narrowing_response_includes_history_to_avoid_looping(monkeypatch) -> None:
+    """Live-tested regression: without conversation history, each turn only
+    saw the latest message in isolation and re-asked a similarly generic
+    clarifying question forever (confirmed live: a product-price question
+    looped through "which product?" -> "which detail?" -> "which product?"
+    without ever answering or admitting the detail isn't available). The
+    prompt must carry prior turns so the model can recognize it already
+    asked and break the loop instead.
+    """
+    orchestrator = AIOrchestrator()
+    stub_runtime = _StubBedrockRuntime("I don't have that specific detail - please contact support.")
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": stub_runtime})(),
+    )
+    body = ChatRequest(message="retail price", sessionId="session-1", country="US", language="en")
+    history = (
+        "user: How much does Forever Aloe Vera Gel cost?\n"
+        "vera: Are you asking about the retail price or the wholesale/distributor cost?"
+    )
+
+    response = orchestrator._candidate_narrowing_response(body, "cid", history)
+
+    assert response is not None
+    sent_prompt = stub_runtime.calls[0]["messages"][0]["content"][0]["text"]
+    assert "Conversation so far" in sent_prompt
+    assert "Forever Aloe Vera Gel" in sent_prompt
+    assert "retail price" in sent_prompt
+    system_prompt = stub_runtime.calls[0]["system"][0]["text"]
+    assert "already asked" in system_prompt
 
 
 def test_candidate_narrowing_response_returns_none_on_bedrock_failure(monkeypatch) -> None:
