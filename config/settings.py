@@ -351,6 +351,18 @@ BEDROCK_EVIDENCE_SELECTOR_ENABLED = _env_bool("BEDROCK_EVIDENCE_SELECTOR_ENABLED
 BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT = _env_int("BEDROCK_EVIDENCE_SELECTOR_CANDIDATE_COUNT", 30)
 BEDROCK_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_EVIDENCE_SELECTOR_MAX_OUTPUT_TOKENS", 512)
 BEDROCK_GLOBAL_TRANSLATION_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_GLOBAL_TRANSLATION_MAX_OUTPUT_TOKENS", 128)
+# Admin-portal "current vs experimental" chat toggle (services/candidate_control.py).
+# Master switch, off by default: until explicitly enabled in a deployment's
+# own config, get_candidate_flags() never touches the database at all, so
+# every existing chat-orchestration code path (including the large existing
+# unit test suite, which calls AIOrchestrator.handle_chat directly with no
+# DB available) stays exactly as fast and DB-free as before this feature
+# existed. Turn this on once per environment (e.g. the test environment),
+# then the three individual behaviors are admin-portal-toggleable with no
+# further redeploy.
+CANDIDATE_MODE_LOOKUP_ENABLED = _env_bool("CANDIDATE_MODE_LOOKUP_ENABLED", False)
+BEDROCK_CANDIDATE_NARROWING_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_CANDIDATE_NARROWING_MAX_OUTPUT_TOKENS", 128)
+BEDROCK_CANDIDATE_GUARDRAIL_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_CANDIDATE_GUARDRAIL_MAX_OUTPUT_TOKENS", 256)
 BEDROCK_FALLBACK_SOURCE_WEIGHT = 0.12
 BEDROCK_FALLBACK_CITATION_WEIGHT = 0.08
 # Retrieval backend. The deployed and evaluated path is OpenSearch section

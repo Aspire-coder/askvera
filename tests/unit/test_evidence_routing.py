@@ -172,6 +172,25 @@ def test_routes_configured_greeting_even_when_widget_language_differs() -> None:
     assert response.startswith("Hi there")
 
 
+def test_wider_typo_tolerance_is_off_by_default_for_capability_phrases() -> None:
+    # A single-letter typo on "what can you help me with" (registered
+    # capability phrase): "capability" is not in the default-mode allowed
+    # category set, and 6 words exceeds the default 3-word cap - either one
+    # alone would keep this from routing as assistant_meta today.
+    assert classify_intent("whst can you help me with", "en") != "assistant_meta"
+
+
+def test_relaxed_typo_tolerance_flag_covers_capability_phrases() -> None:
+    # relaxed_typo_tolerance mirrors the admin-portal "current vs
+    # experimental" chat toggle's wider_typo_tolerance flag - the orchestrator
+    # threads it in from services.candidate_control.get_candidate_flags(),
+    # this module never reads that flag itself.
+    assert (
+        classify_intent("whst can you help me with", "en", relaxed_typo_tolerance=True)
+        == "assistant_meta"
+    )
+
+
 def test_routes_bounded_social_typos_without_fuzzy_policy_routing() -> None:
     assert classify_intent("goo dmorning", "en") == "assistant_meta"
     assert classify_intent("byee", "en") == "assistant_meta"

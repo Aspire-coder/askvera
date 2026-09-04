@@ -23,6 +23,7 @@ import type {
   ModelRoutingReport,
   OperationsStatus,
   CacheResetResult,
+  CandidateModeFlags,
   PipelineTrace,
   SupportRoute,
   WidgetConfig
@@ -97,6 +98,20 @@ export class AdminApi {
   resetAnswerCache(body: { country: string; mode: "exact" | "exact_and_semantic"; reason: string; confirmation: string }) {
     return this.request<CacheResetResult>("/api/admin/operations/cache/reset", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+  }
+  candidateMode() { return this.request<CandidateModeFlags>("/api/admin/experiments/candidate-mode"); }
+  updateCandidateMode(body: CandidateModeFlags & { reason: string; confirmation: string }) {
+    return this.request<CandidateModeFlags>("/api/admin/experiments/candidate-mode", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        narrowing_fallback: body.narrowingFallback,
+        in_voice_guardrail: body.inVoiceGuardrail,
+        wider_typo_tolerance: body.widerTypoTolerance,
+        reason: body.reason,
+        confirmation: body.confirmation
+      })
     });
   }
   traces() { return this.request<PipelineTrace[]>("/api/admin/traces?limit=20"); }

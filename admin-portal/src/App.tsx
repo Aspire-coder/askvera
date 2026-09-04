@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AdminApi, demo, type AdminCredentials } from "./api";
 import { beginSignIn, cognitoConfigured, completeSignIn, demoAllowed, signOut, type AuthSession } from "./auth";
 import { AskVeraMark, ChartIcon, FlowIcon, HomeIcon, KeyIcon, UploadIcon } from "./icons";
+import { CandidateModeControl } from "./components/CandidateModeControl";
 import { FlowVisualizer } from "./components/FlowVisualizer";
 import { InsightsDashboard } from "./components/InsightsDashboard";
 import { KnowledgeUploader } from "./components/KnowledgeUploader";
@@ -154,7 +155,10 @@ export function App() {
       <main className="main-content">
         <header className="mobile-header"><div className="brand"><div className="brand-mark"><AskVeraMark /></div><strong>AskVera Operations</strong></div><button onClick={() => session ? signOut() : setSettingsOpen(true)}><KeyIcon /></button></header>
         {view === "overview" ? <OperationsOverview credentials={credentials} config={adminConfig} onNavigate={navigate} /> : null}
-        {view === "flow" ? <FlowVisualizer credentials={credentials} /> : null}
+        {view === "flow" ? <>
+          <FlowVisualizer credentials={credentials} />
+          <CandidateModeControl credentials={credentials} config={adminConfig} />
+        </> : null}
         {view === "knowledge" ? <KnowledgeUploader credentials={credentials} /> : null}
         {view === "readiness" ? <MarketReadiness credentials={credentials} config={adminConfig} onNavigate={navigate} /> : null}
         {view === "insights" ? <InsightsDashboard credentials={credentials} /> : null}

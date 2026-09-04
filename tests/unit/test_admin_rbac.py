@@ -117,6 +117,97 @@ def test_super_admin_cache_reset_is_audited(monkeypatch) -> None:
     assert captured["metadata"]["total_deleted"] == 5
 
 
+def test_only_super_admin_can_update_candidate_mode(monkeypatch) -> None:
+    called = False
+
+    def set_stub(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return None
+
+    monkeypatch.setattr(admin_routes, "set_candidate_flags", set_stub)
+    body = admin_routes.CandidateModeInput(
+        narrowing_fallback=True,
+        reason="Testing Taia-inspired narrowing fallback",
+        confirmation="UPDATE CANDIDATE MODE",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.experiments_candidate_mode_update(body, _request(_principal()))
+
+    assert exc_info.value.status_code == 403
+    assert not called
+
+
+def test_candidate_mode_update_requires_exact_confirmation() -> None:
+    body = admin_routes.CandidateModeInput(
+        narrowing_fallback=True,
+        reason="Testing Taia-inspired narrowing fallback",
+        confirmation="ENABLE IT",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        admin_routes.experiments_candidate_mode_update(
+            body, _request(_principal(role="super_admin"))
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "UPDATE CANDIDATE MODE" in exc_info.value.detail
+
+
+def test_super_admin_candidate_mode_update_is_audited(monkeypatch) -> None:
+    captured: dict = {}
+
+    def set_stub(flags, updated_by, reason):
+        return flags
+
+    def audit_stub(actor, action, target, metadata=None):
+        captured.update(actor=actor, action=action, target=target, metadata=metadata)
+
+    monkeypatch.setattr(admin_routes, "set_candidate_flags", set_stub)
+    monkeypatch.setattr(admin_routes, "record_admin_audit_event", audit_stub)
+    body = admin_routes.CandidateModeInput(
+        narrowing_fallback=True,
+        in_voice_guardrail=False,
+        wider_typo_tolerance=True,
+        reason="Testing Taia-inspired behavior changes",
+        confirmation="update candidate mode",
+    )
+
+    response = admin_routes.experiments_candidate_mode_update(
+        body, _request(_principal(role="super_admin"))
+    )
+
+    assert response["data"] == {
+        "narrowingFallback": True,
+        "inVoiceGuardrail": False,
+        "widerTypoTolerance": True,
+    }
+    assert captured["action"] == "experiments.candidate_mode_updated"
+    assert captured["metadata"]["narrowing_fallback"] is True
+    assert captured["metadata"]["in_voice_guardrail"] is False
+
+
+def test_candidate_mode_get_returns_current_flags(monkeypatch) -> None:
+    monkeypatch.setattr(
+        admin_routes,
+        "get_candidate_flags",
+        lambda: admin_routes.CandidateFlags(
+            narrowing_fallback=True, in_voice_guardrail=False, wider_typo_tolerance=False
+        ),
+    )
+
+    response = admin_routes.experiments_candidate_mode(
+        _request(_principal(role="super_admin"))
+    )
+
+    assert response["data"] == {
+        "narrowingFallback": True,
+        "inVoiceGuardrail": False,
+        "widerTypoTolerance": False,
+    }
+
+
 def test_permission_hierarchy_is_section_specific() -> None:
     principal = _principal(
         {"market": "CA", "section": "knowledge", "permission": "publish"},
