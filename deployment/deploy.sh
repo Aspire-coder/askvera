@@ -52,7 +52,21 @@ wait_for_local_health() {
   local local_health_url="http://127.0.0.1:8000/health"
 
   for ((attempt = 1; attempt <= STARTUP_HEALTH_ATTEMPTS; attempt++)); do
-    if curl --silent --show-error --fail --max-time 5 "${local_health_url}" >/dev/null; then
+    # A refused connection while the service is still starting is expected, so
+    # an attempt's own error is discarded. Printing it made every deploy show
+    # two "curl: (7) Failed to connect" lines that look like failures and are
+    # not. Only the final attempt keeps its stderr, so a genuine timeout still
+    # shows why it failed rather than only that it did.
+    #
+    # Both branches stay inside an "if" condition on purpose: under the
+    # "set -e" at the top of this script, a bare failing command here would
+    # abort the function before the summary below could report the timeout.
+    if ((attempt == STARTUP_HEALTH_ATTEMPTS)); then
+      if curl --silent --show-error --fail --max-time 5 "${local_health_url}" >/dev/null; then
+        log "Service became ready on attempt ${attempt}."
+        return 0
+      fi
+    elif curl --silent --fail --max-time 5 "${local_health_url}" >/dev/null 2>&1; then
       log "Service became ready on attempt ${attempt}."
       return 0
     fi
