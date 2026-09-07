@@ -1,6 +1,8 @@
 """Cross-market regression coverage for final response quality controls."""
 
 import json
+
+import pytest
 from pathlib import Path
 
 from app.evidence import assistant_meta_response, classify_intent
@@ -148,3 +150,31 @@ def test_output_validator_rejects_any_remaining_contact_placeholder() -> None:
     )
 
     assert {issue.code for issue in result.issues} == {"UNRESOLVED_OUTPUT_PLACEHOLDER"}
+
+
+@pytest.mark.parametrize("answer", [
+    "To qualify you must:\n\na) Generate 120 Case Credits\nb) Maintain Active status\n"
+    "c) Be the only Manager in your Downline.\n\nWould you like to know more?",
+    "Requirements (see Section 5.01):\n\na) 120 Case Credits\nb) Active status\n"
+    "c) Sole Manager\nd) Two consecutive months.\n\nAnything else I can help with?",
+])
+def test_enumeration_markers_are_not_read_as_truncation(answer) -> None:
+    """"a) b) c)" is a list, not a broken parenthesis.
+
+    Measured on the deployed build: "How can i become a recognized manager?"
+    abstained 2 times in 12, every failure on this check, with counts such as
+    zero "(" against three ")". The answers were complete, correct and cited,
+    ending in a normal closing question, and were replaced by "the approved
+    policy documents do not contain enough information". Policy answers
+    enumerate requirements constantly, so this affected the bot's core job.
+    """
+    assert not has_incomplete_ending(answer, "en")
+
+
+@pytest.mark.parametrize("answer", [
+    "You must generate 120 Case Credits. (There is an exception: if a Downline FBO",
+    "See the table [Section 5.01 for the",
+])
+def test_an_unclosed_opener_is_still_truncation(answer) -> None:
+    """Only surplus closers are excused; an unclosed opener still fails."""
+    assert has_incomplete_ending(answer, "en")
