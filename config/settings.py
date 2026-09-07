@@ -632,13 +632,29 @@ def _coerce_value(current_value: Any, raw_value: str) -> Any:
 
 def _apply_ssm_values(loaded: dict[str, str]) -> None:
     """Apply runtime-owned SSM values while preserving code-owned versions."""
+    ignored: list[dict[str, str]] = []
+    overridden: list[str] = []
     for key, raw_value in loaded.items():
         if key in _CODE_OWNED_SETTINGS:
+            # Recorded rather than silently skipped. A stale code-owned value
+            # sitting in SSM is invisible drift: the code correctly ignores it,
+            # so nothing misbehaves, and nobody discovers the parameter is there
+            # until it is mistaken for the effective value. A PROMPT_VERSION
+            # pinned in SSM did exactly that and cost three fixes chasing a cache
+            # that would not invalidate.
+            ignored.append({"key": key, "ssm_value": raw_value, "effective": str(globals().get(key, ""))})
             continue
         if key in globals():
-            globals()[key] = _coerce_value(globals()[key], raw_value)
+            previous = globals()[key]
+            coerced = _coerce_value(previous, raw_value)
+            if coerced != previous:
+                overridden.append(key)
+            globals()[key] = coerced
         else:
             globals()[key] = raw_value
+            overridden.append(key)
+    globals()["_SSM_IGNORED_OVERRIDES"] = ignored
+    globals()["_SSM_OVERRIDDEN_KEYS"] = sorted(overridden)
 
 
 def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
@@ -672,7 +688,54 @@ def load_ssm_config(path: str = SSM_PARAMETER_PATH) -> dict[str, str]:
         globals()["SESSION_TTL_SECONDS"] = int(globals()["SESSION_IDLE_TIMEOUT_MINUTES"]) * 60
 
     _SSM_CONFIG = loaded
+    _log_config_drift()
     return loaded
+
+
+# Populated by _apply_ssm_values; empty until SSM config is loaded.
+_SSM_IGNORED_OVERRIDES: list[dict[str, str]] = []
+_SSM_OVERRIDDEN_KEYS: list[str] = []
+
+
+def config_drift_report() -> dict[str, Any]:
+    """Describe how the effective configuration differs from the code defaults.
+
+    Two kinds of divergence matter and they are not the same thing.
+    `overridden` is SSM doing its job. `ignored_code_owned` is drift: a value
+    sits in SSM that looks authoritative, is not applied, and will mislead the
+    next person who reads the parameter store to find out what production is
+    running.
+    """
+    return {
+        "overridden": list(_SSM_OVERRIDDEN_KEYS),
+        "ignored_code_owned": [dict(entry) for entry in _SSM_IGNORED_OVERRIDES],
+        "code_owned_settings": sorted(_CODE_OWNED_SETTINGS),
+    }
+
+
+def _log_config_drift() -> None:
+    """Report configuration drift once, at startup."""
+    from utils.logging import get_logger
+
+    logger = get_logger("config.settings")
+    report = config_drift_report()
+    if report["ignored_code_owned"]:
+        logger.warning(
+            "config_ssm_override_ignored",
+            keys=[entry["key"] for entry in report["ignored_code_owned"]],
+            detail=report["ignored_code_owned"],
+            remediation=(
+                "These parameters are owned by the code and were not applied. "
+                "Delete them from SSM so the parameter store stops advertising a "
+                "value production does not use."
+            ),
+        )
+    logger.info(
+        "config_effective_snapshot",
+        overridden_key_count=len(report["overridden"]),
+        overridden_keys=report["overridden"],
+        ignored_code_owned_count=len(report["ignored_code_owned"]),
+    )
 
 
 def get(key: str) -> Any:

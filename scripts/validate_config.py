@@ -258,6 +258,17 @@ def main() -> int:
             print(f"- {name}")
         return 1
     print("AskVera configuration is complete.")
+    # Surfaced on every deploy, deliberately as a warning rather than a failure.
+    # A stale code-owned parameter breaks nothing at runtime -- the code ignores
+    # it -- so blocking the deploy would be disproportionate. What it does is
+    # mislead whoever next reads SSM to find out what production is running,
+    # which is how a pinned PROMPT_VERSION cost three fixes.
+    for entry in settings.config_drift_report()["ignored_code_owned"]:
+        print(
+            f"WARNING: SSM sets {entry['key']}={entry['ssm_value']!r}, which is owned by the "
+            f"code and was NOT applied. Effective value: {entry['effective']!r}. "
+            f"Delete this parameter from SSM."
+        )
     return 0
 
 
