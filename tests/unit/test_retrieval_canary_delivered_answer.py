@@ -70,13 +70,14 @@ def stub_pipeline(monkeypatch):
     return retrieval
 
 
-def _answer(text, citations=1):
-    return lambda case, sequence: (text, citations)
+def _pipeline(retrieval, text, citations=1):
+    """Stand in for one real pipeline execution: its retrieval, and its answer."""
+    return lambda case, sequence: (retrieval, text, citations)
 
 
 def test_a_delivered_fallback_fails_the_case(stub_pipeline, monkeypatch):
     """The exact failure the retrieval-only gate could not see."""
-    monkeypatch.setattr(canary, "delivered_answer", _answer(FALLBACK, citations=0))
+    monkeypatch.setattr(canary, "run_pipeline_once", _pipeline(stub_pipeline, FALLBACK, citations=0))
     outcome = canary.run_case_once(
         _case(answer_must_contain=["120"], answer_must_not_contain=["do not contain enough information"]),
         1,
@@ -92,7 +93,7 @@ def test_a_silently_stripped_figure_fails_the_case(stub_pipeline, monkeypatch):
     The answer reads fluently and cites a source; only the figure is gone.
     """
     stripped = "To become a Recognized Manager you must meet the Case Credit requirement."
-    monkeypatch.setattr(canary, "delivered_answer", _answer(stripped, citations=1))
+    monkeypatch.setattr(canary, "run_pipeline_once", _pipeline(stub_pipeline, stripped, citations=1))
     outcome = canary.run_case_once(_case(answer_must_contain=["120"]), 1)
 
     assert not outcome["passed"]
@@ -100,7 +101,7 @@ def test_a_silently_stripped_figure_fails_the_case(stub_pipeline, monkeypatch):
 
 
 def test_a_grounded_answer_passes(stub_pipeline, monkeypatch):
-    monkeypatch.setattr(canary, "delivered_answer", _answer(GOOD_ANSWER, citations=1))
+    monkeypatch.setattr(canary, "run_pipeline_once", _pipeline(stub_pipeline, GOOD_ANSWER, citations=1))
     outcome = canary.run_case_once(
         _case(answer_must_contain=["120"], answer_must_cite=True),
         1,
@@ -110,7 +111,7 @@ def test_a_grounded_answer_passes(stub_pipeline, monkeypatch):
 
 
 def test_an_uncited_answer_fails_when_a_citation_is_required(stub_pipeline, monkeypatch):
-    monkeypatch.setattr(canary, "delivered_answer", _answer(GOOD_ANSWER, citations=0))
+    monkeypatch.setattr(canary, "run_pipeline_once", _pipeline(stub_pipeline, GOOD_ANSWER, citations=0))
     outcome = canary.run_case_once(_case(answer_must_contain=["120"], answer_must_cite=True), 1)
 
     assert not outcome["passed"]
@@ -120,9 +121,9 @@ def test_an_uncited_answer_fails_when_a_citation_is_required(stub_pipeline, monk
 def test_cases_without_answer_requirements_make_no_generation_call(stub_pipeline, monkeypatch):
     """Existing cases stay retrieval-only, so the gate's cost does not jump."""
     def _fail(*args, **kwargs):
-        raise AssertionError("delivered_answer must not run for a retrieval-only case")
+        raise AssertionError("the pipeline must not run for a retrieval-only case")
 
-    monkeypatch.setattr(canary, "delivered_answer", _fail)
+    monkeypatch.setattr(canary, "run_pipeline_once", _fail)
     outcome = canary.run_case_once(_case(), 1)
 
     assert outcome["passed"], outcome["failure_reasons"]
@@ -137,3 +138,77 @@ def test_shipped_fixture_has_delivered_answer_coverage():
     assert checked, "no canary case asserts a delivered answer"
     for case in checked:
         assert case.get("answer_must_not_contain"), f"{case['id']} should reject the abstention fallback"
+
+
+def test_the_gate_bypasses_every_cache():
+    """A quality gate must measure the pipeline, not the cache.
+
+    `handle_chat` consults the exact cache and then the semantic cache before
+    doing any work. Without these stubs a repeated case ran the pipeline once
+    and read cache for every run after that, making `--repeat` -- which exists
+    to expose flakiness -- partially inert on the delivered-answer cases that
+    matter most.
+    """
+    patches = canary._canary_patches()
+
+    for name in ("get_cache_value", "get_semantic_cache_value"):
+        assert patches[name]("key", "cid") is None, f"{name} must not return a cached hit"
+    assert patches["semantic_cache_active"]() is False
+
+
+def test_the_gate_writes_nothing_to_the_production_cache():
+    """Each deploy previously seeded real cache entries with canary answers."""
+    patches = canary._canary_patches()
+
+    assert patches["set_cache_value"]("key", {"response": "x"}, "cid") is None
+    assert patches["set_semantic_cache_value"]() is None
+
+
+def test_evidence_and_answer_come_from_one_execution(stub_pipeline, monkeypatch):
+    """Reporting retrieval from a different run than the answer can disagree.
+
+    The recorded retrieval must be the one the orchestrator actually used, so
+    `top_title` describes the evidence behind the answer being asserted.
+    """
+    other = SimpleNamespace(
+        title="US-EN-Company-Policy.pdf - Sec 4.04-f: Any 3rd-party charges",
+        metadata={"section_id": "4.04-f"},
+        score=1.1,
+    )
+    second_run = SimpleNamespace(documents=[other], confidence=0.75, metadata={})
+
+    # The pipeline reports the retrieval it used; the stub service would have
+    # returned the other one. The result must follow the pipeline.
+    monkeypatch.setattr(canary, "run_pipeline_once", _pipeline(second_run, GOOD_ANSWER, 1))
+    outcome = canary.run_case_once(_case(answer_must_contain=["120"]), 1)
+
+    assert outcome["top_section"] == "4.04-f"
+    assert outcome["confidence"] == 0.75
+
+
+def test_an_answer_produced_without_retrieval_is_reported_not_crashed(stub_pipeline, monkeypatch):
+    """An early conversational route or guardrail block performs no retrieval.
+
+    "This question no longer reaches retrieval" is a real regression, so it is
+    reported as a failure rather than raised as an exception that would bury it
+    in a stack trace.
+    """
+    monkeypatch.setattr(canary, "run_pipeline_once", lambda case, sequence: (None, "Hello.", 0))
+    outcome = canary.run_case_once(_case(answer_must_contain=["120"]), 1)
+
+    assert not outcome["passed"]
+    assert any("without performing retrieval" in reason for reason in outcome["failure_reasons"])
+    assert outcome["evidence_approved"] is False
+
+
+def test_every_patched_name_exists_on_the_orchestrator():
+    """setattr on a name that does not exist would silently do nothing.
+
+    The stubs are applied with setattr, which happily creates a new attribute
+    nothing reads. If any of these were renamed in the orchestrator, the gate
+    would go back to reading production caches with no error anywhere.
+    """
+    from app.orchestrator import chat_orchestrator
+
+    missing = [name for name in canary._canary_patches() if not hasattr(chat_orchestrator, name)]
+    assert not missing, f"canary patches names the orchestrator does not define: {missing}"
