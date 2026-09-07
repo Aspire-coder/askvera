@@ -5,6 +5,27 @@ from app.response import ResponseBuilder
 from app.retrieval import RetrievedDocument, RetrievalResult
 
 
+def test_explicit_approved_non_numeric_rule_is_not_dropped_for_numeric_answer():
+    documents = [
+        RetrievedDocument(id='activity', title='Activity', content='You need 4 Active Case Credits.',
+                          source='s3://kb/activity', page='1'),
+        RetrievedDocument(id='rank', title='Rank', content='Rank is retained unless terminated.',
+                          source='s3://kb/rank', page='2'),
+        RetrievedDocument(id='noise', title='Noise', content='Unrelated bonus rules.', source='s3://kb/noise'),
+    ]
+    result = RetrievalResult(documents, [], 0.9, metadata={'evidence_decision': {'approved': True}})
+    answer = 'You need 4 Active Case Credits [Source 1]. Rank is retained unless terminated [rank].'
+    citations = ResponseBuilder()._supporting_citations(answer, result)
+    assert [citation['uri'] for citation in citations] == ['s3://kb/activity', 's3://kb/rank']
+
+
+def test_unknown_or_linked_markers_do_not_invent_citation_sources():
+    doc = RetrievedDocument(id='rank', title='Rank', content='Retained rank.', source='s3://kb/rank')
+    result = RetrievalResult([doc], [], 0.9, metadata={'evidence_decision': {'approved': True}})
+    answer = 'Unsupported unrelated 999 [Source 99] [missing] [rank](https://outside.example).'
+    assert ResponseBuilder()._supporting_citations(answer, result) == []
+
+
 def test_response_builder_preserves_existing_api_shape() -> None:
     """ChatResponse converts back to the current widget payload."""
     retrieval_result = RetrievalResult(

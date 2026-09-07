@@ -2,6 +2,69 @@ from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationContext, ValidationResult
 from app.validation.validators.numeric_grounding_validator import NumericGroundingValidator, remove_unsupported_numeric_sentences
+import pytest
+
+
+@pytest.mark.parametrize('extra', [
+    'Office hours are 09.00 am to 17.00 pm Monday through Friday.',
+    'A fee of 12.50 applies, with a maximum of 18.75.',
+    'Une commission de 12,50 euros et de 18,75 euros est requise.',
+    'Office hours are 09.00 am to 17.00 pm Monday through Friday',
+    'If active, you need 2 Case Credits in the U.S. to receive benefits.',
+])
+def test_numeric_repair_removes_whole_sentence_with_decimal_values(extra):
+    grounded = 'The office telephone is +31 88 646 0200.'
+    context = _context(grounded + '\n\n' + extra, 'Telephone Office +31 88 646 0200')
+    repaired, removed = remove_unsupported_numeric_sentences(
+        context.chat_response.answer, context.retrieval_result.documents)
+    assert removed
+    assert repaired == grounded
+
+
+def test_numeric_repair_keeps_adjacent_grounded_decimal_sentence():
+    supported = 'The service fee is 2.50.'
+    context = _context('The delivery fee is 18.75. ' + supported, supported)
+    repaired, removed = remove_unsupported_numeric_sentences(
+        context.chat_response.answer, context.retrieval_result.documents)
+    assert removed == ['18.75']
+    assert repaired == supported
+
+
+@pytest.mark.parametrize('value', ['18', '18.75', '18,75'])
+def test_numeric_grounding_checks_values_before_sentence_period(value):
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(f'The service fee is {value}.', 'The service fee is 2.50.'), result)
+    assert result.has_critical()
+
+
+@pytest.mark.parametrize("answer,source", [
+    ("The Belgium office telephone number is +31 88 646 0200. You can also email support.",
+     "Forever Belgium Telephone Office +31 88 646 0200 (Reception, Netherlands)"),
+    ("Le numéro du bureau en Belgique est +31 88 646 0200.",
+     "Telephone Office +31 88 646 0200 (Reception, Netherlands)"),
+    ("Call Customer Service at 1-888-440-ALOE (2563). You can reach them for orders.",
+     "Call Customer Care at 1-888- 440-ALOE (2563)."),
+])
+def test_source_grounded_contact_survives_wording_change(answer, source):
+    context = _context(answer, source)
+    result = ValidationResult()
+    NumericGroundingValidator().validate(context, result)
+    assert result.valid
+    assert remove_unsupported_numeric_sentences(answer, context.retrieval_result.documents) == (answer, [])
+
+
+@pytest.mark.parametrize("answer,source", [
+    ("Belgium telephone: +31 88 646 0299.", "Telephone Office +31 88 646 0200"),
+    ("Telephone Office: +31 88 646 0299.", "Telephone Office +31 88 646 0200"),
+    ("Call Customer Care at 1-888-440-ALOE (2999).", "Call Customer Care at 1-888-440-ALOE (2563)."),
+    ("Belgium telephone: +31 88 646 0200.", "Telephone Office +31 88 646. Order count: 0200"),
+    ("Recognized Manager needs 120 CC.", "Assistant Supervisor needs 120 CC."),
+])
+def test_contact_fix_does_not_approve_wrong_numbers(answer, source):
+    result = ValidationResult()
+    NumericGroundingValidator().validate(_context(answer, source), result)
+    assert not result.valid
 
 
 def _context(answer: str, source_text: str, metadata: dict | None = None) -> ValidationContext:

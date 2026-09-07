@@ -190,6 +190,17 @@ class ResponseBuilder:
             # answer and source use different languages.
             return [self._source_for_answer(document, answer) for document in verified[:3]]
 
+        # Preserve explicit references to approved passages, including a
+        # non-numeric rule alongside a numeric requirement. This is citation
+        # presentation, not a claim-entailment or evidence-approval override.
+        approval = (retrieval_result.metadata or {}).get("evidence_decision", {})
+        if isinstance(approval, dict) and approval.get("approved") is True:
+            indices = {int(match) for match in re.findall(r"\[(?:Source\s+)?(\d+)\](?!\()", answer)}
+            explicit = [document for index, document in enumerate(documents, 1)
+                        if index in indices or re.search(r"\[" + re.escape(document.id) + r"\](?!\()", answer)]
+            if explicit:
+                return [self._source_for_answer(document, answer) for document in explicit]
+
         answer_numbers = self._numbers(answer)
         ranked = sorted(
             documents,
