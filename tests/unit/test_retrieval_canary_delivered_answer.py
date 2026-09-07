@@ -77,7 +77,7 @@ def _answer(text, citations=1):
 def test_a_delivered_fallback_fails_the_case(stub_pipeline, monkeypatch):
     """The exact failure the retrieval-only gate could not see."""
     monkeypatch.setattr(canary, "delivered_answer", _answer(FALLBACK, citations=0))
-    outcome = canary.run_case(
+    outcome = canary.run_case_once(
         _case(answer_must_contain=["120"], answer_must_not_contain=["do not contain enough information"]),
         1,
     )
@@ -93,7 +93,7 @@ def test_a_silently_stripped_figure_fails_the_case(stub_pipeline, monkeypatch):
     """
     stripped = "To become a Recognized Manager you must meet the Case Credit requirement."
     monkeypatch.setattr(canary, "delivered_answer", _answer(stripped, citations=1))
-    outcome = canary.run_case(_case(answer_must_contain=["120"]), 1)
+    outcome = canary.run_case_once(_case(answer_must_contain=["120"]), 1)
 
     assert not outcome["passed"]
     assert any("missing '120'" in reason for reason in outcome["failure_reasons"])
@@ -101,7 +101,7 @@ def test_a_silently_stripped_figure_fails_the_case(stub_pipeline, monkeypatch):
 
 def test_a_grounded_answer_passes(stub_pipeline, monkeypatch):
     monkeypatch.setattr(canary, "delivered_answer", _answer(GOOD_ANSWER, citations=1))
-    outcome = canary.run_case(
+    outcome = canary.run_case_once(
         _case(answer_must_contain=["120"], answer_must_cite=True),
         1,
     )
@@ -111,7 +111,7 @@ def test_a_grounded_answer_passes(stub_pipeline, monkeypatch):
 
 def test_an_uncited_answer_fails_when_a_citation_is_required(stub_pipeline, monkeypatch):
     monkeypatch.setattr(canary, "delivered_answer", _answer(GOOD_ANSWER, citations=0))
-    outcome = canary.run_case(_case(answer_must_contain=["120"], answer_must_cite=True), 1)
+    outcome = canary.run_case_once(_case(answer_must_contain=["120"], answer_must_cite=True), 1)
 
     assert not outcome["passed"]
     assert any("no citation" in reason for reason in outcome["failure_reasons"])
@@ -123,7 +123,7 @@ def test_cases_without_answer_requirements_make_no_generation_call(stub_pipeline
         raise AssertionError("delivered_answer must not run for a retrieval-only case")
 
     monkeypatch.setattr(canary, "delivered_answer", _fail)
-    outcome = canary.run_case(_case(), 1)
+    outcome = canary.run_case_once(_case(), 1)
 
     assert outcome["passed"], outcome["failure_reasons"]
     assert outcome["answer_citations"] == -1
