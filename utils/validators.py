@@ -8,7 +8,11 @@ import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from config.vera_persona import ROLE_CONTENT_SCOPES
-from services.market_config import get_country_codes, get_language_codes_for_country
+from services.market_config import (
+    get_country_codes,
+    get_language_codes_for_country,
+    get_supported_language_codes,
+)
 
 TRAFFIC_SOURCES = {"widget", "evaluation", "backend_test", "admin_test"}
 
@@ -19,6 +23,19 @@ def _country_codes() -> set[str]:
 
 def _language_codes_for_country(country_code: str) -> set[str]:
     return get_language_codes_for_country(country_code)
+
+
+def _supported_language_codes() -> set[str]:
+    """Languages a reply may be written in, on any market.
+
+    Response language is deliberately decoupled from document authority. A
+    Germany-selected reader asking in English was previously rejected outright by
+    request validation, which is the language-and-market failure recorded in the
+    2026-09-07 comparison. Answering in English does NOT authorise US policy as a
+    substitute for German evidence: the selected market still governs which
+    documents are eligible, enforced in retrieval and evidence approval.
+    """
+    return get_supported_language_codes()
 
 
 class Envelope(BaseModel):
@@ -71,8 +88,8 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_locale_pair(self) -> "ChatRequest":
-        if self.language not in _language_codes_for_country(self.country):
-            raise ValueError("Unsupported language for country.")
+        if self.language not in _supported_language_codes():
+            raise ValueError("Unsupported language.")
         return self
 
 
@@ -100,8 +117,11 @@ class ConsentRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_locale_pair(self) -> "ConsentRequest":
-        if self.lang not in _language_codes_for_country(self.country):
-            raise ValueError("Unsupported language for country.")
+        # Must accept the same languages as ChatRequest: a reader offered a
+        # language for chat has to be able to consent in it. Consent copy exists
+        # for every configured language.
+        if self.lang not in _supported_language_codes():
+            raise ValueError("Unsupported language.")
         return self
 
 
@@ -174,6 +194,6 @@ class SupportRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_locale_pair(self) -> "SupportRequest":
-        if self.language not in _language_codes_for_country(self.country):
-            raise ValueError("Unsupported language for country.")
+        if self.language not in _supported_language_codes():
+            raise ValueError("Unsupported language.")
         return self
