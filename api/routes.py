@@ -103,6 +103,8 @@ def source_link(body: SourceLinkRequest, request: Request) -> Envelope | JSONRes
     correlation_id = _correlation_id(request)
     if not _session_matches_widget_token(request, body.sessionId):
         return _session_mismatch_response(correlation_id)
+    if not _widget_locale_allowed(request, body.country, body.language):
+        return _session_mismatch_response(correlation_id)
     if not has_valid_consent(body.sessionId, correlation_id):
         return consent_required_response(correlation_id)
 

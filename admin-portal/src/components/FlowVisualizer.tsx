@@ -48,8 +48,8 @@ const metadataNumber = (stages: Array<TraceStage | undefined>, ...keys: string[]
 };
 
 export function FlowVisualizer({ credentials }: { credentials: AdminCredentials }) {
-  const [traces, setTraces] = useState<PipelineTrace[]>(demo.traces);
-  const [selectedId, setSelectedId] = useState(demo.traces[0].correlation_id);
+  const [traces, setTraces] = useState<PipelineTrace[]>([]);
+  const [selectedId, setSelectedId] = useState("");
   const [selectedStage, setSelectedStage] = useState("request_received");
   const [mode, setMode] = useState<DataMode>("demo");
   const [replayKey, setReplayKey] = useState(0);
@@ -58,10 +58,16 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
   const [lookupError, setLookupError] = useState("");
 
   const refresh = async () => {
+    try {
     const result = await withDemoFallback(() => new AdminApi(credentials).traces(), demo.traces);
-    setTraces(result.data.length ? result.data : demo.traces);
+    setTraces(result.data);
     setMode(result.mode);
     if (result.data.length && !result.data.some((trace) => trace.correlation_id === selectedId)) setSelectedId(result.data[0].correlation_id);
+    setLookupError("");
+    } catch (error) {
+      setTraces([]);
+      setLookupError(error instanceof Error ? error.message : "Live traces could not be loaded.");
+    }
   };
 
   useEffect(() => {
@@ -70,7 +76,7 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
     const api = new AdminApi(credentials);
     let timer = 0;
     void api.streamTraces((next) => {
-      setTraces(next.length ? next : demo.traces);
+      setTraces(next);
       setMode("live");
       setStreamStatus("live");
     }, controller.signal).catch(() => {
@@ -81,7 +87,8 @@ export function FlowVisualizer({ credentials }: { credentials: AdminCredentials 
     return () => { controller.abort(); if (timer) window.clearInterval(timer); };
   }, [credentials.accessToken, credentials.apiKey]);
 
-  const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0] || demo.traces[0], [selectedId, traces]);
+  const trace = useMemo(() => traces.find((item) => item.correlation_id === selectedId) || traces[0], [selectedId, traces]);
+  if (!trace) return <section className="page-section"><h1>Live flow</h1><p role="status">{lookupError || "No live traces are available yet."}</p><button className="button secondary" onClick={() => void refresh()}>Refresh</button></section>;
   const detail = stationById.get(selectedStage) || stations[0];
   const activeStage = stageFor(trace, selectedStage);
   const deliveredStage = stageFor(trace, "response_delivered");

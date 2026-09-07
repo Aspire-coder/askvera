@@ -11,11 +11,12 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [jobs, setJobs] = useState<IngestionJob[]>(demoAllowed ? demo.jobs : []);
   const [mode, setMode] = useState<DataMode>(demoAllowed ? "demo" : "live");
   const [loadError, setLoadError] = useState("");
+  const [configReady, setConfigReady] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [country, setCountry] = useState("BE");
+  const [country, setCountry] = useState("");
   const [coverageSelection, setCoverageSelection] = useState("BE");
-  const [language, setLanguage] = useState("nl");
+  const [language, setLanguage] = useState("");
   const [documentType, setDocumentType] = useState("policy");
   const [accessScope, setAccessScope] = useState("country");
   const [version, setVersion] = useState("");
@@ -51,10 +52,12 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
         withDemoFallback(() => api.ingestions(), demo.jobs)
       ]);
       setConfig(configResult.data);
+      setConfigReady(configResult.mode === "live");
       setJobs(jobsResult.data);
       setMode(configResult.mode === "live" && jobsResult.mode === "live" ? "live" : "demo");
       setLoadError("");
     } catch (error) {
+      setConfigReady(false);
       setJobs([]);
       setMode("live");
       setLoadError(error instanceof Error ? error.message : "Live document activity could not be loaded.");
@@ -72,7 +75,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   }, [documentType]);
 
   const selectedMarket = config.countries.find((market) => market.code === coverageSelection);
-  const uploadMarket = config.countries.find((market) => market.code === country) || config.countries[0];
+  const uploadMarket = config.countries.find((market) => market.code === country);
   const showingGlobalCoverage = coverageSelection === "GLOBAL";
   const languages = uploadMarket?.languages || [];
   const marketJobs = useMemo(
@@ -83,13 +86,16 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const inProgressDocuments = marketJobs.filter((job) => !["ready", "failed"].includes(job.status)).length;
   const suggestedDocumentId = `${country.toLowerCase()}-${documentType.replaceAll("_", "-")}`;
   useEffect(() => {
-    if (!config.countries.some((market) => market.code === country) && config.countries[0]) setCountry(config.countries[0].code);
-    if (!languages.some((option) => option.code === language) && languages[0]) setLanguage(languages[0].code);
-  }, [country, config]);
+    if (country && !config.countries.some((market) => market.code === country)) setCountry("");
+    if (language && !languages.some((option) => option.code === language)) setLanguage("");
+  }, [country, language, config]);
+
+  const metadataReady = configReady && !!uploadMarket && languages.some((option) => option.code === language);
 
   const acceptedExtensions = useMemo(() => ".pdf,.docx,.txt,.md,.csv,.html,.htm", []);
   const chooseFile = (candidate?: File) => {
     if (!candidate) return;
+    setFile(null);
     setNotice("");
     if (candidate.size > config.maxUploadBytes) {
       setNotice(`That file is larger than ${formatSize(config.maxUploadBytes)}.`);
@@ -106,6 +112,10 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const upload = async () => {
     if (!file || (!credentials.accessToken && !credentials.apiKey)) {
       setNotice(!credentials.accessToken && !credentials.apiKey ? "Sign in before uploading." : "Choose a document first.");
+      return;
+    }
+    if (!metadataReady) {
+      setNotice("Wait for live configuration, then select the document's market and source language. Do not guess from your location.");
       return;
     }
     const formData = new FormData();
@@ -131,7 +141,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
       setFile(null);
       await refresh();
     } catch (error) {
-      setNotice(error instanceof DOMException && error.name === "AbortError" ? "Upload cancelled before processing began." : error instanceof Error ? error.message : "Upload failed. The document was not queued.");
+      setNotice(error instanceof DOMException && error.name === "AbortError" ? "Upload request cancelled. It may already have reached the server; refresh document activity before retrying." : error instanceof Error ? error.message : "Upload status could not be confirmed. Refresh document activity before retrying.");
     } finally {
       uploadController.current = null;
       setSubmitting(false);
@@ -288,8 +298,8 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field span-2"><label>Content type</label><div className="type-options">
               {config.documentTypes.map((type) => <button key={type} type="button" className={documentType === type ? "selected" : ""} onClick={() => setDocumentType(type)}>{readableType(type)}</button>)}
             </div></div>
-            <div className="form-field"><label htmlFor="market">Market</label><select id="market" value={country} onChange={(event) => setCountry(event.target.value)}>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}</select></div>
-            <div className="form-field"><label htmlFor="language">Language</label><select id="language" value={language} onChange={(event) => setLanguage(event.target.value)}>{languages.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)}</select></div>
+            <div className="form-field"><label htmlFor="market">Document market</label><select id="market" value={country} disabled={!configReady} onChange={(event) => { setCountry(event.target.value); setLanguage(""); }}><option value="">Select document market</option>{config.countries.map((market) => <option key={market.code} value={market.code}>{market.name} ({market.code})</option>)}</select><small className="field-help">Choose the market the document governs, not your current location.</small></div>
+            <div className="form-field"><label htmlFor="language">Source language</label><select id="language" value={language} disabled={!configReady || !country} onChange={(event) => setLanguage(event.target.value)}><option value="">Select source language</option>{languages.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)}</select><small className="field-help">If the correct language is unavailable, request a configuration review instead of selecting another language.</small></div>
             <div className="form-field"><label htmlFor="scope">Availability</label><select id="scope" value={accessScope} onChange={(event) => setAccessScope(event.target.value)}><option value="country">Selected market only</option><option value="global">All markets</option></select></div>
             <div className="form-field"><label htmlFor="version">Document version</label><input id="version" value={version} onChange={(event) => setVersion(event.target.value)} placeholder="e.g. 2026.3" /></div>
             <div className="form-field"><label htmlFor="effective">Effective date</label><input id="effective" type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} /></div>
@@ -298,7 +308,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <div className="form-field"><label htmlFor="owner">Document owner</label><input id="owner" value={documentOwner} onChange={(event) => setDocumentOwner(event.target.value)} placeholder="Policy or compliance owner" /></div>
             <div className="form-field"><label htmlFor="approval">Approval reference</label><input id="approval" value={approvalReference} onChange={(event) => setApprovalReference(event.target.value)} placeholder="Ticket, memo or approval ID" /></div>
             <label className="review-toggle"><input type="checkbox" checked={reviewBeforePublish} onChange={(event) => setReviewBeforePublish(event.target.checked)} /><span><strong>Review chunks before publishing</strong><small>Keep this document out of live answers until you test and approve it.</small></span></label>
-            <div className="form-field upload-action"><span className="helper">Files are checked before queueing. If the connection stops, the job is not activated until processing completes.</span>{submitting ? <button className="button secondary" onClick={cancelUpload}>Cancel upload</button> : <button className="button primary" disabled={!file} onClick={() => void upload()}>{reviewBeforePublish ? "Upload for review" : "Upload and index"}</button>}</div>
+            <div className="form-field upload-action"><span className="helper">Confirm the market and source language before uploading. Keep review enabled to inspect extraction before publication.</span>{submitting ? <button className="button secondary" onClick={cancelUpload}>Cancel upload</button> : <button className="button primary" disabled={!file || !metadataReady} onClick={() => void upload()}>{reviewBeforePublish ? "Upload for review" : "Upload and index"}</button>}</div>
           </div>
           {notice ? <div className="notice" role="status">{notice}</div> : null}
         </div>
@@ -311,7 +321,7 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             <li><span>3</span><div><strong>Semantic indexing</strong><p>Each chunk receives an embedding and searchable metadata.</p></div></li>
             <li><span>4</span><div><strong>Atomic activation</strong><p>The previous source is replaced only when the new index is complete.</p></div></li>
           </ol>
-          <div className="supported-note"><CheckIcon /><span>Limited to approved company policies and the global office directory.</span></div>
+          <div className="supported-note"><CheckIcon /><span>Company policies stay within their market. Only the approved international sponsoring directory is global.</span></div>
         </aside>
       </div>
 

@@ -363,6 +363,8 @@ def experiments_candidate_mode_update(body: CandidateModeInput, request: Request
     principal = getattr(request.state, "admin_identity", {}) or {}
     if principal.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Only a Super Admin can change candidate mode.")
+    if settings.APP_ENV not in {"development", "test", "testing", "staging", "uat"}:
+        raise HTTPException(status_code=403, detail="Candidate mode is unavailable in this environment.")
     if body.confirmation.strip().upper() != CANDIDATE_MODE_CONFIRMATION_PHRASE:
         raise HTTPException(
             status_code=400, detail=f'Type "{CANDIDATE_MODE_CONFIRMATION_PHRASE}" to confirm.'
@@ -812,12 +814,14 @@ def ingestion_preview_test(
 
 @admin_router.post("/ingestions/{job_id}/publish")
 def publish_ingestion(job_id: str, request: Request) -> dict[str, Any]:
-    principal = require_admin_access(request, "knowledge", "stage")
+    principal = require_admin_access(request, "knowledge", "publish")
     try:
         preview = preview_ingestion_job(job_id, limit=1)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
-    require_admin_access(request, "knowledge", "stage", str(preview["job"].get("country") or ""))
+    require_admin_access(request, "knowledge", "publish", str(preview["job"].get("country") or ""))
+    if preview["job"].get("access_scope") == "global" and principal.get("role") != "super_admin":
+        raise HTTPException(status_code=403, detail="Only a Super Admin can publish global content.")
     accepted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
     try:
         result = publish_ingestion_job(job_id, accepted_by=accepted_by)
@@ -869,11 +873,11 @@ async def upload_document(
     logical_document_id: Annotated[str, Form()] = "",
     document_owner: Annotated[str, Form()] = "",
     approval_reference: Annotated[str, Form()] = "",
-    review_before_publish: Annotated[bool, Form()] = False,
+    review_before_publish: Annotated[bool, Form()] = True,
 ) -> dict[str, Any]:
     normalized_country = country.upper().strip()
     normalized_language = language.lower().strip()
-    require_admin_access(request, "knowledge", "stage", normalized_country)
+    require_admin_access(request, "knowledge", "stage" if review_before_publish else "publish", normalized_country)
     if normalized_country not in get_country_codes():
         raise HTTPException(status_code=400, detail="Unsupported country.")
     if normalized_language not in get_language_codes_for_country(normalized_country):

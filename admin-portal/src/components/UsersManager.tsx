@@ -39,6 +39,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
   const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [replacePermissions, setReplacePermissions] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("country_admin");
   const [markets, setMarkets] = useState<string[]>([]);
@@ -61,6 +62,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
   useEffect(() => { void load(); }, [api, canViewAudit]);
 
   const scopes = useMemo<AdminScope[]>(() => {
+    if (editing && !replacePermissions) return editing.scopes;
     if (role === "super_admin") return [];
     if (role === "auditor") return [
       { market: "*", section: "users", permission: "view" },
@@ -72,7 +74,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
     return markets.flatMap((market) => Object.entries(sectionPermissions)
       .filter(([section, permission]) => allowedSections.has(section) && Boolean(permission))
       .map(([section, permission]) => ({ market, section, permission })));
-  }, [markets, role, sectionPermissions]);
+  }, [markets, role, sectionPermissions, editing, replacePermissions]);
 
   const filtered = users.filter((user) => {
     const matchesSearch = !query || user.email.toLowerCase().includes(query.toLowerCase());
@@ -108,6 +110,7 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
 
   const edit = (user: AdminUser) => {
     setEditing(user);
+    setReplacePermissions(false);
     setEmail(user.email);
     setRole(user.role);
     setMarkets([...new Set(user.scopes.map((scope) => scope.market).filter((market) => market !== "*"))]);
@@ -127,6 +130,8 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
       return;
     }
     if (role !== "super_admin" && !scopes.length) { setError("Choose at least one market and permission."); return; }
+    if (editing && (replacePermissions || role !== editing.role)
+      && !window.confirm(`Replace access for ${editing.email}?\nBefore: ${summary(editing.role, editing.scopes)}\nAfter: ${summary(role, scopes)}`)) return;
     setSaving(true);
     setError("");
     try {
@@ -175,7 +180,8 @@ export function UsersManager({ credentials, config }: { credentials: AdminCreden
       {!editing ? <label><span>Email</span><input type="email" inputMode="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoFocus /></label> : null}
       <label><span>Role template</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="super_admin">Super Admin</option><option value="country_admin">Country Admin</option><option value="section_scoped">Section-scoped user</option><option value="auditor">Auditor</option></select></label>
       {role !== "super_admin" && role !== "auditor" ? <><fieldset><legend>Markets</legend><div className="choice-grid">{config.countries.map((market) => <label key={market.code}><input type="checkbox" checked={markets.includes(market.code)} onChange={() => setMarkets((current) => current.includes(market.code) ? current.filter((item) => item !== market.code) : [...current, market.code])} />{market.name}</label>)}</div></fieldset><fieldset><legend>Section permissions</legend>{sections.filter((section) => role === "country_admin" ? ["knowledge", "insights", "flow", "support"].includes(section.id) : !["users", "audit"].includes(section.id)).map((section) => <label className="permission-row" key={section.id}><span>{section.label}</span><select value={sectionPermissions[section.id] || ""} onChange={(event) => setSectionPermissions((current) => ({ ...current, [section.id]: event.target.value }))}><option value="">No access</option>{section.permissions.map((permission) => <option key={permission}>{permission}</option>)}</select></label>)}</fieldset></> : null}
-      <div className="access-summary">{summary(role, scopes)}</div>
+      {editing ? <label><input type="checkbox" checked={replacePermissions} onChange={(event) => setReplacePermissions(event.target.checked)} />Apply the selected section permissions uniformly to every selected market. Leave unchecked to preserve existing per-market permissions.</label> : null}
+      <div className="access-summary">{summary(role, scopes)}{editing && !replacePermissions ? " Existing per-market permissions are preserved; check the replacement option to apply the controls above." : ""}</div>
       <div className="modal-actions"><button className="button secondary" onClick={closeForm}>Cancel</button><button className="button primary" disabled={saving} onClick={() => void save()}>{saving ? "Saving..." : editing ? "Save access" : "Send invite"}</button></div>
     </section></div> : null}
   </section>;
