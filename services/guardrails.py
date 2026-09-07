@@ -10,8 +10,25 @@ from utils.logging import get_logger
 LOGGER = get_logger("services.guardrails")
 
 
+def is_policy_safety_question(text: str) -> bool:
+    """Recognize questions about restrictions, not requests to make claims.
+
+    Deliberately excludes compound requests and imperative instructions; those
+    need per-intent routing rather than a whole-message safety exemption.
+    """
+    return bool(re.fullmatch(
+        r"\s*(?:does (?:the |company |the company )?policy (?:prohibit|forbid|ban) "
+        r"|what (?:does|do) (?:the |company |the company )?(?:policy|policies|rules) say about )"
+        r"(?:guaranteed (?:income|earnings)(?: claims)?|medical advice|(?:medical|income|health) claims)\s*\?\s*",
+        text, re.IGNORECASE,
+    ))
+
+
 def _matches(topic: str, text: str) -> bool:
-    return any(re.search(re.escape(pattern), text, flags=re.IGNORECASE) for pattern in DENIED_TOPICS[topic])
+    if topic in {"income_claim", "medical_claim"} and is_policy_safety_question(text):
+        return False
+    return any(re.search(r"(?<!\w)" + re.escape(pattern) + r"(?!\w)", text, flags=re.IGNORECASE)
+               for pattern in DENIED_TOPICS[topic])
 
 
 def check_text(text: str, correlation_id: str) -> None:
