@@ -1554,7 +1554,7 @@ def test_semantic_assistant_route_cannot_turn_unrelated_question_into_greeting(m
 
     assert response.answer.startswith("I'm sorry")
     assert "company policies" in response.answer
-    assert "global sponsoring directory" in response.answer
+    assert "international sponsoring directory" in response.answer
     assert response.metadata["intent"] == "off_topic"
     router.generate.assert_not_called()
 

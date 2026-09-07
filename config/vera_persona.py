@@ -41,7 +41,7 @@ FALLBACK_RESPONSES = {
     ),
     "off_topic": (
         "I'm sorry, but I can't help with that question. AskVera can help with approved "
-        "Forever Living company policies and information from the global office directory."
+        "Forever Living company policies and information from the international sponsoring directory."
     ),
 }
 

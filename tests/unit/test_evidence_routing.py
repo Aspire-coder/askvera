@@ -36,7 +36,7 @@ def test_routes_help_me_phrasing_of_capability_question() -> None:
     assert classify_intent("what can you help me with?", "en") == "assistant_meta"
     capability = assistant_meta_response("what can you help me with?", "en") or ""
     assert "official policies" in capability
-    assert "global sponsoring directory" in capability
+    assert "international sponsoring directory" in capability
 
 
 def test_routes_how_can_you_help_me_phrasing_of_capability_question() -> None:
@@ -46,7 +46,7 @@ def test_routes_how_can_you_help_me_phrasing_of_capability_question() -> None:
     assert classify_intent("how can you help me?", "en") == "assistant_meta"
     capability = assistant_meta_response("how can you help me?", "en") or ""
     assert "official policies" in capability
-    assert "global sponsoring directory" in capability
+    assert "international sponsoring directory" in capability
 
 
 def test_routes_greeting_composed_with_how_can_you_help_me() -> None:
@@ -160,7 +160,7 @@ def test_routes_launched_language_greetings_without_model_tokens() -> None:
     assert "AskVera" in (assistant_meta_response("Hola", "es") or "")
     capability = assistant_meta_response("what can you help with", "en") or ""
     assert "official policies" in capability
-    assert "global sponsoring directory" in capability
+    assert "international sponsoring directory" in capability
     assert "products" not in capability
     assert "ordering" not in capability
 
@@ -303,7 +303,7 @@ def test_every_published_language_has_a_warm_off_topic_copy_or_safe_translation(
     assert "I'm sorry" in english
     assert "can't help with that question" in english
     assert "company policies" in english
-    assert "global sponsoring directory" in english
+    assert "international sponsoring directory" in english
     assert "products" not in english
     assert "ordering" not in english
 
