@@ -153,6 +153,41 @@
       "expected_title_contains": "Forever Uruguay",
       "minimum_confidence": 0.35,
       "evidence_must_be_approved": true
+    },
+    {
+      "id": "recognized-manager-delivered-answer",
+      "question": "How can I become a recognized manager?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Recognized Manager",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true,
+      "answer_must_contain": [
+        "120"
+      ],
+      "answer_must_not_contain": [
+        "do not contain enough information"
+      ],
+      "answer_must_cite": true
+    },
+    {
+      "id": "supervisor-credits-delivered-answer",
+      "question": "How many Case Credits do I need to reach Supervisor?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Supervisor is achieved",
+      "expected_section_contains": "4.01-b",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": true,
+      "answer_must_contain": [
+        "10"
+      ],
+      "answer_must_not_contain": [
+        "do not contain enough information"
+      ],
+      "answer_must_cite": true
     }
   ]
 }
