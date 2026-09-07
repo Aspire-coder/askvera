@@ -1,11 +1,13 @@
 """AI chat orchestration for AskVera."""
 
 import re
+from dataclasses import replace
 from time import perf_counter
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.models.responses import ModelResponse
+from app.orchestrator.compound_requests import separate_question_and_command
 from app.operations import pipeline_trace_store
 from app.models.router import ModelRouter, model_router
 from app.evidence import (
@@ -26,8 +28,9 @@ from app.response.quality import (
     remove_or_replace_contact_placeholders,
     unsupported_requested_years,
 )
-from app.retrieval import RetrievalService, retrieval_service
+from app.retrieval import RetrievalService, confidence_from_sources, retrieval_service
 from app.retrieval.models import RetrievalResult
+from app.retrieval.cache_evidence import restore_evidence, serialize_evidence
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
 from app.validation.validators.numeric_grounding_validator import remove_unsupported_numeric_sentences
@@ -55,6 +58,7 @@ from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
+from utils.inline_citations import separate_verified_citations
 from utils.directory_fields import (
     parse_directory_fields,
     preserve_directory_role_labels,
@@ -189,11 +193,49 @@ class AIOrchestrator:
             preserve_location_names=True,
             preserve_person_names=True,
         )
+        response = self._mixed_request_response(body, scrubbed_input, correlation_id, candidate_flags)
+        if response is None:
+            response = self._handle_scrubbed_chat(body, scrubbed_input, correlation_id, candidate_flags)
+        # Persist the original request and the actual delivered response exactly
+        # once, including refusals, cache hits and partial mixed-intent answers.
+        append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
+        return response
+
+    def _mixed_request_response(
+        self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
+    ) -> ChatResponse | None:
+        parts = separate_question_and_command(scrubbed_input)
+        if parts is None:
+            return None
+        question, command = parts
+        question_decision = self._evaluate_governance(question, body, correlation_id)
+        command_decision = self._evaluate_governance(command, body, correlation_id)
+        metadata = command_decision.metadata or {}
+        issue_codes = {str(issue.get("code", "")) for issue in metadata.get("risk", {}).get("issues", [])}
+        explicit_refusal = metadata.get("topic") in {"income_claim", "medical_claim", "off_topic"} or bool(
+            issue_codes & {"INCOME_CLAIM_RISK", "MEDICAL_CLAIM_RISK"})
+        if (not question_decision.allowed or command_decision.allowed or not explicit_refusal
+                or metadata.get("providerError")):
+            return None
+        # Preserve every scope/session field. The unsafe command never enters
+        # retrieval, the model prompt, or the safe-question cache key.
+        safe_body = body.model_copy(update={"message": question})
+        response = self._handle_scrubbed_chat(safe_body, question, correlation_id, candidate_flags)
+        decline = self._governance_user_message(
+            command_decision, body.language, body.country, command, correlation_id,
+        )
+        return self._replace_answer(response, f"{response.answer}\n\n{decline}", {
+            "mixed_intent": True, "refused_part_count": 1,
+        })
+
+    def _handle_scrubbed_chat(
+        self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
+    ) -> ChatResponse:
+        """Run the normal checked pipeline; the entry point owns turn persistence."""
         chat_response = self._early_conversation_response(
             scrubbed_input, body, correlation_id, candidate_flags
         )
         if chat_response:
-            append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
             return chat_response
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
@@ -328,7 +370,6 @@ class AIOrchestrator:
             correlation_id,
             semantic_lookup_ms,
         )
-        append_session_turn(body.sessionId, scrubbed_input, chat_response.answer, correlation_id)
         write_audit_event(
             {
                 "type": "chat",
@@ -362,6 +403,9 @@ class AIOrchestrator:
         country: str = "",
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
+        citation_cleaned = separate_verified_citations(chat_response.answer, retrieval_result.documents)
+        if citation_cleaned != chat_response.answer:
+            chat_response = self._replace_answer(chat_response, citation_cleaned, {"inline_citations_separated": True})
         completed_answer, restored_fields = chat_response.answer, []
         if chat_response.citations:
             directory_field_sets = [
@@ -523,8 +567,6 @@ class AIOrchestrator:
             },
         )
         response = self._cached_response_value(cached, body, correlation_id, cache_type="exact")
-        if response and response.metadata.get("cache") == "exact":
-            append_session_turn(body.sessionId, session_input or body.message, response.answer, correlation_id)
         return response
 
     def _cached_response_value(
@@ -537,16 +579,19 @@ class AIOrchestrator:
     ) -> ChatResponse | None:
         if not cached:
             return None
+        evidence = restore_evidence(cached.get("evidence"), body.country, body.language)
+        if evidence is None:
+            return None
         chat_response = self._secure_and_complete_response(
             self.response_builder.from_cached(cached, correlation_id),
-            RetrievalResult(documents=[], citations=[], confidence=0.0),
+            evidence,
             body.language,
             correlation_id,
             user_question=body.message,
             country=body.country,
         )
         chat_response = self._validate_response(
-            chat_response, body, correlation_id
+            chat_response, body, correlation_id, retrieval_result=evidence
         )
         chat_response = self._replace_answer(chat_response, chat_response.answer, {"cache": cache_type})
         governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
@@ -619,7 +664,6 @@ class AIOrchestrator:
                 "semantic_cache_candidates_checked": cached.candidates_checked,
             },
         )
-        append_session_turn(body.sessionId, session_input or body.message, response.answer, correlation_id)
         return response, cached, duration_ms
 
     def _record_semantic_shadow_result(
@@ -779,6 +823,9 @@ class AIOrchestrator:
             # subject that a bare anchor substitution would silently drop.
             # Keep both the prior topic and the new subject for retrieval.
             contextual_query = f"{anchor} {user_message}".strip()
+        elif anchor != user_message:
+            # Context must never replace the question currently being asked.
+            contextual_query = f"{anchor}\nFollow-up request: {user_message}"
         else:
             contextual_query = anchor
         LOGGER.info(
@@ -793,6 +840,8 @@ class AIOrchestrator:
         """Keep follow-up intent in governance and cache keys, outside retrieval."""
         normalized_message = " ".join((user_message or "").split()).strip()
         normalized_retrieval = " ".join((retrieval_query or "").split()).strip()
+        if (retrieval_query or "").endswith(f"\nFollow-up request: {normalized_message}"):
+            return retrieval_query
         if (
             not self._needs_history_context(normalized_message, history)
             or not normalized_retrieval
@@ -989,7 +1038,7 @@ class AIOrchestrator:
             decision.reason
             or (
                 "I'm sorry, but I can't help with that question. AskVera can help with approved "
-                "Forever Living company policies and information from the global office directory."
+                "Forever Living company policies and information from the international sponsoring directory."
             )
         )
 
@@ -1094,7 +1143,7 @@ class AIOrchestrator:
             ),
             "off_topic": (
                 "You must make clear you can only help with approved Forever Living "
-                "company policy and global office directory information."
+                "company policy and international sponsoring directory information."
             ),
         }.get(topic)
         if mandatory_elements is None:
@@ -1372,27 +1421,24 @@ class AIOrchestrator:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id, candidate_flags)
         if routed_response:
-            append_session_turn(body.sessionId, scrubbed_input, routed_response.answer, correlation_id)
             return routed_response, retrieval_result, None
 
         evidence_decision = approve_evidence(retrieval_query, retrieval_result, body.country, body.language)
-        if evidence_decision.approved and self._is_cross_market_local_evidence(scrubbed_input, retrieval_result, body):
-            # The message names a market other than this session's own, and the
-            # top-ranked evidence is a country-scoped document (this session's
-            # market, never the one named) rather than a global/cross-market
-            # one - answering would misrepresent the named country's policy, so
-            # this downgrades to the same insufficient-evidence path a real
-            # retrieval miss takes instead of switching scope or inventing a
-            # new response template.
-            evidence_decision = EvidenceDecision(
-                approved=False,
-                reason="cross_market_local_evidence",
-                evidence=[],
-                query_intent=evidence_decision.query_intent,
-                exact_topic_match=evidence_decision.exact_topic_match,
-                top_score=evidence_decision.top_score,
-                score_margin=evidence_decision.score_margin,
+        scope_query = self._scope_query(scrubbed_input, retrieval_query, history)
+        if evidence_decision.approved and self._is_cross_market_local_evidence(scope_query, retrieval_result, body):
+            # Incidental local candidates must not veto a valid global answer.
+            # Reapprove global evidence alone; never let the local policy stand
+            # in for the foreign country's rules, even in comparison requests.
+            globals_only = [doc for doc in evidence_decision.evidence if doc.metadata.get("access_scope") == "global"]
+            sources = [doc.to_source() for doc in globals_only]
+            scoped_result = replace(
+                retrieval_result, documents=globals_only, citations=sources,
+                confidence=min(retrieval_result.confidence, confidence_from_sources(sources)),
+                metadata={**retrieval_result.metadata, "strong_local_match": False},
             )
+            evidence_decision = approve_evidence(retrieval_query, scoped_result, body.country, body.language)
+            if not evidence_decision.approved:
+                evidence_decision = replace(evidence_decision, reason="cross_market_local_evidence")
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
         if evidence_decision.approved:
             unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
@@ -1416,7 +1462,6 @@ class AIOrchestrator:
                     body,
                     correlation_id,
                 )
-                append_session_turn(body.sessionId, scrubbed_input, fallback.answer, correlation_id)
                 return fallback, approved_result, evidence_decision
             return None, approved_result, evidence_decision
 
@@ -1439,7 +1484,6 @@ class AIOrchestrator:
         if candidate_flags.narrowing_fallback:
             narrowing_response = self._candidate_narrowing_response(body, correlation_id, history)
             if narrowing_response:
-                append_session_turn(body.sessionId, scrubbed_input, narrowing_response.answer, correlation_id)
                 return narrowing_response, approved_result, evidence_decision
         fallback_message = self._insufficient_evidence_message(body.language)
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
@@ -1461,6 +1505,12 @@ class AIOrchestrator:
         )
         return fallback, approved_result, evidence_decision
 
+    def _scope_query(self, current: str, contextual: str, history: str) -> str:
+        """Inherit a target only for dependent turns without an explicit new market."""
+        if not find_market_mentions(current) and self._needs_history_context(current, history):
+            return contextual
+        return current
+
     def _is_cross_market_local_evidence(
         self,
         scrubbed_input: str,
@@ -1476,11 +1526,11 @@ class AIOrchestrator:
         too and mask the mismatch.
         """
         mentioned_markets = {code.upper() for code in find_market_mentions(scrubbed_input)}
-        if not mentioned_markets or body.country.upper() in mentioned_markets:
+        if not (mentioned_markets - {body.country.upper()}):
             return False
         if not retrieval_result.documents:
             return False
-        return retrieval_result.documents[0].metadata.get("access_scope") != "global"
+        return any(document.metadata.get("access_scope") != "global" for document in retrieval_result.documents)
 
     def _directory_clarification_response(
         self,
@@ -1533,7 +1583,6 @@ class AIOrchestrator:
                 {"id": "directory-sponsoring", "label": "Sponsoring information", "prompt": "What sponsoring information is available for that country?"},
             ],
         )
-        append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
         return response
 
     def _validate_response(
@@ -1717,6 +1766,7 @@ class AIOrchestrator:
             )
             return
         cache_value = chat_response.to_cache_value()
+        cache_value["evidence"] = serialize_evidence(retrieval_result)
         set_cache_value(cache_key, cache_value, correlation_id)
         if self._should_semantic_cache_response(chat_response):
             set_semantic_cache_value(

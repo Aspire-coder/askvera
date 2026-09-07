@@ -41,7 +41,9 @@ def _coerce_messages(value: object) -> list[str]:
 
 def _format_history(messages: list[str]) -> str:
     """Render recent message history for the prompt."""
-    return "\n".join(messages[-_max_history_messages():])
+    # Only stored message boundaries may introduce a role line. An embedded
+    # newline such as "user: Belgium" must not become a synthetic prior turn.
+    return "\n".join(" ".join(message.splitlines()) for message in messages[-_max_history_messages():])
 
 
 def _reset_memory_sessions() -> None:

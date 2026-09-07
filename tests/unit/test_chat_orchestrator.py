@@ -1,6 +1,9 @@
 """Unit tests for AI chat orchestration safety paths."""
 
 from unittest.mock import MagicMock
+from dataclasses import replace
+
+import pytest
 
 from botocore.exceptions import BotoCoreError
 
@@ -16,6 +19,15 @@ from app.validation.models import ValidationResult
 from services.candidate_control import CandidateFlags
 from services.semantic_cache import SemanticCacheHit
 from utils.validators import ChatRequest
+
+
+@pytest.fixture(autouse=True)
+def local_conversation_memory(monkeypatch):
+    from services import session
+    monkeypatch.setattr(settings, "CHAT_MEMORY_BACKEND", "memory")
+    session._reset_memory_sessions()
+    yield
+    session._reset_memory_sessions()
 
 
 class _FakeGovernance:
@@ -83,6 +95,7 @@ class _GuardrailRouter:
 def test_cached_response_is_checked_by_output_governance(monkeypatch) -> None:
     """Cached responses still pass through current governance before returning."""
     governance = _FakeGovernance()
+    monkeypatch.setattr(chat_orchestrator, "restore_evidence", lambda *_: _FakeRetriever().retrieve("question"))
     router = MagicMock()
     orchestrator = AIOrchestrator(router=router, validator=_FakeValidator(), governance=governance)
     body = ChatRequest(message="What is the FBO Support Fee?", sessionId="session-1", country="US", language="en")
@@ -142,7 +155,10 @@ def test_followup_about_first_question_uses_anchor_for_retrieval(monkeypatch) ->
     response = orchestrator.handle_chat(body, "cid")
 
     assert response.answer == "Here is more detail about becoming a Recognized Manager."
-    assert retriever.seen_messages == ["how can i become a recognized manager"]
+    assert retriever.seen_messages == [
+        "how can i become a recognized manager\n"
+        "Follow-up request: explain me more about my first question"
+    ]
     assert governance.seen_texts[0] == (
         "how can i become a recognized manager\n"
         "Follow-up request: explain me more about my first question"
@@ -161,7 +177,7 @@ def test_more_details_uses_latest_self_contained_question() -> None:
 
     query = orchestrator._build_retrieval_query("I need more details", history, "cid")
 
-    assert query == "How can I sign up in Belgium?"
+    assert query == "How can I sign up in Belgium?\nFollow-up request: I need more details"
     assert orchestrator._build_request_query("I need more details", query, history) == (
         "How can I sign up in Belgium?\nFollow-up request: I need more details"
     )
@@ -181,7 +197,7 @@ def test_chained_followup_skips_prior_vague_followup() -> None:
 
     query = orchestrator._build_retrieval_query("Can you elaborate?", history, "cid")
 
-    assert query == "How can I sign up in Belgium?"
+    assert query == "How can I sign up in Belgium?\nFollow-up request: Can you elaborate?"
     assert orchestrator._build_request_query("Can you elaborate?", query, history) == (
         "How can I sign up in Belgium?\nFollow-up request: Can you elaborate?"
     )
@@ -226,6 +242,23 @@ def test_followup_marker_is_not_matched_inside_policy_word() -> None:
     question = "What is the refund policy?"
 
     assert orchestrator._build_retrieval_query(question, history, "cid") == question
+
+
+@pytest.mark.parametrize("question", [
+    "Does that include last month's credits?",
+    "When does it expire?",
+    "Can I return it after opening?",
+    "Does that guarantee an income?",
+])
+def test_followup_retrieval_preserves_current_question(question) -> None:
+    orchestrator = AIOrchestrator()
+    anchor = "What are the monthly activity requirements?"
+    history = f"user: {anchor}\nvera: An earlier answer."
+    query = orchestrator._build_retrieval_query(question, history, "cid")
+    assert anchor in query
+    assert query.endswith(f"Follow-up request: {question}")
+    assert "An earlier answer" not in query
+    assert orchestrator._build_request_query(question, query, history) == query
 
 
 def test_fallback_responses_are_not_cacheable() -> None:
@@ -319,6 +352,7 @@ def test_semantic_cache_requires_citations_and_high_confidence(monkeypatch) -> N
 def test_semantic_cache_lookup_uses_current_retrieval_evidence(monkeypatch) -> None:
     """Semantic lookup receives current evidence and avoids model generation on a hit."""
     router = MagicMock()
+    monkeypatch.setattr(chat_orchestrator, "restore_evidence", lambda *_: _FakeRetriever().retrieve("question"))
     orchestrator = AIOrchestrator(router=router, validator=_FakeValidator(), governance=_FakeGovernance())
     body = ChatRequest(
         message="What is a recognised manager?",
@@ -362,7 +396,7 @@ def test_semantic_cache_lookup_uses_current_retrieval_evidence(monkeypatch) -> N
     assert response.answer == "A grounded cached answer."
     assert response.metadata["cache"] == "semantic"
     assert response.metadata["semantic_cache_similarity"] == 0.98
-    assert appended[0][1] == "scrubbed"
+    assert appended == []  # handle_chat persists the final delivered turn.
     router.generate.assert_not_called()
 
 
@@ -644,9 +678,8 @@ def test_cached_response_runs_country_aware_final_output_cleanup(monkeypatch) ->
         cache_type="exact",
     )
 
-    assert response is not None
-    assert response.answer == "Call (888) 440-ALOE (2563) or visit www.foreverliving.com."
-    assert response.metadata["cache"] == "exact"
+    # Legacy answers without evidence are misses, never repaired with guessed contacts.
+    assert response is None
 
 
 def test_requested_year_outside_approved_document_scope_fails_closed(monkeypatch) -> None:
@@ -761,6 +794,125 @@ def test_cross_market_question_with_global_evidence_still_answers(monkeypatch) -
 
     assert decision is not None and decision.approved is True
     assert response is None
+
+
+@pytest.mark.parametrize("message,history,expected_global", [
+    ("Belgium office telephone?", "", True),
+    ("United States policy and Belgium office telephone?", "", True),
+    ("Belgique téléphone du bureau?", "", True),
+    ("Tell me more", "user: Belgium office telephone?\nvera: Please clarify.", True),
+    ("What about United States?", "user: Belgium office telephone?", False),
+])
+def test_cross_market_mixed_candidates_keep_only_eligible_evidence(monkeypatch, message, history, expected_global):
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(message=message, sessionId="session-1", country="US", language="en")
+    local = RetrievedDocument(
+        id="us", title="US Policy", content="US policy information.", source="s3://approved/us.pdf",
+        country="US", language="en", score=.9, metadata={"access_scope": "country"},
+    )
+    global_doc = replace(local, id="global", title="Global office directory", country="GLOBAL",
+                         metadata={"access_scope": "global", "document_type": "office_directory"})
+    result = RetrievalResult(documents=[local, global_doc], citations=[], confidence=.9)
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    query = orchestrator._build_retrieval_query(message, history, "test")
+    response, approved, decision = orchestrator._route_or_approve_evidence(query, result, message, body, "test", history=history)
+    assert response is None
+    assert decision.approved
+    assert [doc.id for doc in approved.documents] == (["global"] if expected_global else ["us", "global"])
+
+
+def test_inherited_foreign_policy_is_refused_without_persisting_partial_turn(monkeypatch):
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(message="Tell me more", sessionId="session-1", country="US", language="en")
+    local = RetrievedDocument(id="us", title="US Policy", content="US policy.", source="s3://approved/us.pdf",
+                              country="US", language="en", score=.9, metadata={"access_scope": "country"})
+    result = RetrievalResult(documents=[local], citations=[], confidence=.9)
+    saved = MagicMock()
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", saved)
+    monkeypatch.setattr(orchestrator, "_office_contact_addendum", lambda *_: "")
+    response, approved, decision = orchestrator._route_or_approve_evidence(
+        "Belgium policy requirements?", result, body.message, body, "test", history="user: Belgium policy requirements?",
+    )
+    assert decision.reason == "cross_market_local_evidence"
+    assert approved.documents == []
+    saved.assert_not_called()  # Entry point owns persistence, not evidence routing.
+
+
+def test_weak_global_candidate_cannot_borrow_local_confidence(monkeypatch):
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+    body = ChatRequest(message="Belgium office?", sessionId="session-1", country="US", language="en")
+    local = RetrievedDocument(id="us", title="US Policy", content="US policy.", source="s3://approved/us.pdf",
+                              country="US", language="en", score=.99, metadata={"access_scope": "country"})
+    weak = replace(local, id="global", score=.001, country="GLOBAL", metadata={"access_scope": "global"})
+    result = RetrievalResult(documents=[local, weak], citations=[], confidence=.99, metadata={"strong_local_match": True})
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    monkeypatch.setattr(orchestrator, "_office_contact_addendum", lambda *_: "")
+    response, approved, decision = orchestrator._route_or_approve_evidence(body.message, result, body.message, body, "test")
+    assert not decision.approved
+    assert approved.documents == []
+    assert response is not None
+
+
+def test_cached_global_phone_survives_real_cleanup_and_output_validation(monkeypatch):
+    from app.retrieval.cache_evidence import serialize_evidence
+    from app.retrieval import cache_evidence
+    from services import pii
+    phone = "+44 20 7946 0123"
+    answer = f"United Kingdom office telephone: {phone}"
+    source = RetrievedDocument(
+        id="uk-office", title="Global office directory", content=answer,
+        source="s3://approved/global/directory.pdf", country="GLOBAL", language="en", score=.9,
+        metadata={"access_scope": "global", "document_type": "office_directory", "directory_section": "office", "ingestion_id": "v1"},
+    )
+    result = RetrievalResult(documents=[source], citations=[source.to_source()], confidence=.9)
+    monkeypatch.setattr(cache_evidence, "_active_generation_rows", lambda **_: [{"active_ingestion_id": "v1"}])
+    # Only the external Comprehend boundary is mocked; public-evidence allowlisting,
+    # contact cleanup, numeric grounding and all output validators remain real.
+    monkeypatch.setattr(pii, "_detect_pii_entities", lambda text, _: [
+        {"BeginOffset": text.index(phone), "EndOffset": text.index(phone) + len(phone), "Type": "PHONE"},
+    ])
+    orchestrator = AIOrchestrator(governance=_FakeGovernance())
+    body = ChatRequest(message="United Kingdom office telephone?", sessionId="session-1", country="US", language="en")
+    response = orchestrator._cached_response_value(
+        {"response": answer, "sources": result.citations, "confidence": .9, "evidence": serialize_evidence(result)},
+        body, "test", cache_type="exact",
+    )
+    assert response is not None
+    assert phone in response.answer
+    assert "[PHONE]" not in response.answer
+    assert not response.metadata.get("fallback")
+    assert response.metadata["cache"] == "exact"
+
+
+@pytest.mark.parametrize("question,answer,content,phone", [
+    ("What is Belgium's office telephone?",
+     "The Belgium office telephone number is +31 88 646 0200. You can also email support.",
+     "Telephone Office +31 88 646 0200 (Reception, Netherlands)", "+31 88 646 0200"),
+    ("Quel est le numéro du bureau en Belgique ?",
+     "Le numéro du bureau en Belgique est +31 88 646 0200.",
+     "Telephone Office +31 88 646 0200 (Reception, Netherlands)", "+31 88 646 0200"),
+    ("what is teh custmoer service phone numbr?",
+     "Call Customer Service at 1-888-440-ALOE (2563). You can reach them for orders.",
+     "Call Customer Care at 1-888- 440-ALOE (2563).", "1-888-440-ALOE (2563)"),
+])
+def test_phone_survives_real_output_pipeline(monkeypatch, question, answer, content, phone):
+    from services import pii
+    monkeypatch.setattr(pii, "_detect_pii_entities", lambda text, _: [
+        {"BeginOffset": text.index(phone), "EndOffset": text.index(phone) + len(phone), "Type": "PHONE"}
+    ] if phone in text else [])
+    source = RetrievedDocument(id="contact", title="Approved contact", content=content,
+                               source="s3://approved/contact.pdf", country="US", language="en", score=.9)
+    evidence = RetrievalResult(documents=[source], citations=[source.to_source()], confidence=.9)
+    response = ChatResponse(answer=answer, citations=evidence.citations, suggestions=[], cards=[],
+                            confidence=.9, metadata={}, correlation_id="test")
+    body = ChatRequest(message=question, sessionId="session-1", country="US", language="en")
+    orchestrator = AIOrchestrator(governance=_FakeGovernance())
+    secured = orchestrator._secure_and_complete_response(response, evidence, "en", "test",
+                                                         user_question=question, country="US")
+    validated = orchestrator._validate_response(secured, body, "test", retrieval_result=evidence)
+    assert phone in validated.answer
+    assert not validated.metadata.get("numeric_claim_repair")
+    assert not validated.metadata.get("fallback")
 
 
 def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> None:
@@ -1402,7 +1554,7 @@ def test_semantic_assistant_route_cannot_turn_unrelated_question_into_greeting(m
 
     assert response.answer.startswith("I'm sorry")
     assert "company policies" in response.answer
-    assert "global office directory" in response.answer
+    assert "global sponsoring directory" in response.answer
     assert response.metadata["intent"] == "off_topic"
     router.generate.assert_not_called()
 
