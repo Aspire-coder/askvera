@@ -6,7 +6,7 @@ from time import perf_counter
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from app.metrics.responses import record_delivered_response
+from app.metrics.responses import record_delivered_response, record_numeric_repair
 from app.models.responses import ModelResponse
 from app.orchestrator.compound_requests import separate_question_and_command
 from app.operations import pipeline_trace_store
@@ -1833,11 +1833,23 @@ class AIOrchestrator:
                         )
                     )
                     if not repaired_result.has_critical():
+                        # Sections are logged alongside the removed figures so a
+                        # reviewer can check the removal against the evidence
+                        # the answer was actually built from. Without them, a
+                        # log line saying a number was deleted gives no way to
+                        # tell a correct repair from the false positive this
+                        # validator produced on 2026-09-07.
                         LOGGER.warning(
                             "output_validator_numeric_claims_repaired",
                             correlation_id=correlation_id,
                             removed_numeric_claims=removed_numbers,
+                            removed_claim_count=len(removed_numbers),
+                            evidence_sections=[
+                                str((document.metadata or {}).get("section_id") or "")
+                                for document in retrieval_result.documents[:5]
+                            ],
                         )
+                        record_numeric_repair(len(removed_numbers))
                         return self._with_validation_metadata(repaired_response, repaired_result)
             failure_layer = self._validation_failure_layer(result)
             LOGGER.warning(

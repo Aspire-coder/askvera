@@ -54,6 +54,29 @@ def record_delivered_response(metadata: dict[str, Any] | None) -> None:
         )
 
 
+def record_numeric_repair(removed_claim_count: int) -> None:
+    """Count one answer whose numbers were edited by grounding repair.
+
+    Repair is a silent edit to an answer a user is about to read, and it is not
+    always right: on 2026-09-07 it removed a correct, document-backed figure
+    because a heading two lines above the claim supplied the wrong subject. The
+    removal itself is already logged, but nothing counted it, so there was no
+    way to notice repair firing more often after a change -- only to stumble on
+    one instance in a transcript.
+
+    Counting makes the weekly review possible: if this rises, sample the
+    output_validator_numeric_claims_repaired log entries and check whether the
+    removed figures were genuinely ungrounded.
+    """
+    _record(
+        SystemMetric(
+            name="numeric_claim_repairs",
+            value=float(max(0, removed_claim_count)),
+            unit="Count",
+        )
+    )
+
+
 def _record(metric: SystemMetric) -> None:
     """Record in-process and publish, never letting metrics break a response.
 
