@@ -100,36 +100,52 @@ def _context_for_claim(answer: str, start: int, end: int, radius: int = 220) -> 
 
 
 def _capitalized_entity_phrases(text: str) -> list[str]:
-    """Extract title-like phrases without a language-specific alphabet or stopword list."""
+    """Extract title-like phrases without a language-specific alphabet or stopword list.
+
+    A phrase never spans a line break or sentence boundary. Word extraction
+    discards punctuation, so a heading used to merge into the sentence beneath it:
+    "How to Become a Recognized Manager\\n\\nYou must generate..." yielded the
+    entity "Recognized Manager You", whose tokens matched no subject in the
+    source. The number was then reported ungrounded and the whole answer was
+    replaced by the insufficient-evidence fallback.
+    """
     entities: list[str] = []
-    current: list[str] = []
-    for word in re.findall(r"[^\W\d_]+", text, flags=re.UNICODE):
-        if word[:1].isupper():
-            current.append(word)
-        elif current:
+    for segment in re.split(r"[\n\r]+|(?<=[.!?:;])\s", text):
+        current: list[str] = []
+        for word in re.findall(r"[^\W\d_]+", segment, flags=re.UNICODE):
+            if word[:1].isupper():
+                current.append(word)
+            elif current:
+                entities.append(" ".join(current))
+                current = []
+        if current:
             entities.append(" ".join(current))
-            current = []
-    if current:
-        entities.append(" ".join(current))
     return entities
 
 
 def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
     """Extract named subjects that connect a number to the policy topic."""
     # Preserve this occurrence's position: splitting on the numeric text links
-    # repeated values to the first subject instead of the current claim.
+    # repeated values to the first subject instead of the current claim. The
+    # prefix is already bounded to what precedes THIS occurrence.
     phrases = _capitalized_entity_phrases(claim.prefix)
     phrases = [phrase for phrase in phrases if len(_word_tokens(phrase)) >= 2][-1:]
 
     token_sets: list[set[str]] = []
     for phrase in phrases:
         words = re.findall(r"[^\W\d_]+", phrase, flags=re.UNICODE)
-        # Include multi-word suffixes so a leading grammatical word never becomes
-        # a hidden language dependency, for example "For Assistant Manager".
-        for start in range(max(len(words) - 1, 1)):
-            tokens = _word_tokens(" ".join(words[start:]))
-            if len(tokens) >= 2 and tokens not in token_sets:
-                token_sets.append(tokens)
+        # Consider every contiguous multi-word span, not only suffixes. A leading
+        # grammatical word ("For Assistant Manager") was already handled; a
+        # TRAILING one was not, so a heading like "Recognized Manager
+        # Requirements" produced only spans containing "requirements", which
+        # appears in no source, and a correct grounded number was rejected.
+        # The number itself must still be present in the source: these spans only
+        # decide which occurrence a number is bound to.
+        for start in range(len(words)):
+            for end in range(len(words), start + 1, -1):
+                tokens = _word_tokens(" ".join(words[start:end]))
+                if len(tokens) >= 2 and tokens not in token_sets:
+                    token_sets.append(tokens)
     return token_sets
 
 
