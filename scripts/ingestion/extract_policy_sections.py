@@ -43,6 +43,13 @@ INLINE_SUBSECTION_RE = re.compile(
 INLINE_TOP_LEVEL_RE = re.compile(
     r"(?<!^)(?<=\s)(?=(?P<section>\d{1,2})\.\s+(?P<title>[^\W\d_]))"
 )
+# A clock time followed by a time unit is prose, not a numbered policy heading.
+# Do not reject decimal section IDs alone: e.g. 23.59 can be a real section.
+CLOCK_TIME_RE = re.compile(
+    r"^(?:[01]?\d|2[0-3])\.[0-5]\d\s+"
+    r"(?:hours?|hrs?|uhr|uur|heures?|ore|horas?|timmar)\b",
+    flags=re.IGNORECASE,
+)
 LIST_ITEM_RE = re.compile(
     r"(?m)^(?P<label>\([a-z0-9]+\)|[a-z][.)])\s+(?P<title>.+)$",
     flags=re.IGNORECASE,
@@ -138,7 +145,10 @@ def _clean_page_text(text: str) -> str:
 
 def _split_inline_section_headings(line: str) -> list[str]:
     """Restore heading boundaries lost by PDF text extraction."""
-    split_offsets = {match.start() for match in INLINE_SUBSECTION_RE.finditer(line)}
+    split_offsets = {
+        match.start() for match in INLINE_SUBSECTION_RE.finditer(line)
+        if not CLOCK_TIME_RE.match(line[match.start():])
+    }
     split_offsets.update(
         match.start()
         for match in INLINE_TOP_LEVEL_RE.finditer(line)
@@ -194,6 +204,8 @@ def _looks_like_contents_page(text: str) -> bool:
 
 
 def _looks_like_section_heading(match: re.Match[str]) -> bool:
+    if CLOCK_TIME_RE.match(match.group(0)):
+        return False
     """Reject numbered prose while preserving language-neutral headings."""
     section_id = match.group("section")
     title = match.group("title").strip()
@@ -230,11 +242,12 @@ def extract_sections(
     effective_date: str = "",
     status: str = "active",
     chunk_profile: str = "current",
+    extracted_pages: list[tuple[int, str]] | None = None,
 ) -> list[PolicySection]:
     if chunk_profile not in CHUNK_PROFILES:
         raise ValueError(f"Unknown chunk profile: {chunk_profile}")
 
-    all_pages = _read_pdf_pages(pdf_path, chunk_profile=chunk_profile)
+    all_pages = extracted_pages if extracted_pages is not None else _read_pdf_pages(pdf_path, chunk_profile=chunk_profile)
     pages = [
         (page_number, text)
         for page_number, text in all_pages
@@ -284,6 +297,10 @@ def extract_sections(
                 chunk_profile=chunk_profile,
             )
         )
+
+    if not sections:
+        # Never publish only front matter/contents when body headings were missed.
+        raise ValueError("No policy body sections were recognized; review extraction before publication.")
 
     outlines = _outline_chunks(
         all_pages,

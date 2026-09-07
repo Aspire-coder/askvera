@@ -24,7 +24,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from config import settings
-from scripts.ingestion.extract_global_office_directory import extract_directory as extract_office_directory
 from scripts.ingestion.extract_global_sponsoring_directory import extract_directory as extract_sponsoring_directory
 from scripts.ingestion.extract_policy_sections import extract_sections as extract_policy_sections
 from scripts.ingestion.load_policy_sections_to_opensearch import (
@@ -437,23 +436,15 @@ def _extract_directory_sections(
     *,
     version: str,
     effective_date: str,
+    extracted_pages: list[tuple[int, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Extract office_directory PDFs with the same specialized parsers that
-    produced the directory content already in the index, instead of the
-    generic chunker.
+    """Accept only international sponsoring content under the legacy directory type.
 
-    The generic build_sections() path never sets record_country,
-    directory_fields, directory_kind, or directory_section - metadata that
-    country-scoping, contact-field restoration, and answer validation all
-    depend on - so an office_directory PDF ingested through it "succeeds"
-    (nonzero sections, generation activates) while silently losing all of
-    that. Both known directory formats (the country-sponsoring directory and
-    the office/staff contact directory) are tried in turn; a PDF matching
-    neither raises rather than falling back to the generic path and
-    reproducing that silent metadata loss.
+    Keep the specialized parser's country and field metadata. Never fall back
+    to the retired office/staff directory or the generic chunker.
     """
     try:
-        sponsoring_records = extract_sponsoring_directory(path)
+        sponsoring_records = extract_sponsoring_directory(path, extracted_pages=extracted_pages)
     except ValueError:
         sponsoring_records = []
     if sponsoring_records:
@@ -462,17 +453,9 @@ def _extract_directory_sections(
             for record in sponsoring_records
         ]
 
-    office_records, staff_records = extract_office_directory(path)
-    directory_records = [*office_records, *staff_records]
-    if directory_records:
-        return [
-            {**record.to_row(), "document_version": version, "effective_date": effective_date}
-            for record in directory_records
-        ]
-
     raise ValueError(
-        "This document does not match a known office directory format "
-        "(country sponsoring directory or office/staff contact directory)."
+        "Only the international sponsoring directory is supported as global content. "
+        "This document does not match its format; office/staff directories are not supported."
     )
 
 
@@ -505,7 +488,8 @@ def process_ingestion_job(
         # consume the OCR-extracted `pages` text), so a directory PDF that
         # requires OCR falls back to the generic chunker below, same as a
         # policy PDF does in that case.
-        use_directory_extractor = document_type == "office_directory" and path.suffix.lower() == ".pdf"
+        use_directory_extractor = document_type == "office_directory"
+        normalized_pages = None
         if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
             preflight = analyze_pdf_with_timeout(
                 path,
@@ -519,8 +503,7 @@ def process_ingestion_job(
                         "This PDF appears to be scanned or image-only and requires OCR before publication."
                     )
                 pages = _extract_pages_with_textract(upload_uri)
-                use_policy_extractor = False
-                use_directory_extractor = False
+                normalized_pages = [(page.number, page.text) for page in pages]
             else:
                 pages = extract_pages(path, chunk_profile=chunk_profile)
         else:
@@ -539,10 +522,15 @@ def process_ingestion_job(
                     effective_date=effective_date,
                     status="active",
                     chunk_profile=chunk_profile,
+                    **({"extracted_pages": normalized_pages} if normalized_pages is not None else {}),
                 )
             ]
         elif use_directory_extractor:
-            sections = _extract_directory_sections(path, version=version, effective_date=effective_date)
+            if path.suffix.lower() != ".pdf":
+                normalized_pages = [(page.number, page.text) for page in pages]
+            sections = _extract_directory_sections(
+                path, version=version, effective_date=effective_date, extracted_pages=normalized_pages,
+            )
         else:
             sections = build_sections(
                 pages,
@@ -556,7 +544,8 @@ def process_ingestion_job(
             )
         if not sections:
             raise ValueError("No readable text was found in the document.")
-        if len(sections) < settings.ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD:
+        short_notice = document_type == "policy" and path.suffix.lower() != ".pdf" and len(pages) == 1
+        if len(sections) < settings.ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD and not short_notice:
             # A near-empty extraction (e.g. a directory PDF whose format the
             # extractor didn't recognize, or a policy PDF that lost its
             # section structure) previously succeeded silently with a
@@ -571,6 +560,8 @@ def process_ingestion_job(
                 "source document's formatting before retrying."
             )
 
+        for section in sections:
+            section["expiry_date"] = expiry_date
         _update_job(job_id, status="uploading", progress=35, section_count=len(sections))
         source_uri = _upload_source(
             path,

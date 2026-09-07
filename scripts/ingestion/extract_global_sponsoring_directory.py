@@ -69,11 +69,13 @@ def _page_for_offset(page_offsets: list[tuple[int, int, int]], offset: int) -> i
     return page_offsets[-1][0]
 
 
-def extract_directory(pdf_path: Path) -> list[SponsoringRecord]:
-    reader = PdfReader(str(pdf_path))
+def extract_directory(pdf_path: Path, *, extracted_pages: list[tuple[int, str]] | None = None) -> list[SponsoringRecord]:
+    if extracted_pages is None:
+        reader = PdfReader(str(pdf_path))
+        extracted_pages = [(number, page.extract_text() or "") for number, page in enumerate(reader.pages, start=1)]
     pages: list[tuple[int, str]] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = _clean_page(page.extract_text() or "")
+    for page_number, page_text in extracted_pages:
+        text = _clean_page(page_text)
         if text:
             pages.append((page_number, text))
 

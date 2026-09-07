@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from scripts.ingestion.extract_global_office_directory import DirectoryRecord
 from scripts.ingestion.extract_global_sponsoring_directory import SponsoringRecord
 from scripts.ingestion.extract_policy_sections import PolicySection
 from services import knowledge_generations, knowledge_ingestion
@@ -210,13 +209,6 @@ def test_office_directory_pdf_uses_sponsoring_extractor_when_it_matches(monkeypa
         "extract_sponsoring_directory",
         lambda *_args, **_kwargs: [record],
     )
-    monkeypatch.setattr(
-        knowledge_ingestion,
-        "extract_office_directory",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("office/staff extractor must not run once the sponsoring extractor matched")
-        ),
-    )
 
     assert process_ingestion_job(
         "generation-1",
@@ -234,21 +226,10 @@ def test_office_directory_pdf_uses_sponsoring_extractor_when_it_matches(monkeypa
     assert indexed_sections[0]["metadata"]["directory_kind"] == "international_sponsoring"
 
 
-def test_office_directory_pdf_falls_back_to_office_staff_extractor(monkeypatch, tmp_path: Path) -> None:
-    """A PDF that isn't the sponsoring-directory format must still be tried
-    against the office/staff contact directory format before giving up."""
+def test_office_directory_pdf_is_rejected_before_publication(monkeypatch, tmp_path: Path) -> None:
+    """Retired directory content must not reach storage or indexing."""
     source = tmp_path / "International-Office-Directory.pdf"
     source.write_bytes(b"%PDF-1.7\n")
-    record = DirectoryRecord(
-        source_file=source.name,
-        section_id="office-001-forever-uruguay",
-        title="Forever Uruguay",
-        start_page=5,
-        end_page=5,
-        content="Forever Uruguay\nCountry\nUruguay",
-        record_type="office",
-        record_country="Uruguay",
-    )
     indexed_sections: list[dict[str, object]] = []
     _office_directory_common_mocks(monkeypatch, indexed_sections)
     monkeypatch.setattr(
@@ -256,10 +237,17 @@ def test_office_directory_pdf_falls_back_to_office_staff_extractor(monkeypatch, 
         "extract_sponsoring_directory",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("No country sponsoring sections were found in the PDF.")),
     )
+
+    def unexpected_publication(*_args, **_kwargs):
+        pytest.fail("Rejected directory must not reach publication")
+
+    monkeypatch.setattr(knowledge_ingestion, "_upload_source", unexpected_publication)
+    monkeypatch.setattr(knowledge_ingestion, "_index_sections", unexpected_publication)
+    monkeypatch.setattr(knowledge_ingestion, "_record_document", unexpected_publication)
+    releases = []
     monkeypatch.setattr(
-        knowledge_ingestion,
-        "extract_office_directory",
-        lambda *_args, **_kwargs: ([record], []),
+        knowledge_ingestion, "release_ingestion_claim",
+        lambda job_id, message, **kwargs: releases.append({"message": message, **kwargs}),
     )
 
     assert process_ingestion_job(
@@ -272,10 +260,10 @@ def test_office_directory_pdf_falls_back_to_office_staff_extractor(monkeypatch, 
         access_scope="global",
         version="2026.1",
         effective_date="2026-07-01",
-    ) is True
-    assert indexed_sections[0]["section_id"] == "office-001-forever-uruguay"
-    assert indexed_sections[0]["metadata"]["record_country"] == "Uruguay"
-    assert indexed_sections[0]["metadata"]["directory_section"] == "office"
+    ) is False
+    assert not indexed_sections
+    assert "Only the international sponsoring directory" in releases[0]["message"]
+    assert releases[0]["retryable"] is False
 
 
 def test_office_directory_pdf_raises_instead_of_silently_using_generic_chunker(monkeypatch, tmp_path: Path) -> None:
@@ -291,11 +279,6 @@ def test_office_directory_pdf_raises_instead_of_silently_using_generic_chunker(m
         knowledge_ingestion,
         "extract_sponsoring_directory",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("No country sponsoring sections were found in the PDF.")),
-    )
-    monkeypatch.setattr(
-        knowledge_ingestion,
-        "extract_office_directory",
-        lambda *_args, **_kwargs: ([], []),
     )
     monkeypatch.setattr(knowledge_ingestion, "_update_job", lambda *_args, **_kwargs: None)
     releases: list[dict[str, object]] = []
@@ -319,7 +302,7 @@ def test_office_directory_pdf_raises_instead_of_silently_using_generic_chunker(m
 
     assert result is False
     assert releases
-    assert "known office directory format" in releases[0]["message"]
+    assert "Only the international sponsoring directory" in releases[0]["message"]
     assert releases[0]["retryable"] is False
 
 

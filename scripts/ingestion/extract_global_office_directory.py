@@ -124,14 +124,16 @@ def _extract_group(
     return records
 
 
-def extract_directory(pdf_path: Path) -> tuple[list[DirectoryRecord], list[DirectoryRecord]]:
-    reader = PdfReader(str(pdf_path))
+def extract_directory(pdf_path: Path, *, extracted_pages: list[tuple[int, str]] | None = None) -> tuple[list[DirectoryRecord], list[DirectoryRecord]]:
+    if extracted_pages is None:
+        reader = PdfReader(str(pdf_path))
+        extracted_pages = [(number, page.extract_text() or "") for number, page in enumerate(reader.pages, start=1)]
     office_pages: list[tuple[int, str]] = []
     staff_pages: list[tuple[int, str]] = []
     section = ""
 
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = _clean_page(page.extract_text() or "")
+    for page_number, page_text in extracted_pages:
+        text = _clean_page(page_text)
         if not text:
             continue
         if "Country Office Contact Details" in text and "Source worksheet:" in text:
