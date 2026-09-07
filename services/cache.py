@@ -10,6 +10,7 @@ import botocore.awsrequest
 import redis
 from redis.credentials import CredentialProvider
 
+from app.metrics.health import record_cache_outcome
 from config import settings
 from utils.exceptions import CacheConnectionError
 from utils.logging import get_logger
@@ -182,6 +183,10 @@ def get_cache_value(key: str, correlation_id: str) -> dict[str, Any] | None:
     try:
         raw = _redis_client.get(key)
         LOGGER.info("cache_read", correlation_id=correlation_id, hit=bool(raw), key=key)
+        # Only a completed read counts. A cache the process cannot reach at all
+        # is a connectivity problem, not a miss, and recording it as a miss
+        # would drag CacheHitRatio down and point the on-call at the wrong thing.
+        record_cache_outcome(hit=bool(raw))
         return json.loads(raw) if raw else None
     except (redis.RedisError, json.JSONDecodeError, TypeError, ValueError) as exc:
         LOGGER.warning(

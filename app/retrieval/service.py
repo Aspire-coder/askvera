@@ -3,6 +3,7 @@
 from time import perf_counter
 
 from app.metrics import STAGE_RETRIEVAL
+from app.metrics.health import record_retrieval_outcome
 from app.metrics.pipeline import record_pipeline_metric
 from config import settings
 
@@ -60,6 +61,9 @@ class RetrievalService:
             success = True
             return result
         finally:
+            # Zero documents is a legitimate no-match, not a failure; only an
+            # exception from the provider counts against RetrievalHealth.
+            record_retrieval_outcome(success=success)
             record_pipeline_metric(
                 stage=STAGE_RETRIEVAL,
                 duration_ms=round((perf_counter() - started) * 1000, 2),
