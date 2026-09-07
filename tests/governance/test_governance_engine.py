@@ -26,8 +26,17 @@ class FakeProvider:
         self.exc = exc
         self.called = False
 
-    def evaluate(self, *, text: str, country: str, language: str, correlation_id: str) -> GovernanceDecision:
+    def evaluate(
+        self,
+        *,
+        text: str,
+        country: str,
+        language: str,
+        correlation_id: str,
+        allow_claim_topics: bool = False,
+    ) -> GovernanceDecision:
         self.called = True
+        self.allow_claim_topics = allow_claim_topics
         if self.exc:
             raise self.exc
         return self.decision
@@ -60,6 +69,32 @@ def _risk_decision(level: RiskLevel = RiskLevel.LOW, action: PolicyAction = Poli
             )
         )
     return decision
+
+
+def test_allow_claim_topics_is_forwarded_to_the_provider() -> None:
+    """The output-guardrail exemption must reach the provider, defaulting off."""
+    provider = FakeProvider()
+    _engine(_risk_decision(), provider).evaluate(
+        text="hello", country="US", language="en", correlation_id="cid"
+    )
+    assert provider.allow_claim_topics is False
+
+    provider = FakeProvider()
+    _engine(_risk_decision(), provider).evaluate(
+        text="hello", country="US", language="en", correlation_id="cid", allow_claim_topics=True
+    )
+    assert provider.allow_claim_topics is True
+
+
+def test_allow_claim_topics_does_not_bypass_a_refusing_risk_policy() -> None:
+    """Risk policies run before the provider and are unaffected by the exemption."""
+    provider = FakeProvider()
+    decision = _engine(_risk_decision(RiskLevel.HIGH, PolicyAction.REFUSE), provider).evaluate(
+        text="guaranteed income", country="US", language="en",
+        correlation_id="cid", allow_claim_topics=True,
+    )
+    assert decision.allowed is False
+    assert provider.called is False
 
 
 def test_governance_allows_when_risk_and_guardrails_allow() -> None:
