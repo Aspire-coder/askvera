@@ -18,6 +18,7 @@ from opensearchpy.exceptions import OpenSearchException
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
+from services.guardrails import is_policy_safety_question
 from services.knowledge_generations import active_generation_ids
 from services.market_config import (
     find_market_mentions,
@@ -638,9 +639,16 @@ class OpenSearchSectionProvider:
                         "intent_confidence": search_plan.intent_confidence,
                     },
                 )
+            # A reviewed policy-safety question - asking what the rules prohibit -
+            # must still reach the documents. Skipping retrieval here leaves the
+            # request with no evidence, so it is refused downstream no matter what
+            # the routing layers decide. Verified live 2026-09-07: the planner
+            # classifies these as medical_claim/income_claim and this branch, not
+            # the guardrails, is what withheld the answer.
             if (
                 search_plan.conversation_intent != "knowledge"
                 and search_plan.intent_confidence >= settings.BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE
+                and not is_policy_safety_question(message)
             ):
                 return RetrievalResult(
                     documents=[],
