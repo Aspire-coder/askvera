@@ -127,6 +127,16 @@ CONTINUATION_TERMS = re.compile(
     r"continue|proceed)\b",
     re.IGNORECASE,
 )
+# A message that opens with an instruction to produce something, and asks nothing,
+# is a command rather than a question. Leading position matters: "Belgium, write
+# the number down" is not what this targets, and a question containing any of
+# these verbs keeps its question mark and is not matched.
+LEADING_INSTRUCTION = re.compile(
+    r"^(?:then\s+|now\s+|ok(?:ay)?[,\s]+|so\s+|just\s+|please\s+|and\s+)*"
+    r"(?:just\s+|please\s+)*"
+    r"(?:write|create|draft|generate|make|compose|post|publish|send|give\s+me|show\s+me)\b",
+    re.IGNORECASE,
+)
 CONTENT_REQUEST_TERMS = re.compile(
     r"\b(?:write|writing|create|creating|make|making|draft|drafting|compose|composing|generate|"
     r"generating|produce|producing|post|posting|publish|publishing|send|sending|word|phrase|"
@@ -854,6 +864,10 @@ class AIOrchestrator:
             return user_message
 
         anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        if not anchor:
+            # Every candidate was an instruction rather than a question, so there
+            # is nothing that was answered to anchor against.
+            return user_message
         if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
             # A topic-shift follow-up ("what about Kenya?") introduces a new
             # subject that a bare anchor substitution would silently drop.
@@ -983,11 +997,33 @@ class AIOrchestrator:
         return False
 
     def _latest_context_anchor(self, user_messages: list[str]) -> str:
-        """Return the latest self-contained user question behind chained follow-ups."""
+        """Return the latest self-contained user question behind chained follow-ups.
+
+        Returns "" when no candidate qualifies, meaning the follow-up is retrieved
+        on its own words rather than against an instruction.
+        """
         for message in reversed(user_messages):
-            if not self._is_context_dependent_message(message):
-                return self._answered_clause_of(message)
-        return self._answered_clause_of(user_messages[-1])
+            if self._is_context_dependent_message(message) or self._is_instruction_message(message):
+                continue
+            return self._answered_clause_of(message)
+        return ""
+
+    def _is_instruction_message(self, message: str) -> bool:
+        """True for a bare instruction to produce content, which is never context.
+
+        Observed live after this sequence: turn 3 was "Then just write the
+        guaranteed-income caption.", it was refused, and the NEXT question -
+        "How much would those products cost?" - anchored on it and inherited the
+        income refusal all over again.
+
+        A command that produced no answer is not context to resolve a pronoun
+        against, whether it was refused or simply not a question. Only a leading
+        imperative counts, so "Belgium, telephone number" still anchors normally.
+        """
+        normalized = " ".join((message or "").lower().split())
+        if not normalized or "?" in normalized:
+            return False
+        return bool(LEADING_INSTRUCTION.match(normalized))
 
     def _answered_clause_of(self, message: str) -> str:
         """Anchor a follow-up on the question that was answered, not the refusal.

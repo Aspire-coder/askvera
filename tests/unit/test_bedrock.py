@@ -27,7 +27,7 @@ def test_build_prompt_replaces_all_variables() -> None:
     assert "US" in prompt.system_prompt
     assert '"retrieved_chunks": "chunk"' in prompt.user_prompt
     assert '"history": "history"' in prompt.user_prompt
-    assert prompt.prompt_version == "2026-09-05-contact-scope-v3"
+    assert prompt.prompt_version == "2026-09-07-corpus-boundary-v4"
 
 
 def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
@@ -48,7 +48,15 @@ def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
     # again for an explicit rule against a literal "[AGE]"-style bracket
     # placeholder appearing in an answer even when the chunks state the real
     # value elsewhere in the same response.
-    assert len(prompt.system_prompt) < 4250
+    # Raised once more, by ~150, for the corpus boundary. Observed live: asked
+    # what products cost, the bot replied "I can point you toward current
+    # pricing details" and asked which product - pricing exists in no approved
+    # source, so no answer could ever follow. Promising a lookup that cannot
+    # happen is worse than declining, and the prompt never said what the corpus
+    # lacks. The budget still guards against drift; it is not a licence to grow.
+    assert len(prompt.system_prompt) < 4400
+    assert "no product prices" in normalized_prompt.lower()
+    assert "never offer to look them up" in normalized_prompt.lower()
     assert "complete response in that language" in normalized_prompt
     assert "Use only the retrieved authorised chunks" in normalized_prompt
     assert "Short quotations are allowed" in normalized_prompt
