@@ -249,15 +249,45 @@ def test_chat_request_accepts_published_sweden_languages() -> None:
         assert request.language == language
 
 
-def test_chat_request_rejects_unpublished_language_for_market() -> None:
-    """A missing source language must not silently fall back to another language."""
+def test_chat_request_accepts_any_supported_response_language() -> None:
+    """Response language is decoupled from the selected market's own languages.
+
+    A Germany-selected reader asking in English was rejected outright by request
+    validation before this change - the language-and-market failure recorded in
+    docs/audits/2026-09-07. Accepting the pair here does NOT grant access to
+    another market's documents: the selected market still governs document
+    eligibility, enforced in retrieval and evidence approval, not here.
+    """
     market_config.load_market_config.cache_clear()
     market_config.load_policy_locales.cache_clear()
 
-    with pytest.raises(ValidationError, match="Unsupported language for country"):
+    request = ChatRequest(
+        message="Vad är en aktiv FBO?",
+        sessionId="session-1",
+        country="FI",
+        language="sv",
+    )
+    assert request.country == "FI"
+    assert request.language == "sv"
+
+    assert ChatRequest(
+        message="What must I do to be Active?",
+        sessionId="session-1",
+        country="DE",
+        language="en",
+    ).language == "en"
+
+
+def test_chat_request_rejects_a_language_no_market_publishes() -> None:
+    """The set is still bounded: an unconfigured language is refused."""
+    market_config.load_market_config.cache_clear()
+    market_config.load_policy_locales.cache_clear()
+
+    assert "ja" not in market_config.get_supported_language_codes()
+    with pytest.raises(ValidationError, match="Unsupported language"):
         ChatRequest(
-            message="Vad är en aktiv FBO?",
+            message="FBO とは何ですか?",
             sessionId="session-1",
-            country="FI",
-            language="sv",
+            country="US",
+            language="ja",
         )

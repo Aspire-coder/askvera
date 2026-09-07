@@ -361,6 +361,21 @@ def get_language_codes_for_country(country_code: str) -> set[str]:
     return set()
 
 
+def get_supported_language_codes() -> set[str]:
+    """Return every language enabled on any market.
+
+    Response language and document authority are separate concerns: a reader may
+    ask in one language about the market they selected. This set governs which
+    language a reply may be written in. It never widens document access - the
+    selected market still governs which policy documents are eligible.
+    """
+    return {
+        language["code"]
+        for country in get_countries()
+        for language in country["languages"]
+    }
+
+
 def get_widget_language_codes_for_country(country_code: str) -> set[str]:
     """Return languages accepted for a provisioned widget market."""
     normalized_code = country_code.upper()
