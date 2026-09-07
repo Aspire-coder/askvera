@@ -480,3 +480,50 @@ def test_numeric_grounding_allows_reformatted_directory_phone_across_languages()
     )
 
     assert not result.has_critical()
+
+
+_MANAGER_SOURCE = (
+    "Section 5.01: Recognized Manager: (a) An FBO qualifies as a Recognized Manager when "
+    "he/she has generated a total of 120 Case Credits within any 2 consecutive Months, "
+    "of which at least 25 Case Credits must be from Personal sales."
+)
+
+
+@pytest.mark.parametrize("answer", [
+    "To become a Recognized Manager you must generate 120 Case Credits within any 2 consecutive Months.",
+    "How to Become a Recognized Manager\n\nYou must generate a total of 120 Case Credits "
+    "within any 2 consecutive Months.",
+    "## Recognized Manager Requirements\n\nYou need 120 Case Credits in any 2 consecutive Months.",
+    "**Recognized Manager Qualification**\n\nA total of 120 Case Credits is required.",
+    "A Recognized Manager requires:\n\n* 120 Case Credits within 2 consecutive Months",
+])
+def test_headings_do_not_break_numeric_subject_binding(answer) -> None:
+    """A heading must not detach a number from the subject that grounds it.
+
+    Observed live 2026-09-07: "how can i become a recognized manager" retrieved
+    the right sections at confidence 0.95 and generated a correct answer, which
+    then failed output validation with NUMERIC_CLAIM_UNGROUNDED on 120 - a figure
+    stated in the cited source - and was replaced by the insufficient-evidence
+    fallback.
+
+    Two causes. Phrase extraction discarded line breaks, merging a heading into
+    the sentence below it ("Recognized Manager You"). And token spans covered only
+    suffixes, so a trailing word ("Recognized Manager Requirements") left no span
+    present in the source. Answers of this shape all use headings, which is why a
+    retrieval-only canary never saw it.
+    """
+    result = ValidationResult()
+    NumericGroundingValidator().validate(_context(answer, _MANAGER_SOURCE), result)
+    assert result.valid
+
+
+@pytest.mark.parametrize("answer", [
+    "How to Become a Recognized Manager\n\nYou must generate 450 Case Credits.",
+    "## Recognized Manager Requirements\n\nYou need 999 Case Credits.",
+    "A Recognized Manager earns a 35% bonus on all downline sales.",
+])
+def test_headings_do_not_let_an_invented_number_through(answer) -> None:
+    """Wider subject spans must not weaken the grounding check itself."""
+    result = ValidationResult()
+    NumericGroundingValidator().validate(_context(answer, _MANAGER_SOURCE), result)
+    assert result.has_critical()
