@@ -31,9 +31,17 @@ def _matches(topic: str, text: str) -> bool:
                for pattern in DENIED_TOPICS[topic])
 
 
-def check_text(text: str, correlation_id: str) -> None:
-    """Raise when text violates denied topics."""
-    for topic in ["income_claim", "medical_claim", "off_topic"]:
+def check_text(text: str, correlation_id: str, *, allow_claim_topics: bool = False) -> None:
+    """Raise when text violates denied topics.
+
+    allow_claim_topics skips the medical and income claim topics only. It exists
+    for one case: the ANSWER to a reviewed policy-safety question necessarily
+    quotes the vocabulary that question asks about, so re-running the denied
+    phrase list over that answer blocks the very explanation the user asked for.
+    The caller must establish that context; off_topic is never skipped.
+    """
+    topics = ["off_topic"] if allow_claim_topics else ["income_claim", "medical_claim", "off_topic"]
+    for topic in topics:
         if _matches(topic, text):
             LOGGER.warning("guardrail_blocked", correlation_id=correlation_id, topic=topic)
             raise GuardrailBlockedError(FALLBACK_RESPONSES[topic], topic=topic)

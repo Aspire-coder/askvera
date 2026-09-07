@@ -359,7 +359,12 @@ class AIOrchestrator:
             model_response=model_response,
             retrieval_result=retrieval_result,
         )
-        governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
+        governance_decision = self._evaluate_governance(
+            chat_response.answer,
+            body,
+            correlation_id,
+            allow_claim_topics=self._answer_explains_reviewed_policy(body, chat_response),
+        )
         if not governance_decision.allowed:
             return self._governance_fallback(
                 governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
@@ -595,7 +600,12 @@ class AIOrchestrator:
             chat_response, body, correlation_id, retrieval_result=evidence
         )
         chat_response = self._replace_answer(chat_response, chat_response.answer, {"cache": cache_type})
-        governance_decision = self._evaluate_governance(chat_response.answer, body, correlation_id)
+        governance_decision = self._evaluate_governance(
+            chat_response.answer,
+            body,
+            correlation_id,
+            allow_claim_topics=self._answer_explains_reviewed_policy(body, chat_response),
+        )
         if not governance_decision.allowed:
             LOGGER.warning(
                 "cached_response_governance_blocked",
@@ -934,7 +944,14 @@ class AIOrchestrator:
                     messages.append(cleaned)
         return messages
 
-    def _evaluate_governance(self, text: str, body: ChatRequest, correlation_id: str) -> GovernanceDecision:
+    def _evaluate_governance(
+        self,
+        text: str,
+        body: ChatRequest,
+        correlation_id: str,
+        *,
+        allow_claim_topics: bool = False,
+    ) -> GovernanceDecision:
         """Run unified governance checks for input or output text."""
         return self.governance_engine.evaluate(
             text=text,
@@ -942,7 +959,23 @@ class AIOrchestrator:
             language=body.language,
             role=body.role,
             correlation_id=correlation_id,
+            allow_claim_topics=allow_claim_topics,
         )
+
+    def _answer_explains_reviewed_policy(self, body: ChatRequest, chat_response: ChatResponse) -> bool:
+        """True when the answer is the explanation a policy-safety question asked for.
+
+        Verified live 2026-09-07: the pipeline retrieved the governing sections
+        (16.02-j Making Product Claims, 16.02-k Making Earnings Claims), generated
+        a correct grounded answer, passed all eight validators, and then blocked
+        that answer at output governance - because an explanation of a prohibition
+        necessarily contains the prohibited vocabulary.
+
+        Deliberately narrow: the question must be one of the reviewed exact
+        phrasings, and the answer must cite approved sources. An ungrounded answer
+        gets no exemption, and off_topic is never skipped.
+        """
+        return bool(is_policy_safety_question(body.message) and chat_response.citations)
 
     def _governance_fallback(
         self,

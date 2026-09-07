@@ -17,6 +17,7 @@ class GovernanceProvider(Protocol):
         country: str,
         language: str,
         correlation_id: str,
+        allow_claim_topics: bool = False,
     ) -> GovernanceDecision:
         """Evaluate one text payload and return a governance decision."""
         ...
