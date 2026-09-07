@@ -73,6 +73,49 @@ def _git_commit() -> str:
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
 
 
+def delivered_answer(case: dict[str, Any], sequence: int) -> tuple[str, int]:
+    """Return the answer a user would actually receive, and its citation count.
+
+    Retrieval scoring cannot see what happens after a document is selected. On
+    2026-09-07 every defect found after the selector regression lived downstream
+    of it - in governance, output validation and numeric repair - and this canary
+    passed 15/15 while a rank-qualification question failed in production:
+    correct, cited answers were discarded, or delivered with the governing figure
+    silently removed.
+
+    Session and consent are stubbed because a batch gate has no real session. The
+    rest of the pipeline runs exactly as it does for a user, including generation,
+    validation, repair and output governance.
+    """
+    from app.orchestrator import chat_orchestrator
+    from utils.validators import ChatRequest
+
+    patched = {
+        "validate_and_touch_session": lambda *args, **kwargs: None,
+        "has_valid_consent": lambda *args, **kwargs: True,
+        "get_session_history": lambda *args, **kwargs: "",
+        "append_session_turn": lambda *args, **kwargs: None,
+    }
+    originals = {name: getattr(chat_orchestrator, name) for name in patched}
+    for name, replacement in patched.items():
+        setattr(chat_orchestrator, name, replacement)
+    try:
+        response = chat_orchestrator.AIOrchestrator().handle_chat(
+            ChatRequest(
+                message=str(case["question"]),
+                sessionId=f"deployment-canary-{sequence}",
+                country=str(case["country"]),
+                language=str(case["language"]),
+                role=str(case["role"]),
+            ),
+            f"deployment-canary-answer-{sequence}-{case['id']}",
+        )
+        return response.answer or "", len(response.citations or [])
+    finally:
+        for name, original in originals.items():
+            setattr(chat_orchestrator, name, original)
+
+
 def run_case(case: dict[str, Any], sequence: int):
     from app.evidence import approve_evidence
     from app.retrieval.service import RetrievalService
@@ -116,6 +159,26 @@ def run_case(case: dict[str, Any], sequence: int):
         failures.append(f"evidence rejected: {decision.reason}")
     if bool(case.get("evidence_must_be_absent")) and result.documents:
         failures.append(f"expected no evidence but received {len(result.documents)} documents")
+
+    # Optional second stage: what the user is actually shown. Costs one
+    # generation call, so it is opt-in per case rather than run for all of them.
+    answer_required = [str(value) for value in (case.get("answer_must_contain") or [])]
+    answer_forbidden = [str(value) for value in (case.get("answer_must_not_contain") or [])]
+    answer_extract = ""
+    answer_citations = -1
+    if answer_required or answer_forbidden or case.get("answer_must_cite"):
+        answer, answer_citations = delivered_answer(case, sequence)
+        answer_extract = answer[:200]
+        folded = answer.casefold()
+        for required in answer_required:
+            if required.casefold() not in folded:
+                failures.append(f"delivered answer is missing {required!r}")
+        for forbidden in answer_forbidden:
+            if forbidden.casefold() in folded:
+                failures.append(f"delivered answer contains {forbidden!r}")
+        if bool(case.get("answer_must_cite")) and answer_citations < 1:
+            failures.append("delivered answer has no citation")
+
     return {
         "id": case["id"],
         "passed": not failures,
@@ -127,6 +190,8 @@ def run_case(case: dict[str, Any], sequence: int):
         "typo_ranking_applied": bool(result.metadata.get("typo_ranking_applied")),
         "ranking_query_used": result.metadata.get("ranking_query_used", ""),
         "document_scores": [round(float(document.score or 0.0), 3) for document in result.documents],
+        "answer_citations": answer_citations,
+        "answer_extract": answer_extract,
     }
 
 
