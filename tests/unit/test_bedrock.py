@@ -25,8 +25,9 @@ def test_build_prompt_replaces_all_variables() -> None:
     )
     assert "{{" not in prompt.system_prompt
     assert "US" in prompt.system_prompt
-    assert "chunk" in prompt.system_prompt
-    assert prompt.prompt_version == "2026-07-17.1"
+    assert '"retrieved_chunks": "chunk"' in prompt.user_prompt
+    assert '"history": "history"' in prompt.user_prompt
+    assert prompt.prompt_version == "2026-09-05-contact-scope-v3"
 
 
 def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
@@ -50,7 +51,7 @@ def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
     assert len(prompt.system_prompt) < 4250
     assert "complete response in that language" in normalized_prompt
     assert "Use only the retrieved authorised chunks" in normalized_prompt
-    assert "Restate them naturally; do not quote verbatim" in normalized_prompt
+    assert "Short quotations are allowed" in normalized_prompt
     assert "Numbers, percentages, dates, timeframes" in normalized_prompt
     assert "Never combine countries" in normalized_prompt
     assert "history only for conversational continuity" in normalized_prompt

@@ -1,5 +1,6 @@
 from app.risk.models import PolicyAction, RiskContext
 from app.risk.policies.income_claim_policy import IncomeClaimPolicy
+import pytest
 
 
 def _context(message: str) -> RiskContext:
@@ -55,3 +56,29 @@ def test_income_claim_policy_still_flags_passive_income_with_bonus_terms() -> No
 
     assert len(issues) == 1
     assert issues[0].code == "INCOME_CLAIM_RISK"
+
+
+@pytest.mark.parametrize("message", [
+    "Once you've earned a Sales Level, you keep it. Maintaining one status doesn't guarantee the other.",
+    "Earning your sales rank does not guarantee Active status.",
+    "You earn Active status monthly. This does not guarantee retention of another status.",
+    "There is no re-qualifying needed for the Sales Level itself once earned. "
+    "Maintaining one doesn't guarantee the other.",
+])
+def test_earned_status_is_not_earnings(message):
+    assert IncomeClaimPolicy().evaluate(_context(message)) == []
+
+
+@pytest.mark.parametrize("message", [
+    "You earned your sales rank. I guarantee you will earn $5000 every month.",
+    "Earning a sales level guarantees income.",
+    "Your rank doesn't guarantee Active status, but I guarantee money every month.",
+    "I guarantee you will earn. You already earned your rank.",
+    "You earned your rank. Guaranteed earnings are available.",
+    "Earn a sales rank and earn $5000, guaranteed.",
+    "The Sales Level is earned. Guaranteed income follows.",
+    "You earned a sales level. I guarantee $5000 every month.",
+    "You earned your rank. This guarantees bonuses.",
+])
+def test_status_language_cannot_hide_real_income_claim(message):
+    assert IncomeClaimPolicy().evaluate(_context(message))

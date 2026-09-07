@@ -265,6 +265,12 @@ def get_widget_country_codes() -> set[str]:
     return {country["code"] for country in get_widget_countries()}
 
 
+@lru_cache(maxsize=1)
+def _localized_market_names() -> dict[str, list[str]]:
+    path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json")
+    return json.loads(path.read_text(encoding="utf-8"))["names"]
+
+
 def find_market_mentions(message: str) -> set[str]:
     """Return enabled markets whose configured name is present in a message.
 
@@ -282,18 +288,24 @@ def find_market_mentions(message: str) -> set[str]:
     if not normalized_message:
         return set()
 
+    markets = [market for market in load_market_config()["markets"] if market.get("enabled", True)]
+    markets.extend(load_global_directory_markets())
+    names: dict[str, set[str]] = {}
+    localized = _localized_market_names()
+    for market in markets:
+        code = str(market["code"]).upper()
+        for name in [market["name"], *localized.get(code, [])]:
+            normalized_name = _normalize_market_text(name)
+            if normalized_name:
+                names.setdefault(normalized_name, set()).add(code)
+    # Match longer names first so "Equatorial Guinea" does not also select
+    # Guinea. Unambiguous full names only; never infer access from an alias.
     padded_message = f" {normalized_message} "
     matches: set[str] = set()
-    for market in load_market_config()["markets"]:
-        if not market.get("enabled", True):
-            continue
-        normalized_name = _normalize_market_text(str(market.get("name") or ""))
-        if normalized_name and f" {normalized_name} " in padded_message:
-            matches.add(str(market["code"]).upper())
-    for market in load_global_directory_markets():
-        normalized_name = _normalize_market_text(market["name"])
-        if normalized_name and f" {normalized_name} " in padded_message:
-            matches.add(market["code"])
+    for name in sorted(names, key=len, reverse=True):
+        if len(names[name]) == 1 and f" {name} " in padded_message:
+            matches.update(names[name])
+            padded_message = padded_message.replace(f" {name} ", " ")
     return matches
 
 

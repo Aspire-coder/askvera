@@ -7,12 +7,13 @@ import unicodedata
 from dataclasses import dataclass
 
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+from utils.redaction import PHONE_RE
 
 
 # Numbers are universal. The validator deliberately does not enumerate English
 # units such as "months" or document-specific terms such as "Case Credits".
 NUMERIC_CLAIM_PATTERN = re.compile(
-    r"(?<![\w.])(?P<number>\d+(?:[.,]\d+)?(?:\s*(?:-|\u2013|\u2014)\s*\d+(?:[.,]\d+)?)?)(?![\w.])",
+    r"(?<![\w.])(?P<number>\d+(?:[.,]\d+)?(?:\s*(?:-|\u2013|\u2014)\s*\d+(?:[.,]\d+)?)?)(?!\w|\.\d)",
     re.UNICODE,
 )
 
@@ -27,6 +28,7 @@ class MeasurableClaim:
     end: int
     sentence: str
     context: str
+    prefix: str
 
 
 def _normalize(text: str) -> str:
@@ -114,9 +116,10 @@ def _capitalized_entity_phrases(text: str) -> list[str]:
 
 def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
     """Extract named subjects that connect a number to the policy topic."""
-    before_claim = claim.sentence.split(claim.text, 1)[0] if claim.text in claim.sentence else claim.sentence
-    context_before = claim.context.split(claim.text, 1)[0] if claim.text in claim.context else claim.context
-    phrases = _capitalized_entity_phrases(before_claim) or _capitalized_entity_phrases(context_before)
+    # Preserve this occurrence's position: splitting on the numeric text links
+    # repeated values to the first subject instead of the current claim.
+    phrases = _capitalized_entity_phrases(claim.prefix)
+    phrases = [phrase for phrase in phrases if len(_word_tokens(phrase)) >= 2][-1:]
 
     token_sets: list[set[str]] = []
     for phrase in phrases:
@@ -133,7 +136,7 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
 def _source_windows(source_text: str, number: str, radius: int = 260) -> list[str]:
     """Return clause-bounded source windows around the same number."""
     windows: list[str] = []
-    pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?![\d.])")
+    pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
     for match in pattern.finditer(source_text):
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
@@ -191,25 +194,34 @@ def _structured_record_number_is_supported(claim: MeasurableClaim, source_text: 
     return False
 
 
+def _phone_matches(text: str) -> list[re.Match[str]]:
+    vanity = re.compile(r"(?<!\w)(?:\d{1,4}[- ]\s*){2,3}[a-z]{3,10}\s*\(\d{3,6}\)", re.I)
+    vanity_matches = list(vanity.finditer(text))
+    return [match for match in [*vanity_matches, *PHONE_RE.finditer(text)]
+            if 7 <= sum(char.isdigit() for char in match.group()) <= 15
+            and not any(other.start() <= match.start() and match.end() <= other.end()
+                        for other in vanity_matches if other is not match)]
+
+
 def _extract_claims(answer: str) -> list[MeasurableClaim]:
     """Extract numeric claims from an answer without assuming unit vocabulary."""
     claims: list[MeasurableClaim] = []
-    seen: set[str] = set()
-    for match in NUMERIC_CLAIM_PATTERN.finditer(answer):
+    phones = _phone_matches(answer)
+    numbers = [match for match in NUMERIC_CLAIM_PATTERN.finditer(answer)
+               if not any(phone.start() <= match.start() and match.end() <= phone.end() for phone in phones)]
+    for match in sorted([*phones, *numbers], key=lambda item: item.start()):
         if _is_structural_reference(answer, match.start(), match.end()):
             continue
         claim = MeasurableClaim(
             text=match.group(0),
-            number=match.group("number"),
+            number=match.group(0),
             start=match.start(),
             end=match.end(),
             sentence=_sentence_for_claim(answer, match.start(), match.end()),
             context=_context_for_claim(answer, match.start(), match.end()),
+            prefix=answer[max(0, match.start() - 220):match.start()],
         )
-        key = _normalize(claim.text)
-        if key not in seen:
-            seen.add(key)
-            claims.append(claim)
+        claims.append(claim)
     return claims
 
 
@@ -227,6 +239,26 @@ def _is_structural_reference(answer: str, start: int, end: int) -> bool:
     return False
 
 
+def _grounded_phone_spans(answer: str, source_texts: list[str]) -> list[tuple[int, int]]:
+    """Compare whole contact values, never digits concatenated across a document.
+
+    A source contact label is required. Answer wording may be translated; numeric
+    policy rules elsewhere still go through the existing subject-binding check.
+    """
+    label = re.compile(r"\b(?:telephone|phone|fax|call|customer care|toll.free)\b", re.I)
+
+    def key(value: str) -> str:
+        return re.sub(r"[\s()+.-]", "", value).casefold()
+
+    approved = {
+        key(match.group())
+        for source in source_texts
+        for match in _phone_matches(source)
+        if label.search(source[max(0, match.start() - 65):match.start()])
+    }
+    return [(match.start(), match.end()) for match in _phone_matches(answer) if key(match.group()) in approved]
+
+
 def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> list[MeasurableClaim]:
     """Return factual numeric claims that no retrieved source supports."""
     source_texts = [
@@ -236,9 +268,11 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
     ]
     if not source_texts:
         return []
+    phone_spans = _grounded_phone_spans(answer, source_texts)
     return [
         claim
         for claim in _extract_claims(answer)
+        if not any(start <= claim.start and claim.end <= end for start, end in phone_spans)
         if not any(_claim_is_supported(claim, source_text) for source_text in source_texts)
     ]
 
@@ -250,20 +284,16 @@ def remove_unsupported_numeric_sentences(answer: str, source_documents: list[obj
         return answer, []
 
     spans: list[tuple[int, int]] = []
+    # Decimal/time separators are not sentence endings. A bare period search
+    # left fragments such as "00 pm" after deleting a sentence with 09.00-17.00.
+    abbreviations = list(re.finditer(r"\b(?:[^\W\d_]\.){2,}", answer))
+    boundaries = [match for match in re.finditer(r"[.!?](?=\s|$)|\n", answer)
+                  if not any(abbreviation.start() <= match.start() < abbreviation.end()
+                             for abbreviation in abbreviations)]
     for claim in unsupported:
-        left = max(answer.rfind(delimiter, 0, claim.start) for delimiter in (".", "!", "?", "\n"))
-        right_candidates = [
-            position
-            for position in (
-                answer.find(".", claim.end),
-                answer.find("!", claim.end),
-                answer.find("?", claim.end),
-                answer.find("\n", claim.end),
-            )
-            if position != -1
-        ]
-        right = min(right_candidates) + 1 if right_candidates else len(answer)
-        spans.append((left + 1, right))
+        left = max((match.end() for match in boundaries if match.end() <= claim.start), default=0)
+        right = next((match.end() for match in boundaries if match.start() >= claim.end), len(answer))
+        spans.append((left, right))
 
     merged: list[tuple[int, int]] = []
     for start, end in sorted(spans):
@@ -290,10 +320,7 @@ class NumericGroundingValidator:
         if retrieval_result is None or not retrieval_result.documents:
             return
 
-        claims = _extract_claims(context.chat_response.answer or "")
-        if not claims:
-            return
-
+        answer = context.chat_response.answer or ""
         source_documents = [
             (document, _normalize(document.content))
             for document in retrieval_result.documents
@@ -302,9 +329,12 @@ class NumericGroundingValidator:
         if not source_documents:
             return
 
+        # unsupported_numeric_claims already excludes source-grounded contact
+        # values. The remaining check rescues numbers that appear only inside a
+        # structured office/staff directory record rather than in running text.
         unsupported = [
             claim.text
-            for claim in claims
+            for claim in unsupported_numeric_claims(answer, retrieval_result.documents)
             if not any(
                 _claim_is_supported(claim, source_text)
                 or (

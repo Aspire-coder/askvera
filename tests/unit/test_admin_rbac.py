@@ -287,6 +287,30 @@ def test_country_publisher_cannot_upload_global_content() -> None:
     assert exc_info.value.status_code == 403
 
 
+@pytest.mark.parametrize("document_type,access_scope", [
+    ("other", "global"),
+    ("faq", "global"),
+    ("policy", "global"),
+    ("office_directory", "country"),
+])
+def test_super_admin_cannot_bypass_upload_scope_contract(document_type, access_scope) -> None:
+    async def unreadable_file(*_args):
+        pytest.fail("Rejected metadata must not read or stage the uploaded file")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(admin_routes.upload_document(
+            _request(_principal(role="super_admin")),
+            SimpleNamespace(add_task=lambda *_args, **_kwargs: pytest.fail("Unexpected ingestion")),
+            SimpleNamespace(filename="document.pdf", read=unreadable_file),
+            country="CA",
+            language="en",
+            document_type=document_type,
+            access_scope=access_scope,
+        ))
+
+    assert exc_info.value.status_code == 400
+
+
 def test_insights_all_markets_is_limited_to_assigned_scopes(monkeypatch) -> None:
     principal = _principal(
         {"market": "DE", "section": "insights", "permission": "view"},

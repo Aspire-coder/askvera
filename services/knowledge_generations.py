@@ -79,11 +79,11 @@ def active_generation_ids(
     return result
 
 
-def _active_generation_rows() -> list[dict[str, Any]]:
+def _active_generation_rows(*, fresh: bool = False) -> list[dict[str, Any]]:
     global _cache_loaded_at, _cache_rows
     now = time.monotonic()
     with _cache_lock:
-        if _cache_rows and now - _cache_loaded_at < _CACHE_SECONDS:
+        if not fresh and _cache_rows and now - _cache_loaded_at < _CACHE_SECONDS:
             return list(_cache_rows)
         try:
             with get_engine().connect() as connection:

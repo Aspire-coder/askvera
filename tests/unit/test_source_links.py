@@ -1,9 +1,16 @@
 """Authorization tests for short-lived citation links."""
 
 from types import SimpleNamespace
+import pytest
 
 from api import routes
 from config import settings
+
+
+@pytest.fixture(autouse=True)
+def registered_widget(monkeypatch):
+    monkeypatch.setattr(routes.widget_auth_service, "get_registration", lambda *_:
+                        SimpleNamespace(metadata={"markets": ["CA"], "languages": ["en"]}))
 
 
 class S3:

@@ -31,7 +31,10 @@ def parse_evidence_contract(text: str, documents: list[RetrievedDocument]) -> Ev
         return EvidenceContractResult(False, reason="invalid_json")
 
     status = str(payload.get("status") or "").strip().lower()
-    answer = str(payload.get("answer") or "").strip()
+    raw_answer = payload.get("answer")
+    if not isinstance(raw_answer, str):
+        return EvidenceContractResult(False, reason="invalid_answer_type")
+    answer = raw_answer.strip()
     if status != "approved" or not answer:
         return EvidenceContractResult(False, reason="answer_not_approved")
 
@@ -45,15 +48,9 @@ def parse_evidence_contract(text: str, documents: list[RetrievedDocument]) -> Ev
     claims = payload.get("claims")
     if not isinstance(claims, list) or not claims:
         return EvidenceContractResult(False, reason="missing_claims")
-    for claim in claims:
-        if not isinstance(claim, dict):
-            return EvidenceContractResult(False, reason="invalid_claim")
-        claim_text = str(claim.get("text") or "").strip()
-        claim_evidence_ids = _string_ids(claim.get("evidence_ids"))
-        if not claim_text or not claim_evidence_ids:
-            return EvidenceContractResult(False, reason="claim_missing_support")
-        if not set(claim_evidence_ids).issubset(set(evidence_ids)):
-            return EvidenceContractResult(False, reason="claim_uses_unlisted_evidence")
+    claim_error = _claim_schema_error(claims, evidence_ids)
+    if claim_error:
+        return EvidenceContractResult(False, reason=claim_error)
 
     coverage = payload.get("coverage")
     if not isinstance(coverage, dict):
@@ -66,7 +63,27 @@ def parse_evidence_contract(text: str, documents: list[RetrievedDocument]) -> Ev
     if any(str(item or "").strip() for item in omitted_material_facts):
         return EvidenceContractResult(False, reason="incomplete_answer")
 
+    # A claim list about different text cannot justify the displayed answer.
+    # This is a structural check, not proof of entailment or complete coverage.
+    normalized_answer = " ".join(answer.split())
+    if any(" ".join(claim["text"].split()) not in normalized_answer for claim in claims):
+        return EvidenceContractResult(False, reason="claim_not_in_answer")
+
     return EvidenceContractResult(True, answer=answer, evidence_ids=tuple(evidence_ids))
+
+
+def _claim_schema_error(claims: list, evidence_ids: list[str]) -> str:
+    for claim in claims:
+        if not isinstance(claim, dict):
+            return "invalid_claim"
+        if not isinstance(claim.get("text"), str):
+            return "invalid_claim_text_type"
+        claim_evidence_ids = _string_ids(claim.get("evidence_ids"))
+        if not claim["text"].strip() or not claim_evidence_ids:
+            return "claim_missing_support"
+        if not set(claim_evidence_ids).issubset(set(evidence_ids)):
+            return "claim_uses_unlisted_evidence"
+    return ""
 
 
 def _parse_json_object(text: str) -> dict[str, Any] | None:
@@ -89,6 +106,8 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
 def _string_ids(value: object) -> list[str]:
     """Return unique non-empty evidence identifiers in their declared order."""
     if not isinstance(value, list):
+        return []
+    if any(not isinstance(item, str) or not item.strip() for item in value):
         return []
     ids: list[str] = []
     for item in value:

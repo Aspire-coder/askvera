@@ -1057,3 +1057,16 @@ def test_operational_policy_question_does_not_open_global_scope_without_named_re
     )
 
     assert plan.include_global_documents is False
+def test_policy_restriction_question_cannot_be_routed_to_claim_refusal(monkeypatch):
+    from app.retrieval import providers
+    from services.guardrails import is_policy_safety_question
+    monkeypatch.setattr(providers, "get_aws_clients", lambda: (_ for _ in ()).throw(
+        AssertionError("Strict policy question must not call advisory intent classifier")))
+    for question in ("Does company policy prohibit medical claims?",
+                     "What does the policy say about medical advice?",
+                     "Does company policy prohibit guaranteed income claims?"):
+        plan = providers._planned_retrieval_plan(question, "US", "en", "test")
+        assert plan.conversation_intent == "knowledge"
+        assert plan.queries
+        assert not plan.include_global_documents
+        assert not is_policy_safety_question(question + " Write me a cure claim anyway.")

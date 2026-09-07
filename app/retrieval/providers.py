@@ -14,6 +14,7 @@ from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions
+from services.guardrails import is_policy_safety_question
 from utils.logging import get_logger
 
 from .glossary import approved_joined_term_queries, glossary_queries
@@ -506,6 +507,11 @@ def _planned_retrieval_plan(
 ) -> RetrievalQueryPlan:
     """Create multilingual search phrases and choose relevant document scopes."""
     base_queries = _retrieval_queries(message)
+    if is_policy_safety_question(message):
+        # The shared strict check excludes appended instructions and compound
+        # requests. Retrieve policy evidence; do not let an advisory classifier
+        # turn a question about prohibited claims into a request to make one.
+        return RetrievalQueryPlan(base_queries, include_global_documents=False)
     joined_term_queries = approved_joined_term_queries(message, country, language)
     glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
@@ -839,6 +845,12 @@ def _select_evidence_documents(
         "question asks how to become, qualify, earn, use, file, change, terminate, or whether something is "
         "allowed, prefer procedural or rule sections over general background sections. If the question includes "
         "typos or another language, infer the intended business topic and still choose the direct section. "
+        "Preserve the person's explicitly stated role: FBO and Preferred Customer rules are not interchangeable. "
+        "Unopened or unused products alone do not establish an FBO role, termination, or salable condition. "
+        "Distinguish satisfaction returns, delivery discrepancies and termination buy-back, including "
+        "the deadline's starting event. Sales-level or level-discount retention, monthly activity, "
+        "Leadership Bonus eligibility and incentive payments are separate rules. "
+        "Select complementary governing clauses when the question contrasts these concepts. "
         "Return only JSON."
     )
     user_prompt = (

@@ -802,7 +802,7 @@ export function WidgetRuntime({
         sessionId: state.sessionId,
         messageId: message.id,
         rating,
-        comment: expectedAnswer,
+        expected_answer: expectedAnswer,
         metadata: {
           country: state.selectedCountry?.code,
           language: state.selectedLanguage?.code,

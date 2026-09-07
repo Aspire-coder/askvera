@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from typing import Any
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
 from services.controlled_copy import localize_reviewed_copy
-from services.market_config import get_document_country_codes
+from services.market_config import find_market_mentions, get_document_country_codes
 from utils.text_similarity import edit_distance_at_most_one
 
 
@@ -137,7 +138,14 @@ def localized_conversation_response(key: str, language: str = "") -> str | None:
 def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str, language: str) -> EvidenceDecision:
     """Approve approved, current-locale evidence before model generation."""
     intent = classify_intent(query, language)
-    documents = retrieval_result.documents
+    # An explicit company-policy request cannot be satisfied by a global
+    # directory, even if the planner happens to route it to global evidence.
+    policy_requested = bool(re.search(r"\b(?:company|local|national)\s+polic(?:y|ies)\b", query, re.IGNORECASE))
+    if policy_requested and find_market_mentions(query) - {country.upper()}:
+        return EvidenceDecision(False, "cross_market_policy_request", [], intent, False, 0.0, 0.0)
+    documents = [document for document in retrieval_result.documents
+                 if _has_current_locale_document([document], country, language)
+                 and not (policy_requested and document.metadata.get("access_scope") == "global")]
     if intent != "policy_fact":
         return EvidenceDecision(True, "non_document_intent", documents[:1], intent, True, 0.0, 0.0)
     if not documents:
@@ -203,7 +211,20 @@ def _has_current_locale_document(documents: list[RetrievedDocument], country: st
     if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
         allowed_languages.add("en")
     for document in documents:
+        metadata = document.metadata or {}
+        if metadata.get("status", "active") != "active":
+            continue
+        today = datetime.now(UTC).date()
+        try:
+            effective = date.fromisoformat(str(metadata["effective_date"])[:10]) if metadata.get("effective_date") else None
+            expiry = date.fromisoformat(str(metadata["expiry_date"])[:10]) if metadata.get("expiry_date") else None
+        except ValueError:
+            continue
+        if (effective and effective > today) or (expiry and expiry < today):
+            continue
         if str(document.metadata.get("access_scope") or "").lower() == "global":
+            if metadata.get("document_type") == "policy":
+                continue
             return True
         document_country = (document.country or "").upper()
         document_language = _locale_key(document.language)
