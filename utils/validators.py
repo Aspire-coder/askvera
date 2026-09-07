@@ -8,21 +8,13 @@ import re
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from config.vera_persona import ROLE_CONTENT_SCOPES
-from services.market_config import (
-    get_country_codes,
-    get_language_codes_for_country,
-    get_supported_language_codes,
-)
+from services.market_config import get_country_codes, get_supported_language_codes
 
 TRAFFIC_SOURCES = {"widget", "evaluation", "backend_test", "admin_test"}
 
 
 def _country_codes() -> set[str]:
     return get_country_codes()
-
-
-def _language_codes_for_country(country_code: str) -> set[str]:
-    return get_language_codes_for_country(country_code)
 
 
 def _supported_language_codes() -> set[str]:
