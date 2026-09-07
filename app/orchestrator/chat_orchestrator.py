@@ -52,6 +52,7 @@ from services.semantic_cache import (
 )
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
+from services.guardrails import is_policy_safety_question
 from services.market_config import find_market_mentions, find_probable_market_typo
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
@@ -1329,6 +1330,17 @@ class AIOrchestrator:
                     "intent": "support_request",
                 },
             )
+
+        # The planner is advisory here, exactly as it is for assistant_meta below.
+        # Asking what the rules prohibit is not a request to make the prohibited
+        # claim, so a reviewed policy-safety question must never be short-circuited
+        # into claim-refusal copy. Declining the shortcut removes no protection:
+        # the deterministic guardrails already exempted this same question at input
+        # governance, and retrieval, the evidence gate, output governance and the
+        # validators all still run. The matcher is a strict whole-message match, so
+        # an appended instruction or compound request does not qualify.
+        if intent in {"medical_claim", "income_claim"} and is_policy_safety_question(body.message):
+            return None
 
         response_key = ""
         if intent == "assistant_meta":
