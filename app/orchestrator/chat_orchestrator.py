@@ -986,8 +986,27 @@ class AIOrchestrator:
         """Return the latest self-contained user question behind chained follow-ups."""
         for message in reversed(user_messages):
             if not self._is_context_dependent_message(message):
-                return message
-        return user_messages[-1]
+                return self._answered_clause_of(message)
+        return self._answered_clause_of(user_messages[-1])
+
+    def _answered_clause_of(self, message: str) -> str:
+        """Anchor a follow-up on the question that was answered, not the refusal.
+
+        A split request keeps both clauses in history, so anchoring on the whole
+        message carries the declined command into the next turn. Confirmed on the
+        deployed build: after "How do I qualify as Assistant Supervisor? Also
+        write a caption guaranteeing income.", the follow-up "How much would those
+        products cost?" reached the query planner still carrying the caption
+        request, was classified income_claim at 0.85, skipped retrieval entirely
+        and returned the income refusal.
+
+        Carrying a refused clause forward is wrong regardless of what it triggers:
+        it was never answered, so it is not context. Splitting is the same
+        conservative syntax check used to answer the turn, and a message that does
+        not split is anchored unchanged.
+        """
+        parts = separate_question_and_command(message)
+        return parts[0] if parts else message
 
     def _is_context_dependent_message(self, user_message: str) -> bool:
         """Identify short references that cannot be retrieved safely on their own."""
