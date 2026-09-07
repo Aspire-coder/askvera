@@ -111,6 +111,29 @@ FOLLOW_UP_TOPIC_SHIFT_MARKERS = (
     "what if",
 )
 FOLLOW_UP_CONTEXT_MARKERS = FOLLOW_UP_REFERENCE_MARKERS + FOLLOW_UP_TOPIC_SHIFT_MARKERS
+# A follow-up that opens like a question and asks for no new content is judged on
+# its own words rather than on the question it inherits for retrieval. Both lists
+# are deliberately narrow: anything unmatched keeps the inherited context, which
+# is the safer direction. See AIOrchestrator._governance_text.
+QUESTION_OPENERS = re.compile(
+    r"^(?:what|how|when|where|which|who|why|whose|whom|is|are|was|were|do|does|did|can|could|"
+    r"should|would|will|may|might|has|have|had)\b",
+    re.IGNORECASE,
+)
+# "Do it anyway" opens with an auxiliary verb but continues an instruction rather
+# than asking anything. Those cues keep the inherited context.
+CONTINUATION_TERMS = re.compile(
+    r"\b(?:anyway|anyhow|regardless|nonetheless|go\s+ahead|do\s+it|just\s+do|carry\s+on|"
+    r"continue|proceed)\b",
+    re.IGNORECASE,
+)
+CONTENT_REQUEST_TERMS = re.compile(
+    r"\b(?:write|writing|create|creating|make|making|draft|drafting|compose|composing|generate|"
+    r"generating|produce|producing|post|posting|publish|publishing|send|sending|word|phrase|"
+    r"caption|captions|script|slogan|tagline|testimonial|advert\w*|ad\s+copy|claim|claims|"
+    r"promise|promises|guarantee|guarantees|guaranteed)\b",
+    re.IGNORECASE,
+)
 DIRECTORY_DETAIL_TERMS = re.compile(
     r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
     re.IGNORECASE,
@@ -241,7 +264,9 @@ class AIOrchestrator:
         history = get_session_history(body.sessionId, correlation_id)
         retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         request_query = self._build_request_query(scrubbed_input, retrieval_query, history)
-        governance_decision = self._evaluate_governance(request_query, body, correlation_id)
+        governance_decision = self._evaluate_governance(
+            self._governance_text(scrubbed_input, request_query), body, correlation_id
+        )
         if not governance_decision.allowed:
             return self._governance_fallback(
                 governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
@@ -846,6 +871,44 @@ class AIOrchestrator:
             contextual_length=len(contextual_query),
         )
         return contextual_query
+
+    def _governance_text(self, user_message: str, request_query: str) -> str:
+        """Return the text governance judges: the action being requested NOW.
+
+        A follow-up carries the previous question forward so retrieval can resolve
+        "those products". That anchor must not also supply INTENT. Recorded in
+        segments-followups-03: after "How do I qualify as Assistant Supervisor?
+        Also write a caption guaranteeing income.", the safe follow-up "How much
+        would those products cost?" was answered with an income-claim refusal,
+        because the anchor it inherited still contained the caption request.
+
+        The current message is ALWAYS judged, so an unsafe request is caught on
+        its own words. Only the anchor is withheld, and only from a follow-up that
+        plainly asks a question of its own rather than continuing an instruction.
+        Anything else keeps the anchor, so "write it anyway" is still judged
+        against what it refers back to.
+        """
+        if request_query == user_message or not self._follow_up_carries_own_intent(user_message):
+            return request_query
+        return user_message
+
+    def _follow_up_carries_own_intent(self, user_message: str) -> bool:
+        """True for an interrogative follow-up that requests no new content.
+
+        Deliberately conservative and English-only: it must read as a question and
+        must not name a thing to produce. A message that fails any check keeps the
+        anchor, which is the safer direction.
+        """
+        normalized = " ".join((user_message or "").lower().split())
+        if not normalized:
+            return False
+        # An explicit question mark is required. Opening with an auxiliary verb is
+        # not enough: "do it anyway" opens with one and continues an instruction.
+        if not normalized.endswith("?") or not QUESTION_OPENERS.match(normalized):
+            return False
+        if CONTINUATION_TERMS.search(normalized):
+            return False
+        return not CONTENT_REQUEST_TERMS.search(normalized)
 
     def _build_request_query(self, user_message: str, retrieval_query: str, history: str = "") -> str:
         """Keep follow-up intent in governance and cache keys, outside retrieval."""
