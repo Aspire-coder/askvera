@@ -101,7 +101,16 @@ def has_incomplete_ending(answer: str, language: str = "") -> bool:
     text = (answer or "").strip()
     if not text:
         return True
-    if text.count("(") != text.count(")") or text.count("[") != text.count("]"):
+    # Only an UNCLOSED opener indicates truncation. Surplus closers are how
+    # enumerations are written - "a) ... b) ... c) ..." - and policy answers list
+    # requirements that way constantly.
+    #
+    # Measured on the deployed build: "How can i become a recognized manager?"
+    # abstained 2 times in 12, every failure on this check, with counts like
+    # 0 "(" against 3 ")". The answers were complete, correct and cited, ending
+    # in a normal closing question; they were replaced by "the approved policy
+    # documents do not contain enough information".
+    if text.count("(") > text.count(")") or text.count("[") > text.count("]"):
         return True
     locale = (language or "en").split("-", 1)[0].lower()
     return locale == "en" and bool(_INCOMPLETE_ENGLISH_END_RE.search(text))
