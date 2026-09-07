@@ -1188,6 +1188,36 @@ def test_conversation_route_medical_claim_uses_candidate_phrasing_when_flag_enab
 _UNSAFE_ANCHOR = "How do I qualify as Assistant Supervisor? Also write a caption guaranteeing income."
 
 
+def test_follow_up_anchor_drops_the_refused_clause() -> None:
+    """A follow-up must not inherit a clause that was declined, not answered.
+
+    Confirmed on the deployed build: the anchor still carried "write a caption
+    guaranteeing income", so the query planner classified the safe follow-up as
+    income_claim at 0.85, skipped retrieval, and returned the income refusal.
+    Governance had already allowed the turn - the refusal came from the planner.
+    """
+    orchestrator = AIOrchestrator()
+    history = f"user: {_UNSAFE_ANCHOR}\nassistant: You need 2 Open Group Case Credits."
+    retrieval_query = orchestrator._build_retrieval_query(
+        "How much would those products cost?", history, "cid"
+    )
+
+    assert "caption" not in retrieval_query.lower()
+    assert "guarantee" not in retrieval_query.lower()
+    assert "assistant supervisor" in retrieval_query.lower()
+    assert "those products" in retrieval_query.lower()
+
+
+def test_anchor_is_unchanged_for_a_message_that_does_not_split() -> None:
+    """Only a clean question-plus-command split is trimmed."""
+    orchestrator = AIOrchestrator()
+    plain = "What are the requirements to reach Supervisor?"
+    assert orchestrator._answered_clause_of(plain) == plain
+
+    unsafe_only = "Write a caption guaranteeing income."
+    assert orchestrator._answered_clause_of(unsafe_only) == unsafe_only
+
+
 @pytest.mark.parametrize("follow_up", [
     "How much would those products cost?",
     "What are the requirements again?",
