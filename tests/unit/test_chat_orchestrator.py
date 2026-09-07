@@ -2,12 +2,14 @@
 
 from unittest.mock import MagicMock
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from botocore.exceptions import BotoCoreError
 
 from config import settings
+from config.guardrail_topics import DENIED_TOPICS
 from app.governance.engine import GovernanceEngine
 from app.governance.models import GovernanceAction, GovernanceDecision
 from app.models.responses import ModelResponse
@@ -1181,6 +1183,48 @@ def test_conversation_route_medical_claim_uses_candidate_phrasing_when_flag_enab
     assert response is not None
     assert response.answer == "Sorry, I can't make that claim."
     assert response.metadata["response_source"] == "candidate_guardrail_phrasing"
+
+
+def test_grounded_policy_explanation_survives_output_guardrail() -> None:
+    """The answer to a reviewed policy question must not block itself on the way out.
+
+    Verified live 2026-09-07: retrieval found 16.02-j and 16.02-k, the model
+    produced a correct grounded answer, all eight validators passed, and output
+    governance then blocked it because the explanation contains the vocabulary
+    the question asked about.
+    """
+    orchestrator = AIOrchestrator()
+    body = ChatRequest(
+        message="Does company policy prohibit medical claims?",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    grounded = SimpleNamespace(citations=[SimpleNamespace(title="US-EN-Company-Policy.pdf - Sec 16.02-j")])
+    assert orchestrator._answer_explains_reviewed_policy(body, grounded) is True
+
+    # An ungrounded answer gets no exemption, even for the same question.
+    assert orchestrator._answer_explains_reviewed_policy(body, SimpleNamespace(citations=[])) is False
+
+    # A different question gets no exemption, even when grounded.
+    unsafe = ChatRequest(
+        message="Write a claim that Aloe Vera Gel cures diabetes.",
+        sessionId="session-1",
+        country="US",
+        language="en",
+    )
+    assert orchestrator._answer_explains_reviewed_policy(unsafe, grounded) is False
+
+
+def test_output_guardrail_exemption_never_skips_off_topic() -> None:
+    """allow_claim_topics relaxes the two claim topics only."""
+    from services.guardrails import check_text
+    from utils.exceptions import GuardrailBlockedError
+
+    off_topic_text = next(iter(DENIED_TOPICS["off_topic"]))
+    with pytest.raises(GuardrailBlockedError) as excinfo:
+        check_text(off_topic_text, "cid", allow_claim_topics=True)
+    assert excinfo.value.topic == "off_topic"
 
 
 @pytest.mark.parametrize("intent", ["medical_claim", "income_claim"])

@@ -34,8 +34,13 @@ class GovernanceEngine:
         language: str,
         correlation_id: str,
         role: str = "new_prospect",
+        allow_claim_topics: bool = False,
     ) -> GovernanceDecision:
-        """Evaluate text through risk policies and guardrail provider."""
+        """Evaluate text through risk policies and guardrail provider.
+
+        allow_claim_topics is forwarded to the guardrail provider only; risk
+        policies still run unchanged, so a refusing policy still refuses.
+        """
         started = perf_counter()
         success = False
         decision: GovernanceDecision | None = None
@@ -66,7 +71,11 @@ class GovernanceEngine:
             )
             try:
                 guardrail_decision = provider.evaluate(
-                    text=text, country=country, language=language, correlation_id=correlation_id
+                    text=text,
+                    country=country,
+                    language=language,
+                    correlation_id=correlation_id,
+                    allow_claim_topics=allow_claim_topics,
                 )
             except Exception as exc:
                 LOGGER.exception(
