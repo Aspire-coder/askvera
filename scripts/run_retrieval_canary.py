@@ -59,6 +59,18 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
         minimum_confidence = float(case["minimum_confidence"])
         if not 0.0 <= minimum_confidence <= 1.0:
             raise ValueError(f"Invalid minimum confidence for {identifier}: {minimum_confidence}.")
+        if "blocking" in case and not isinstance(case["blocking"], bool):
+            raise ValueError(f"'blocking' must be true or false for {identifier}.")
+        if "repeat" in case:
+            repeat = case["repeat"]
+            if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat < 1:
+                raise ValueError(f"'repeat' must be a positive integer for {identifier}.")
+        # A non-blocking case needs a stated reason, so the quarantine list
+        # cannot quietly become the place failures go to be forgotten.
+        if case.get("blocking") is False and not str(case.get("non_blocking_reason") or "").strip():
+            raise ValueError(
+                f"Case {identifier} is non-blocking and must set 'non_blocking_reason'."
+            )
     return cases, hashlib.sha256(raw).hexdigest()
 
 
@@ -116,7 +128,42 @@ def delivered_answer(case: dict[str, Any], sequence: int) -> tuple[str, int]:
             setattr(chat_orchestrator, name, original)
 
 
-def run_case(case: dict[str, Any], sequence: int):
+def run_case(case: dict[str, Any], sequence: int, default_repeat: int) -> dict[str, Any]:
+    """Run one case repeatedly and require every run to pass.
+
+    A single run of a case that fails one time in three is close to
+    meaningless, and reporting it as a pass trains everyone to retry a red
+    deploy until it goes green -- which is how a real regression gets waved
+    through. Repeating turns an intermittent failure into a visible one.
+
+    A case that passes some runs and fails others is reported as flaky rather
+    than simply failed, because the two want different responses: a flaky case
+    means the pipeline is non-deterministic on that input, while a uniformly
+    failed case means it is reliably wrong.
+    """
+    repeat = max(1, int(case.get("repeat") or default_repeat))
+    runs = [run_case_once(case, sequence * 1000 + attempt) for attempt in range(repeat)]
+
+    passed_runs = sum(1 for run in runs if run["passed"])
+    # Report the first failing run, so failure_reasons describe an actual
+    # observed failure rather than a run that happened to succeed.
+    representative = next((run for run in runs if not run["passed"]), runs[0])
+
+    blocking = bool(case.get("blocking", True))
+    result = dict(representative)
+    result.update(
+        {
+            "passed": passed_runs == repeat,
+            "blocking": blocking,
+            "runs": repeat,
+            "passed_runs": passed_runs,
+            "flaky": 0 < passed_runs < repeat,
+        }
+    )
+    return result
+
+
+def run_case_once(case: dict[str, Any], sequence: int):
     from app.evidence import approve_evidence
     from app.retrieval.service import RetrievalService
 
@@ -206,6 +253,16 @@ def main() -> int:
         default=[],
         help="Run only the named case. Repeat this option to run a bounded subset.",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help=(
+            "Runs per case; a case passes only if every run passes. Each run costs "
+            "real Bedrock calls, so the deploy gate uses 1 and this is for "
+            "investigating whether a case is genuinely stable."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -232,15 +289,28 @@ def main() -> int:
     if args.load_ssm:
         settings.load_ssm_config()
     logging.disable(logging.INFO)
-    results = [run_case(case, index) for index, case in enumerate(cases, start=1)]
+    results = [run_case(case, index, args.repeat) for index, case in enumerate(cases, start=1)]
+
+    # Only blocking cases decide the exit code. Non-blocking cases are observed
+    # and reported so a known-unstable case keeps producing evidence instead of
+    # being deleted, without holding up a deploy that is otherwise sound.
+    blocking_results = [result for result in results if result["blocking"]]
+    blocking_failures = [result for result in blocking_results if not result["passed"]]
+    observed_failures = [
+        result for result in results if not result["blocking"] and not result["passed"]
+    ]
     summary = {
-        "status": "passed" if all(result["passed"] for result in results) else "failed",
+        "status": "passed" if not blocking_failures else "failed",
         "commit": _git_commit(),
         "index": settings.OPENSEARCH_INDEX,
         "pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
         "fixture_sha256": fixture_hash,
-        "passed": sum(result["passed"] for result in results),
-        "total": len(results),
+        "runs_per_case": args.repeat,
+        "passed": sum(result["passed"] for result in blocking_results),
+        "total": len(blocking_results),
+        "observed_only_cases": len(results) - len(blocking_results),
+        "observed_only_failures": [result["id"] for result in observed_failures],
+        "flaky_cases": [result["id"] for result in results if result["flaky"]],
         "results": results,
     }
     print(json.dumps(summary, ensure_ascii=False))
