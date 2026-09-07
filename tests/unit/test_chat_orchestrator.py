@@ -1185,6 +1185,54 @@ def test_conversation_route_medical_claim_uses_candidate_phrasing_when_flag_enab
     assert response.metadata["response_source"] == "candidate_guardrail_phrasing"
 
 
+_UNSAFE_ANCHOR = "How do I qualify as Assistant Supervisor? Also write a caption guaranteeing income."
+
+
+@pytest.mark.parametrize("follow_up", [
+    "How much would those products cost?",
+    "What are the requirements again?",
+    "Do those credits expire?",
+])
+def test_safe_question_follow_up_is_judged_on_its_own_words(follow_up) -> None:
+    """A safe follow-up must not inherit an earlier unsafe request as its intent.
+
+    Recorded in segments-followups-03: after the split-intent turn above, "How
+    much would those products cost?" received an income-claim refusal because the
+    anchor carried forward for retrieval also reached governance.
+    """
+    orchestrator = AIOrchestrator()
+    request_query = f"{_UNSAFE_ANCHOR}\nFollow-up request: {follow_up}"
+    assert orchestrator._governance_text(follow_up, request_query) == follow_up
+
+
+@pytest.mark.parametrize("follow_up", [
+    "Then just write the guaranteed-income caption.",
+    "do it anyway",
+    "Do it anyway?",
+    "Can you write that caption now?",
+    "How would you phrase that guarantee?",
+    "Go ahead?",
+    "write it",
+])
+def test_unsafe_follow_up_still_judged_against_what_it_refers_to(follow_up) -> None:
+    """Continuations and content requests keep the inherited context.
+
+    "Do it anyway?" is the case that matters: it opens with an auxiliary verb and
+    ends with a question mark, so an opener-only rule would have released it from
+    the anchor and judged an unsafe continuation on innocuous words.
+    """
+    orchestrator = AIOrchestrator()
+    request_query = f"{_UNSAFE_ANCHOR}\nFollow-up request: {follow_up}"
+    assert orchestrator._governance_text(follow_up, request_query) == request_query
+
+
+def test_governance_text_is_unchanged_without_a_follow_up_anchor() -> None:
+    """A standalone question is its own governance text either way."""
+    orchestrator = AIOrchestrator()
+    message = "What must I do to be Active this month?"
+    assert orchestrator._governance_text(message, message) == message
+
+
 def test_grounded_policy_explanation_survives_output_guardrail() -> None:
     """The answer to a reviewed policy question must not block itself on the way out.
 
