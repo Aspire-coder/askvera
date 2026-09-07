@@ -58,6 +58,26 @@ If `METRICS_PROVIDER` is not `cloudwatch` or `ENABLE_CLOUDWATCH_METRICS` is not
 the six alarms that do have producers are as blind as the five that do not. I
 could not check this myself.
 
+## Measured baseline, before any change (2026-09-07 21:35 UTC)
+
+Ten runs of the probe against deployed `7ad2d10`, temperature unset:
+
+| Outcome | Runs | Retrieval confidence |
+|---|---|---|
+| Forever Kyrgyzstan record (correct) | 0,1,2,3,4,6,7,8 | 0.95 every time |
+| US-EN-Company-Policy Sec 4.04-f (wrong) | 5, 9 | 0.85 and 0.75 |
+
+**8/10 correct, 20% failure rate.** With the ~4-in-14 recorded earlier the same
+day, that is 6 failures in 24 observed runs, about 25%.
+
+Confidence separates the two outcomes perfectly across all ten runs: 0.95 when
+the selector is right, below 0.9 when it is wrong. That holds in the earlier
+probe too. It suggests a cheap safety net independent of the temperature
+question -- when retrieval confidence for a named-market question falls below
+0.9, prefer score order over the selector's reordering -- but it is a
+correlation over 24 runs, not an established rule, and it should not be built
+before the temperature result is in.
+
 ## Verifying the temperature change — do this, don't assume
 
 Branch 1 is a hypothesis with a measurement attached, not a proven fix. The
