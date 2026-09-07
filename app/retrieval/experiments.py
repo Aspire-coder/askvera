@@ -22,6 +22,8 @@ def diversify_by_parent(
             or metadata.get("section_id")
             or document.get("id", "")
         )
+        identity = metadata.get("logical_document_id") or metadata.get("source_file") or document.get("id", "")
+        parent = f"{identity}|{metadata.get('ingestion_id', '')}|{parent}"
         if counts[parent] >= per_parent:
             continue
         result.append(document)
