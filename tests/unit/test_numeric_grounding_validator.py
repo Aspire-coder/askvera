@@ -569,3 +569,48 @@ def test_repair_leaves_a_matched_pair_untouched() -> None:
 
     assert removed == []
     assert repaired == answer
+
+
+def test_a_heading_does_not_supply_the_numeric_subject() -> None:
+    """The subject comes from the claim's sentence, not the heading above it.
+
+    Measured live on rank-qualification questions. "Requirements to Reach
+    Supervisor" supplied {reach, supervisor}; every subject token must appear in
+    the source window, and the source says "Supervisor is achieved by generating
+    a total of 10 Open Group Case Credits", which has no "reach". The 10 was
+    reported ungrounded, so the sentence stating the requirement was deleted from
+    the answer, or the answer was replaced entirely.
+    """
+    source = (
+        "Section 4.01: (b) Supervisor is achieved by generating a total of 10 Open Group "
+        "Case Credits in any single Month."
+    )
+    answer = (
+        "# Requirements to Reach Supervisor\n\n"
+        "To achieve the Supervisor rank, you need to generate a total of "
+        "**10 Open Group Case Credits within any single month**."
+    )
+    result = ValidationResult()
+    NumericGroundingValidator().validate(_context(answer, source), result)
+    assert result.valid
+
+
+def test_a_colon_does_not_detach_the_subject() -> None:
+    """A colon introduces a list inside the sentence and must not bound the subject.
+
+    Without this, "To qualify as Assistant Manager ... two paths: generate 120"
+    loses its subject after the colon, and a figure belonging to a different rank
+    passes as grounded.
+    """
+    source = (
+        "Assistant Manager is achieved by generating a total of 75 Open Group Case Credits. "
+        "Unrecognized Manager can re-qualify by generating a total of 120 Open Group Case "
+        "Credits within 1-2 consecutive Months."
+    )
+    answer = (
+        "To qualify as Assistant Manager, you need one of these paths: "
+        "generate 120 Open Group Case Credits in 1-2 consecutive months."
+    )
+    result = ValidationResult()
+    NumericGroundingValidator().validate(_context(answer, source), result)
+    assert result.has_critical()
