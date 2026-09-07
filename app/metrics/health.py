@@ -100,7 +100,7 @@ def _safely(recorder, publish_metric_name: str | None) -> None:
         recorder()
         if publish_metric_name is None:
             return
-        metric = metrics_collector.latest_system_metric(publish_metric_name)
+        metric = metrics_collector.system_snapshot(publish_metric_name)
         if metric is not None:
             metrics_publisher.publish_system(metric)
     except Exception as exc:  # noqa: BLE001 - metrics must never break a request.

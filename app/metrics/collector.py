@@ -60,16 +60,6 @@ class MetricsCollector:
             self._system_metrics[metric.name] = metric
             return metric
 
-    def latest_system_metric(self, name: str) -> SystemMetric | None:
-        """Return the most recent sample for one system metric, if any.
-
-        Recording and publishing are separate steps in this design, so callers
-        that need to forward a freshly recorded sample to the metrics provider
-        need a supported way to read it back.
-        """
-        with self._lock:
-            return self._system_metrics.get(name)
-
     def increment_system_metric(self, name: str, amount: float = 1.0, unit: str = "Count") -> SystemMetric:
         """Increment a numeric system metric by name."""
         current = self._system_metrics.get(name)
