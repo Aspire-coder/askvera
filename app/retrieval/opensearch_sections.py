@@ -22,6 +22,7 @@ from services.knowledge_generations import active_generation_ids
 from services.market_config import (
     find_market_mentions,
     get_document_country_codes,
+    load_global_directory_markets,
     load_market_config,
 )
 from utils.logging import get_logger
@@ -405,11 +406,12 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
 
 def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
     """Return the named market(s) whose global directory record should lead."""
+    catalog = [*load_market_config().get("markets", []), *load_global_directory_markets()]
     mentioned_codes = find_market_mentions(message)
     if not mentioned_codes:
         normalized_message = _normalize_text(message)
         message_tokens = [token for token in normalized_message.split() if len(token) >= 4]
-        for market in load_market_config().get("markets", []):
+        for market in catalog:
             market_name = _normalize_text(str(market.get("name") or ""))
             name_tokens = market_name.split()
             if len(name_tokens) != 1 or not market_name:
@@ -431,7 +433,7 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
     target_codes = mentioned_codes or {str(selected_country or "").upper()}
     return {
         str(country.get("name") or "")
-        for country in load_market_config().get("markets", [])
+        for country in catalog
         if str(country.get("code") or "").upper() in target_codes
     }
 
@@ -473,7 +475,14 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
         "end_page": source.get("end_page", ""),
         "content": source.get("content", ""),
         "search_text": source.get("search_text", ""),
-        "metadata": source.get("metadata", {}),
+        "metadata": {
+            "status": "active",
+            **(source.get("metadata") or {}),
+            **{key: source[key] for key in (
+                "ingestion_id", "logical_document_id", "content_hash", "source_file",
+                "effective_date", "expiry_date", "status",
+            ) if key in source},
+        },
         "rank": float(hit.get("_score") or 0.0) * score_weight,
     }
 
@@ -960,8 +969,17 @@ class OpenSearchSectionProvider:
             "Do not substitute a selected-market policy section that merely mentions generic customer care when a matching "
             "global office or staff record directly contains the requested contact information. "
             "Prefer the governing section for the user's exact intent over nearby sections that only mention similar words. "
-            "When a return question says a product is unopened, unused, unsold, or salable and asks for a time window, "
-            "prefer the FBO buy-back or unsold-salable-product clause over a general Retail/Preferred Customer satisfaction clause. "
+            "For joining costs, include applicable purchase-qualification and opt-in requirements alongside entry and fee clauses. "
+            "No minimum capital investment does not establish free entry; no out-of-pocket support fee only describes that fee. "
+            "Do not drop an entry prerequisite because another passage appears to give a simpler answer. "
+            "For qualification questions, choose requirements rather than benefits. Include benefits only when requested. "
+            "Preserve the person's explicitly stated role: FBO and Preferred Customer rules are not interchangeable. "
+            "Unopened or unused products alone do not establish an FBO role, termination, or salable condition. "
+            "For returns, select the rule for the stated role and action; distinguish satisfaction returns, "
+            "delivery discrepancies and termination buy-back, including the deadline's starting event. "
+            "For retaining a sales level or level discount, prefer explicit retention/loss rules; "
+            "monthly activity, Leadership Bonus eligibility and incentive payments are separate questions. "
+            "Select complementary governing clauses when the question contrasts these concepts. "
             "List selected_ranks in order of relevance, most relevant first. "
             "Also set directly_answers_top_rank to true only if the FIRST candidate in selected_ranks explicitly "
             "states the specific fact, rule, amount, or mechanism the question asks about - not merely the same "

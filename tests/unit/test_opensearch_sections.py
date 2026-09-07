@@ -472,9 +472,9 @@ def test_finalize_eligible_rows_bounds_repeats_from_the_same_parent_when_enabled
     monkeypatch.setattr(settings, "OPENSEARCH_RESULT_COUNT", 5)
     monkeypatch.setattr(settings, "SECTION_RETRIEVAL_MIN_SCORE", 0.05)
     rows = [
-        ({"id": "a", "metadata": {"parent_section_id": "5.01"}}, 0.9),
-        ({"id": "b", "metadata": {"parent_section_id": "5.01"}}, 0.8),
-        ({"id": "c", "metadata": {"parent_section_id": "5.02"}}, 0.7),
+        ({"id": "a", "metadata": {"source_file": "p.pdf", "parent_section_id": "5.01"}}, 0.9),
+        ({"id": "b", "metadata": {"source_file": "p.pdf", "parent_section_id": "5.01"}}, 0.8),
+        ({"id": "c", "metadata": {"source_file": "p.pdf", "parent_section_id": "5.02"}}, 0.7),
     ]
 
     result = OpenSearchSectionProvider()._finalize_eligible_rows(rows)

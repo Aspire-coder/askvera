@@ -216,6 +216,16 @@ def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> 
 def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str, bool]:
     """Remove extra labelled directory fields when one field was requested."""
     question_text = (question or "").casefold()
+    # Remove only a standalone French orders sentence for a single-field request.
+    if (re.search(r"\b(?:téléphone|numéro)\b", question_text)
+            and re.search(r"\b(?:bureau|réception)\b", question_text)
+            and not re.search(r"\b(?:commandes?|tous|toutes|deux)\b", question_text)):
+        focused, count = re.subn(
+            r"(?m)^\s*Le numéro pour les commandes(?: en [\w -]+)? est le\s+"
+            r"\*{0,2}\+?[\d ()-]+\*{0,2}\.[ \t]*$", "", answer, flags=re.I,
+        )
+        if count:
+            return re.sub(r"\n{3,}", "\n\n", focused).strip(), True
     if re.search(r"\b(all|every|complete)\s+(contact|directory)|\bcontact details?\b", question_text):
         return answer, False
 

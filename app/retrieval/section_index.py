@@ -330,6 +330,34 @@ def _return_policy_score(message: str, title: str, content: str) -> float:
     )
 
 
+def _joining_cost_score(message: str, content: str) -> float:
+    """Prefer explicit entry-cost clauses, not a definition of ongoing fees.
+
+    This bounded English intent feature is country/section independent. It
+    changes candidate ranking only; approval and confidence thresholds remain.
+    """
+    question = _normalize_text(message)
+    if not re.search(r"\b(join\w*|enrol\w*|register\w*|registration|sign(?:ing)? up)\b", question):
+        return 0.0
+    if not re.search(r"\b(cost\w*|fee\w*|pay\w*|money|free|investment)\b", question):
+        return 0.0
+    evidence = _normalize_text(content)
+    if re.search(
+        r"\b(?:no minimum capital investment|(?:joining|enrolment|enrollment|registration) fee|"
+        r"(?:fee|payment) (?:is )?required to (?:join|register|enrol))\b", evidence
+    ):
+        return 1.8
+    # A no-investment statement cannot replace qualification prerequisites.
+    # Prefer short governing clauses rather than a large glossary whose relevant
+    # condition would be truncated before the selector can see it.
+    if len(evidence) <= 1500 and re.search(
+        r"\beligible to opt[- ]in\b|"
+        r"\bpurchas\w*\b[^.;]{0,240}\b(?:qualified|entitled)\b", evidence
+    ):
+        return 1.6
+    return 0.0
+
+
 def _source_score(row: dict[str, Any], message: str) -> float:
     """Blend search rank with generic, document-derived lexical alignment."""
     base_score = float(row.get("rank") or 0.0)
@@ -354,6 +382,8 @@ def _source_score(row: dict[str, Any], message: str) -> float:
         score += (len(message_tokens & content_tokens) / len(message_tokens)) * 0.35
     score += _exact_topic_score(message, title, content)
     score += _governing_requirement_score(message, title, content)
+    if row.get("access_scope") != "global":
+        score += _joining_cost_score(message, content)
     score += _fragment_quality_score(row, message)
     score += _purchase_channel_score(message, title, content)
     score += _return_policy_score(message, title, content)
