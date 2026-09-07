@@ -128,7 +128,24 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
     # Preserve this occurrence's position: splitting on the numeric text links
     # repeated values to the first subject instead of the current claim. The
     # prefix is already bounded to what precedes THIS occurrence.
-    phrases = _capitalized_entity_phrases(claim.prefix)
+    #
+    # Bound the subject to the claim's own sentence. A heading two lines above
+    # was supplying it: "Requirements to Reach Supervisor" gave {reach,
+    # supervisor}, and every token must appear in the source window, so a source
+    # sentence reading "Supervisor is achieved by generating a total of 10 Open
+    # Group Case Credits" did not match. 10 was reported ungrounded, and the
+    # sentence stating the requirement was deleted from the answer or the whole
+    # answer was replaced. Measured live on rank-qualification questions, which
+    # are close to this bot's core purpose.
+    #
+    # With no named subject in the sentence, the existing lexical-overlap path
+    # applies, which is the same treatment as scripts that do not capitalise.
+    # Only a line break or a sentence end bounds the subject. A colon must not:
+    # "To qualify as Assistant Manager ... two paths: generate 120 ..." keeps its
+    # subject after the colon, and cutting there let a number belonging to
+    # another rank pass as grounded.
+    sentence_prefix = re.split(r"[\n\r]|(?<=[.!?])\s", claim.prefix)[-1]
+    phrases = _capitalized_entity_phrases(sentence_prefix)
     phrases = [phrase for phrase in phrases if len(_word_tokens(phrase)) >= 2][-1:]
 
     token_sets: list[set[str]] = []
