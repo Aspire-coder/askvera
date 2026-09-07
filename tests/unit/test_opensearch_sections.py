@@ -1,5 +1,7 @@
 """Tests for generic OpenSearch section retrieval behavior."""
 
+import pytest
+
 from app.evidence import approve_evidence
 from app.retrieval import opensearch_sections
 from app.retrieval.models import RetrievalResult
@@ -779,6 +781,36 @@ def test_high_confidence_conversation_route_skips_opensearch(monkeypatch) -> Non
 
     assert result.documents == []
     assert result.metadata["conversation_intent"] == "medical_claim"
+
+
+def test_policy_safety_question_still_reaches_retrieval(monkeypatch) -> None:
+    """Asking what the rules prohibit must not skip the documents.
+
+    Verified live 2026-09-07: the planner classifies these as medical_claim or
+    income_claim, and skipping retrieval here left nothing to answer from, so the
+    request was refused downstream regardless of the routing layers.
+    """
+    provider = OpenSearchSectionProvider()
+    monkeypatch.setattr(
+        provider,
+        "_build_search_plan",
+        lambda *_: RetrievalQueryPlan(
+            ["Does company policy prohibit medical claims?"],
+            conversation_intent="medical_claim",
+            intent_confidence=0.98,
+        ),
+    )
+    searched: list[str] = []
+    monkeypatch.setattr(
+        opensearch_sections,
+        "_client",
+        lambda: searched.append("called") or (_ for _ in ()).throw(RuntimeError("stop after search starts")),
+    )
+
+    with pytest.raises(RuntimeError):
+        provider.retrieve("Does company policy prohibit medical claims?", "US", "en", "new_prospect", "cid")
+
+    assert searched, "retrieval must be attempted for a reviewed policy-safety question"
 
 
 def test_outline_chunks_are_prioritized_only_for_structure_questions() -> None:
