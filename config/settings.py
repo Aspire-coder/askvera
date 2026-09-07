@@ -307,6 +307,14 @@ BEDROCK_SHARED_CIRCUIT_BREAKER_PREFIX = _env_str(
 # Generous ceiling that prevents runaway responses without shortening normal
 # policy and directory answers.
 BEDROCK_MAX_OUTPUT_TOKENS = _env_int("BEDROCK_MAX_OUTPUT_TOKENS", 1024)
+# Sampling temperature for the calls that classify rather than write: the query
+# planner, both evidence selectors, the support/income-claim routers and query
+# translation. Each returns JSON or a single rewritten string, so sampling
+# variety buys nothing and costs reproducibility -- the same question could
+# retrieve different evidence on two consecutive asks, which is the flapping
+# investigated in docs/audits/2026-09-07. The answer-writing call deliberately
+# does NOT use this and keeps the model default, where some variation is fine.
+BEDROCK_CLASSIFIER_TEMPERATURE = _env_float("BEDROCK_CLASSIFIER_TEMPERATURE", 0.0)
 # Bedrock Guardrail ID. Found in Bedrock -> Guardrails -> your guardrail -> Guardrail ID.
 BEDROCK_GUARDRAIL_ID = _env_str("BEDROCK_GUARDRAIL_ID", "")
 # Bedrock Guardrail version. Found in Bedrock -> Guardrails -> Versions.
@@ -606,6 +614,11 @@ _CODE_OWNED_SETTINGS = {
     "RETRIEVAL_PIPELINE_VERSION",
     "CONVERSATION_ROUTING_VERSION",
     "MODEL_ROUTING_VERSION",
+    # Determinism of the retrieval classifiers is a property of the code, not an
+    # operational dial. An SSM override here would make retrieval irreproducible
+    # with nothing in the codebase to explain why -- the same shape of problem
+    # as the pinned PROMPT_VERSION that silently defeated a code change.
+    "BEDROCK_CLASSIFIER_TEMPERATURE",
 }
 
 
