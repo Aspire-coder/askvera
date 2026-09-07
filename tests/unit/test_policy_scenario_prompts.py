@@ -54,6 +54,16 @@ def test_both_selectors_receive_scenario_guards(monkeypatch, provider):
         result = providers._select_evidence_documents(question, documents, "test")
         assert result[0].id == "2"
     prompt = calls[0]["system"][0]["text"]
-    assert "FBO and Preferred Customer rules are not interchangeable" in prompt
-    assert "alone do not establish an FBO role" in prompt
-    assert "complementary governing clauses" in prompt
+    # Scenario guards belong to the generation prompt, NOT the evidence selector.
+    # Adding them to the selector regressed three retrieval-quality canary cases
+    # (mexico-sponsoring, kyrgyzstan-foreign-fbo-bonus, unopened-product-return-
+    # window) by pulling policy sections ahead of sponsoring records and ahead of
+    # the buy-back clause, so they were reverted. Selector ranking changes must be
+    # evaluated against the canary before shipping.
+    assert "FBO and Preferred Customer rules are not interchangeable" not in prompt
+    assert "complementary governing clauses" not in prompt
+    if provider == "opensearch":
+        # Release-gate protection for unopened-product-return-window: without
+        # this, the selector picks the general satisfaction clause (21.03)
+        # instead of the buy-back clause (21.05).
+        assert "prefer the FBO buy-back or unsold-salable-product clause" in prompt

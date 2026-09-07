@@ -845,12 +845,6 @@ def _select_evidence_documents(
         "question asks how to become, qualify, earn, use, file, change, terminate, or whether something is "
         "allowed, prefer procedural or rule sections over general background sections. If the question includes "
         "typos or another language, infer the intended business topic and still choose the direct section. "
-        "Preserve the person's explicitly stated role: FBO and Preferred Customer rules are not interchangeable. "
-        "Unopened or unused products alone do not establish an FBO role, termination, or salable condition. "
-        "Distinguish satisfaction returns, delivery discrepancies and termination buy-back, including "
-        "the deadline's starting event. Sales-level or level-discount retention, monthly activity, "
-        "Leadership Bonus eligibility and incentive payments are separate rules. "
-        "Select complementary governing clauses when the question contrasts these concepts. "
         "Return only JSON."
     )
     user_prompt = (
