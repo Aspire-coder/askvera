@@ -49,7 +49,7 @@ def get_candidate_flags() -> CandidateFlags:
     AIOrchestrator.handle_chat directly with no database available - stays
     exactly as fast and DB-free as before this feature existed.
     """
-    if not settings.CANDIDATE_MODE_LOOKUP_ENABLED:
+    if settings.APP_ENV not in {"development", "test", "testing", "staging", "uat"} or not settings.CANDIDATE_MODE_LOOKUP_ENABLED:
         return _DEFAULT_FLAGS
 
     global _cached_flags, _cache_expires_at
@@ -87,6 +87,8 @@ def get_candidate_flags() -> CandidateFlags:
 
 def set_candidate_flags(flags: CandidateFlags, updated_by: str, reason: str) -> CandidateFlags:
     """Upsert the singleton control row and invalidate the local cache."""
+    if settings.APP_ENV not in {"development", "test", "testing", "staging", "uat"}:
+        raise ValueError("Experimental chat behavior is restricted to test environments.")
     global _cached_flags, _cache_expires_at
     with get_engine().begin() as connection:
         connection.execute(
