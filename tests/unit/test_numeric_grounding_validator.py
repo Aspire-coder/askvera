@@ -1,6 +1,7 @@
 from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationContext, ValidationResult
+from app.response.quality import has_incomplete_ending
 from app.validation.validators.numeric_grounding_validator import NumericGroundingValidator, remove_unsupported_numeric_sentences
 import pytest
 
@@ -527,3 +528,44 @@ def test_headings_do_not_let_an_invented_number_through(answer) -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(_context(answer, _MANAGER_SOURCE), result)
     assert result.has_critical()
+
+
+def test_repair_does_not_orphan_a_bracket_and_break_the_answer() -> None:
+    """Removing a sentence must not leave half a parenthetical behind.
+
+    Measured at 1 in 10 on "How can i become a recognized manager?" against the
+    deployed build. The model wrote a parenthetical aside containing an
+    ungrounded number, repair deleted that sentence, the stray ")" survived, and
+    the integrity validator read the unbalanced text as truncated - replacing a
+    complete, correct, cited answer with "the approved policy documents do not
+    contain enough information".
+    """
+    source = "A Recognized Manager must generate 120 Open Group Case Credits within 2 consecutive Months."
+    answer = (
+        "# Becoming a Recognized Manager\n\n"
+        "You must generate 120 Open Group Case Credits. "
+        "(There is an exception: a Downline FBO earning 999 Case Credits may still qualify. "
+        "Contact support for details.)\n\n"
+        "Maintain Active status throughout."
+    )
+    repaired, removed = remove_unsupported_numeric_sentences(
+        answer, _context(answer, source).retrieval_result.documents)
+
+    assert removed == ["999"]
+    assert repaired.count("(") == repaired.count(")")
+    assert not has_incomplete_ending(repaired, "en")
+    assert "120" in repaired
+
+
+def test_repair_leaves_a_matched_pair_untouched() -> None:
+    """Only orphaned delimiters are dropped, never a balanced pair."""
+    source = (
+        "A Recognized Manager must generate 120 Open Group Case Credits within 2 "
+        "consecutive Months (see Section 5.01)."
+    )
+    answer = "You need 120 Open Group Case Credits (see Section 5.01) within 2 consecutive Months."
+    repaired, removed = remove_unsupported_numeric_sentences(
+        answer, _context(answer, source).retrieval_result.documents)
+
+    assert removed == []
+    assert repaired == answer

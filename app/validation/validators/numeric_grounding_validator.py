@@ -321,9 +321,42 @@ def remove_unsupported_numeric_sentences(answer: str, source_documents: list[obj
     repaired = answer
     for start, end in reversed(merged):
         repaired = repaired[:start] + repaired[end:]
+    repaired = _drop_orphaned_delimiters(repaired)
     repaired = re.sub(r"[ \t]+\n", "\n", repaired)
     repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
     return repaired, [claim.text for claim in unsupported]
+
+
+def _drop_orphaned_delimiters(text: str) -> str:
+    """Remove brackets this repair orphaned, never a matched pair.
+
+    Removing a sentence can cut one half of a parenthetical aside. Measured at
+    1 in 10 on "How can i become a recognized manager?": the model wrote
+    "(There is an exception: ... 999 Case Credits ...)", repair deleted the
+    sentence holding the number, the stray ")" survived, and the integrity
+    validator then read the unbalanced text as truncated and replaced the entire
+    answer with "the approved policy documents do not contain enough
+    information" - for a question the documents answer in full.
+
+    Only delimiters with no partner are dropped, so text the repair did not
+    touch is unchanged.
+    """
+    removable: set[int] = set()
+    for opener, closer in (("(", ")"), ("[", "]")):
+        open_positions: list[int] = []
+        for index, character in enumerate(text):
+            if character == opener:
+                open_positions.append(index)
+            elif character == closer:
+                if open_positions:
+                    open_positions.pop()
+                else:
+                    removable.add(index)
+        removable.update(open_positions)
+    if not removable:
+        return text
+    cleaned = "".join(char for index, char in enumerate(text) if index not in removable)
+    return re.sub(r"\s+([,.;:!?])", r"\1", re.sub(r"[ \t]{2,}", " ", cleaned))
 
 
 class NumericGroundingValidator:
