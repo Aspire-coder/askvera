@@ -602,6 +602,7 @@ _SSM_CONFIG: dict[str, str] = {}
 # Letting an older SSM value override them can make a successful deployment
 # continue serving responses created by previous code.
 _CODE_OWNED_SETTINGS = {
+    "PROMPT_VERSION",
     "RETRIEVAL_PIPELINE_VERSION",
     "CONVERSATION_ROUTING_VERSION",
     "MODEL_ROUTING_VERSION",

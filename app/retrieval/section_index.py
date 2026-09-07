@@ -117,20 +117,6 @@ def _tokens(text_value: str) -> list[str]:
     return tokens
 
 
-def _ts_query(tokens: list[str]) -> str:
-    """Build a safe broad Postgres tsquery from Unicode-normalized tokens."""
-    cleaned = [token.replace("'", "") for token in tokens if token and "'" not in token]
-    return " | ".join(f"{token}:*" for token in cleaned) or "policy"
-
-
-def _token_regex(tokens: list[str]) -> str:
-    """Build a broad regex fallback for candidate collection."""
-    cleaned = [re.escape(token) for token in tokens if token]
-    if not cleaned:
-        return r"policy"
-    return r"\m(?:" + "|".join(cleaned) + r")\M"
-
-
 def _key_phrases(message: str) -> list[str]:
     """Extract short phrases worth matching exactly."""
     ordered = _tokens(message)
