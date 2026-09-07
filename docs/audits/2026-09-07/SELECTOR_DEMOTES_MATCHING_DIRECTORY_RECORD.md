@@ -1,5 +1,12 @@
 # Confirmed ranking weakness: the selector demotes a dominant country record
 
+> **RESOLVED 2026-09-07.** Cause was non-zero sampling on the LLM evidence
+> selector, not the selector prompt. Fixed by `BEDROCK_CLASSIFIER_TEMPERATURE=0`
+> in `feat/deterministic-classifiers`, deployed as `fc2a7b9`. Measured 0
+> failures in 30 runs against 7 in 34 before (Fisher exact p = 0.0087). See
+> **Resolution** at the end. The analysis below is kept as written, including
+> the parts it got wrong.
+
 Investigated 2026-09-07 against deployed `544c1f6`. **The canary fixture is
 correct. The selector is wrong roughly a third of the time.**
 
@@ -97,3 +104,60 @@ standalone probe above for iteration since it needs no deploy.
 Relax the fixture. The expectation is correct, and loosening it would hide a
 selector that discards the best available evidence for a country-specific
 question. That is the class of failure this gate exists to catch.
+
+
+## Resolution (2026-09-07)
+
+**The cause was sampling, not the prompt.** Every Bedrock `converse` call in
+`app/retrieval/providers.py` and `app/retrieval/opensearch_sections.py` ran at
+the model's default temperature. The evidence selector is a classifier that
+returns JSON, so sampling variety bought nothing and cost reproducibility: the
+same question could be given the same candidates and reorder them differently.
+
+`feat/deterministic-classifiers` sets `temperature` explicitly on the six
+classifier calls -- query planner, both evidence selectors, the support and
+income-claim routers, query translation -- and leaves the three prose-writing
+calls at the model default. Deployed as `fc2a7b9`.
+
+### Measurement
+
+Same standalone probe, same question, same index.
+
+| | Failures | Runs | Rate |
+|---|---|---|---|
+| Temperature unset | 7 | 34 | 20.6% |
+| Temperature 0 (`fc2a7b9`) | **0** | **30** | **0%** |
+
+Fisher exact, one-tailed: **p = 0.0087**. Probability of 30 consecutive clean
+runs at the old rate: **0.001**.
+
+The 30 post-fix runs all returned confidence 0.95, the value that previously
+accompanied every correct result. No run returned 0.75 or 0.85.
+
+Rule of three puts the 95% upper bound on the new failure rate at 10%, so this
+is not evidence the rate is exactly zero -- only that it is decisively lower
+than 20.6%.
+
+### What this closes, and what it does not
+
+The deterministic guard proposed above is **not needed**. Neither is the
+confidence-threshold fallback that suggested itself from the data (0.95 when
+right, 0.75-0.85 when wrong, across all 34 pre-fix runs). Both were designed to
+compensate for a non-determinism that no longer exists. Building either now
+would add a branch that never fires.
+
+`kyrgyzstan-foreign-fbo-bonus-release-gate` stays blocking and is now a genuine
+regression guard rather than a known-flaky case. If it fails again, that is new
+information, not the old flapping.
+
+The advice above about validation still holds and generalises: a single green
+canary run proves nothing about an intermittent failure. `--repeat N`, added in
+`feat/canary-repeat-runs`, exists for this.
+
+### Correction to the analysis above
+
+The section arguing a prompt change was the likely fix, and that a deterministic
+guard was preferable to touching the prompt, was reasoning from the wrong cause.
+The prompt was never the problem. The observation that prompt edits to this
+component are high risk remains true and was what made a deterministic
+alternative attractive -- but the actual fix touched no prompt at all.
