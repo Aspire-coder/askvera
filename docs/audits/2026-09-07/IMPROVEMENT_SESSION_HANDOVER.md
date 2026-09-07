@@ -1,9 +1,28 @@
 # Retrieval and quality improvements: session handover
 
-Worked 2026-09-07 against `main` at `7ad2d10`. Six code branches are pushed and
-unmerged. Nothing was deployed and nothing was run against the production box.
+Worked 2026-09-07. Seven branches produced. Four are merged and the code is
+deployed as `fc2a7b9`; three remain, gated on one unanswered question below.
 
-## The finding that reframed the work
+## Headline: the selector flapping is fixed, and measured
+
+`BEDROCK_CLASSIFIER_TEMPERATURE=0` eliminated the intermittent ranking failure
+recorded in `SELECTOR_DEMOTES_MATCHING_DIRECTORY_RECORD.md`.
+
+| | Failures | Runs | Rate |
+|---|---|---|---|
+| Temperature unset | 7 | 34 | 20.6% |
+| Temperature 0 (`fc2a7b9`) | **0** | **30** | **0%** |
+
+Fisher exact one-tailed **p = 0.0087**. The cause was sampling on the LLM
+evidence selector, not the selector prompt. Full detail and the corrections it
+forced are in that finding doc, now marked RESOLVED.
+
+This also cancelled two pieces of planned work: the deterministic country-record
+guard the finding proposed, and a confidence-threshold fallback suggested by the
+data (0.95 when right, 0.75-0.85 when wrong, across all 34 pre-fix runs). Both
+compensated for non-determinism that no longer exists.
+
+## The finding that reframed the metrics work
 
 **Five of the fourteen CloudWatch alarms were watching metrics that no code ever
 emitted.** `GovernanceHealth`, `RetrievalHealth`, `ValidationHealth`,
@@ -11,41 +30,45 @@ emitted.** `GovernanceHealth`, `RetrievalHealth`, `ValidationHealth`,
 and alarms in `app/monitoring/alarms.py`, and zero callers anywhere in `app/`,
 `api/`, `services/`, `utils/`, `config/`, `scripts/` or `main.py`.
 
-Every one of those alarms uses `treat_missing_data="notBreaching"`. With no data
-they sat in OK indefinitely. **They did not look broken. They looked healthy.**
+Every one uses `treat_missing_data="notBreaching"`. With no data they sat in OK
+indefinitely. **They did not look broken. They looked healthy.**
 
-This changed the shape of task 1. Adding a fallback-rate metric to a metrics
-path that nothing published would have produced another silent alarm. The
-publishing path had to be wired first.
+Adding a fallback-rate metric to a path nothing published would have produced a
+sixth silent alarm, so the publishing path had to be wired first.
 
 A latent defect surfaced while wiring it: the collector only ever had
-`record_retrieval_failure`, which drives `retrieval_health` to 0.0 with nothing
-to drive it back up. Governance and validation each had a success recorder;
-retrieval did not. Wired as it stood, `RetrievalHealth` would have latched at
-0.0 on the first failure and fired forever — no more useful than the silence.
+`record_retrieval_failure`, driving `retrieval_health` to 0.0 with nothing to
+drive it back up. Governance and validation each had a success recorder;
+retrieval did not. Wired as it stood, that alarm would have latched on the first
+failure and fired forever.
 
-## Branches, in merge order
+## Branches
 
-The first three are independent. The last three are a stack.
+**Merged and deployed as `fc2a7b9`:**
+
+| Branch | What it does |
+|--------|--------------|
+| `feat/deterministic-classifiers` | Temperature 0 on the six retrieval classifier calls |
+| `feat/canary-repeat-runs` | `--repeat N`, flaky detection, observed-only tier, two new cases |
+| `feat/config-drift-detection` | Report SSM values the code refused to apply |
+
+Plus `docs/selector-ranking-weakness`, merged as PR #79.
+
+**Remaining, a stack. Merge 1, then 2, then 3, in that order:**
 
 | # | Branch | What it does |
 |---|--------|--------------|
-| 1 | `feat/deterministic-classifiers` | `temperature: 0` on the six retrieval classifier calls |
-| 2 | `feat/canary-repeat-runs` | `--repeat N`, flaky detection, observed-only tier, two new cases |
-| 3 | `feat/config-drift-detection` | Report SSM values the code refused to apply |
-| 4 | `feat/fallback-rate-metric` | Fallback rate + alarm; fixes unused `CLOUDWATCH_FLUSH_INTERVAL` |
-| 5 | `feat/track-numeric-repairs` | *stacked on 4* — count grounding repairs |
-| 6 | `feat/wire-health-metrics` | *stacked on 5* — wire all five dead health metrics |
+| 1 | `feat/fallback-rate-metric` | Fallback rate + alarm; fixes unused `CLOUDWATCH_FLUSH_INTERVAL` |
+| 2 | `feat/track-numeric-repairs` | Count grounding repairs, log their evidence |
+| 3 | `feat/wire-health-metrics` | Wire all five dead health metrics |
 
-**Merge 4 → 5 → 6 in that order.** 1, 2 and 3 can go any time.
+Every branch has the full suite green under `pytest tests`, which is what
+`deploy.sh` runs, not just `tests/unit`.
 
-Every branch has the full suite green (`pytest tests`, which is what `deploy.sh`
-runs — not just `tests/unit`).
+## Blocking question for the remaining three
 
-## Before you assume any of this is live
-
-None of the metrics work reaches CloudWatch unless both of these are true in
-SSM. Their code defaults are `null` and `false`:
+None of that work reaches CloudWatch unless SSM sets both of these. The code
+defaults are `null` and `false`:
 
 ```bash
 aws ssm get-parameters-by-path --path /askverachat/prod/ --recursive \
@@ -53,96 +76,83 @@ aws ssm get-parameters-by-path --path /askverachat/prod/ --recursive \
   --output table
 ```
 
-If `METRICS_PROVIDER` is not `cloudwatch` or `ENABLE_CLOUDWATCH_METRICS` is not
-`true`, then **request metrics are not reaching CloudWatch today either**, and
-the six alarms that do have producers are as blind as the five that do not. I
-could not check this myself.
+The `config_effective_snapshot` log confirms SSM sets `METRICS_PROVIDER`,
+`ENABLE_CLOUDWATCH_METRICS` and `ENABLE_CLOUDWATCH_ALARMS`, but not to what
+values. If `METRICS_PROVIDER` is not `cloudwatch`, then request metrics are not
+reaching CloudWatch today either, the six alarms that do have producers are as
+blind as the five that do not, and fixing that comes before deploying these
+three branches.
 
-## Measured baseline, before any change (2026-09-07 21:35 UTC)
+## What the first deploy of this work found
 
-Ten runs of the probe against deployed `7ad2d10`, temperature unset:
+**Config drift, immediately.** SSM held
+`RETRIEVAL_PIPELINE_VERSION = 2026-07-17-reviewed-results-v1`, seven weeks
+stale, while production ran `2026-08-23-selector-calibration-v4`. Harmless at
+runtime, since the code ignores it, but it would mislead anyone reading SSM to
+find out what production runs. Deleted from the console; the application's own
+role correctly lacks `ssm:DeleteParameter`. The next deploy should report
+`ignored_code_owned_count: 0`.
 
-| Outcome | Runs | Retrieval confidence |
-|---|---|---|
-| Forever Kyrgyzstan record (correct) | 0,1,2,3,4,6,7,8 | 0.95 every time |
-| US-EN-Company-Policy Sec 4.04-f (wrong) | 5, 9 | 0.85 and 0.75 |
+**A canary case that passes for the wrong reason.**
+`product-price-out-of-scope-delivered` passed, but the answer was a generic
+fallback telling the reader the documents do not contain enough information and
+to rephrase. Evidence approval rejected first
+(`insufficient_approved_evidence`), so the corpus-boundary prompt rule never
+ran. The assertion, absence of two bad phrases, passed because the response
+contained nothing at all. A distributor asking a price is told to rephrase
+rather than that the documents do not cover pricing. **The case needs a stronger
+assertion and the behaviour needs fixing.** Keep it observed-only until then.
 
-**8/10 correct, 20% failure rate.** With the ~4-in-14 recorded earlier the same
-day, that is 6 failures in 24 observed runs, about 25%.
+**Numeric repair firing on a directory contact answer.**
+`uruguay-phone-delivered-answer` triggered `NUMERIC_CLAIM_UNGROUNDED`, and
+repair removed the figures 10 and 8. The phone numbers survived and the case
+passed, but something was deleted, plausibly office hours. This is the same
+validator that removed a correct figure earlier in the day, on exactly the class
+of answer where three phone numbers went missing this week. Worth reading the
+full answer before and after repair.
 
-Confidence separates the two outcomes perfectly across all ten runs: 0.95 when
-the selector is right, below 0.9 when it is wrong. That holds in the earlier
-probe too. It suggests a cheap safety net independent of the temperature
-question -- when retrieval confidence for a named-market question falls below
-0.9, prefer score order over the selector's reordering -- but it is a
-correlation over 24 runs, not an established rule, and it should not be built
-before the temperature result is in.
+**`uruguay-phone-delivered-answer` is ready to promote** to blocking. It
+delivered the correct number with a citation.
 
-## Verifying the temperature change — do this, don't assume
+## Two things deliberately not done
 
-Branch 1 is a hypothesis with a measurement attached, not a proven fix. The
-selector weakness in `SELECTOR_DEMOTES_MATCHING_DIRECTORY_RECORD.md` recorded
-~4 failures in 14 runs, with the record scoring 9.406 buried at position four.
-Non-zero sampling is the obvious mechanism, but that is an inference.
-
-Measure it before and after, using the mechanism branch 2 adds:
-
-```bash
-cd /opt/askvera && sudo -u askvera .venv/bin/python scripts/run_retrieval_canary.py \
-  --load-ssm --repeat 10 --case-id kyrgyzstan-foreign-fbo-bonus-release-gate
-```
-
-Read `passed_runs` and `flaky` in the output. If the pre-change run flaps and
-the post-change run is 10/10, the fix is real. If it still flaps at temperature
-0, the selector prompt itself is the problem and the finding doc's next steps
-apply.
-
-I deliberately did **not** quarantine that case. It is currently the only signal
-that would tell you whether the temperature change worked.
-
-## Two things I did not do, and why
-
-**Held-out evaluation on the US$25 budget.** Prepared but not run. It spends
-real money and needs the box, both of which are yours to trigger. The discipline
-from `RETRIEVAL_STATUS_AND_PLAN.md` §6 still holds and matters more than the
-mechanics: **agree the thresholds before seeing any results, and never reuse a
-question that was used to tune a fix.** Branch 2 gives you `--repeat` so a
-held-out number can be a distribution rather than a single sample.
+**Held-out evaluation on the US$25 budget.** Not run. It spends real money and
+needs the box. The discipline from `RETRIEVAL_STATUS_AND_PLAN.md` section 6
+matters more than the mechanics: **agree thresholds before seeing results, and
+never reuse a question used to tune a fix.** `--repeat` now makes a held-out
+number a distribution rather than a single sample.
 
 **Backing up the 8 GB of captures to S3.** Not done. It is an outward-facing
-upload of ~600 Bedrock calls of evaluation data, it costs money, and the
-destination bucket and retention are decisions I should not make for you. The
-captures still exist only on one laptop, which remains the single largest
-unrecoverable risk in the project — larger than anything in this session.
+upload whose destination bucket and retention are not mine to choose. Those
+captures still exist on one laptop only, which remains the single largest
+unrecoverable risk in the project.
 
 ## Open risks
 
 - **The 35% fallback threshold is a guess.** Nobody has measured the normal
-  rate. It is set to catch a step change, not to express a quality target.
-  Tighten it once a fortnight of `FallbackResponses` data gives a real baseline.
-- **The two new canary cases are unverified.** That is why they are
-  observed-only. Promote them to blocking once a deploy shows them passing.
-- **`starlette` is unpinned**, arriving via `fastapi==0.141.1`. That is why the
-  `httpx2` deprecation appeared with no change on our side. Pinning it, and
-  doing the `httpx2` migration deliberately, is the real fix for the third
-  deploy message.
+  rate. Set to catch a step change, not to express a target. Tighten it once a
+  fortnight of `FallbackResponses` data gives a baseline.
+- **`starlette` is unpinned**, arriving via `fastapi==0.141.1`, which is why the
+  `httpx2` deprecation appeared with no change on our side. Pinning it and doing
+  the migration deliberately is the real fix for that deploy message.
 - **There is no deploy log.** `/var/log/askvera-deploy.log` does not exist, so
-  deploy output — canary scores, health timings, rollbacks — lives only in shell
-  scrollback. A `tee` into a timestamped file would make the fallback-rate work
-  much easier to reason about after the fact.
+  canary scores, health timings and rollbacks live only in shell scrollback.
 - **`_high_error_rate_alarm` uses per-host dimensions** while the new fallback
-  alarm uses aggregate ones. Correct for a single-instance deployment, worth
-  revisiting before a second instance exists.
+  alarm uses aggregate ones. Correct for one instance; revisit before a second.
+- **The 0% post-fix rate is not proof of zero.** Rule of three puts the 95%
+  upper bound at 10%. Decisively better than 20.6%, not perfect.
 
-## Corrections to things I said earlier
+## Corrections made during the session
 
-- I claimed no `temperature` was set anywhere. Wrong:
-  `services/controlled_copy.py` already pinned it to 0. That is the precedent
-  branch 1 follows.
-- I predicted both the curl and nginx deploy messages would disappear on the
-  next deploy. Only nginx did. `deploy.sh` parses its functions before
-  `git pull` replaces the file, so the curl fix lands one deploy later.
+- I claimed no temperature was set anywhere. Wrong:
+  `services/controlled_copy.py` already pinned it to 0.
+- I predicted both the curl and nginx deploy messages would clear on the same
+  deploy. Only nginx did. `deploy.sh` parses its functions before `git pull`
+  replaces the file, so the curl fix landed one deploy later.
 - I stated a test count of 1004 in a commit message without having read it. The
   actual figure was 987. Amended.
 - I added `latest_system_metric` to the collector when `system_snapshot` already
   did the same thing. Removed.
+- I read a 9/10 probe as a near-clean result before verifying the change was
+  deployed. It was not. The box was still on `7ad2d10`, so that run was a second
+  baseline rather than an after-measurement.
