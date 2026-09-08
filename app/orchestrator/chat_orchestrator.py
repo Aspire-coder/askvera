@@ -1002,11 +1002,47 @@ class AIOrchestrator:
         Returns "" when no candidate qualifies, meaning the follow-up is retrieved
         on its own words rather than against an instruction.
         """
+        later_messages: list[str] = []
         for message in reversed(user_messages):
             if self._is_context_dependent_message(message) or self._is_instruction_message(message):
+                later_messages.append(message)
                 continue
-            return self._answered_clause_of(message)
+            return self._carry_forward_market_shift(self._answered_clause_of(message), later_messages)
         return ""
+
+    def _carry_forward_market_shift(self, anchor: str, later_messages: list[str]) -> str:
+        """Keep a market named after the anchor, so the subject cannot revert.
+
+        The anchor search skips context-dependent turns, which is right for
+        "Tell me more" but wrong when one of those skipped turns changed the
+        country. Given:
+
+            How do I sponsor someone in Belgium?
+            What about Germany?
+            Tell me more.
+
+        the anchor walks back past both follow-ups to the Belgium question, and
+        Germany disappears from retrieval entirely - the reader is answered
+        about the market they moved away from two turns ago.
+
+        `later_messages` is newest-first, so the most recent market shift wins.
+
+        The shifting turn is appended rather than substituted into the anchor.
+        find_market_mentions returns market codes, not the surface names as
+        written, so replacing "Belgium" with "Germany" would need a reverse
+        code-to-name mapping in whichever language the reader used. This mirrors
+        _build_retrieval_query's existing handling of an immediate topic shift,
+        which keeps both the prior topic and the new subject for the same
+        reason, and leaves market scoping to retrieval and evidence approval.
+        """
+        if not anchor:
+            return anchor
+        anchor_markets = find_market_mentions(anchor)
+        for message in later_messages:
+            markets = find_market_mentions(message)
+            if markets and markets != anchor_markets:
+                return f"{anchor} {message}".strip()
+        return anchor
 
     def _is_instruction_message(self, message: str) -> bool:
         """True for a bare instruction to produce content, which is never context.
