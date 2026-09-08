@@ -499,6 +499,17 @@ def process_ingestion_job(
             )
             if preflight.requires_ocr:
                 if not settings.ADMIN_TEXTRACT_OCR_ENABLED or not upload_uri:
+                    # Named precisely, because this now fires for a mostly
+                    # readable document containing one scanned page, and
+                    # "appears to be scanned or image-only" would send the
+                    # uploader looking for a problem that is not there.
+                    if preflight.scanned_page_numbers:
+                        pages = ", ".join(str(n) for n in preflight.scanned_page_numbers)
+                        raise ValueError(
+                            f"This PDF has no extractable text on page(s) {pages}, which carry images. "
+                            f"Publishing it would silently omit that content. Supply a text-based PDF "
+                            f"or enable OCR before publication."
+                        )
                     raise ValueError(
                         "This PDF appears to be scanned or image-only and requires OCR before publication."
                     )

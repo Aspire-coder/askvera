@@ -37,6 +37,13 @@ def main() -> int:
         print(f"Extracted characters: {report.extracted_character_count}")
         print(f"OCR required: {report.requires_ocr}")
         print(f"Table-aware extraction recommended: {report.table_aware_extraction_recommended}")
+        print(f"Text coverage: {report.text_coverage_ratio:.1%} of pages")
+        if report.scanned_page_numbers:
+            pages = ", ".join(str(number) for number in report.scanned_page_numbers)
+            print(f"Scanned pages needing OCR (no extractable text, image present): {pages}")
+        if report.blank_page_numbers:
+            pages = ", ".join(str(number) for number in report.blank_page_numbers)
+            print(f"Blank pages (no text, no image - normal): {pages}")
         print(f"Garbled (unrecoverable) characters found: {report.garbled_character_count}")
         if report.encoding_corruption_detected:
             print(
