@@ -76,9 +76,41 @@ def format_directory_fields(fields: dict[str, object]) -> str:
     )
 
 
+_CONTACT_REQUEST_RE = re.compile(
+    r"\b(phone|telephone|number|email|e-mail|website|web\s+site|url|address|located|location|"
+    r"fax|contact|reach)\b",
+    re.IGNORECASE,
+)
+_NON_CONTACT_REQUEST_RE = re.compile(
+    r"\b(business\s+hours?|office\s+hours?|hours?|open|opening|minimum\s+order|order\s+size|"
+    r"delivery|bonus|payment|sponsor\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_only_for_a_non_contact_field(question: str) -> bool:
+    """True when the question names a directory field that is not a contact.
+
+    Restoring a phone number and a street address into an answer about opening
+    hours adds facts nobody asked for, and every one of them then has to
+    survive subject-aware grounding in a sentence about hours. On 2026-09-08
+    that cost the Belgium office-hours answer its address and phone number:
+    both were verbatim from the record - removal diagnostics reported them
+    present in the source - and repair deleted them along with their sentences,
+    failing the release gate.
+
+    Contact restoration exists to correct a mangled or dropped contact value in
+    an answer that is about contacts. It has no business in an answer that is
+    not.
+    """
+    text = question or ""
+    return bool(_NON_CONTACT_REQUEST_RE.search(text)) and not _CONTACT_REQUEST_RE.search(text)
+
+
 def restore_missing_directory_contacts(
     answer: str,
     field_sets: Iterable[dict[str, object]],
+    question: str = "",
 ) -> tuple[str, list[str]]:
     """Restore exact contacts from the highest-ranked directory record.
 
@@ -90,6 +122,8 @@ def restore_missing_directory_contacts(
     corrected in place instead of leaving it wrong and appending a duplicate.
     """
     original = (answer or "").strip()
+    if _asks_only_for_a_non_contact_field(question):
+        return original, []
     missing: list[tuple[str, str]] = []
     corrected_labels: list[str] = []
     seen_values: set[str] = set()
