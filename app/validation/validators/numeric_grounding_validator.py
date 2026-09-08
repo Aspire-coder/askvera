@@ -364,7 +364,9 @@ def _source_windows(
         )
     for match in pattern.finditer(source_text):
         if required_unit:
-            found_unit = _unit_beside(source_text, match.start(), match.end())
+            # The unit governing THIS occurrence, which may be inherited from a
+            # heading rather than written beside the figure.
+            found_unit = _governing_unit(source_text, match.start(), match.end())
             if found_unit and found_unit != required_unit:
                 continue
         index = match.start()
@@ -385,6 +387,45 @@ def _source_windows(
         window_end = min(right_boundary, match.end() + radius)
         windows.append(source_text[window_start:window_end])
     return windows
+
+
+# Any unit token, wherever it stands - not only beside a figure. Used to find
+# the unit that governs a bare number, such as a column heading stating the
+# currency once for the rows beneath it.
+_UNIT_TOKEN_RE = re.compile(
+    r"(?<![a-z])(?:case\s+credits?|cc|"
+    + "|".join(sorted(code.lower() for code in _CURRENCY_CODES))
+    + r")(?![a-z])|[%€£$]",
+    re.IGNORECASE,
+)
+# How far back a heading may govern a figure. Far enough to reach the label at
+# the top of a short block, short enough not to reach across a record into an
+# unrelated one.
+_UNIT_LOOKBACK_CHARACTERS = 300
+
+
+def _governing_unit(source_text: str, start: int, end: int) -> str:
+    """The unit this figure is denominated in, adjacent or inherited.
+
+    A unit written beside the number wins. Otherwise the nearest unit token
+    BEFORE it governs, which is how a table states its currency once in a
+    heading and leaves the rows bare.
+
+    Document-wide presence is not enough, and treating it as enough was wrong.
+    In a record reading "Delivery charges - DZD / Standard delivery: 900 /
+    Membership charges - EUR / Annual membership: 20", both DZD and EUR appear,
+    so an answer saying "Standard delivery costs 900 EUR" satisfied a
+    document-wide check while stating the wrong currency for that row.
+    """
+    adjacent = _unit_beside(source_text, start, end)
+    if adjacent:
+        return adjacent
+    nearest = None
+    for match in _UNIT_TOKEN_RE.finditer(
+        source_text, max(0, start - _UNIT_LOOKBACK_CHARACTERS), start
+    ):
+        nearest = match
+    return _normalize_unit(nearest.group(0)) if nearest else ""
 
 
 def _unit_appears_in(source_text: str, unit: str) -> bool:

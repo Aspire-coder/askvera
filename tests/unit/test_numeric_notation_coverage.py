@@ -464,3 +464,62 @@ def test_an_unlisted_code_is_a_unit_only_when_the_answer_capitalises_it():
     assert _normalize_unit("xyz", allow_unlisted_code=True) == ""
     assert _normalize_unit("and", allow_unlisted_code=True) == ""
     assert _normalize_unit("XYZ") == ""
+
+
+# A unit appearing somewhere in the document is necessary, not sufficient.
+# Raised in review with this counterexample: both DZD and EUR appear, so a
+# document-wide check accepts either currency for either row.
+_MIXED_UNIT_RECORD = (
+    "Forever Algeria.\n"
+    "Delivery charges - DZD\n"
+    "Standard delivery: 900\n"
+    "Membership charges - EUR\n"
+    "Annual membership: 20"
+)
+
+MIXED_UNIT_CASES = [
+    ("Standard delivery costs 900 EUR.", False),
+    ("Standard delivery costs 900 DZD.", True),
+    ("Annual membership costs 20 EUR.", True),
+    ("Annual membership costs 20 DZD.", False),
+]
+
+
+@pytest.mark.parametrize("answer,should_be_grounded", MIXED_UNIT_CASES)
+def test_a_figure_takes_the_unit_of_its_own_row(answer: str, should_be_grounded: bool) -> None:
+    """The unit governing a figure is the nearest one before it, not any in the
+    document.
+
+    Both rows here are bare numbers under their own currency heading, which is
+    how a table states a unit once. A document-wide check cannot tell them
+    apart, and the number and the field name both match in every case, so
+    nothing else in the validator can either.
+    """
+    document = _document(_MIXED_UNIT_RECORD, "Forever Algeria", "sponsoring-001-algeria")
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+    assert (not unsupported) is should_be_grounded, unsupported
+
+
+def test_an_adjacent_unit_beats_an_inherited_one() -> None:
+    """A heading governs only the figures that do not state their own unit."""
+    record = "Charges - DZD\nStandard delivery: 900\nExpress delivery: 40 EUR"
+    document = _document(record, "Forever Algeria", "sponsoring-001-algeria")
+
+    assert not [c.number for c in unsupported_numeric_claims("Express delivery costs 40 EUR.", [document])]
+    assert [c.number for c in unsupported_numeric_claims("Express delivery costs 40 DZD.", [document])]
+
+
+def test_a_heading_does_not_govern_across_a_long_gap() -> None:
+    """Inheritance is bounded, so a distant heading cannot claim an unrelated figure."""
+    from app.validation.validators.numeric_grounding_validator import (
+        _UNIT_LOOKBACK_CHARACTERS,
+        _governing_unit,
+        _normalize,
+    )
+
+    filler = "some unrelated sentence about ordering. " * 12
+    record = _normalize(f"Charges - DZD {filler} Standard delivery: 900")
+    index = record.rfind("900")
+
+    assert len(filler) > _UNIT_LOOKBACK_CHARACTERS
+    assert _governing_unit(record, index, index + 3) == ""
