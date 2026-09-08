@@ -373,3 +373,82 @@ def test_a_question_asking_for_hours_and_an_address_still_restores() -> None:
     )
 
     assert restored
+
+
+# --- the France pilot defect, reproduced from the real record ---------------
+
+
+FRANCE_RECORD_WRAP = (
+    "Minimum order size FBO: We do not have a minimum order in France, yet a newly sponsored\n"
+    "Preferred Customer will have to order 150\u20ac minimum of products within 72 hours in order "
+    "to validate his\nsponsorship.\n"
+)
+
+ORDER_QUESTION = "What is the minimum order size for an FBO in France?"
+
+
+def test_a_field_that_wraps_mid_sentence_is_not_appended_as_a_fragment() -> None:
+    """The defect a reader actually received, on 2026-09-08.
+
+    The capture stopped at the newline where the PDF wraps, so the answer was
+    given "...yet a newly sponsored" with a period bolted on and delivered it.
+    The value now runs to the end of the sentence, which makes it prose, which
+    the length guard declines - so nothing is appended rather than half of it.
+    """
+    answer = "For an FBO in France, there is no minimum order requirement."
+
+    restored, changed = restore_missing_requested_order_size(
+        answer, [FRANCE_RECORD_WRAP], ORDER_QUESTION
+    )
+
+    assert changed is False
+    assert restored == answer
+    assert "yet a newly sponsored." not in restored
+
+
+def test_the_old_truncation_point_is_no_longer_reachable() -> None:
+    """Pinned to the exact fragment, so a regression is unmistakable."""
+    restored, _ = restore_missing_requested_order_size(
+        "An answer.", [FRANCE_RECORD_WRAP], ORDER_QUESTION
+    )
+
+    assert not restored.rstrip().endswith("yet a newly sponsored.")
+
+
+def test_a_short_field_that_wraps_is_restored_whole() -> None:
+    """Preserving the field across line breaks, not merely refusing more often.
+
+    A wrapped value that is genuinely a value still gets restored, joined into
+    one line.
+    """
+    wrapped = "Minimum order size FBO: 2 CC per\norder for all FBOs."
+
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", [wrapped], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert restored.endswith("Minimum order size FBO: 2 CC per order for all FBOs.")
+
+
+def test_a_short_single_line_field_still_restores() -> None:
+    """The behaviour this function exists for must survive the fix."""
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", ["Minimum order size FBO: 0,200CC (7 800DZD)."], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert restored.endswith("Minimum order size FBO: 0,200CC (7 800DZD).")
+
+
+def test_a_prose_field_is_declined_rather_than_truncated() -> None:
+    """Algeria writes this field as a sentence too, and gets the same treatment."""
+    algeria = (
+        "Minimum order size FBO: 0,200CC as a first order for Preferred Customers, "
+        "7 800DZD ($60) and the equivalent of 5 000 DZD ($43) after the first purchase "
+        "for all FBOs.\n"
+    )
+
+    _, changed = restore_missing_requested_order_size("An answer.", [algeria], ORDER_QUESTION)
+
+    assert changed is False

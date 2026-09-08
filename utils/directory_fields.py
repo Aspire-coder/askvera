@@ -317,7 +317,7 @@ def restore_missing_requested_order_size(
     corrected = answer or ""
     for source in source_texts:
         match = re.search(
-            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.\n]+)",
+            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.]+)",
             source or "",
             re.IGNORECASE,
         )
