@@ -763,3 +763,76 @@ def test_prose_after_a_colon_line_does_not_keep_an_orphaned_lead_in() -> None:
 
     text = "The costs are:\n\nOur office is open on weekdays."
     assert _drop_orphaned_lead_ins(text) == "Our office is open on weekdays."
+
+
+class _AlgeriaSource:
+    """The directory writes amounts space-grouped and continental."""
+
+    content = (
+        "Forever Algeria. Minimum order size FBO: 0,200CC as a first order for "
+        "Preferred Customers, 7 800DZD ($60) and the equivalent in local currency."
+    )
+    title = "International-Sponsoring-Directory.pdf - Forever Algeria"
+    metadata: dict = {}
+
+
+def _algeria_flagged(answer: str) -> list[str]:
+    from app.validation.validators.numeric_grounding_validator import unsupported_numeric_claims
+
+    return [claim.number for claim in unsupported_numeric_claims(answer, [_AlgeriaSource()])]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "For a new FBO in Algeria, the minimum first order is 7,800 DZD (about $60).",
+        "For a new FBO in Algeria, the minimum first order is 7800 DZD (about $60).",
+        "For a new FBO in Algeria, the minimum first order is 7 800DZD ($60).",
+        "A new FBO in Algeria must place a first order of 0.200 CC.",
+        "A new FBO in Algeria must place a first order of 0,200CC.",
+    ],
+)
+def test_algeria_minimum_order_survives_every_notation(answer: str) -> None:
+    """Observed live 2026-09-08. Retrieval, ranking and approval all succeeded -
+    Forever Algeria scored 9.542 with a margin of 8.44 - and the reader still
+    got "the approved policy documents do not contain enough information".
+
+    The record states "0,200CC" and "7 800DZD"; a model asked in English writes
+    "0.200" and "7,800". Neither was found, the sentence was deleted, and with
+    nothing left the answer fell back. Four of six natural renderings produced
+    an empty answer.
+    """
+    assert _algeria_flagged(answer) == [], answer
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "The minimum first order in Algeria is 99,000 DZD.",
+        "A new FBO in Algeria must place a first order of 5,000 CC.",
+    ],
+)
+def test_invented_algeria_amounts_are_still_removed(answer: str) -> None:
+    """Tolerating notation must not become tolerating a wrong figure."""
+    assert _algeria_flagged(answer)
+
+
+def test_a_leading_zero_makes_a_three_digit_tail_unambiguous() -> None:
+    """"0,200" cannot be a thousands group; that would just be "200"."""
+    from app.validation.validators.numeric_grounding_validator import _number_variants
+
+    assert "0.200" in _number_variants("0,200")
+    assert "0,200" in _number_variants("0.200")
+
+
+def test_a_grouped_thousand_is_offered_ungrouped_but_never_swapped() -> None:
+    """"7,800" must be able to reach a source writing "7 800".
+
+    The ungrouped form is offered as an alternative, never as a replacement, so
+    "1.000" still cannot find "1,000" and the thousandfold confusion stays
+    caught by the test above.
+    """
+    from app.validation.validators.numeric_grounding_validator import _number_variants
+
+    assert "7800" in _number_variants("7,800")
+    assert "1,000" not in _number_variants("1.000")
