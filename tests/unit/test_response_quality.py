@@ -210,3 +210,22 @@ def test_non_english_answers_are_not_judged_by_the_english_word_rule():
     assert incomplete_ending_reason("Le montant minimum est de 2 CC.", "fr") is None
     # Bracket balance is language-independent and still applies.
     assert incomplete_ending_reason("Le montant (minimum", "fr") == "unclosed_paren:1>0"
+
+
+def test_truncation_verdict_is_logged_with_the_reported_stop_reason():
+    """The heuristic verdict and Bedrock's own stop reason must arrive together.
+
+    "INCOMPLETE_OUTPUT" is a reading of the text; stopReason "max_tokens" is
+    the model stating it ran out of room. A truly truncated answer needs a
+    bigger budget, a misjudged one needs a better rule, and the two are
+    indistinguishable from the text alone - which is how the Algeria case
+    stayed unexplained.
+    """
+    import inspect
+
+    from app.orchestrator import chat_orchestrator
+
+    source = inspect.getsource(chat_orchestrator.AIOrchestrator._validate_response)
+    assert "finish_reason=" in source
+    assert "output_tokens=" in source
+    assert "max_output_tokens=" in source

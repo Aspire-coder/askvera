@@ -1863,11 +1863,25 @@ class AIOrchestrator:
             )
         )
         if result.issues:
+            # An INCOMPLETE_OUTPUT verdict is a heuristic reading of the text,
+            # but whether the model actually ran out of room is a fact Bedrock
+            # reports. Logging them together separates a genuinely truncated
+            # answer from a complete one the heuristic misjudged - the two need
+            # opposite fixes, and telling them apart from the text alone is
+            # guesswork. The token count and the cap are logged beside it so a
+            # near-miss is visible without a second deploy.
             LOGGER.warning(
                 "output_validator_issues_detected",
                 correlation_id=correlation_id,
                 issue_count=len(result.issues),
                 highest_severity=result.highest_severity.value,
+                finish_reason=(model_response.finish_reason if model_response else ""),
+                output_tokens=(
+                    int((model_response.token_usage or {}).get("outputTokens") or 0)
+                    if model_response
+                    else 0
+                ),
+                max_output_tokens=settings.BEDROCK_MAX_OUTPUT_TOKENS,
                 issues=[
                     {
                         "code": issue.code,

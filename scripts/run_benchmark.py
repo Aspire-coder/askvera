@@ -133,6 +133,9 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         "citations": len(response.citations or []),
         "abstained": bool(metadata.get("fallback")) or _abstained(answer),
         "failure_layer": metadata.get("failure_layer") or "",
+        # Why generation stopped. "max_tokens" is Bedrock stating it ran out of
+        # room, which is a fact, unlike a heuristic reading of the text.
+        "finish_reason": str(metadata.get("finish_reason") or ""),
         "removed_numeric_claims": run.removed_numeric_claims,
         "top_title": documents[0].title if documents else "",
         "confidence": round(float(run.retrieval.confidence), 3) if run.retrieval else 0.0,
