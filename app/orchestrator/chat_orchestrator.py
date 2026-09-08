@@ -510,6 +510,7 @@ class AIOrchestrator:
             completed_answer, restored_fields = restore_missing_directory_contacts(
                 completed_answer,
                 directory_field_sets,
+                user_question,
             )
             restored_fields = [*restored_requested_fields, *restored_fields]
         if restored_fields:

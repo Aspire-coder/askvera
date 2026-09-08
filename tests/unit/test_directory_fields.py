@@ -317,3 +317,59 @@ def test_still_restores_an_ordinary_short_order_value() -> None:
 
     assert changed is True
     assert "Minimum order size FBO: 0,200CC (7 800DZD)." in corrected
+
+
+def test_contacts_are_not_restored_into_an_answer_about_opening_hours() -> None:
+    """Reported by the release gate on 2026-09-08, after a citation fix.
+
+    Contact restoration is gated on the response having citations. Belgium's
+    office-hours answer previously had none - the same citation bug seen on
+    Algeria - so restoration never ran. Once citations were attached, an answer
+    about opening hours gained a street address and a phone number, both
+    verbatim from the record, and both then had to survive subject-aware
+    grounding inside a sentence about hours. They did not: repair removed 16
+    and 3743, took their sentences with them, and the canary rolled the deploy
+    back.
+
+    Restoration exists to correct a mangled contact value in an answer about
+    contacts. Nothing asked for a phone number here.
+    """
+    fields = [{
+        "Business Hours Office": "09.00 am - 17.00 pm (Mon - Fri)",
+        "Telephone Office": "+32 2 3743 000",
+        "Office & Product Center Address": "Bijenstraat 16",
+    }]
+    answer = "The office hours for the Forever Belgium office are 09.00 am - 17.00 pm (Mon - Fri)."
+
+    corrected, restored = restore_missing_directory_contacts(
+        answer, fields, "What are the office hours for the Forever Belgium office?"
+    )
+
+    assert restored == []
+    assert corrected == answer
+    assert "3743" not in corrected and "Bijenstraat" not in corrected
+
+
+def test_contacts_are_still_restored_when_a_contact_was_asked_for() -> None:
+    """The guard must not disable the correction this function exists for."""
+    fields = [{"Telephone Office": "+32 2 3743 000"}]
+    answer = "Telephone Office: +32 2 0000 000"
+
+    corrected, restored = restore_missing_directory_contacts(
+        answer, fields, "What is the telephone number for the Forever Belgium office?"
+    )
+
+    assert restored
+    assert "+32 2 3743 000" in corrected
+
+
+def test_a_question_asking_for_hours_and_an_address_still_restores() -> None:
+    """Only a question naming no contact field at all skips restoration."""
+    fields = [{"Office & Product Center Address": "Bijenstraat 16"}]
+    answer = "Office & Product Center Address: Somewhere else"
+
+    _corrected, restored = restore_missing_directory_contacts(
+        answer, fields, "What is the office address and the opening hours?"
+    )
+
+    assert restored
