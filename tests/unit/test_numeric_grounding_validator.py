@@ -836,3 +836,65 @@ def test_a_grouped_thousand_is_offered_ungrouped_but_never_swapped() -> None:
 
     assert "7800" in _number_variants("7,800")
     assert "1,000" not in _number_variants("1.000")
+
+
+class _NewZealandSource:
+    """A directory record states the country once, at the top, not per bullet."""
+
+    content = (
+        "Forever New Zealand. • Minimum order size: $100 +gst. "
+        "• Delivery Cost: $8 +gst ($9,20). "
+        "• Local Product Centers available: Yes, 278 Manukau Rd. Epsom."
+    )
+    title = "International-Sponsoring-Directory.pdf - Forever New Zealand"
+    metadata: dict = {}
+
+
+class _RankSource:
+    content = (
+        "Supervisor is achieved by generating a total of 10 Open Group Case Credits "
+        "within any single Month. Assistant Manager requires 120 Case Credits."
+    )
+    title = "US-EN-Company-Policy.pdf - Sec 4.01-b: Supervisor"
+    metadata: dict = {}
+
+
+def _flagged(answer: str, source) -> list[str]:
+    from app.validation.validators.numeric_grounding_validator import unsupported_numeric_claims
+
+    return [claim.number for claim in unsupported_numeric_claims(answer, [source])]
+
+
+def test_naming_the_market_does_not_make_a_figure_ungroundable() -> None:
+    """Observed live 2026-09-08, deleting $8 and $9.20 from a delivery answer.
+
+    The record states "• Delivery Cost: $8 +gst ($9,20)." and the answer said
+    "For New Zealand, the delivery cost is $8 +GST ($9.20)." The subject became
+    {new, zealand}, every subject token must appear in the local source window,
+    and that bullet does not repeat the country - the country is the record's
+    identity. Removing the country from the sentence made the same answer
+    ground cleanly, which is backwards: naming the market is what a good answer
+    does, and the prompt asks for it.
+    """
+    assert _flagged("For New Zealand, the delivery cost is $8 +GST ($9.20).", _NewZealandSource()) == []
+
+
+def test_the_same_answer_without_the_market_still_grounds() -> None:
+    """The behaviour that used to be the only one that worked."""
+    assert _flagged("The delivery cost is $8 +GST ($9.20).", _NewZealandSource()) == []
+
+
+def test_an_invented_figure_beside_the_market_is_still_removed() -> None:
+    """Forgiving the market must not forgive the number."""
+    assert _flagged("For New Zealand, the delivery cost is $42 +GST.", _NewZealandSource())
+
+
+def test_rank_binding_is_not_weakened_by_the_market_exemption() -> None:
+    """Only the market is established by the document, never an arbitrary subject.
+
+    A figure belonging to a different rank must still be caught, which is the
+    protection several earlier fixes were written to build.
+    """
+    assert _flagged("Assistant Manager requires 10 Case Credits.", _RankSource())
+    assert _flagged("Supervisor requires 999 Open Group Case Credits.", _RankSource())
+    assert _flagged("Supervisor requires 10 Open Group Case Credits.", _RankSource()) == []
