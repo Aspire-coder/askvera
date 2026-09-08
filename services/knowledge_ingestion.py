@@ -1349,95 +1349,15 @@ def _activate_generation_pointer(
     clear_active_generation_cache()
 
 
-def _active_section_count(ingestion_id: str) -> int:
-    """How many sections of this generation are actually retrievable."""
-    client = _client()
-    client.indices.refresh(index=settings.OPENSEARCH_INDEX)
-    result = client.count(
-        index=settings.OPENSEARCH_INDEX,
-        body={
-            "query": {
-                "bool": {
-                    "filter": [
-                        exact_term_query("ingestion_id", ingestion_id),
-                        {"term": {"status": "active"}},
-                    ]
-                }
-            }
-        },
-    )
-    return int(result.get("count", 0))
-
-
-def _superseded_section_count(
-    *, country: str, language: str, source_file: str, ingestion_id: str
-) -> int:
-    """How many sections of an OLDER generation are still reachable.
-
-    Without the generation pointer, publishing is a replacement: activate the
-    new sections, then delete the previous ones. Between those two steps a
-    reader can match both versions of the same document, which is the failure
-    that matters and the one a count of new sections cannot see.
-    """
-    client = _client()
-    client.indices.refresh(index=settings.OPENSEARCH_INDEX)
-    result = client.count(
-        index=settings.OPENSEARCH_INDEX,
-        body={
-            "query": {
-                "bool": {
-                    "filter": [
-                        {"term": {"country": country}},
-                        {"term": {"language": language}},
-                        {"term": {"source_file": source_file}},
-                        {"terms": {"status": ["active", "staging"]}},
-                    ],
-                    "must_not": [exact_term_query("ingestion_id", ingestion_id)],
-                }
-            }
-        },
-    )
-    return int(result.get("count", 0))
-
-
-def _visibility_verifier(
-    job_id: str,
-    expected: int,
-    *,
-    country: str = "",
-    language: str = "",
-    source_file: str = "",
-) -> Any:
-    """How to check that publication took effect, in the deployment we are in.
-
-    With the generation pointer enabled the pointer is the authority and the
-    attempt store reads it directly: moving it is a single atomic write, and
-    the previous generation stops being reachable the instant it moves.
-
-    With it disabled there is no pointer, and publishing is a two-step
-    replacement rather than a switch. Counting the new sections proves they
-    exist; it does not prove the old ones are gone, and a failure between the
-    two leaves readers able to match both versions of the same document. So the
-    verifier checks both halves: the expected number of new sections is
-    reachable AND no section of any older generation still is.
-    """
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
-        return None
-
-    def _verify() -> bool:
-        if _active_section_count(job_id) != expected:
-            return False
-        return (
-            _superseded_section_count(
-                country=country,
-                language=language,
-                source_file=source_file,
-                ingestion_id=job_id,
-            )
-            == 0
-        )
-
-    return _verify
+# _active_section_count, _superseded_section_count and _visibility_verifier
+# lived here. They verified the outcome of a publication without a generation
+# pointer: the expected new sections reachable, and no remnant of an older one.
+#
+# They are gone because that mode is no longer supported. Reviewed publication
+# refuses it - see _require_supported_publication_mode - and verification of an
+# unsupported mode is worse than nothing: it reads as though the mode were
+# safe. Detecting a bad outcome was never the same as preventing it, and the
+# outcome in question was a stale worker deleting a live generation.
 
 
 def _activate_staged_sections(
@@ -2153,6 +2073,40 @@ def record_review_decision(
     return resolution
 
 
+def _require_supported_publication_mode() -> None:
+    """Reviewed publication requires the generation pointer. One supported mode.
+
+    Without it, publishing is activate-then-delete against OpenSearch: flip the
+    new sections to active, then delete every section for that source carrying
+    a different ingestion id. Both writes are reader-visible immediately, and
+    neither can be made part of the ownership transaction, because OpenSearch
+    is a second system and no check spanning the two is atomic.
+
+    That is not a small window. A worker paused before those writes, whose
+    lease then expires and whose job is republished by someone else, resumes
+    and deletes the newer generation - "a different ingestion id" is exactly
+    what the newer one is - before reinstating its own. Verification would then
+    report the failure, after readers had already lost the current document.
+
+    Detecting a bad outcome is not preventing it. An ownership check before
+    each write narrows the window and cannot close it, so this refuses the mode
+    instead of claiming a protection it does not have.
+
+    The automatic path in process_ingestion_job still performs that legacy
+    replacement when review_before_publish is false. That is pre-existing
+    behaviour with the same exposure and it is recorded in the rollout notes;
+    restricting it here would block all automatic ingestion in the default
+    configuration, which is a decision for whoever owns the deployment.
+    """
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        raise ValueError(
+            "Publication is disabled because ADMIN_INGESTION_GENERATION_POINTER_ENABLED "
+            "is off. Without the generation pointer, publishing replaces content "
+            "directly in the index and a stale worker can delete a newer version. "
+            "Enable the pointer to publish."
+        )
+
+
 def publish_ingestion_job(
     job_id: str,
     *,
@@ -2195,6 +2149,12 @@ def publish_ingestion_job(
     # forcing the flag true whenever there is anything to find, not by this
     # check, and the two together are what close it.
     revision = _enforce_publication_gate(job, resolution)
+    # After the gate, deliberately. A contradiction is a fact about the
+    # document and a reviewer should be told about it whatever the deployment
+    # is configured to allow; the mode is a fact about the deployment. Both
+    # refuse publication, and reporting the document problem first is more
+    # use to the person holding it.
+    _require_supported_publication_mode()
     count, documents = _staging_documents(job_id, limit=10000)
     expected = int(job.get("section_count") or 0)
     if count != expected or not documents:
@@ -2214,19 +2174,11 @@ def publish_ingestion_job(
     # is still live. begin() returns None only when this revision is fully
     # published, finalization included.
     attempt_store = store or publication_attempt.PostgresAttemptStore()
-    verify_visible = _visibility_verifier(
-        job_id,
-        expected,
-        country=str(job.get("country") or first.get("country") or ""),
-        language=str(job.get("language") or first.get("language") or ""),
-        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-    )
     claim = publication_attempt.begin(
         attempt_store,
         job_id=job_id,
         revision=revision,
         logical_document_id=logical_document_id,
-        verify_visible=verify_visible,
     )
     if claim is None:
         return {"job": _ingestion_job(job_id), "publishedCount": count}
@@ -2251,7 +2203,6 @@ def publish_ingestion_job(
                 job_id=job_id,
                 claim=claim,
                 logical_document_id=logical_document_id,
-                verify_visible=verify_visible,
             )
 
         # Finalization, and it runs on the recovery path too. An active pointer
@@ -2354,12 +2305,32 @@ def _publish_activated_generation(
 ) -> None:
     """Activate the staged sections, then move the pointer that makes them visible.
 
-    Order matters and is the reason this is recoverable: with the generation
-    pointer enabled, activated sections are still invisible until the pointer
-    names them, so a failure between the two steps leaves nothing a reader can
-    reach. The pointer update is the commit point.
+    Order matters and is the reason this is recoverable: activated sections are
+    invisible until the pointer names them, so a failure between the two steps
+    leaves nothing a reader can reach. The pointer update is the commit point,
+    it is a single row write, and it is fenced on the attempt token.
+
+    There is no branch here for a deployment without the pointer. See
+    publish_ingestion_job for why that mode is refused rather than supported.
     """
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        # Unreachable: publish_ingestion_job refuses first. Kept as a hard stop
+        # rather than a comment, because the branch it replaces deleted a live
+        # generation, and the next person to reintroduce it should hit this.
+        raise RuntimeError(
+            "Reviewed publication requires ADMIN_INGESTION_GENERATION_POINTER_ENABLED."
+        )
+
     client = _client()
+    # Checked before the index is touched. It cannot make the index write
+    # transactional - OpenSearch is a second system and no check spanning the
+    # two is atomic - but it means a worker that has already lost the job stops
+    # here rather than after activating sections. With the pointer enabled
+    # those sections are invisible until the pointer moves, and the pointer
+    # write is genuinely fenced, so the remaining window changes nothing a
+    # reader can reach.
+    with get_engine().begin() as connection:
+        _assert_publication_owner(connection, job_id=job_id, owner=owner)
     _activate_staged_sections(
         client,
         index=settings.OPENSEARCH_INDEX,
@@ -2367,26 +2338,14 @@ def _publish_activated_generation(
         expected_count=expected,
         ingestion_id=job_id,
     )
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
-        _activate_generation_pointer(
-            logical_document_id=logical_document_id,
-            ingestion_id=job_id,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            document_type=str(job.get("document_type") or "policy"),
-            access_scope=str(job.get("access_scope") or "country"),
-            activated_by=accepted_by,
-            owner=owner,
-        )
-    else:
-        delete_actions = _older_source_actions(
-            client,
-            index=settings.OPENSEARCH_INDEX,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            ingestion_id=job_id,
-        )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
+    _activate_generation_pointer(
+        logical_document_id=logical_document_id,
+        ingestion_id=job_id,
+        country=str(job.get("country") or first.get("country") or ""),
+        language=str(job.get("language") or first.get("language") or ""),
+        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+        document_type=str(job.get("document_type") or "policy"),
+        access_scope=str(job.get("access_scope") or "country"),
+        activated_by=accepted_by,
+        owner=owner,
+    )
