@@ -30,7 +30,6 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
     _actions,
     _client,
     _index_body,
-    _older_source_actions,
 )
 from services.aws_clients import get_aws_clients
 from services.document_preflight import analyze_pdf_with_timeout, extract_pdf_page_text
@@ -573,6 +572,31 @@ def _assess_document(
     return assessment
 
 
+def _automatic_publication_is_unsafe(job_id: str) -> bool:
+    """Whether skipping review would take the destructive replacement path.
+
+    Without the generation pointer, activating a document also deletes every
+    section for that source carrying a different ingestion id - and a worker
+    resuming late deletes whatever is live now. Reviewed publication refuses
+    that mode outright. This is the same refusal for the automatic path, and it
+    withholds ACTIVATION rather than ingestion: the document is still uploaded,
+    extracted, indexed as staging and queued for review. Nothing is lost.
+
+    Operational impact, stated plainly: with
+    ADMIN_INGESTION_GENERATION_POINTER_ENABLED off, no document reaches readers
+    by any route - uploads work, review works, publication is refused. Enabling
+    the pointer restores publication on both paths and is the intended fix.
+    """
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        return False
+    LOGGER.warning(
+        "automatic_publication_withheld_unsafe_replacement_mode",
+        correlation_id=job_id,
+        reason="ADMIN_INGESTION_GENERATION_POINTER_ENABLED is off",
+    )
+    return True
+
+
 def process_ingestion_job(
     job_id: str,
     local_path: str,
@@ -728,7 +752,11 @@ def process_ingestion_job(
             content_hash=document_hash,
             low_text_image_pages=low_text_image_pages,
         )
-        review_before_publish = review_before_publish or bool(assessment["requires_review"])
+        review_before_publish = (
+            review_before_publish
+            or bool(assessment["requires_review"])
+            or _automatic_publication_is_unsafe(job_id)
+        )
         indexed = _index_sections(
             sections,
             source_uri=source_uri,
@@ -1159,18 +1187,16 @@ def _index_sections(
             access_scope=access_scope,
             activated_by=activated_by,
         )
-    identity = (sections[0]["country"], sections[0]["language"], sections[0]["source_file"])
     if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED and not review_before_publish:
-        delete_actions = _older_source_actions(
-            client,
-            index=index,
-            country=str(identity[0]),
-            language=str(identity[1]),
-            source_file=str(identity[2]),
-            ingestion_id=ingestion_id,
+        # Unreachable: _automatic_publication_is_unsafe forces review first.
+        # This is where the legacy replacement used to run - delete every
+        # section for this source with a different ingestion id, which is
+        # exactly what a newer generation is. Kept as a hard stop so
+        # reintroducing it fails loudly instead of deleting a live document.
+        raise RuntimeError(
+            "Automatic publication without the generation pointer is refused: "
+            "the replacement it performs can delete a newer generation."
         )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
     return int(success)
 
 

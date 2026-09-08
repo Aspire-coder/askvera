@@ -425,15 +425,79 @@ def test_the_refusal_explains_the_risk_rather_than_naming_a_flag() -> None:
     assert "stale worker can delete a newer version" in source
 
 
-def test_the_automatic_path_is_recorded_as_still_carrying_the_legacy_window() -> None:
-    """process_ingestion_job still replaces directly when review is skipped.
+def test_automatic_publication_is_withheld_when_the_mode_is_unsafe(monkeypatch) -> None:
+    """The remaining exposure, closed.
 
-    That is pre-existing and unchanged, and restricting it would block all
-    automatic ingestion in the default configuration - somebody else's
-    decision. It must not be quietly implied to be covered by this work.
+    Reviewed publication refuses the legacy mode. Automatic publication took
+    the same destructive path and was only disclosed, not contained. It is now
+    routed to review instead, which withholds ACTIVATION rather than ingestion.
+    """
+    monkeypatch.setattr(
+        knowledge_ingestion.settings,
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        False,
+        raising=False,
+    )
+
+    assert knowledge_ingestion._automatic_publication_is_unsafe("job-1") is True
+
+
+def test_automatic_publication_is_allowed_when_the_pointer_is_on(monkeypatch) -> None:
+    """Containment must not become a blanket refusal of automatic ingestion."""
+    monkeypatch.setattr(
+        knowledge_ingestion.settings,
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED",
+        True,
+        raising=False,
+    )
+
+    assert knowledge_ingestion._automatic_publication_is_unsafe("job-1") is False
+
+
+def test_the_indexing_path_holds_no_branch_that_deletes_by_source() -> None:
+    """The destructive call is gone from the automatic path too.
+
+    _older_source_actions selected every section for a source with a different
+    ingestion id. It is no longer imported by this module at all, so neither
+    publication path can reach it.
+    """
+    import inspect
+    import re
+
+    source = inspect.getsource(knowledge_ingestion._index_sections)
+    code = "\n".join(re.sub(r"#.*$", "", line) for line in source.splitlines())
+    code = re.sub(r'"""(?:.|\n)*?"""', "", code)
+
+    assert "_older_source_actions" not in code
+    assert "_older_source_actions" not in dir(knowledge_ingestion)
+
+
+def _prose(function) -> str:
+    """A docstring as one line, so an assertion is not defeated by wrapping.
+
+    Prose assertions kept failing on where the line happened to break, which
+    tests the formatter rather than the statement.
     """
     import inspect
 
-    source = inspect.getsource(knowledge_ingestion._require_supported_publication_mode)
+    return " ".join((inspect.getdoc(function) or "").split())
 
-    assert "process_ingestion_job" in source
+
+def test_withholding_activation_is_not_withholding_ingestion() -> None:
+    """The operational impact has to be the true one.
+
+    An earlier note said restricting this path would block all automatic
+    ingestion. It does not: the document is still uploaded, extracted, indexed
+    as staging and queued for review. What is withheld is reaching readers.
+    """
+    prose = _prose(knowledge_ingestion._automatic_publication_is_unsafe)
+
+    assert "queued for review" in prose
+    assert "Nothing is lost" in prose
+
+
+def test_the_operational_impact_of_a_disabled_pointer_is_stated() -> None:
+    """With the flag off, nothing reaches readers by any route. Say so."""
+    prose = _prose(knowledge_ingestion._automatic_publication_is_unsafe)
+
+    assert "no document reaches readers by any route" in prose

@@ -49,12 +49,21 @@ newer one is - then reinstates its own stale content. Verification would report
 that afterwards, having already lost the live document. Detecting a bad outcome
 is not preventing it.
 
-**Still carrying that window:** `process_ingestion_job` performs the same
-legacy replacement when `review_before_publish` is false. That is pre-existing
-and unchanged. Restricting it would block all automatic ingestion in the
-default configuration, which is a decision for whoever owns the deployment -
-but enabling the pointer removes the window there too, which is the other
-reason to enable it.
+**The automatic path is contained too.** `process_ingestion_job` performed the
+same legacy replacement when `review_before_publish` was false. It now forces
+review instead, so no document activates automatically in that mode. An earlier
+version of this note said restricting it would block all automatic ingestion:
+that was wrong. It withholds **activation**, not ingestion - the document is
+still uploaded, extracted, indexed as staging and queued for review.
+
+**Operational impact, stated plainly.** With
+`ADMIN_INGESTION_GENERATION_POINTER_ENABLED` off, no document reaches readers
+by any route. Uploads work. Review works. Publication is refused on both paths.
+Enabling the pointer restores publication on both and is the intended fix - it
+is a deployment change nobody in this repository can make.
+
+The destructive call itself, `_older_source_actions`, is no longer imported by
+`services/knowledge_ingestion.py` at all, so neither path can reach it.
 
 ## How ownership works
 

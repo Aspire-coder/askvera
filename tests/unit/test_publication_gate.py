@@ -334,10 +334,25 @@ def test_review_before_publish_is_only_ever_forced_on_never_off() -> None:
     from services import knowledge_ingestion
 
     process = inspect.getsource(knowledge_ingestion.process_ingestion_job)
-    assert (
-        "review_before_publish = review_before_publish or bool(assessment[\"requires_review\"])"
-        in process
-    )
+
+    # Structural, not a literal: the rule is that every assignment to the flag
+    # begins by OR-ing its current value, so review can only ever be added. A
+    # string match broke the moment a third forcing condition was added, which
+    # would have tempted somebody to weaken the check rather than keep it.
+    assignments = [
+        line.strip()
+        for line in process.splitlines()
+        if line.strip().startswith("review_before_publish =")
+    ]
+    assert assignments, "the flag must still be decided in this function"
+    for assignment in assignments:
+        assert assignment.startswith("review_before_publish = (") or assignment.startswith(
+            "review_before_publish = review_before_publish or"
+        ), assignment
+    assert "review_before_publish = False" not in process
+    # And the conditions that force it on are all present.
+    assert "requires_review" in process
+    assert "_automatic_publication_is_unsafe" in process
 
 
 def _loaded_row(**overrides) -> dict:
