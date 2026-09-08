@@ -5,9 +5,12 @@ nothing about whether PostgreSQL accepts the statements, whether they are
 genuinely repeatable, or whether the previous application version keeps working
 against the migrated schema. Only running them does that.
 
-These tests skip unless ASKVERA_TEST_POSTGRES_URL points at a disposable
-database. They must never be pointed at the live database: they create and drop
-schemas.
+These tests skip unless a database is designated disposable twice over:
+ASKVERA_TEST_POSTGRES_URL names it and ASKVERA_TEST_POSTGRES_DISPOSABLE=yes
+confirms it is expendable. They never fall back to the application's own
+database configuration, and they refuse outright to run against a URL matching
+the configured RDS host or one that looks managed. They create and drop
+schemas, and the drop is scoped to a generated name they created themselves.
 
     createdb askvera_migration_test
     ASKVERA_TEST_POSTGRES_URL=postgresql://localhost/askvera_migration_test \\
@@ -26,10 +29,48 @@ from pathlib import Path
 
 import pytest
 
+# The database must be designated disposable, twice over, and must never be
+# reached by falling back to the application's own configuration.
+#
+# ASKVERA_TEST_POSTGRES_URL names it, and ASKVERA_TEST_POSTGRES_DISPOSABLE must
+# be set to "yes" as a separate deliberate act. Two variables rather than one
+# because a URL can be pasted from a runbook by accident; a second variable
+# saying "this database is expendable" cannot be set by accident.
+_URL = os.environ.get("ASKVERA_TEST_POSTGRES_URL", "")
+_DISPOSABLE = os.environ.get("ASKVERA_TEST_POSTGRES_DISPOSABLE", "").strip().lower() == "yes"
+
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ASKVERA_TEST_POSTGRES_URL"),
-    reason="ASKVERA_TEST_POSTGRES_URL is not set; migration has not been executed",
+    not (_URL and _DISPOSABLE),
+    reason=(
+        "migration not executed: set ASKVERA_TEST_POSTGRES_URL and "
+        "ASKVERA_TEST_POSTGRES_DISPOSABLE=yes for a throwaway database"
+    ),
 )
+
+
+def _refuse_live_database(url: str) -> None:
+    """Stop before touching anything that looks like a real database.
+
+    These tests create and drop schemas. Running them against the application's
+    database would destroy data, and the way that happens is never a decision -
+    it is an environment variable left set from something else.
+    """
+    from config import settings
+
+    for attribute in ("RDS_HOST", "RDS_DB_IDENTIFIER"):
+        live = str(getattr(settings, attribute, "") or "").strip()
+        if live and live.lower() in url.lower():
+            raise RuntimeError(
+                f"ASKVERA_TEST_POSTGRES_URL names {attribute} from the application "
+                "configuration. These tests create and drop schemas and must never "
+                "run against it."
+            )
+    if any(marker in url.lower() for marker in ("prod", "rds.amazonaws.com")):
+        raise RuntimeError(
+            "ASKVERA_TEST_POSTGRES_URL looks like a managed or production database. "
+            "Use a local throwaway instance."
+        )
+
 
 MIGRATION = (
     Path(__file__).resolve().parents[2]
@@ -86,7 +127,9 @@ def schema():
     """A disposable schema per test, dropped afterwards whatever happens."""
     from sqlalchemy import create_engine, text
 
-    engine = create_engine(os.environ["ASKVERA_TEST_POSTGRES_URL"], future=True)
+    _refuse_live_database(_URL)
+    engine = create_engine(_URL, future=True)
+    # A generated name, so cleanup can only ever drop a schema this test made.
     name = f"review_migration_{uuid.uuid4().hex[:12]}"
     with engine.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{name}"'))
@@ -94,6 +137,9 @@ def schema():
         yield engine, name
     finally:
         with engine.begin() as connection:
+            # Scoped to the generated name. Nothing else is dropped, and the
+            # public schema is never touched.
+            assert name.startswith("review_migration_")
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{name}" CASCADE'))
 
 
