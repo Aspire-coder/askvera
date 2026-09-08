@@ -330,3 +330,44 @@ def test_conversation_turns_must_be_non_empty_strings():
         _validate(_case(conversation=["  "]))
     with pytest.raises(ValueError, match="conversation"):
         _validate(_case(conversation=["a"] * (canary.MAX_CONVERSATION_TURNS + 1)))
+
+
+def test_a_conversation_case_replays_even_when_it_asserts_only_retrieval(monkeypatch):
+    """Prior turns are replayed in the pipeline and nowhere else.
+
+    Routing such a case to the retrieval-only path would run the final
+    question with no history and score it as a first turn: a multi-turn case
+    that silently stopped being one.
+    """
+    seen: list = []
+
+    def _fake_pipeline(case, sequence):
+        seen.append(case.get("conversation"))
+        return stub_retrieval(), "", 0
+
+    def stub_retrieval():
+        return SimpleNamespace(
+            documents=[
+                SimpleNamespace(
+                    title="US-EN-Company-Policy.pdf - Sec 5.01: Recognized Manager:",
+                    metadata={"section_id": "5.01"},
+                    score=4.3,
+                )
+            ],
+            confidence=0.95,
+            metadata={},
+        )
+
+    monkeypatch.setattr(canary, "run_pipeline_once", _fake_pipeline)
+    monkeypatch.setitem(
+        sys.modules,
+        "app.evidence",
+        SimpleNamespace(approve_evidence=lambda *a, **k: SimpleNamespace(approved=True, reason="")),
+    )
+
+    # No answer assertions at all - only a retrieval expectation.
+    case = _case(conversation=["How do I sponsor in Belgium?", "What about Germany?"])
+    outcome = canary.run_case_once(case, 1)
+
+    assert seen == [["How do I sponsor in Belgium?", "What about Germany?"]]
+    assert outcome["passed"], outcome["failure_reasons"]

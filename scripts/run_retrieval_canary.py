@@ -287,10 +287,16 @@ def run_case_once(case: dict[str, Any], sequence: int):
     answer_required = [str(value) for value in (case.get("answer_must_contain") or [])]
     answer_forbidden = [str(value) for value in (case.get("answer_must_not_contain") or [])]
     checks_answer = bool(answer_required or answer_forbidden or case.get("answer_must_cite"))
+    # A conversation case has to go through the pipeline even when it asserts
+    # only on retrieval, because prior turns are replayed there and nowhere
+    # else. Routing it to the retrieval-only path would run the final question
+    # with no history at all and score it as a first turn -- a multi-turn case
+    # that silently stopped being one, which is worse than not having it.
+    uses_pipeline = checks_answer or bool(case.get("conversation"))
 
     answer = ""
     answer_citations = -1
-    if checks_answer:
+    if uses_pipeline:
         # One execution supplies both the evidence and the answer, so a case
         # can never report retrieval from a run that produced a different reply.
         result, answer, answer_citations = run_pipeline_once(case, sequence)
