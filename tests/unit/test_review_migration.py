@@ -5,10 +5,14 @@ applying it to Postgres and asserting the result, and it is what can be done
 without a database, so what it does and does not establish is stated rather
 than implied:
 
-  established - every statement is re-runnable, nothing is dropped or renamed,
-                the previous application version keeps working, and a legacy
-                job reads as unevaluated rather than clean.
-  NOT established - that Postgres accepts it. It has never been executed.
+  established - the migration TEXT says what it should: statements carry IF NOT
+                EXISTS, nothing is dropped or renamed, review_findings has no
+                default, and the decisions table has the columns and constraint
+                intended.
+  NOT established - compatibility, repeatability, or that PostgreSQL accepts any
+                of it. Reading SQL is not running it. Those claims are pending
+                until tests/integration/test_review_migration_postgres.py has
+                been executed against a real database, which has not happened.
 """
 
 from __future__ import annotations
@@ -40,8 +44,13 @@ def test_the_migration_exists_and_is_ordered_after_the_current_head() -> None:
     assert migrations[-1] == MIGRATION.name
 
 
-def test_every_statement_can_run_twice() -> None:
-    """The deploy applies migrations on every run and a retry must be harmless."""
+def test_every_statement_carries_a_re_runnable_guard() -> None:
+    """Checks the guard is written, which is not the same as proving repeatability.
+
+    Repeat execution is proven by applying the migration three times to a real
+    database, in the integration test. This only catches a statement that was
+    written without a guard at all.
+    """
     for statement in _statements():
         upper = statement.upper()
         assert "IF NOT EXISTS" in upper or upper.startswith("COMMENT"), statement[:80]
@@ -80,11 +89,13 @@ def test_a_legacy_job_reads_as_unevaluated_not_as_clean() -> None:
     assert "ADD COLUMN IF NOT EXISTS review_evaluated_at TIMESTAMPTZ;" in sql
 
 
-def test_decisions_are_append_only_with_no_update_path() -> None:
-    """History, not current state.
+def test_the_migration_creates_no_update_path_for_decisions() -> None:
+    """Naming a table append-only does not enforce it.
 
-    Overwriting the previous approval destroys the record of who approved what,
-    which is the thing an audit asks for. A later decision adds a row.
+    This checks only that the migration itself introduces no UPDATE or ON
+    CONFLICT path. Whether the application ever updates or deletes a decision
+    is a separate test, and whether the database permits it is a matter of
+    grants - neither is established here.
     """
     # Comments are stripped first. Checking the raw text matched the word
     # "UPDATE" inside a comment explaining that there is no UPDATE path, which
@@ -119,3 +130,31 @@ def test_no_finding_gets_its_own_table() -> None:
     per finding would be deleted and rewritten every time and buy nothing."""
     statements = " ".join(_statements()).upper()
     assert statements.count("CREATE TABLE") == 1
+
+
+def test_the_application_exposes_no_update_or_delete_for_decisions() -> None:
+    """Append-only has to be enforced, not just asserted in a comment.
+
+    Two layers are needed and only one is in this repository. This checks the
+    first: no code writes an UPDATE or DELETE against the decisions table, so a
+    decision cannot be edited or removed through the application.
+
+    The second layer is database grants. If the application role holds UPDATE
+    and DELETE on ingestion_review_decisions, then a bug, a migration or a
+    console session can still rewrite history, and nothing in this repository
+    prevents it. Revoking those grants is an infrastructure change and is
+    recorded in the rollout notes as required rather than assumed.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for source in list((root / "services").rglob("*.py")) + list((root / "api").rglob("*.py")):
+        text = source.read_text(encoding="utf-8", errors="replace")
+        if "ingestion_review_decisions" not in text:
+            continue
+        for statement in ("UPDATE ingestion_review_decisions", "DELETE FROM ingestion_review_decisions"):
+            if statement.lower() in text.lower():
+                offenders.append(f"{source.name}: {statement}")
+
+    assert offenders == [], offenders
