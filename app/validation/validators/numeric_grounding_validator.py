@@ -99,6 +99,27 @@ def _number_variants(number: str) -> set[str]:
     grouped = re.fullmatch(r"(?P<whole>\d{1,3})(?P<separator>[.,])(?P<group>\d{3})", normalized)
     if grouped and grouped.group("whole") != "0":
         variants.add(f"{grouped.group('whole')}{grouped.group('group')}")
+
+    # A trailing zero is presentation, not value. Measured on the first live
+    # benchmark run: the Algeria record states a delivery cost of "900 DZD
+    # ($7.5)", the model wrote "$7.50", and the answer was discarded whole as
+    # an ungrounded numeric claim. The figure was right, the source was right,
+    # and the retrieval was right; only the formatting differed.
+    #
+    # The last fractional digit is never removed, so "1.000" reaches "1.0" and
+    # stops. Reducing it to "1" would let a claim meaning one thousand match a
+    # source saying one, which is the 1000x confusion the grouped rule above
+    # is careful to avoid.
+    for variant in list(variants):
+        decimal = re.fullmatch(r"(?P<whole>\d+)(?P<separator>[.,])(?P<fraction>\d+)", variant)
+        if not decimal:
+            continue
+        whole, separator, fraction = decimal.group("whole", "separator", "fraction")
+        trimmed = fraction.rstrip("0") or "0"
+        variants.add(f"{whole}{separator}{trimmed}")
+        # The mirror case: the answer writes "7.5" where the record writes
+        # "7.50".
+        variants.add(f"{whole}{separator}{fraction}0")
     return variants
 
 
