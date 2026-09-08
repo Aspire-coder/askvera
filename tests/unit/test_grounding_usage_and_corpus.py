@@ -236,7 +236,9 @@ def test_the_signature_reads_the_pointer_table_not_the_index(monkeypatch) -> Non
 # --- the environment gate -------------------------------------------------
 
 
-def _environment(monkeypatch, *, sections=17896, rows=None, rows_raise=False, pointer=True):
+def _environment(monkeypatch, *, sections=17896, rows=None, rows_raise=False,
+                 pointer=True, sentinel_for=()):
+    """A fake environment. sentinel_for names probes that match nothing."""
     from config import settings
 
     monkeypatch.setattr(
@@ -254,19 +256,16 @@ def _environment(monkeypatch, *, sections=17896, rows=None, rows_raise=False, po
 
     from app.retrieval import opensearch_sections
 
-    filters = (
-        []
-        if not pointer
-        else [{"bool": {"should": [{"term": {"ingestion_id": "ingest-a"}}]}}]
+    def _filters(country, language, scope, *, document_type=""):
+        label = "global" if scope == "global" else f"country:{country}:{language}"
+        if rows_raise or rows == [] or label in sentinel_for:
+            return [{"bool": {"should": [{"term": {"ingestion_id": "__no_active_generation__"}}]}}]
+        return [{"bool": {"should": [{"term": {"ingestion_id": "ingest-a"}}]}}]
+
+    monkeypatch.setattr(opensearch_sections, "_generation_filters", _filters)
+    return comparison.check_environment(
+        [{"id": "algeria-delivery-cost", "country": "DZ", "language": "en"}]
     )
-    if rows_raise or rows == []:
-        filters = [
-            {"bool": {"should": [{"term": {"ingestion_id": "__no_active_generation__"}}]}}
-        ]
-    monkeypatch.setattr(
-        opensearch_sections, "_generation_filters", lambda *a, **k: filters
-    )
-    return comparison.check_environment()
 
 
 def test_an_unreachable_pointer_table_makes_the_environment_unready(monkeypatch) -> None:
@@ -275,22 +274,49 @@ def test_an_unreachable_pointer_table_makes_the_environment_unready(monkeypatch)
     With the pointer enabled and its table unreachable, active_generation_ids
     catches the error and returns nothing, so retrieval is filtered to
     __no_active_generation__ and every case abstains. Nothing raises, nothing
-    is free, and no turn reaches numeric repair - so neither rule is asked
-    anything.
+    is free, and no turn reaches numeric repair.
     """
     report = _environment(monkeypatch, rows_raise=True)
 
     assert report["ready"] is False
     assert any("unreachable" in problem for problem in report["problems"])
-    assert any("__no_active_generation__" in problem for problem in report["problems"])
 
 
-def test_the_sentinel_filter_alone_is_enough_to_refuse(monkeypatch) -> None:
-    """Asked of retrieval itself rather than inferred from the database."""
-    report = _environment(monkeypatch, rows=[])
+def test_a_country_without_its_own_generation_does_not_condemn_the_run(
+    monkeypatch,
+) -> None:
+    """The false negative that stopped a healthy pilot.
+
+    Most of this corpus is the global sponsoring directory, so a market can
+    legitimately have no country-scoped generation and still be answerable. An
+    earlier probe asked only for country scope with document_type="policy" and
+    read the correct answer "nothing" as a dead environment.
+    """
+    report = _environment(monkeypatch, sentinel_for=("country:DZ:en",))
+
+    assert report["ready"] is True
+    labels = {probe["probe"]: probe["matches_documents"] for probe in report["retrieval_probes"]}
+    assert labels["global"] is True
+    assert labels["country:DZ:en"] is False
+
+
+def test_the_probes_ask_the_way_retrieval_asks() -> None:
+    """No document_type, because real callers pass none."""
+    import inspect
+    import re
+
+    source = inspect.getsource(comparison._retrieval_probes)
+    code = re.sub(r'"""(?:.|\n)*?"""', "", source)
+
+    assert "document_type" not in code
+    assert '("", "en", "global")' in code
+
+
+def test_every_probe_dead_is_a_refusal(monkeypatch) -> None:
+    report = _environment(monkeypatch, sentinel_for=("global", "country:DZ:en"))
 
     assert report["ready"] is False
-    assert "__no_active_generation__" in report["retrieval_filter_sample"]
+    assert any("every retrieval probe" in problem for problem in report["problems"])
 
 
 def test_a_healthy_environment_is_ready(monkeypatch) -> None:
@@ -311,7 +337,10 @@ def test_freeze_refuses_when_the_environment_cannot_retrieve(
     monkeypatch.setattr(
         comparison,
         "check_environment",
-        lambda: {"ready": False, "problems": ["retrieval is filtered to __no_active_generation__"]},
+        lambda cases=None: {
+            "ready": False,
+            "problems": ["retrieval is filtered to __no_active_generation__"],
+        },
     )
     monkeypatch.setattr(
         comparison, "freeze", lambda *a, **k: pytest.fail("freeze ran in a dead environment")

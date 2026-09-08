@@ -319,18 +319,27 @@ def _indexed_generation_ids() -> list[str]:
     return sorted(str(bucket.get("key") or "") for bucket in buckets)
 
 
-def check_environment() -> dict[str, Any]:
-    """Can this machine actually retrieve? Answered before anything is billed.
+def _fixture_cases(fixture: Path) -> tuple[list[dict[str, Any]], str]:
+    import scripts.run_benchmark as benchmark
+
+    return benchmark.load_fixture(fixture)
+
+
+def check_environment(cases: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Can this machine actually retrieve, for the cases about to run?
 
     The pipeline runs happily with an unreachable database and returns
     refusals: with the generation pointer enabled, active_generation_ids
     catches the connection error, returns nothing, and _generation_filters
     restricts retrieval to the sentinel "__no_active_generation__". Every case
-    then retrieves zero documents and abstains.
+    then retrieves zero documents and abstains - silently, not for free, and
+    with no turn reaching numeric repair, so neither rule is asked anything.
 
-    That failure is silent, it is not free, and it is worthless to measure -
-    no turn reaches numeric repair, so neither rule is asked anything. This
-    check is what stops a pilot paying for six refusals.
+    The probes mirror how retrieval actually calls _generation_filters:
+    (country, language, scope) with NO document_type. An earlier version asked
+    for document_type="policy" in the country scope, which is a real question
+    with a correct answer of "nothing" - most of this corpus is the global
+    sponsoring directory - and reported a healthy environment as dead.
     """
     from config import settings
 
@@ -359,21 +368,13 @@ def check_environment() -> dict[str, Any]:
                 "__no_active_generation__ and every case would abstain"
             )
 
-    # The decisive check: ask retrieval itself what filter it would apply.
-    try:
-        from app.retrieval import opensearch_sections
-
-        applied = json.dumps(
-            opensearch_sections._generation_filters("DZ", "fr", "country", document_type="policy")
+    report["retrieval_probes"] = _retrieval_probes(cases or [])
+    reachable = [probe for probe in report["retrieval_probes"] if probe["matches_documents"]]
+    if report["retrieval_probes"] and not reachable:
+        report["problems"].append(
+            "every retrieval probe is filtered to __no_active_generation__: "
+            "no scope or locale the pilot needs has an active generation"
         )
-        report["retrieval_filter_sample"] = applied[:200]
-        if "__no_active_generation__" in applied:
-            report["problems"].append(
-                "retrieval is filtered to __no_active_generation__: it would "
-                "match no documents at all"
-            )
-    except Exception as exc:
-        report["problems"].append(f"could not evaluate the retrieval filter: {type(exc).__name__}")
 
     report["corpus_signature"] = _corpus_signature()
     if report["corpus_signature"] == "unavailable":
@@ -384,6 +385,55 @@ def check_environment() -> dict[str, Any]:
 
     report["ready"] = not report["problems"]
     return report
+
+
+def _retrieval_probes(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ask retrieval what filter it would build, the way retrieval asks.
+
+    The global probe matters most for this corpus: the sponsoring directory is
+    global scope, and it is where the pilot's numeric cases live. Each case
+    also gets its own country-scope probe, because a market with no active
+    country generation answers from global or not at all - and which of those
+    it is should be visible before anyone pays to find out.
+    """
+    from app.retrieval import opensearch_sections
+
+    wanted = [{"label": "global", "args": ("", "en", "global")}]
+    seen: set[tuple[str, str]] = set()
+    for case in cases:
+        country = str(case.get("country") or "")
+        language = str(case.get("language") or "")
+        if country and (country, language) not in seen:
+            seen.add((country, language))
+            wanted.append(
+                {
+                    "label": f"country:{country}:{language}",
+                    "args": (country, language, "country"),
+                }
+            )
+
+    probes: list[dict[str, Any]] = []
+    for probe in wanted:
+        try:
+            applied = json.dumps(opensearch_sections._generation_filters(*probe["args"]))
+            probes.append(
+                {
+                    "probe": probe["label"],
+                    # An empty filter list means the pointer is disabled, which
+                    # is not a failure - retrieval simply is not restricted.
+                    "matches_documents": "__no_active_generation__" not in applied,
+                    "filter": applied[:160],
+                }
+            )
+        except Exception as exc:
+            probes.append(
+                {
+                    "probe": probe["label"],
+                    "matches_documents": False,
+                    "filter": f"{type(exc).__name__}: {exc}"[:160],
+                }
+            )
+    return probes
 
 
 def _select(cases: list[dict[str, Any]], wanted: list[str]) -> list[dict[str, Any]]:
@@ -1277,7 +1327,9 @@ def main() -> int:
 
             runtime_settings.load_ssm_config()
             init_aws_clients()
-            report["environment"] = check_environment()
+            report["environment"] = check_environment(
+                _select(_fixture_cases(args.fixture)[0], args.case)
+            )
         print(json.dumps(report, indent=2))
         return 0
 
@@ -1332,7 +1384,8 @@ def main() -> int:
 
             runtime_settings.load_ssm_config()
             init_aws_clients()
-        environment = check_environment()
+        selected = _select(_fixture_cases(args.fixture)[0], args.case)
+        environment = check_environment(selected)
         if not environment["ready"]:
             print(
                 json.dumps(
