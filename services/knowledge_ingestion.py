@@ -1247,6 +1247,46 @@ def _activate_generation_pointer(
     clear_active_generation_cache()
 
 
+def _active_section_count(ingestion_id: str) -> int:
+    """How many sections of this generation are actually retrievable."""
+    client = _client()
+    client.indices.refresh(index=settings.OPENSEARCH_INDEX)
+    result = client.count(
+        index=settings.OPENSEARCH_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "filter": [
+                        exact_term_query("ingestion_id", ingestion_id),
+                        {"term": {"status": "active"}},
+                    ]
+                }
+            }
+        },
+    )
+    return int(result.get("count", 0))
+
+
+def _visibility_verifier(job_id: str, expected: int) -> Any:
+    """How to check that a generation is live, in the deployment we are in.
+
+    With the generation pointer enabled the pointer is the authority and the
+    attempt store reads it directly. With it disabled there is no pointer to
+    read and visibility is the index itself - so it is counted. Publication
+    without a pointer is not therefore unverifiable, and recording it as
+    "succeeded, visibility unverified" was labelling an unknown outcome as
+    success. It is verified differently, and if the count does not match, the
+    attempt fails rather than being called a success with a caveat.
+    """
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        return None
+
+    def _verify() -> bool:
+        return _active_section_count(job_id) == expected
+
+    return _verify
+
+
 def _activate_staged_sections(
     client: Any,
     *,
@@ -2003,62 +2043,87 @@ def publish_ingestion_job(
         source_file=str(first.get("sourceFile") or job.get("filename") or ""),
     ))
 
-    # From here on the attempt is recorded, so a worker that dies has left
-    # something a retry can interpret. begin() returns None when this exact
-    # revision already published - a duplicate request, not a second activation.
+    # From here on the attempt is owned, so a worker that dies leaves something
+    # a retry can interpret - and a retry cannot proceed while the owner's lease
+    # is still live. begin() returns None only when this revision is fully
+    # published, finalization included.
     attempt_store = store or publication_attempt.PostgresAttemptStore()
-    claimed = publication_attempt.begin(
+    verify_visible = _visibility_verifier(job_id, expected)
+    claim = publication_attempt.begin(
         attempt_store,
         job_id=job_id,
         revision=revision,
         logical_document_id=logical_document_id,
+        verify_visible=verify_visible,
     )
-    if claimed is None:
+    if claim is None:
         return {"job": _ingestion_job(job_id), "publishedCount": count}
 
     try:
-        _publish_activated_generation(
-            job=job,
+        # already_active means a previous attempt got the generation live and
+        # died before finishing. Re-activating would be harmless but pointless;
+        # what is missing is everything after it.
+        if not claim.already_active:
+            _publish_activated_generation(
+                job=job,
+                job_id=job_id,
+                first=first,
+                expected=expected,
+                documents=documents,
+                logical_document_id=logical_document_id,
+                accepted_by=accepted_by,
+            )
+            publication_attempt.confirm_visible(
+                attempt_store,
+                job_id=job_id,
+                claim=claim,
+                logical_document_id=logical_document_id,
+                verify_visible=verify_visible,
+            )
+
+        # Finalization, and it runs on the recovery path too. An active pointer
+        # establishes visibility and nothing else: without these the portal
+        # shows a document that is live and still marked awaiting review. Both
+        # writes are idempotent - _record_document upserts on document_id, and
+        # the job update is a plain assignment - so repeating them after a
+        # failure is safe.
+        _record_document(
             job_id=job_id,
-            first=first,
-            expected=expected,
-            documents=documents,
-            logical_document_id=logical_document_id,
+            filename=str(job.get("filename") or "document"),
+            source_uri=str(job.get("source_uri") or ""),
+            country=str(job.get("country") or ""),
+            language=str(job.get("language") or ""),
+            document_type=str(job.get("document_type") or "policy"),
+            access_scope=str(job.get("access_scope") or "country"),
+            version=str(job.get("document_version") or ""),
+            section_count=count,
+            content_hash=str(job.get("content_hash") or ""),
             accepted_by=accepted_by,
+            logical_document_id=logical_document_id,
+            document_owner=str(job.get("document_owner") or ""),
+            approval_reference=str(job.get("approval_reference") or ""),
+            effective_date=str(job.get("effective_date") or ""),
+            expiry_date=str(job.get("expiry_date") or ""),
+            malware_scan_status=str(job.get("malware_scan_status") or "not_required"),
         )
+    except publication_attempt.OwnershipLost:
+        raise
     except Exception as exc:
-        # Recoverable, not "did not happen": the pointer decides which, and
-        # confirm()/begin() are the only places that decision is made.
-        publication_attempt.fail(attempt_store, job_id=job_id, detail=str(exc))
+        # Recoverable, not "did not happen". Which one it was is decided by the
+        # next attempt, after it takes ownership - never inferred here from the
+        # fact that an exception was raised.
+        publication_attempt.fail(attempt_store, job_id=job_id, claim=claim, detail=str(exc))
         raise
 
-    publication_attempt.confirm(
+    _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
+    # Succeeded means finished, not activated. Written last, so a retry that
+    # sees it can safely do nothing.
+    publication_attempt.complete(
         attempt_store,
         job_id=job_id,
-        logical_document_id=logical_document_id,
-        pointer_enabled=bool(settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED),
+        claim=claim,
+        detail="verified visible and finalized",
     )
-
-    _record_document(
-        job_id=job_id,
-        filename=str(job.get("filename") or "document"),
-        source_uri=str(job.get("source_uri") or ""),
-        country=str(job.get("country") or ""),
-        language=str(job.get("language") or ""),
-        document_type=str(job.get("document_type") or "policy"),
-        access_scope=str(job.get("access_scope") or "country"),
-        version=str(job.get("document_version") or ""),
-        section_count=count,
-        content_hash=str(job.get("content_hash") or ""),
-        accepted_by=accepted_by,
-        logical_document_id=logical_document_id,
-        document_owner=str(job.get("document_owner") or ""),
-        approval_reference=str(job.get("approval_reference") or ""),
-        effective_date=str(job.get("effective_date") or ""),
-        expiry_date=str(job.get("expiry_date") or ""),
-        malware_scan_status=str(job.get("malware_scan_status") or "not_required"),
-    )
-    _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
     clear_active_generation_cache()
     return {"job": _ingestion_job(job_id), "publishedCount": count}
 

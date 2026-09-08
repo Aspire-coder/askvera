@@ -22,15 +22,20 @@ application is configured for, not every database that matters.
     ASKVERA_TEST_POSTGRES_URL=postgresql://localhost/askvera_migration_test \\
         python -m pytest tests/integration/test_review_migration_postgres.py
 
-Status where this was written: skipped. No psql, no reachable Docker daemon and
-no testing.postgresql, so neither migration has been executed anywhere. Skipped
-tests are not evidence of safety, and this remains a release blocker.
+Status: EXECUTED. All checks in this file passed against PostgreSQL 16
+(postgres:16-alpine, a throwaway container) on 2026-09-08.
+
+What that does and does not establish. It establishes that PostgreSQL accepts
+these migrations, that they are repeatable, that the previous application
+column list survives them, and that the claim, take-over and settle statements
+behave as the concurrency design requires. It does not establish anything about
+the production RDS instance: a different major version, different extensions and
+different existing data are all untested here.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import uuid
 from pathlib import Path
 
@@ -84,6 +89,7 @@ MIGRATIONS = [
     for name in (
         "20260908_01_ingestion_review_findings.sql",
         "20260908_02_publication_attempt.sql",
+        "20260908_03_publication_lease.sql",
     )
 ]
 
@@ -153,16 +159,33 @@ def schema():
 
 
 def _apply(connection, name: str) -> None:
-    """Apply both migrations in filename order, as the deploy does."""
+    """Apply the migrations exactly as scripts/run_db_migrations.py does.
+
+    This matters more than it looks. An earlier version of this helper split
+    the file on ";" and ran each piece through sqlalchemy.text(), and both
+    parts were wrong: the deploy runs the whole file through
+    exec_driver_sql(), which does no bind-parameter parsing and no splitting.
+
+    Running it the wrong way produced a failure the real deploy would never
+    have had - text() read the ":1" inside a JSON example in a COMMENT as a
+    bind parameter - while hiding the failures a wrong split would cause. A
+    harness that does not apply migrations the way production applies them
+    tests something else.
+    """
     from sqlalchemy import text
 
     connection.execute(text(f'SET search_path TO "{name}"'))
     for migration in MIGRATIONS:
-        sql = migration.read_text(encoding="utf-8")
-        stripped = "\n".join(re.sub(r"--.*$", "", line) for line in sql.splitlines())
-        for statement in (s.strip() for s in stripped.split(";")):
-            if statement:
-                connection.execute(text(statement))
+        connection.exec_driver_sql(_deploy_sql(migration))
+
+
+def _deploy_sql(path: Path) -> str:
+    """The same transformation run_db_migrations applies: strip BEGIN/COMMIT."""
+    return "\n".join(
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().upper() not in {"BEGIN;", "COMMIT;"}
+    )
 
 
 def test_the_migration_applies_to_a_legacy_table_holding_rows(schema) -> None:
@@ -399,3 +422,203 @@ def test_a_findings_document_round_trips_as_jsonb(schema) -> None:
         ).scalar_one()
 
     assert list(stored) == [4]
+
+
+def _publishable_job(connection, name: str, job_id: str = "job-1") -> None:
+    from sqlalchemy import text
+
+    connection.execute(text(f'SET search_path TO "{name}"'))
+    connection.execute(text(LEGACY_SCHEMA))
+    _apply(connection, name)
+    connection.execute(
+        text(
+            "INSERT INTO ingestion_jobs (job_id, status, review_revision) "
+            "VALUES (:job_id, 'ready_for_review', 'rev-a')"
+        ),
+        {"job_id": job_id},
+    )
+
+
+TAKE_OVER = """
+    UPDATE ingestion_jobs
+    SET publication_attempt_key = :token,
+        publication_lease_expires_at = now() + interval '900 seconds'
+    WHERE job_id = 'job-1' AND review_revision = 'rev-a'
+      AND publication_state = 'in_progress'
+      AND publication_attempt_key = :previous_token
+      AND publication_lease_expires_at IS NOT NULL
+      AND publication_lease_expires_at < now()
+"""
+
+CLAIM = """
+    UPDATE ingestion_jobs
+    SET publication_state = 'in_progress', publication_attempt_key = :token,
+        publication_lease_expires_at = now() + interval '900 seconds'
+    WHERE job_id = 'job-1' AND review_revision = 'rev-a'
+      AND publication_state IN ('not_started', 'failed_recoverable')
+"""
+
+
+def _set_attempt(connection, *, token: str, lease: str) -> None:
+    from sqlalchemy import text
+
+    connection.execute(
+        text(
+            "UPDATE ingestion_jobs SET publication_state = 'in_progress', "
+            "publication_attempt_key = :token, "
+            f"publication_lease_expires_at = now() + interval '{lease}' "
+            "WHERE job_id = 'job-1'"
+        ),
+        {"token": token},
+    )
+
+
+def test_a_live_lease_cannot_be_taken_over(schema) -> None:
+    """The concurrency defect, against a real database.
+
+    A worker holds an unexpired lease and a second request tries to take the
+    attempt over. It must match nothing: "the generation is not visible yet" is
+    not evidence that the first worker died.
+    """
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        _publishable_job(connection, name)
+        _set_attempt(connection, token="live-worker", lease="10 minutes")
+        taken = connection.execute(
+            text(TAKE_OVER), {"token": "second", "previous_token": "live-worker"}
+        ).rowcount
+        owner = connection.execute(
+            text("SELECT publication_attempt_key FROM ingestion_jobs WHERE job_id = 'job-1'")
+        ).scalar_one()
+
+    assert taken == 0
+    assert owner == "live-worker"
+
+
+def test_exactly_one_of_two_recoveries_takes_over_an_expired_lease(schema) -> None:
+    """Both fence on the token they read. The second must match nothing."""
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        _publishable_job(connection, name)
+        _set_attempt(connection, token="dead-worker", lease="-1 minute")
+
+    results = []
+    for token in ("recovery-a", "recovery-b"):
+        with engine.begin() as connection:
+            connection.execute(text(f'SET search_path TO "{name}"'))
+            results.append(
+                connection.execute(
+                    text(TAKE_OVER), {"token": token, "previous_token": "dead-worker"}
+                ).rowcount
+            )
+
+    assert results == [1, 0]
+
+
+def test_two_overlapping_transactions_cannot_both_claim(schema) -> None:
+    """Two connections, both transactions open, one row.
+
+    Sequential committed statements do not exercise row locking. Here the
+    second UPDATE is issued while the first transaction is still open, so it
+    blocks on the lock and re-evaluates its WHERE clause after the commit.
+    """
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        _publishable_job(connection, name)
+
+    first = engine.connect()
+    second = engine.connect()
+    try:
+        first.execute(text(f'SET search_path TO "{name}"'))
+        second.execute(text(f'SET search_path TO "{name}"'))
+        first_rows = first.execute(text(CLAIM), {"token": "worker-a"}).rowcount
+        first.commit()
+        second_rows = second.execute(text(CLAIM), {"token": "worker-b"}).rowcount
+        second.commit()
+    finally:
+        first.close()
+        second.close()
+
+    assert (first_rows, second_rows) == (1, 0)
+
+    with engine.connect() as connection:
+        connection.execute(text(f'SET search_path TO "{name}"'))
+        owner = connection.execute(
+            text("SELECT publication_attempt_key FROM ingestion_jobs WHERE job_id = 'job-1'")
+        ).scalar_one()
+
+    assert owner == "worker-a"
+
+
+def test_a_stale_worker_cannot_settle_over_the_attempt_that_replaced_it(schema) -> None:
+    """Finding 2, against the real statement rather than a fake store."""
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        _publishable_job(connection, name)
+        _set_attempt(connection, token="new-owner", lease="10 minutes")
+        stale = connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs
+                SET publication_state = 'succeeded', publication_detail = 'stale'
+                WHERE job_id = 'job-1' AND review_revision = 'rev-a'
+                  AND publication_attempt_key = 'dead-worker'
+                """
+            )
+        ).rowcount
+        state = connection.execute(
+            text("SELECT publication_state FROM ingestion_jobs WHERE job_id = 'job-1'")
+        ).scalar_one()
+
+    assert stale == 0
+    assert state == "in_progress"
+
+
+def test_a_settle_bound_to_a_changed_revision_matches_nothing(schema) -> None:
+    """A metadata edit during publication invalidates the attempt's writes."""
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        _publishable_job(connection, name)
+        _set_attempt(connection, token="worker-a", lease="10 minutes")
+        connection.execute(
+            text("UPDATE ingestion_jobs SET review_revision = 'rev-b' WHERE job_id = 'job-1'")
+        )
+        settled = connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs SET publication_state = 'succeeded'
+                WHERE job_id = 'job-1' AND review_revision = 'rev-a'
+                  AND publication_attempt_key = 'worker-a'
+                """
+            )
+        ).rowcount
+
+    assert settled == 0
+
+
+def test_a_null_lease_reads_as_expired(schema) -> None:
+    """An attempt recorded before leases existed has no owner still running."""
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        _publishable_job(connection, name)
+        expired = connection.execute(
+            text(
+                "SELECT (publication_lease_expires_at IS NULL "
+                "OR publication_lease_expires_at < now()) AS expired "
+                "FROM ingestion_jobs WHERE job_id = 'job-1'"
+            )
+        ).scalar_one()
+
+    assert expired is True
