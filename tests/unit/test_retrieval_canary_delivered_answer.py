@@ -436,3 +436,41 @@ def test_the_chained_followup_case_asserts_retrieval_not_a_mention():
 
     assert case["expected_title_contains"] == "Forever Germany"
     assert "answer_must_contain" not in case
+
+
+def test_the_cases_guarding_the_2026_09_08_fixes_can_stop_a_release():
+    """Each of these guards a defect a distributor actually hit.
+
+    They shipped observed-only because their assertions had not been proven
+    against the live index, and an assertion that is itself wrong would roll
+    back a sound deploy - which is worse than no test. Each has now passed on
+    two consecutive deploys, so a future failure should stop a release rather
+    than be reported quietly in a wall of JSON.
+
+    Demoting one of these is a deliberate act, not an accident, and this test
+    is here to make it look like one.
+    """
+    cases, _ = canary.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json")
+    by_id = {case["id"]: case for case in cases}
+
+    for case_id in (
+        "product-price-out-of-scope-delivered",
+        "chained-followup-market-continuity",
+        "belgium-office-hours-survive-repair",
+        "market-delivery-cost-keeps-ordinary-fallback",
+    ):
+        assert by_id[case_id].get("blocking", True) is True, case_id
+
+
+def test_a_case_for_an_unfixed_defect_stays_observed_only():
+    """algeria-minimum-order-delivered still fails, and should not block.
+
+    It dies on INCOMPLETE_OUTPUT plus an invented figure, which no fix so far
+    addresses. Making it blocking would stop every release until that is
+    solved; leaving it observed keeps it visible and honest.
+    """
+    cases, _ = canary.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json")
+    case = next(c for c in cases if c["id"] == "algeria-minimum-order-delivered")
+
+    assert case["blocking"] is False
+    assert case["non_blocking_reason"].strip()
