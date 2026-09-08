@@ -41,7 +41,11 @@ def test_the_migration_exists_and_is_ordered_after_the_current_head() -> None:
     """Migrations apply in filename order, so a lower number would never run."""
     migrations = sorted(p.name for p in MIGRATION.parent.glob("*.sql"))
     assert MIGRATION.name in migrations
-    assert migrations[-1] == MIGRATION.name
+    # Everything that existed before this one sorts earlier. Asserting it is
+    # last would fail the moment a later migration is added, which says nothing
+    # about whether this one runs.
+    earlier = [name for name in migrations if name < MIGRATION.name]
+    assert len(earlier) == migrations.index(MIGRATION.name)
 
 
 def test_every_statement_carries_a_re_runnable_guard() -> None:

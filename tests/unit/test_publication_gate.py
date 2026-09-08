@@ -278,8 +278,8 @@ def test_there_are_exactly_two_activation_paths_and_both_are_gated() -> None:
     # The processing-path calls are gated on review_before_publish, and that
     # flag is forced true when findings exist.
     process = inspect.getsource(knowledge_ingestion.process_ingestion_job)
-    assert "_findings_require_review(" in process
-    assert process.index("_findings_require_review(") < process.index("_index_sections(")
+    assert "_assess_document(" in process
+    assert process.index("_assess_document(") < process.index("_index_sections(")
 
 
 def test_a_contradiction_withholds_automatic_publication() -> None:
@@ -292,21 +292,21 @@ def test_a_contradiction_withholds_automatic_publication() -> None:
     """
     from services import knowledge_ingestion
 
-    assert knowledge_ingestion._findings_require_review(
+    assert knowledge_ingestion._assess_document(
         job_id="job-1", filename="DK-EN-Company-Policy.pdf", country="DK", language="EN",
-        document_type="policy", version="2026-07",
+        document_type="policy", access_scope="country", version="2026-07", content_hash="h",
         effective_date="2026-07-01", expiry_date="2026-01-01", low_text_image_pages=[],
-    ) is True
+    )["requires_review"] is True
 
 
 def test_an_uncertain_page_withholds_automatic_publication() -> None:
     from services import knowledge_ingestion
 
-    assert knowledge_ingestion._findings_require_review(
+    assert knowledge_ingestion._assess_document(
         job_id="job-2", filename="DK-EN-Company-Policy.pdf", country="DK", language="EN",
-        document_type="policy", version="2026-07",
+        document_type="policy", access_scope="country", version="2026-07", content_hash="h",
         effective_date="2026-07-01", expiry_date="", low_text_image_pages=[7],
-    ) is True
+    )["requires_review"] is True
 
 
 def test_a_clean_document_still_publishes_automatically() -> None:
@@ -316,11 +316,11 @@ def test_a_clean_document_still_publishes_automatically() -> None:
     """
     from services import knowledge_ingestion
 
-    assert knowledge_ingestion._findings_require_review(
+    assert knowledge_ingestion._assess_document(
         job_id="job-3", filename="DK-EN-Company-Policy.pdf", country="DK", language="EN",
-        document_type="policy", version="2026-07",
+        document_type="policy", access_scope="country", version="2026-07", content_hash="h",
         effective_date="2026-07-01", expiry_date="", low_text_image_pages=[],
-    ) is False
+    )["requires_review"] is False
 
 
 def test_review_before_publish_is_only_ever_forced_on_never_off() -> None:
@@ -330,7 +330,10 @@ def test_review_before_publish_is_only_ever_forced_on_never_off() -> None:
     from services import knowledge_ingestion
 
     process = inspect.getsource(knowledge_ingestion.process_ingestion_job)
-    assert "review_before_publish = review_before_publish or _findings_require_review(" in process
+    assert (
+        "review_before_publish = review_before_publish or bool(assessment[\"requires_review\"])"
+        in process
+    )
 
 
 def _loaded_row(**overrides) -> dict:

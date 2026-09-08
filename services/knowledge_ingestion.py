@@ -35,6 +35,7 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
 from services.aws_clients import get_aws_clients
 from services.document_preflight import analyze_pdf_with_timeout, extract_pdf_page_text
 from services.db import get_engine
+from services import publication_attempt
 from services.knowledge_generations import (
     build_logical_document_id,
     clear_active_generation_cache,
@@ -482,19 +483,29 @@ def _report_low_text_image_pages(preflight, job_id: str, filename: str) -> None:
     )
 
 
-def _findings_require_review(
+def _assess_document(
     *,
     job_id: str,
     filename: str,
     country: str,
     language: str,
     document_type: str,
+    access_scope: str,
     version: str,
     effective_date: str,
     expiry_date: str,
+    content_hash: str,
     low_text_image_pages: list[int],
-) -> bool:
-    """Whether this document must go to a reviewer rather than activating.
+) -> dict[str, Any]:
+    """Assess a document, returning the findings, its revision, and the routing.
+
+    The assessment is returned rather than acted on here so it can be stored in
+    the same statement that marks the job ready for review. A job that is
+    reviewable but carries no record of what was found would show a reviewer an
+    empty findings list and let them approve on the strength of an assessment
+    whose result was lost.
+
+    Whether this document must go to a reviewer rather than activating.
 
     review_before_publish arrives as a form field and defaults to true, but a
     caller holding publish permission can submit false, and both activation
@@ -507,6 +518,7 @@ def _findings_require_review(
     the reasons are logged; nothing is discarded.
     """
     from services.metadata_conflicts import detect_metadata_conflicts
+    from services.publication_gate import revision_fingerprint
 
     findings = detect_metadata_conflicts(
         filename=filename,
@@ -517,17 +529,48 @@ def _findings_require_review(
         effective_date=effective_date,
         expiry_date=expiry_date,
     )
-    if not findings and not low_text_image_pages:
-        return False
-
-    LOGGER.warning(
-        "automatic_publication_withheld_pending_review",
-        correlation_id=job_id,
-        filename=filename,
-        findings=[f"{finding.field}:{finding.severity}" for finding in findings],
-        uncertain_pages=list(low_text_image_pages),
+    revision = revision_fingerprint(
+        content_hash=content_hash,
+        metadata={
+            "filename": filename,
+            "country": country,
+            "language": language,
+            "document_type": document_type,
+            "access_scope": access_scope,
+            "version": version,
+            "effective_date": effective_date,
+            "expiry_date": expiry_date,
+        },
     )
-    return True
+    assessment = {
+        "requires_review": bool(findings or low_text_image_pages),
+        "revision": revision,
+        "findings": findings,
+        "payload": json.dumps(
+            {
+                "schema": 1,
+                "findings": [
+                    {
+                        "field": finding.field,
+                        "severity": finding.severity,
+                        "detail": finding.detail,
+                    }
+                    for finding in findings
+                ],
+                "uncertain_pages": [int(page) for page in low_text_image_pages],
+            },
+            sort_keys=True,
+        ),
+    }
+    if assessment["requires_review"]:
+        LOGGER.warning(
+            "automatic_publication_withheld_pending_review",
+            correlation_id=job_id,
+            filename=filename,
+            findings=[f"{finding.field}:{finding.severity}" for finding in findings],
+            uncertain_pages=list(low_text_image_pages),
+        )
+    return assessment
 
 
 def process_ingestion_job(
@@ -672,17 +715,20 @@ def process_ingestion_job(
         # covers automatic publication as well as the reviewed route. A document
         # carrying findings is routed to review rather than refused: the upload
         # is not lost, it just cannot reach the index without someone looking.
-        review_before_publish = review_before_publish or _findings_require_review(
+        assessment = _assess_document(
             job_id=job_id,
             filename=filename,
             country=country,
             language=language,
             document_type=document_type,
+            access_scope=access_scope,
             version=version,
             effective_date=effective_date,
             expiry_date=expiry_date,
+            content_hash=document_hash,
             low_text_image_pages=low_text_image_pages,
         )
+        review_before_publish = review_before_publish or bool(assessment["requires_review"])
         indexed = _index_sections(
             sections,
             source_uri=source_uri,
@@ -713,6 +759,9 @@ def process_ingestion_job(
                 expiry_date=expiry_date,
                 malware_scan_status="clean" if settings.ADMIN_INGESTION_MALWARE_SCAN_REQUIRED else "not_required",
             )
+        # One statement. The assessment and the status that exposes the job to
+        # a reviewer are written together, so there is no moment at which a job
+        # is reviewable with no record of what was found about it.
         _update_job(
             job_id,
             status="ready_for_review" if review_before_publish else "ready",
@@ -722,6 +771,9 @@ def process_ingestion_job(
             lease_owner="",
             lease_expires_at=None,
             completed_at=datetime.now(UTC),
+            review_revision=str(assessment["revision"]),
+            review_findings=str(assessment["payload"]),
+            review_evaluated_at=datetime.now(UTC),
         )
         return True
     except ValueError as exc:
@@ -1276,11 +1328,19 @@ def _update_job(job_id: str, **values: Any) -> None:
         "accepted_by",
         "review_before_publish",
         "malware_scan_status",
+        "review_revision",
+        "review_findings",
+        "review_evaluated_at",
     }
     updates = {key: value for key, value in values.items() if key in allowed}
     if not updates:
         return
-    assignments = ", ".join(f"{key} = :{key}" for key in updates)
+    # review_findings is JSONB and arrives as a JSON string; a bound text
+    # parameter needs the cast, the rest do not.
+    assignments = ", ".join(
+        f"{key} = CAST(:{key} AS JSONB)" if key == "review_findings" else f"{key} = :{key}"
+        for key in updates
+    )
     try:
         with get_engine().begin() as connection:
             connection.execute(
@@ -1667,8 +1727,11 @@ def test_ingestion_job(job_id: str, message: str, *, limit: int = 5) -> dict[str
     return {"job": job, "message": message, "matches": matches, "matchCount": len(matches)}
 
 
-def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> None:
+def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> str:
     """Refuse publication when metadata or extraction findings are unresolved.
+
+    Returns the revision fingerprint the publication attempt binds to, so the
+    content that passed the gate is the content the attempt is authorised for.
 
     Raises ValueError, which the admin route already turns into a 400 carrying
     the reasons, so a caller is told what to fix rather than that something
@@ -1726,10 +1789,15 @@ def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> None:
             revision=revision,
         )
         raise ValueError(" ".join(blocked.reasons)) from blocked
+    return revision
 
 
 def publish_ingestion_job(
-    job_id: str, *, accepted_by: str, resolution: Any = None
+    job_id: str,
+    *,
+    accepted_by: str,
+    resolution: Any = None,
+    store: Any = None,
 ) -> dict[str, Any]:
     """Publish a reviewed document.
 
@@ -1744,20 +1812,11 @@ def publish_ingestion_job(
     # Enforced here rather than in the route, because this is the single place
     # every publication path arrives at - the API endpoint, a retry, and any
     # future caller. A disabled button in the portal is not enforcement.
-    _enforce_publication_gate(job, resolution)
+    revision = _enforce_publication_gate(job, resolution)
     count, documents = _staging_documents(job_id, limit=10000)
     expected = int(job.get("section_count") or 0)
     if count != expected or not documents:
         raise ValueError(f"Staged publication verification failed: expected {expected}, found {count}.")
-    client = _client()
-    actions = [{"_id": document["id"]} for document in documents]
-    _activate_staged_sections(
-        client,
-        index=settings.OPENSEARCH_INDEX,
-        actions=actions,
-        expected_count=expected,
-        ingestion_id=job_id,
-    )
     first = documents[0]
     logical_document_id = str(job.get("logical_document_id") or build_logical_document_id(
         logical_document_id="",
@@ -1767,28 +1826,43 @@ def publish_ingestion_job(
         access_scope=str(job.get("access_scope") or "country"),
         source_file=str(first.get("sourceFile") or job.get("filename") or ""),
     ))
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
-        _activate_generation_pointer(
+
+    # From here on the attempt is recorded, so a worker that dies has left
+    # something a retry can interpret. begin() returns None when this exact
+    # revision already published - a duplicate request, not a second activation.
+    attempt_store = store or publication_attempt.PostgresAttemptStore()
+    claimed = publication_attempt.begin(
+        attempt_store,
+        job_id=job_id,
+        revision=revision,
+        logical_document_id=logical_document_id,
+    )
+    if claimed is None:
+        return {"job": _ingestion_job(job_id), "publishedCount": count}
+
+    try:
+        _publish_activated_generation(
+            job=job,
+            job_id=job_id,
+            first=first,
+            expected=expected,
+            documents=documents,
             logical_document_id=logical_document_id,
-            ingestion_id=job_id,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            document_type=str(job.get("document_type") or "policy"),
-            access_scope=str(job.get("access_scope") or "country"),
-            activated_by=accepted_by,
+            accepted_by=accepted_by,
         )
-    else:
-        delete_actions = _older_source_actions(
-            client,
-            index=settings.OPENSEARCH_INDEX,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            ingestion_id=job_id,
-        )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
+    except Exception as exc:
+        # Recoverable, not "did not happen": the pointer decides which, and
+        # confirm()/begin() are the only places that decision is made.
+        publication_attempt.fail(attempt_store, job_id=job_id, detail=str(exc))
+        raise
+
+    publication_attempt.confirm(
+        attempt_store,
+        job_id=job_id,
+        logical_document_id=logical_document_id,
+        pointer_enabled=bool(settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED),
+    )
+
     _record_document(
         job_id=job_id,
         filename=str(job.get("filename") or "document"),
@@ -1811,3 +1885,52 @@ def publish_ingestion_job(
     _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
     clear_active_generation_cache()
     return {"job": _ingestion_job(job_id), "publishedCount": count}
+
+
+def _publish_activated_generation(
+    *,
+    job: dict[str, Any],
+    job_id: str,
+    first: dict[str, Any],
+    expected: int,
+    documents: list[dict[str, Any]],
+    logical_document_id: str,
+    accepted_by: str,
+) -> None:
+    """Activate the staged sections, then move the pointer that makes them visible.
+
+    Order matters and is the reason this is recoverable: with the generation
+    pointer enabled, activated sections are still invisible until the pointer
+    names them, so a failure between the two steps leaves nothing a reader can
+    reach. The pointer update is the commit point.
+    """
+    client = _client()
+    _activate_staged_sections(
+        client,
+        index=settings.OPENSEARCH_INDEX,
+        actions=[{"_id": document["id"]} for document in documents],
+        expected_count=expected,
+        ingestion_id=job_id,
+    )
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        _activate_generation_pointer(
+            logical_document_id=logical_document_id,
+            ingestion_id=job_id,
+            country=str(job.get("country") or first.get("country") or ""),
+            language=str(job.get("language") or first.get("language") or ""),
+            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+            document_type=str(job.get("document_type") or "policy"),
+            access_scope=str(job.get("access_scope") or "country"),
+            activated_by=accepted_by,
+        )
+    else:
+        delete_actions = _older_source_actions(
+            client,
+            index=settings.OPENSEARCH_INDEX,
+            country=str(job.get("country") or first.get("country") or ""),
+            language=str(job.get("language") or first.get("language") or ""),
+            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+            ingestion_id=job_id,
+        )
+        if delete_actions:
+            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
