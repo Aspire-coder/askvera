@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "description": "Questions for measuring answer quality, run by scripts/run_benchmark.py. This is NOT the retrieval canary and must never be used as a deploy gate. The canary is built from failures we already fixed, so it can only prove we have not gone backwards. These cases exist to say how good the system is, which means they must be written from source documents rather than from what the bot said. Every case states where its expected answer comes from, in 'source_evidence' and 'provenance'; a case that cannot state that does not belong here.",
-  "status": "Pilot refusal cases, source-verified directory cases, and a first country-scope pair. The DK/SE pair covers the Benelux and Nordic policy documents, which are 68% of the corpus and had no coverage: the two sections are byte-identical, so a wrong-market answer is invisible in the text and only the cited section reveals it. Fifteen cases against 17,896 sections detects systematic failures on covered intents and certifies nothing. Expand to non-English policy next: 17 of 28 documents are not in English.",
+  "status": "All cases are DEVELOPMENT data. Every one was authored or had its assertions adjusted while fixing the system on 2026-09-08, so passing them measures whether known defects stay fixed - not how good the system is on questions it has not been tuned against. The held-out set is empty. It must be authored from source without being used to diagnose or fix anything, and kept that way; a case moved into development can never move back.",
   "cases": [
     {
       "id": "scope-product-price-gb",
@@ -19,7 +19,8 @@
         ]
       },
       "source_evidence": "config/conversation_routes.json routes 'price' and 'cost' to the catalogue_scope response, whose approved copy states that product prices, the catalogue, stock levels and order status are not part of the approved documents.",
-      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
+      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required.",
+      "evaluation_set": "development"
     },
     {
       "id": "scope-order-tracking-gb",
@@ -32,7 +33,8 @@
         "kind": "abstain"
       },
       "source_evidence": "config/conversation_routes.json lists 'order status', 'track my order' and 'where is my order' as catalogue scope terms; order status is explicitly outside the approved documents.",
-      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
+      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required.",
+      "evaluation_set": "development"
     },
     {
       "id": "scope-medical-claim-gb",
@@ -49,7 +51,8 @@
         ]
       },
       "source_evidence": "The approved medical_claim response in config/conversation_routes.json declines to make claims about treating or curing anything and directs the reader to a healthcare professional.",
-      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
+      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required.",
+      "evaluation_set": "development"
     },
     {
       "id": "scope-income-guarantee-gb",
@@ -66,7 +69,8 @@
         ]
       },
       "source_evidence": "The approved income_claim response in config/conversation_routes.json declines income projections or guarantees and points to the official Income Disclosure Statement.",
-      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
+      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required.",
+      "evaluation_set": "development"
     },
     {
       "id": "scope-off-topic-gb",
@@ -79,7 +83,8 @@
         "kind": "abstain"
       },
       "source_evidence": "The approved off_topic response in config/conversation_routes.json limits AskVera to Forever Living policies and the international sponsoring directory; weather is covered by no approved document.",
-      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
+      "provenance": "Repository configuration, verified 2026-09-07. No corpus read required.",
+      "evaluation_set": "development"
     },
     {
       "id": "algeria-delivery-cost",
@@ -99,7 +104,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever Algeria record: 'Delivery Cost: 900 DZD ($7.5)'.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "algeria-office-hours",
@@ -124,7 +130,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever Algeria record: 'Business Hours Office 09.30 am - 17.30 pm (Sat - Thu)'. The assertion is the Saturday-to-Thursday working week, which is the fact a reader would get wrong, and which no other market in the fixture shares. The clock values are deliberately not asserted: the record writes 17.30 and a model may answer 5:30 PM, which is the same closing time, and a case that fails on notation measures the notation rather than the answer.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "algeria-repeat-order-minimum",
@@ -144,7 +151,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever Algeria record: 'the equivalent of 5 000 DZD ($43) after the first purchase for all FBOs'. Distinct from the 0,200CC first order, which is the trap in this question.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "algeria-foreign-fbo-bonus",
@@ -164,7 +172,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever Algeria record: 'Foreign FBOs cannot receive bonuses except if they have a residency card in Algeria or are registered as a company'. The France and Reunion records also mention Algeria bonuses ('Forever Algeria does not transfer to foreign accounts'), so answering from those is a market-attribution failure this case detects.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "algeria-foreign-online-purchase",
@@ -187,7 +196,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever Algeria record: 'Online purchase by foreign FBO's available: No - Nevertheless, you can send your order by email: commande.algerie@foreverliving.fr'. A bare 'no' omits the documented alternative.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "france-minimum-order",
@@ -207,7 +217,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever France record: 'We do not have a minimum order in France, yet a newly sponsored Preferred Customer will have to order 150 EUR minimum of products within 72 hours in order to validate his sponsorship.' Both halves matter: no FBO minimum, but a sponsorship-validation requirement.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "france-local-bonus-threshold",
@@ -230,7 +241,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever France record: 'Forever France transfers bonuses to local accounts if the bonus amount exceeds 5 EUR.' The foreign-account threshold in the same paragraph is 100 EUR, so an answer giving 100 has taken the wrong clause.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "reunion-delivery-cost",
@@ -253,7 +265,8 @@
         "must_cite": true
       },
       "source_evidence": "Forever Reunion Island record: 'Delivery cost are at 6 EUR and free for orders exceeding 1CC.' The Reunion record repeats much of the France text, so a France delivery figure (10 EUR / 5 EUR) indicates the wrong record was used.",
-      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
+      "evaluation_set": "development"
     },
     {
       "id": "dk-fbo-support-fee-scope",
@@ -274,7 +287,8 @@
         "must_cite": true
       },
       "source_evidence": "'FBO Support fee: A monthly fee of up to EUR 3 deducted from the bonus of all FBOs who reach the level of Assistant Supervisor or higher... This fee is only payable in months when commission is earned.' The text is byte-identical in Denmark and Sweden, so the answer cannot show which market's copy was used and only the cited section can. This is the first test of country scope over the Benelux and Nordic policies, which are 68% of the corpus and previously had no coverage.",
-      "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure."
+      "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure.",
+      "evaluation_set": "development"
     },
     {
       "id": "se-fbo-support-fee-scope",
@@ -295,7 +309,8 @@
         "must_cite": true
       },
       "source_evidence": "'FBO Support fee: A monthly fee of up to EUR 3 deducted from the bonus of all FBOs who reach the level of Assistant Supervisor or higher... This fee is only payable in months when commission is earned.' The text is byte-identical in Denmark and Sweden, so the answer cannot show which market's copy was used and only the cited section can. This is the first test of country scope over the Benelux and Nordic policies, which are 68% of the corpus and previously had no coverage.",
-      "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure."
+      "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure.",
+      "evaluation_set": "development"
     },
     {
       "id": "belgium-then-germany-market-continuity",
@@ -344,7 +359,8 @@
         "must_cite": true
       },
       "source_evidence": "International-Sponsoring-Directory.pdf sections sponsoring-053-belgium and sponsoring-066-germany. Each turn asserts its own market, so a chain that answers Belgium's rule to a question about Germany fails on the turn that got it wrong rather than only at the end. The final turn says 'there', which resolves to the most recently established market: Germany.",
-      "provenance": "Section identifiers observed in deployment canary output on 2026-09-08 (chained-followup-market-continuity, top_section sponsoring-066-germany). The expected minimum-order values are deliberately not asserted: the Belgium and Germany record text has not been dumped, so asserting a figure would be inventing it."
+      "provenance": "Section identifiers observed in deployment canary output on 2026-09-08 (chained-followup-market-continuity, top_section sponsoring-066-germany). The expected minimum-order values are deliberately not asserted: the Belgium and Germany record text has not been dumped, so asserting a figure would be inventing it.",
+      "evaluation_set": "development"
     }
   ]
 }

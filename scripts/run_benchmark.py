@@ -38,7 +38,15 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 DEFAULT_FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json"
-REQUIRED_CASE_FIELDS = {"id", "question", "country", "language", "role", "intent_group", "expected"}
+REQUIRED_CASE_FIELDS = {
+    "id", "question", "country", "language", "role", "intent_group", "expected",
+    "evaluation_set",
+}
+# A case used to diagnose or fix something measures whether that fix holds,
+# not how the system behaves on questions it was never tuned against. The two
+# cannot be averaged into one number without the number meaning less than it
+# appears to.
+VALID_EVALUATION_SETS = {"development", "held_out"}
 VALID_KINDS = {"answer", "abstain"}
 # Every case has to say why its expectation is believed true. A benchmark whose
 # ground truth is assumed measures the assumption, not the system.
@@ -108,6 +116,11 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
         if not identifier or identifier in identifiers:
             raise ValueError(f"Benchmark case IDs must be non-empty and unique: {identifier!r}.")
         identifiers.add(identifier)
+
+        if case["evaluation_set"] not in VALID_EVALUATION_SETS:
+            raise ValueError(
+                f"Case {identifier} needs evaluation_set of {sorted(VALID_EVALUATION_SETS)}."
+            )
 
         for field in REQUIRED_EVIDENCE_FIELDS:
             if not str(case.get(field) or "").strip():
@@ -423,8 +436,10 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         )
 
     by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_set: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for case in results:
         by_group[case["intent_group"]].extend(case["runs"])
+        by_set[case.get("evaluation_set", "development")].extend(case["runs"])
 
     generation_input = sum(run["generation_input_tokens"] for run in runs)
     generation_output = sum(run["generation_output_tokens"] for run in runs)
@@ -459,6 +474,18 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
                 if run["repair_removed_anything"] and not run["repair_damaged"]
             ),
             len(runs),
+        ),
+        # Reported apart, never averaged. A development case passing says a
+        # known defect stays fixed; a held-out case passing is the only evidence
+        # about questions the system was not tuned against.
+        "by_evaluation_set": {
+            name: rate(
+                sum(1 for run in group_runs if run["passed"]), len(group_runs)
+            )
+            for name, group_runs in sorted(by_set.items())
+        },
+        "held_out_cases": sum(
+            1 for case in results if case.get("evaluation_set") == "held_out"
         ),
         "by_intent_group": {
             group: rate(sum(1 for run in group_runs if run["passed"]), len(group_runs))
@@ -569,6 +596,7 @@ def main() -> int:
             "id": case["id"],
             "question": case["question"],
             "language": case["language"],
+            "evaluation_set": case["evaluation_set"],
             "intent_group": case["intent_group"],
             "expected_kind": case["expected"]["kind"],
             "provenance": case["provenance"],

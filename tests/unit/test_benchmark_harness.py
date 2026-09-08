@@ -33,6 +33,7 @@ VALID_CASE = {
     "language": "en",
     "role": "active_distributor",
     "intent_group": "directory",
+    "evaluation_set": "development",
     "expected": {"kind": "answer", "must_contain": ["2 Case Credits"]},
     "source_evidence": "Policy section 4.2 states the minimum.",
     "provenance": "Dumped from the index on 2026-09-07.",
@@ -565,3 +566,50 @@ def test_a_conversation_turn_missing_its_question_is_refused(tmp_path):
     case["conversation"] = [{"expected": {"kind": "answer"}}]
     with pytest.raises(ValueError, match="no question"):
         benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_a_case_without_an_evaluation_set_is_refused(tmp_path):
+    """A case that does not say whether it was used to fix something cannot be
+    scored honestly, because the two kinds of case mean different things."""
+    case = copy.deepcopy(VALID_CASE)
+    case.pop("evaluation_set")
+    with pytest.raises(ValueError, match="evaluation_set"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+    case["evaluation_set"] = "whatever"
+    with pytest.raises(ValueError, match="evaluation_set"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_the_summary_reports_the_two_sets_apart():
+    """Averaging them would hide that a headline rests on tuned cases."""
+    def case(identifier, evaluation_set, passed):
+        return {
+            "id": identifier, "intent_group": "g", "expected_kind": "answer",
+            "language": "en", "evaluation_set": evaluation_set,
+            "runs_count": 1, "passed_runs": int(passed),
+            "runs": [_run() | {"passed": passed, "retrieval_hit": None,
+                               "repair_removed_anything": False, "repair_damaged": False}],
+        }
+
+    summary = benchmark.summarise(
+        [case("a", "development", True), case("b", "development", True), case("c", "held_out", False)],
+        None,
+    )
+
+    assert summary["by_evaluation_set"]["development"] == "2/2 (100.0%)"
+    assert summary["by_evaluation_set"]["held_out"] == "0/1 (0.0%)"
+    assert summary["held_out_cases"] == 1
+
+
+def test_every_shipped_case_is_currently_development_data():
+    """The honest label for this fixture today.
+
+    Every case was authored or had its assertions adjusted while fixing the
+    system, so the held-out set is empty. This test will need changing when a
+    genuinely untouched case is added - which is the point: moving a case into
+    development is one-way, and that should take a deliberate edit.
+    """
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    assert cases
+    assert {case["evaluation_set"] for case in cases} == {"development"}
