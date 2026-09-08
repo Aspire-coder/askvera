@@ -23,6 +23,7 @@ import logging
 import os
 import statistics
 import sys
+from functools import lru_cache
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,24 @@ VALID_KINDS = {"answer", "abstain"}
 # Every case has to say why its expectation is believed true. A benchmark whose
 # ground truth is assumed measures the assumption, not the system.
 REQUIRED_EVIDENCE_FIELDS = {"source_evidence", "provenance"}
+
+
+@lru_cache(maxsize=1)
+def _valid_roles() -> frozenset[str]:
+    """Roles ChatRequest accepts, read from the same source it validates against."""
+    from config.vera_persona import ROLE_CONTENT_SCOPES
+
+    return frozenset(ROLE_CONTENT_SCOPES)
+
+
+@lru_cache(maxsize=1)
+def _valid_countries() -> frozenset[str]:
+    """Enabled market codes, read from config rather than restated here."""
+    payload = json.loads((PROJECT_ROOT / "config" / "markets.json").read_text(encoding="utf-8"))
+    markets = payload.get("markets", payload) if isinstance(payload, dict) else payload
+    return frozenset(
+        str(market.get("code", "")).upper() for market in markets if market.get("enabled", True)
+    )
 
 
 def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
@@ -72,6 +91,15 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
                     f"Case {identifier} must state {field!r}. A benchmark whose ground truth is "
                     "assumed measures the assumption, not the system."
                 )
+
+        if case["role"] not in _valid_roles():
+            raise ValueError(
+                f"Case {identifier} uses role {case['role']!r}, which ChatRequest rejects. "
+                f"Supported roles: {sorted(_valid_roles())}."
+            )
+        country = str(case["country"]).strip().upper()
+        if country not in _valid_countries():
+            raise ValueError(f"Case {identifier} uses country {country!r}, which is not an enabled market.")
 
         expected = case["expected"]
         if not isinstance(expected, dict) or expected.get("kind") not in VALID_KINDS:

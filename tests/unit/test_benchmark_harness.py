@@ -29,9 +29,9 @@ benchmark = _load("run_benchmark")
 VALID_CASE = {
     "id": "case-1",
     "question": "What is the minimum order?",
-    "country": "GB",
+    "country": "US",
     "language": "en",
-    "role": "fbo",
+    "role": "active_distributor",
     "intent_group": "directory",
     "expected": {"kind": "answer", "must_contain": ["2 Case Credits"]},
     "source_evidence": "Policy section 4.2 states the minimum.",
@@ -323,3 +323,35 @@ def test_an_unqualified_section_still_matches_any_market():
     keys = benchmark._section_keys([("sponsoring-001-algeria", "GLOBAL")])
     assert "sponsoring-001-algeria" in keys
     assert "GLOBAL:sponsoring-001-algeria" in keys
+
+
+def test_an_unsupported_role_is_refused_before_any_model_call(tmp_path):
+    """--dry-run exists to catch exactly this, and did not.
+
+    Every case shipped with role "fbo", which ChatRequest rejects. The fixture
+    validated cleanly, and the error surfaced only after the run had started
+    spending money on a live pipeline. Validating the whole fixture without a
+    model call is the flag's entire purpose, so the roles it accepts must come
+    from the same source ChatRequest validates against.
+    """
+    case = copy.deepcopy(VALID_CASE)
+    case["role"] = "fbo"
+    with pytest.raises(ValueError, match="role"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_an_unknown_country_is_refused_before_any_model_call(tmp_path):
+    """The neighbouring mistake: a market code that is not enabled."""
+    case = copy.deepcopy(VALID_CASE)
+    case["country"] = "ZZ"
+    with pytest.raises(ValueError, match="country"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_the_shipped_fixture_uses_roles_the_request_model_accepts():
+    """A guard on the cases themselves, not only on the loader."""
+    from config.vera_persona import ROLE_CONTENT_SCOPES
+
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    for case in cases:
+        assert case["role"] in ROLE_CONTENT_SCOPES, case["id"]
