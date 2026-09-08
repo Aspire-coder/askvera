@@ -61,21 +61,29 @@ def _pipeline(monkeypatch, *, plan: dict[str, list[str]], fail_after: int | None
     """A pipeline whose turns are described by a plan.
 
     plan maps a case id to a list of "answer" or "refusal". A refusal returns a
-    response without ever firing the capture hook, which is exactly what an
-    early return does in the real orchestrator.
+    response without firing the capture hook, which is what an early return
+    does in the real orchestrator.
+
+    Turns go through AIOrchestrator.handle_chat, because that is what the real
+    canary calls and what the harness wraps to emit turn events. A fake that
+    bypassed it would leave the event path untested.
     """
     from app.orchestrator import chat_orchestrator
 
     performed: list[str] = []
+    plans: dict[str, list[str]] = {}
 
-    def _run(case, sequence):
-        identifier = case["id"]
-        kinds = plan.get(identifier, ["answer"])
-        responses = []
-        for index, kind in enumerate(kinds):
+    class _FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_chat(self, body, correlation_id, *args, **kwargs):
+            identifier = plans["current"]
+            kinds = plan.get(identifier, ["answer"])
+            index = len([entry for entry in performed if entry.startswith(f"{identifier}:")])
+            kind = kinds[index] if index < len(kinds) else "answer"
             if fail_after is not None and len(performed) >= fail_after:
                 raise RuntimeError("interrupted")
-            correlation_id = f"corr-{identifier}-{index}"
             performed.append(f"{identifier}:{index}:{kind}")
             if kind == "answer":
                 hook = chat_orchestrator.pre_repair_capture_hook
@@ -85,24 +93,32 @@ def _pipeline(monkeypatch, *, plan: dict[str, list[str]], fail_after: int | None
                     [_Document("Delivery charges - DZD\nStandard delivery: 900\n")],
                     correlation_id,
                 )
-                responses.append(_Response(correlation_id, f"final {identifier} turn {index}"))
-            else:
-                responses.append(
-                    _Response(correlation_id, "I cannot help with that.", abstained=True)
-                )
+                return _Response(correlation_id, f"final {identifier} turn {index}")
+            return _Response(correlation_id, "I cannot help with that.", abstained=True)
+
+    def _run(case, sequence):
+        identifier = case["id"]
+        plans["current"] = identifier
+        kinds = plan.get(identifier, ["answer"])
+        responses = []
+        # Drive handle_chat once per turn, as the canary does.
+        orchestrator = chat_orchestrator.AIOrchestrator()
+        for index in range(len(kinds)):
+            responses.append(
+                orchestrator.handle_chat(None, f"corr-{identifier}-{index}")
+            )
         return _Run(responses)
 
     import scripts.run_retrieval_canary as canary
 
+    monkeypatch.setattr(chat_orchestrator, "AIOrchestrator", _FakeOrchestrator)
     monkeypatch.setattr(canary, "run_pipeline_capture", _run)
     monkeypatch.setattr(
-        comparison,
-        "_count_model_calls",
-        lambda: ({"calls": 0, "input_tokens": 0, "output_tokens": 0}, lambda: None),
+        comparison, "_instrument_usage", lambda: (_FakeMeter(), lambda: None)
     )
-    # Fixed, clean provenance. The real one reads the working tree, and these
-    # tests must not pass or fail depending on whether it happens to be dirty -
-    # the dirty-tree refusal has its own test, which sets the flag explicitly.
+    # Fixed, clean provenance. The real one reads the working tree and the
+    # index, and these tests must not depend on either - the dirty-tree and
+    # corpus refusals have their own tests, which set those fields explicitly.
     monkeypatch.setattr(
         comparison,
         "_provenance",
@@ -114,9 +130,22 @@ def _pipeline(monkeypatch, *, plan: dict[str, list[str]], fail_after: int | None
             "bedrock_model_id": "us.anthropic.claude-sonnet-4-5",
             "chunk_profile": "current",
             "generation_pointer_enabled": True,
+            "corpus_signature": "active=17896;generations=28;deadbeefdeadbeef",
         },
     )
     return performed
+
+
+class _FakeMeter:
+    def snapshot(self):
+        return {
+            "by_model": {},
+            "application_calls": 0,
+            "http_attempts": 0,
+            "sdk_retry_attempts": 0,
+            "calls_without_reported_tokens": 0,
+            "note": "fake",
+        }
 
 
 def _freeze(tmp_path, **kwargs):
@@ -371,15 +400,108 @@ def test_a_dirty_tree_cannot_be_resumed_across(tmp_path, monkeypatch) -> None:
 
 def test_a_checkpoint_write_failure_surfaces(tmp_path, monkeypatch) -> None:
     """A silent write failure would leave a run that paid for nothing durable."""
+    import os
+
     _pipeline(monkeypatch, plan={"algeria-delivery-cost": ["answer"]})
 
     def _fail(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(Path, "write_text", _fail)
+    monkeypatch.setattr(os, "replace", _fail)
 
     with pytest.raises(OSError):
         _freeze(tmp_path)
+
+
+def test_a_failed_write_does_not_damage_the_previous_checkpoint(
+    tmp_path, monkeypatch
+) -> None:
+    """The reason the swap is atomic.
+
+    Writing in place means an interrupted write truncates the file that already
+    held good turns. A temp file plus os.replace leaves either the old
+    checkpoint or the new one, never half of either.
+    """
+    import os
+
+    checkpoint = tmp_path / "frozen.json"
+    _pipeline(monkeypatch, plan={"algeria-delivery-cost": ["answer"]})
+    _freeze(tmp_path, checkpoint=checkpoint)
+    good = checkpoint.read_text(encoding="utf-8")
+    assert json.loads(good)["turns_recorded"] == 1
+
+    _pipeline(monkeypatch, plan={"france-minimum-order": ["answer"]})
+    monkeypatch.setattr(os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    with pytest.raises(OSError):
+        _freeze(
+            tmp_path,
+            checkpoint=checkpoint,
+            cases_wanted=["france-minimum-order"],
+            resume=True,
+        )
+
+    assert checkpoint.read_text(encoding="utf-8") == good
+
+
+def test_the_checkpoint_is_replaced_atomically() -> None:
+    import inspect
+
+    source = inspect.getsource(comparison.freeze)
+
+    assert "os.replace" in source
+    assert "fsync" in source
+
+
+def test_a_turn_that_starts_is_counted_even_if_it_never_returns(
+    tmp_path, monkeypatch
+) -> None:
+    """Turn events come from the request, not from what the request produced.
+
+    The previous exception path counted captures, so a refusal that preceded
+    the failure, and the failed request itself, were both missing from the
+    accounting - the run under-reported what it had spent.
+    """
+    checkpoint = tmp_path / "frozen.json"
+    _pipeline(
+        monkeypatch,
+        plan={CONVERSATION: ["refusal", "answer", "answer"]},
+        fail_after=2,
+    )
+
+    with pytest.raises(RuntimeError):
+        _freeze(tmp_path, checkpoint=checkpoint, cases_wanted=[CONVERSATION])
+
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+    # Two turns ran (a refusal and an answer) and the third failed.
+    assert payload["turns_attempted_this_run"] == 3
+    assert payload["turns_started"] == 3
+    assert payload["turns_failed"] == 1
+    assert payload["turns_completed"] == 2
+    assert payload["turns_unaccounted"] == 0
+
+
+def test_an_interrupted_attempts_evidence_is_positioned_by_its_turn_event(
+    tmp_path, monkeypatch
+) -> None:
+    """Capture arrival order is not turn order once a turn refuses."""
+    checkpoint = tmp_path / "frozen.json"
+    _pipeline(
+        monkeypatch,
+        plan={CONVERSATION: ["refusal", "answer", "answer"]},
+        fail_after=2,
+    )
+
+    with pytest.raises(RuntimeError):
+        _freeze(tmp_path, checkpoint=checkpoint, cases_wanted=[CONVERSATION])
+
+    runs = json.loads(checkpoint.read_text(encoding="utf-8"))["runs"]
+    kept = [run for run in runs if run.get("attempt_interrupted")]
+
+    assert len(kept) == 1
+    # The captured answer was turn 1, not turn 0: turn 0 refused.
+    assert kept[0]["turn_index"] == 1
+    assert kept[0]["superseded"] is True
 
 
 # --- selection, provenance and accounting ---------------------------------
@@ -415,28 +537,26 @@ def test_the_capture_records_what_produced_it(tmp_path, monkeypatch) -> None:
         "opensearch_index",
         "bedrock_model_id",
         "chunk_profile",
+        "generation_pointer_enabled",
+        "corpus_signature",
     ):
         assert key in provenance
 
 
-def test_model_calls_are_counted_rather_than_estimated(tmp_path, monkeypatch) -> None:
-    """A turn limit bounds work, not spending. This counts what was invoked."""
+def test_usage_is_reported_per_model_with_attempts_separated(tmp_path, monkeypatch) -> None:
+    """A total across models cannot be priced, and calls are not HTTP attempts."""
     _pipeline(monkeypatch, plan={"algeria-delivery-cost": ["answer"]})
 
-    payload = _freeze(tmp_path)
+    usage = _freeze(tmp_path)["usage"]
 
-    for key in ("model_calls_this_run", "input_tokens_this_run", "output_tokens_this_run"):
-        assert key in payload
-
-
-def test_the_counter_wraps_the_client_and_restores_it() -> None:
-    """Including retries, because it counts invocations rather than turns."""
-    import inspect
-
-    source = inspect.getsource(comparison._count_model_calls)
-
-    assert "converse" in source
-    assert "retries included" in source
+    for key in (
+        "by_model",
+        "application_calls",
+        "http_attempts",
+        "sdk_retry_attempts",
+        "calls_without_reported_tokens",
+    ):
+        assert key in usage
 
 
 def test_an_existing_capture_is_not_overwritten(tmp_path, capsys, monkeypatch) -> None:

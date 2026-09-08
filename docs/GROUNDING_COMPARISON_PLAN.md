@@ -84,8 +84,10 @@ python scripts/run_grounding_comparison.py --freeze out/frozen.json --load-ssm \
     --case algeria-existing-fbo-order-minimum-role
 ```
 
-Start with `--repeat 1 --max-turns 6`, read the actual cost, then decide
-whether to continue. `--resume` continues the same file; without it the harness
+Start with `--repeat 1 --max-turns 6`, read the measured `usage` and the
+console spend, then decide whether to continue. Continuing means repeating
+those same six turns twice more - 12 further turn executions - not completing
+the full fixture. `--resume` continues the same file; without it the harness
 refuses to write over an existing capture.
 
 ## Commands
@@ -124,33 +126,50 @@ every safeguard runs as in production and the hook only observes. The hook is
 
 **Turn identity comes from the conversation runner, not from the capture hook.**
 A turn that refuses early, or answers from cache, never reaches numeric repair
-and so never fires the hook. Counting hook calls as turns therefore gave a
-later answer an earlier turn's expectation, undercounted the requests made
-against `--max-turns`, and let the last captured turn mark a conversation
-complete when its real final turn never was.
+and so never fires the hook. Counting hook calls as turns gave a later answer
+an earlier turn's expectation, undercounted requests against `--max-turns`, and
+let the last captured turn mark a conversation complete when its real final
+turn never was.
 
-Every turn the runner performed is recorded, matched to its capture by
-correlation id. A turn that did not reach repair is recorded with
-`reached_repair: false` rather than omitted, because omitting it is what
-shifted the expectations.
+**Turn events.** Every request emits a `started` event before it runs and a
+`completed` or `failed` event after, recorded by wrapping `handle_chat` in the
+measurement process. So a turn is counted as attempted the moment it begins,
+whether it refuses, fails or never returns. The capture reports
+`turns_started`, `turns_completed`, `turns_failed` and `turns_unaccounted` -
+the last should be zero on a clean run, and is non-zero if a request vanished.
 
-**Checkpointing** is per turn, written as each turn is reconciled. If the
-runner raises part way through a case, the turns already captured are written
-and marked `attempt_interrupted` before the error propagates - so an
-interruption keeps what it paid for. Those records carry `superseded: true` and
-are never scored: on that path the turn indexes are capture order, which equals
-turn order only if no earlier turn refused, and a number that might be wrong
-should not be scored as though it were right.
+Counting captures instead, as the previous exception path did, missed refusals
+that preceded a failure and missed the failed request itself.
 
-**Resume validates provenance before making any model call.** Fixture hash,
-harness commit, index, model id and chunk profile must all match, and a resume
-across a dirty working tree is refused because the commit can match while the
-code does not. Mixing two runs would produce one file describing no single
-experiment - and it would carry the new run's provenance at the top, so nothing
-downstream could tell.
+**Checkpointing** is per event, written as each turn starts and ends, and the
+file is **replaced atomically** - written to a temporary file, fsynced, then
+`os.replace`d. Writing in place meant an interrupted write truncated the file
+that already held good turns.
 
-Incomplete attempts are **preserved, not deleted**. A replay writes new records
-beside them; the record of what the first attempt did and cost survives.
+Evidence captured for an interrupted attempt is kept, positioned by its
+`started` event rather than by the order captures arrived - those differ the
+moment an earlier turn refuses. Those records are `superseded` and never
+scored: a partial chain is history, not a thing to measure.
+
+**What is still not survivable:** a hard process kill between a turn completing
+and its event being written loses that turn's evidence. The event is written
+immediately, so the window is small, but it is not zero.
+
+**Resume validates provenance before any model call** - fixture hash, harness
+commit, index, model id, chunk profile, the generation-pointer flag and a
+corpus signature. It refuses across a dirty working tree, because the commit
+can match while the code does not.
+
+The pointer flag is included because it changes which documents retrieval can
+see at all. The corpus signature is included because an index *name* is a
+label: the same name can hold different content an hour later, after a
+publication, a rollback or a re-ingestion. The signature is the active section
+count plus a hash of the active generation ids, and a resume where it reads
+`unavailable` is refused - two unknowns are not a match.
+
+**The corpus must be held still for the duration of the experiment.** The
+signature detects a change; it cannot prevent one, and a change between arms
+invalidates the comparison rather than merely interrupting it.
 
 ## Size
 
@@ -172,35 +191,49 @@ calls.
 `--max-turns` bounds turns. A turn is several model calls, so it does not bound
 spending. Stages that may call a model, per turn:
 
-| Stage | Always? |
+| Stage | Method | Always? |
+|---|---|---|
+| query embedding for vector search | `invoke_model` | yes |
+| LLM query planner (`_planned_retrieval_plan`) | `converse` | when planning is enabled |
+| LLM evidence selector (`_select_evidence_rows`) | `converse` | when there are rows to select |
+| global-document query translation (`_global_search_query`) | `converse` | non-English or global scope |
+| conversation intent verification (`_verified_conversation_intent`) | `converse` | follow-up turns |
+| answer generation (`BedrockProvider.generate`) | `converse` | yes |
+| candidate narrowing / guardrail rephrasing | `converse` | only under candidate flags |
+| generation retry | `converse` | on a failed validation |
+
+**Both invocation methods are instrumented.** An earlier version wrapped
+`converse` only, so every embedding - one per turn, on the `invoke_model` path
+in `services/embeddings.py` - was missing from the totals. The claim that it
+covered "retries and every stage" was wrong and is withdrawn.
+
+What the capture now reports under `usage`:
+
+| Field | Meaning |
 |---|---|
-| query embedding for vector search | yes |
-| LLM query planner (`_planned_retrieval_plan`) | when planning is enabled |
-| LLM evidence selector (`_select_evidence_rows`) | when there are rows to select |
-| global-document query translation (`_global_search_query`) | non-English or global scope |
-| conversation intent verification (`_verified_conversation_intent`) | follow-up turns |
-| answer generation (`BedrockProvider.generate`) | yes |
-| candidate narrowing / guardrail rephrasing | only under candidate flags |
-| generation retry | on a failed validation |
+| `by_model` | calls and tokens per model id, because a rate applies to a model |
+| `application_calls` | how many times the code asked Bedrock for something |
+| `http_attempts` | how many requests botocore actually sent |
+| `sdk_retry_attempts` | the difference - retries the SDK made inside one call |
+| `calls_without_reported_tokens` | embeddings, whose usage is not in the response envelope |
 
-**The harness counts invocations rather than estimating them.** It wraps the
-Bedrock client for the duration of the run, in its own process only, and every
-capture reports `model_calls_this_run`, `input_tokens_this_run` and
-`output_tokens_this_run` - including retries and every stage above.
+**Two things this still cannot price.** Embedding token usage is not returned
+by `invoke_model`, so those calls are counted and their tokens are not - read
+them from the console. And a rate card is needed to turn tokens into money; I
+do not have one.
 
-I have given no verified call-per-turn figure and will not: the earlier
-"plausibly 25-40" was an unverified guess and is withdrawn. The number comes
-out of step 2 below, measured.
+If instrumentation cannot be installed the run **fails** rather than reporting
+zero. A silent zero reads as "this costs nothing", which is the opposite of
+what a pilot is for.
 
 1. `--preflight` - free.
-2. `--repeat 1 --max-turns 6` on the pilot list. Read `model_calls_this_run`
-   and the token counts from the capture, and the spend from the Bedrock
-   console for that window.
+2. `--repeat 1 --max-turns 6` on the pilot list. Read `usage` from the capture
+   and the spend from the Bedrock console for that window.
 3. Multiply by the remaining turns, agree a cap, then continue with `--resume`.
 
-**A spending cap is a decision, not a flag.** Nothing in this harness can stop
-Bedrock charging; `--max-turns` plus a measured call rate is what makes the
-bound meaningful, and step 2 exists to produce that rate.
+**A spending cap is a decision, not a flag.** Nothing here can stop Bedrock
+charging. `--max-turns` plus a measured call rate is what makes a bound
+meaningful, and step 2 exists to produce that rate.
 
 ## Provenance
 
