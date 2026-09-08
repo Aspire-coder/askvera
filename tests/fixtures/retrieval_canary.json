@@ -287,7 +287,8 @@
       "answer_must_cite": true,
       "answer_must_not_remove_numbers": true,
       "blocking": false,
-      "non_blocking_reason": "Added 2026-09-08. Retrieval scored Forever Algeria at 9.542 with margin 8.44 and evidence was approved, yet the reader got the insufficient-evidence fallback: the record writes 0,200CC and 7 800DZD, the model writes 0.200 and 7,800, and grounding repair deleted the sentence. Promote to blocking once a deploy shows it passing."
+      "non_blocking_reason": "Passed for the first time on 2026-09-08 after the minimum-order restorer stopped appending record prose to the answer. Not promoted yet: the run immediately before it failed with grounding repair removing 7,800, 60, 50 and 48-96, and the only change between those two deploys was a log field. Same code, different answer, so the case is model-variable and one green run is one sample. Repeated 5 times per deploy to measure that; promote to blocking once several consecutive deploys report it neither failed nor flaky.",
+      "repeat": 5
     }
   ]
 }

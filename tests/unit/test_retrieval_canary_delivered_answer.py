@@ -463,14 +463,24 @@ def test_the_cases_guarding_the_2026_09_08_fixes_can_stop_a_release():
 
 
 def test_a_case_for_an_unfixed_defect_stays_observed_only():
-    """algeria-minimum-order-delivered still fails, and should not block.
+    """algeria-minimum-order-delivered passes now, and still should not block.
 
-    It dies on INCOMPLETE_OUTPUT plus an invented figure, which no fix so far
-    addresses. Making it blocking would stop every release until that is
-    solved; leaving it observed keeps it visible and honest.
+    It first passed on 2026-09-08, once. The deploy immediately before it
+    failed with grounding repair removing four figures, and the only difference
+    between those two deploys was an added log field - same code, different
+    answer. The case is model-variable, so a single green run is one sample of
+    a distribution, and promoting on it would put the release gate at the mercy
+    of a coin flip.
+
+    It is repeated instead, so each deploy reports whether it is stable rather
+    than whether it got lucky. Promote once several consecutive deploys report
+    it neither failed nor flaky.
     """
     cases, _ = canary.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json")
     case = next(c for c in cases if c["id"] == "algeria-minimum-order-delivered")
 
     assert case["blocking"] is False
     assert case["non_blocking_reason"].strip()
+    # Repetition is the whole point of leaving it observed: an unrepeated
+    # observed case tells us no more than the single run that misled us.
+    assert case["repeat"] >= 3
