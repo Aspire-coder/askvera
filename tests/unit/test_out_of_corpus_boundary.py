@@ -103,3 +103,31 @@ def test_a_locale_without_terms_falls_back_to_the_english_list():
     belongs in the wording review.
     """
     assert mentions_out_of_corpus_topic("catalogue", "What is the price?", "de") is True
+
+
+MARKET_SPECIFIC = [
+    "What is the delivery cost for orders in New Zealand?",
+    "What is the delivery cost for Sweden?",
+    "How much does shipping cost in Germany?",
+]
+
+
+@pytest.mark.parametrize("question", MARKET_SPECIFIC)
+def test_a_market_specific_question_keeps_the_ordinary_fallback(orchestrator, question):
+    """The boundary answer speaks for the whole corpus and must not over-claim.
+
+    Observed 2026-09-08: "What is the delivery cost for orders in New Zealand?"
+    received "those aren't part of the approved documents I work from". The
+    sponsoring directory carries per-market commercial detail - minimum order
+    sizes are in it and two canary cases prove it - so delivery terms plausibly
+    are too, and retrieval may simply have failed.
+
+    An unhelpful "I could not find that" is honest. A confident wrong denial is
+    not, and it stops the reader asking again.
+    """
+    assert not _is_boundary(orchestrator._insufficient_evidence_message("en", question)), question
+
+
+def test_a_product_price_question_without_a_market_still_gets_the_boundary(orchestrator):
+    """The narrowing must not disable the case it was written for."""
+    assert _is_boundary(orchestrator._insufficient_evidence_message("en", "How much does Forever Aloe Vera Gel cost?"))

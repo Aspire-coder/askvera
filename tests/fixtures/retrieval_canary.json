@@ -258,6 +258,21 @@
       "answer_must_not_remove_numbers": true,
       "blocking": false,
       "non_blocking_reason": "Added 2026-09-08 with fix/office-hours-numeric-grounding. The source writes '09.00 am - 17.00 pm' and repair was deleting the sentence whenever the model wrote 09:00-17:00. Promote to blocking once a deploy shows it passing."
+    },
+    {
+      "id": "market-delivery-cost-keeps-ordinary-fallback",
+      "question": "What is the delivery cost for orders in New Zealand?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": false,
+      "answer_must_not_contain": [
+        "aren't part of the approved documents"
+      ],
+      "blocking": false,
+      "non_blocking_reason": "Added 2026-09-08 after the New Zealand delivery-cost question received the corpus-boundary answer, denying the documents cover it. Promote to blocking once a deploy shows it passing."
     }
   ]
 }
