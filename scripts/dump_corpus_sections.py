@@ -72,6 +72,16 @@ def main() -> int:
     parser.add_argument("--access-scope", default="", help="Filter, e.g. country or global.")
     parser.add_argument("--contains", default="", help="Only sections whose text matches this phrase.")
     parser.add_argument("--limit", type=int, default=400, help="Maximum sections to write.")
+    parser.add_argument(
+        "--per-document", type=int, default=0,
+        help="Cap sections written per source document, so one large manual cannot "
+             "fill the whole dump and leave every other document unrepresented.",
+    )
+    parser.add_argument(
+        "--inventory", action="store_true",
+        help="Report how many sections each country and document type holds, and write "
+             "nothing. Use it to decide what to dump before dumping it.",
+    )
     parser.add_argument("--include-inactive", action="store_true")
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--count-only", action="store_true", help="Report how much would be dumped.")
@@ -101,12 +111,54 @@ def main() -> int:
     print(f"{total} sections match in {settings.OPENSEARCH_INDEX}", file=sys.stderr)
     if args.count_only:
         return 0
+
+    if args.inventory:
+        # Sizing the corpus by hand means paging every section; an aggregation
+        # answers it in one request and is what decides where cases are worth
+        # authoring.
+        response = client.search(
+            index=settings.OPENSEARCH_INDEX,
+            body={
+                "query": query,
+                "size": 0,
+                "aggs": {
+                    "countries": {
+                        "terms": {"field": "country", "size": 100},
+                        "aggs": {"types": {"terms": {"field": "document_type", "size": 20}}},
+                    },
+                    "documents": {"terms": {"field": "source_file", "size": 100}},
+                },
+            },
+        )
+        aggregations = response.get("aggregations") or {}
+        print(json.dumps({
+            "index": settings.OPENSEARCH_INDEX,
+            "matched": total,
+            "by_country": [
+                {
+                    "country": bucket["key"],
+                    "sections": bucket["doc_count"],
+                    "types": {
+                        inner["key"]: inner["doc_count"]
+                        for inner in bucket.get("types", {}).get("buckets", [])
+                    },
+                }
+                for bucket in aggregations.get("countries", {}).get("buckets", [])
+            ],
+            "by_document": [
+                {"source_file": bucket["key"], "sections": bucket["doc_count"]}
+                for bucket in aggregations.get("documents", {}).get("buckets", [])
+            ],
+        }, indent=2, ensure_ascii=False))
+        return 0
     if total == 0:
         print("Nothing to dump; loosen the filters.", file=sys.stderr)
         return 1
 
     args.out.mkdir(parents=True, exist_ok=True)
     written = 0
+    skipped_for_cap = 0
+    per_document_counts: dict[str, int] = {}
     index_rows: list[dict[str, Any]] = []
     # Sorting by a stable key keeps successive dumps diffable, which matters
     # when re-checking a case after the corpus is refreshed.
@@ -128,6 +180,17 @@ def main() -> int:
 
         for hit in hits:
             source = hit.get("_source") or {}
+            # Sections arrive ordered by id, which groups them by document. Without
+            # a cap the first document consumes the whole limit and every other one
+            # is absent, so a dump of 400 from 17,896 sections can represent a
+            # single manual and nothing else.
+            document_key = str(source.get("source_file") or source.get("logical_document_id") or "")
+            if args.per_document:
+                seen = per_document_counts.get(document_key, 0)
+                if seen >= args.per_document:
+                    skipped_for_cap += 1
+                    continue
+                per_document_counts[document_key] = seen + 1
             country = _safe_name(source.get("country"), "unknown")
             document = _safe_name(source.get("source_file") or source.get("logical_document_id"), "document")
             section = _safe_name(source.get("section_id") or hit.get("_id"), f"section{written}")
