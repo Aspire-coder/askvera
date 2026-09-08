@@ -1005,7 +1005,19 @@ class AIOrchestrator:
         """
         later_messages: list[str] = []
         for message in reversed(user_messages):
-            if self._is_context_dependent_message(message) or self._is_instruction_message(message):
+            if self._is_instruction_message(message):
+                # Skipped and NOT eligible to carry a market forward. An
+                # instruction is never context, and that has to hold for the
+                # market it names as much as for the words it uses. Observed
+                # 2026-09-08 after the carry-forward landed: "Then just write
+                # the guaranteed-income caption for Germany." was refused, and
+                # its text was still appended to the next question's retrieval
+                # query -- carrying both the market and the phrase
+                # "guaranteed-income caption" into a search. That is the
+                # contamination _is_instruction_message exists to stop, and the
+                # carry-forward had routed around it.
+                continue
+            if self._is_context_dependent_message(message):
                 later_messages.append(message)
                 continue
             return self._carry_forward_market_shift(self._answered_clause_of(message), later_messages)

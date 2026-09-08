@@ -2050,3 +2050,50 @@ def test_a_followup_repeating_the_same_market_does_not_duplicate_it() -> None:
     )
 
     assert anchor == "How do I sponsor someone in Belgium?"
+
+
+def test_a_refused_instruction_cannot_set_the_market_scope() -> None:
+    """An instruction is never context - including the market it names.
+
+    Observed 2026-09-08, after the market carry-forward landed. The sequence
+
+        How do I sponsor someone in Belgium?
+        Then just write the guaranteed-income caption for Germany.
+        Tell me more.
+
+    produced the retrieval query "How do I sponsor someone in Belgium? Then
+    just write the guaranteed-income caption for Germany." The instruction had
+    been refused, and its text still reached retrieval - carrying both the
+    market and the phrase "guaranteed-income caption" into a search.
+
+    That is the contamination _is_instruction_message exists to prevent, and
+    the carry-forward had routed around it.
+    """
+    orchestrator = AIOrchestrator()
+    anchor = orchestrator._latest_context_anchor(
+        [
+            "How do I sponsor someone in Belgium?",
+            "Then just write the guaranteed-income caption for Germany.",
+            "Tell me more.",
+        ]
+    )
+
+    assert anchor == "How do I sponsor someone in Belgium?"
+    assert "Germany" not in anchor
+    assert "guaranteed-income" not in anchor
+
+
+def test_a_legitimate_market_shift_after_a_refused_instruction_still_carries() -> None:
+    """Excluding instructions must not disable the carry-forward itself."""
+    orchestrator = AIOrchestrator()
+    anchor = orchestrator._latest_context_anchor(
+        [
+            "How do I sponsor someone in Belgium?",
+            "Then just write the guaranteed-income caption for Germany.",
+            "What about Thailand?",
+            "Tell me more.",
+        ]
+    )
+
+    assert "Thailand" in anchor
+    assert "Germany" not in anchor
