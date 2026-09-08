@@ -277,3 +277,43 @@ def test_focus_minimum_order_answer_removes_payment_and_delivery_claims() -> Non
 
     assert focused == ""
     assert changed is True
+
+
+def test_does_not_append_record_prose_as_a_minimum_order_value() -> None:
+    """The value capture runs to the next period, and can run into prose.
+
+    Appending that prose as a sentence ends the answer mid-phrase. The output
+    validator then discards the entire answer as structurally incomplete and
+    the reader is told the approved documents do not cover their question -
+    which is how a correct Algeria answer became a refusal.
+    """
+    answer = "A new FBO in Algeria places a first order through the local office."
+    source = (
+        "Minimum order size FBO: 0,200CC (7 800DZD) and all first orders must be "
+        "placed with the sponsoring office named in the"
+    )
+
+    corrected, changed = restore_missing_requested_order_size(
+        answer,
+        [source],
+        "What is the minimum first order size for a new FBO in Algeria?",
+    )
+
+    assert changed is False
+    assert corrected == answer
+    assert not corrected.rstrip().endswith("the.")
+
+
+def test_still_restores_an_ordinary_short_order_value() -> None:
+    """The bound must not stop the restoration this function exists for."""
+    answer = "Payment methods accepted are Bank Transfer and Cash."
+    source = "Minimum order size FBO: 0,200CC (7 800DZD). Payment methods accepted: Cash."
+
+    corrected, changed = restore_missing_requested_order_size(
+        answer,
+        [source],
+        "what is the minimum order size for Algeria",
+    )
+
+    assert changed is True
+    assert "Minimum order size FBO: 0,200CC (7 800DZD)." in corrected
