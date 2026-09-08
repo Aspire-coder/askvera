@@ -151,6 +151,30 @@ def _abstained(answer: str, language: str) -> bool:
     return any(marker and marker in folded for marker in _refusal_markers(language))
 
 
+def _is_cited(required: str, cited: set[str]) -> bool:
+    """Whether a citation covers the required section, including via its parent.
+
+    A retrieved document is keyed by its own section_id, but a citation reports
+    parent_section_id when there is one - the governing section a reader would
+    look up, rather than the chunk the passage happens to sit in. So a correct
+    citation for "2-part-1-definition-18" reads "2".
+
+    Comparing the two as though they shared a namespace made the DK and SE
+    scope cases fail for three runs while the system was doing exactly the right
+    thing: retrieving each market's own copy of identical text and citing its
+    governing section. The measurement was wrong, not the answer.
+
+    The separator is required, so "2" covers "2-part-1-definition-18" and does
+    not cover "21.05".
+    """
+    for key in cited:
+        if key == required:
+            return True
+        if required.startswith(f"{key}-") or required.startswith(f"{key}."):
+            return True
+    return False
+
+
 def _section_keys(pairs: list[tuple[str, str]]) -> list[str]:
     """Section identifiers, both bare and country-qualified.
 
@@ -275,7 +299,7 @@ def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         # Citation correctness, not citation count: an answer can cite a real
         # passage that does not support what it says.
         if expected.get("must_cite"):
-            uncited = [section for section in required if section not in cited]
+            uncited = [section for section in required if not _is_cited(section, cited)]
             if not missing and uncited:
                 failures.append(f"governing sections retrieved but not cited: {uncited}")
     else:

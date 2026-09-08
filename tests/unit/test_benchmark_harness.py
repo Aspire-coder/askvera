@@ -388,3 +388,57 @@ def test_the_shipped_fixture_uses_roles_the_request_model_accepts():
     cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
     for case in cases:
         assert case["role"] in ROLE_CONTENT_SCOPES, case["id"]
+
+
+@pytest.mark.parametrize("required,cited,expected", [
+    ("DK:2-part-1-definition-18", {"2", "DK:2"}, True),
+    ("SE:2-part-1-definition-18", {"2", "SE:2"}, True),
+    # The market still has to be right. A parent from the wrong country is the
+    # failure these cases exist to catch.
+    ("DK:2-part-1-definition-18", {"2", "SE:2"}, False),
+    # The separator is required, so a parent cannot swallow a sibling.
+    ("DK:21.05", {"2", "DK:2"}, False),
+    ("sponsoring-001-algeria", {"sponsoring-001-algeria"}, True),
+])
+def test_a_citation_to_the_parent_section_satisfies_a_leaf_requirement(required, cited, expected):
+    """Retrieval keys a document by section_id; a citation reports its parent.
+
+    RetrievedDocument.to_source prefers parent_section_id, which is the
+    governing section a reader would look up rather than the chunk the passage
+    sits in. So a correct citation for "2-part-1-definition-18" reads "2".
+
+    Comparing those as one namespace made the DK and SE scope cases fail for
+    three consecutive runs while the system was doing exactly the right thing -
+    retrieving each market's own copy of byte-identical text and citing its
+    governing section. The measurement was wrong, not the answer.
+    """
+    assert benchmark._is_cited(required, cited) is expected
+
+
+def test_the_scope_pair_passes_when_each_market_cites_its_own_parent():
+    """End to end through score_run, not just the helper."""
+    case = {
+        **VALID_CASE,
+        "country": "DK",
+        "expected": {
+            "kind": "answer",
+            "must_contain": ["3"],
+            "required_sections": ["DK:2-part-1-definition-18"],
+            "must_cite": True,
+        },
+    }
+    answer = "The FBO Support fee is a monthly fee of up to 3 EUR for Assistant Supervisor and above."
+
+    right_market = benchmark.score_run(case, _run(
+        answer=answer,
+        sections=benchmark._section_keys([("2-part-1-definition-18", "DK")]),
+        cited_sections=benchmark._section_keys([("2", "DK")]),
+    ))
+    assert right_market["passed"], right_market["failures"]
+
+    wrong_market = benchmark.score_run(case, _run(
+        answer=answer,
+        sections=benchmark._section_keys([("2-part-1-definition-18", "SE")]),
+        cited_sections=benchmark._section_keys([("2", "SE")]),
+    ))
+    assert not wrong_market["passed"]
