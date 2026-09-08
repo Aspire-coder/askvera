@@ -38,6 +38,12 @@ There is no window in which half a generation is readable.
 
 That is the property the recoverable design should preserve, not replace.
 
+> **Superseded in part.** The states below are as built. What this note first
+> said about recovery was wrong: it treated "the pointer does not name this job"
+> as evidence the previous worker had died, so two workers could activate at
+> once. Ownership is now a lease with a per-attempt fencing token, decided
+> before the question of what happened is asked. See `## Ownership` at the end.
+
 ## States
 
 Recorded on the job, alongside the review columns:
