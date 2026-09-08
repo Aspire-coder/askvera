@@ -12,6 +12,7 @@ from app.response.quality import (
     contains_unresolved_placeholder,
     contact_for_country,
     has_incomplete_ending,
+    incomplete_ending_reason,
     remove_or_replace_contact_placeholders,
     unsupported_requested_years,
 )
@@ -178,3 +179,34 @@ def test_enumeration_markers_are_not_read_as_truncation(answer) -> None:
 def test_an_unclosed_opener_is_still_truncation(answer) -> None:
     """Only surplus closers are excused; an unclosed opener still fails."""
     assert has_incomplete_ending(answer, "en")
+
+
+def test_incomplete_ending_reason_names_the_rule_that_fired():
+    """Rejecting an answer must leave something to diagnose.
+
+    The rejected text is never logged, so "INCOMPLETE_OUTPUT" on its own gave
+    no way to tell an unclosed bracket from a dangling word - which is why the
+    Algeria minimum-order failure stayed unexplained across several deploys
+    despite correct retrieval and approved evidence.
+    """
+    assert incomplete_ending_reason("Order (2 CC minimum", "en") == "unclosed_paren:1>0"
+    assert incomplete_ending_reason("See [the table", "en") == "unclosed_bracket:1>0"
+    assert incomplete_ending_reason("You can enroll online at.", "en") == "dangling_word:at."
+    assert incomplete_ending_reason("", "en") == "empty"
+    assert incomplete_ending_reason("The minimum order is 2 Case Credits.", "en") is None
+
+
+def test_incomplete_ending_reason_reports_no_answer_text():
+    """Every reason comes from a fixed vocabulary or a count, never the answer."""
+    reason = incomplete_ending_reason(
+        "Contact Ms Dupont on +213 55 12 34 56 about the (", "en"
+    )
+    assert reason == "unclosed_paren:1>0"
+    assert "Dupont" not in reason and "213" not in reason
+
+
+def test_non_english_answers_are_not_judged_by_the_english_word_rule():
+    """The trailing-word list is English; applying it elsewhere is a coin toss."""
+    assert incomplete_ending_reason("Le montant minimum est de 2 CC.", "fr") is None
+    # Bracket balance is language-independent and still applies.
+    assert incomplete_ending_reason("Le montant (minimum", "fr") == "unclosed_paren:1>0"
