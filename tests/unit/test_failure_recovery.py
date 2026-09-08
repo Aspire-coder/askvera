@@ -10,7 +10,6 @@ These are unit-level. Nothing here establishes live timeout behaviour.
 
 from __future__ import annotations
 
-import pytest
 from botocore.exceptions import ClientError, ReadTimeoutError
 
 from config.vera_persona import FALLBACK_RESPONSES
