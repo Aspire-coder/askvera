@@ -168,6 +168,13 @@ def _section_keys(pairs: list[tuple[str, str]]) -> list[str]:
     return keys
 
 
+def _presence(numbers: list[str], documents: list[Any]) -> dict[str, bool]:
+    """Which removed figures the retrieved documents actually contain."""
+    from app.validation.validators.numeric_grounding_validator import numbers_present_in_sources
+
+    return numbers_present_in_sources(numbers, documents) if numbers else {}
+
+
 def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]:
     """Run one question through the real pipeline and record what came back.
 
@@ -191,6 +198,17 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         # room, which is a fact, unlike a heuristic reading of the text.
         "finish_reason": str(metadata.get("finish_reason") or ""),
         "removed_numeric_claims": run.removed_numeric_claims,
+        # Repair removing a figure is not automatically damage. A number the
+        # record does not contain was invented, and removing it is the system
+        # working; a number the record does contain was real, and losing it
+        # costs the reader a fact. Counting both as "damage" reports a number
+        # that means nothing, and today both happened: Algeria's invented "50"
+        # and Belgium's real "16" and "3743" would have scored identically.
+        "removed_but_present_in_source": [
+            number
+            for number, present in _presence(run.removed_numeric_claims, documents).items()
+            if present
+        ],
         "top_title": documents[0].title if documents else "",
         # Every retrieved section, so a case can require the governing one to
         # be present rather than merely first, and can say which sections the
@@ -274,7 +292,9 @@ def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         "passed": not failures,
         "failures": failures,
         "retrieval_hit": retrieval_hit,
-        "repair_damaged": bool(run["removed_numeric_claims"]),
+        # Damage is a supported figure removed, not any removal at all.
+        "repair_removed_anything": bool(run["removed_numeric_claims"]),
+        "repair_damaged": bool(run["removed_but_present_in_source"]),
     }
 
 
@@ -319,7 +339,18 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         ),
         "retrieval_unscored": sum(1 for run in runs if run["retrieval_hit"] is None),
         "cited": rate(sum(1 for run in answerable if run["citations"] > 0), len(answerable)),
-        "repair_damage": rate(sum(1 for run in runs if run["repair_damaged"]), len(runs)),
+        "repair_fired": rate(sum(1 for run in runs if run["repair_removed_anything"]), len(runs)),
+        "repair_removed_supported_figure": rate(
+            sum(1 for run in runs if run["repair_damaged"]), len(runs)
+        ),
+        "repair_removed_invented_figure": rate(
+            sum(
+                1
+                for run in runs
+                if run["repair_removed_anything"] and not run["repair_damaged"]
+            ),
+            len(runs),
+        ),
         "by_intent_group": {
             group: rate(sum(1 for run in group_runs if run["passed"]), len(group_runs))
             for group, group_runs in sorted(by_group.items())
