@@ -898,3 +898,73 @@ def test_rank_binding_is_not_weakened_by_the_market_exemption() -> None:
     assert _flagged("Assistant Manager requires 10 Case Credits.", _RankSource())
     assert _flagged("Supervisor requires 999 Open Group Case Credits.", _RankSource())
     assert _flagged("Supervisor requires 10 Open Group Case Credits.", _RankSource()) == []
+
+
+def test_a_pm_time_is_not_grounded_by_an_am_source() -> None:
+    """External review, 2026-09-08. A defect introduced earlier the same day.
+
+    A meridiem yields one value, not two. Keeping the bare hour alongside the
+    24-hour form meant "5:00 pm" carried both 0500 and 1700, so a source
+    reading "5:00 am" exempted it from deletion.
+
+    Asserted on the exemption itself: the claim may still ground through the
+    literal number path, which binds a figure by its presence anywhere in the
+    source and is a separate, wider weakness.
+    """
+    from app.validation.validators.numeric_grounding_validator import (
+        _grounded_time_spans,
+        _normalize,
+    )
+
+    assert _grounded_time_spans("Opens at 5:00 pm.", [_normalize("Opens at 5:00 am.")]) == []
+    assert _grounded_time_spans("Opens at 5:00 pm.", [_normalize("Opens at 5:00 pm.")]) != []
+
+
+def test_a_decimal_is_not_a_clock_without_a_clock_context() -> None:
+    """External review, 2026-09-08. The other defect from the same day.
+
+    "9.00" in "the fee is 9.00 dollars" matched the clock pattern and was
+    exempted by an unrelated "09:00" in the source, letting an invented amount
+    through. A comment in this file called that harmless. It was not.
+    """
+
+    class _ClockSource:
+        content = "Opens at 09:00."
+        title = "Forever Belgium"
+        metadata: dict = {}
+
+    assert _hours_flagged("The fee is 9.00 dollars.", _ClockSource())
+
+
+def test_a_dotted_time_still_counts_inside_a_range() -> None:
+    """"09.00-17.00" has no meridiem and is unmistakably a clock range."""
+
+    class _Source:
+        content = "Business Hours Office 09.00 am - 17.00 pm (Mon - Fri)."
+        title = "Forever Belgium"
+        metadata: dict = {}
+
+    assert _hours_flagged("The office is open 09.00-17.00.", _Source()) == []
+
+
+def test_a_redundant_meridiem_on_a_24_hour_value_is_accepted() -> None:
+    """The directory writes "17.00 pm" throughout: 24-hour with a spare marker.
+
+    Refusing it broke every Belgium case when this fix was first written.
+    """
+
+    class _Source:
+        content = "Business Hours Office 09.00 am - 17.00 pm (Mon - Fri)."
+        title = "Forever Belgium"
+        metadata: dict = {}
+
+    assert _hours_flagged("The office is open 09:00-17:00.", _Source()) == []
+
+
+def test_an_impossible_clock_reading_is_not_exempted() -> None:
+    class _Source:
+        content = "Business Hours Office 09.00 am - 17.00 pm."
+        title = "Forever Belgium"
+        metadata: dict = {}
+
+    assert _hours_flagged("The office is open at 45:99.", _Source())

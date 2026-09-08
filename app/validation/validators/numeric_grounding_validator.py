@@ -390,6 +390,9 @@ _HOUR_MERIDIEM_RE = re.compile(r"(?<![\d:.])(\d{1,2})\s?([ap])\.?\s?m\.?\b", re.
 def _meridiem_hour_keys(match: re.Match[str]) -> set[str]:
     """Return the 24-hour form of an hour written without minutes."""
     hour = int(match.group(1))
+    # A meridiem hour is 1-12. Anything else is not a clock reading.
+    if not 1 <= hour <= 12:
+        return set()
     if match.group(2).lower() == "p" and hour < 12:
         hour += 12
     elif match.group(2).lower() == "a" and hour == 12:
@@ -410,25 +413,59 @@ def _time_occurrences(text: str) -> list[tuple[int, int, set[str]]]:
     return sorted(occurrences)
 
 
+# A time on the other side of a range separator, in either direction. A dot
+# value earns clock status from being part of a range even without a meridiem,
+# which is how "09.00-17.00" is written.
+_RANGE_AFTER_RE = re.compile(r"^\s*[-–—]\s*\d{1,2}[:.]\d{2}")
+_RANGE_BEFORE_RE = re.compile(r"\d{1,2}[:.]\d{2}\s*[-–—]\s*$")
+
+
 def _time_keys(text: str, match: re.Match[str]) -> set[str]:
-    """Return the 24-hour forms one written time could mean.
+    """Return the single 24-hour form this written time means, if it is one.
 
-    Zero-padded so "9:00" and "09.00" compare equal, which is the whole point:
-    the directory writes office hours as 09.00-17.00 and the model writes them
-    as 09:00-17:00, so a literal comparison never matched and every component
-    was reported ungrounded.
+    Zero-padded so "9:00" and "09.00" compare equal, which is the point: the
+    directory writes office hours as 09.00-17.00 and a model writes 09:00-17:00,
+    so a literal comparison never matched and every component was reported
+    ungrounded.
 
-    A pm time is also offered in 24-hour form, because a model given
-    "17.00" frequently writes "5:00 pm".
+    Two corrections from an external review on 2026-09-08, both defects I
+    introduced earlier the same day.
+
+    A meridiem yields ONE value, not two. Keeping the bare hour alongside the
+    24-hour form meant "5:00 pm" carried both 0500 and 1700, so a source
+    reading "5:00 am" grounded it. A wrong time was exempted from deletion.
+
+    A dot value is only a clock in a clock context. "9.00" in "the fee is 9.00
+    dollars" matched the clock pattern and was exempted by an unrelated "09:00"
+    elsewhere in the source, so an invented amount passed. I had called that
+    harmless in a comment here; it is not. A dot now needs a meridiem or a range
+    partner. A colon is unambiguous enough on its own.
     """
-    hour, minute = int(match.group(1)), match.group(2)
-    keys = {f"{hour:02d}{minute}"}
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        return set()
+
+    separator = text[match.start() + len(match.group(1))]
     meridiem = _MERIDIEM_RE.match(text[match.end():])
-    if meridiem and meridiem.group(1).lower() == "p" and hour < 12:
-        keys.add(f"{hour + 12:02d}{minute}")
-    if meridiem and meridiem.group(1).lower() == "a" and hour == 12:
-        keys.add(f"00{minute}")
-    return keys
+    if separator == "." and not meridiem:
+        in_range = _RANGE_AFTER_RE.match(text[match.end():]) or _RANGE_BEFORE_RE.search(
+            text[:match.start()]
+        )
+        if not in_range:
+            return set()
+
+    if meridiem:
+        marker = meridiem.group(1).lower()
+        if marker == "p" and hour < 12:
+            hour += 12
+        elif marker == "a" and hour == 12:
+            hour = 0
+        elif marker == "p" and hour > 12:
+            # "17.00 pm" is how these records are written throughout - a
+            # 24-hour value with a redundant meridiem. The hour already says
+            # what is meant, so the marker is ignored rather than refused.
+            pass
+    return {f"{hour:02d}{minute:02d}"}
 
 
 def _grounded_time_spans(answer: str, source_texts: list[str]) -> list[tuple[int, int]]:
