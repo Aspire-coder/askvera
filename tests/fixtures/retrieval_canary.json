@@ -241,7 +241,8 @@
       "non_blocking_reason": "Retrieval assertion added 2026-09-08 after the first version passed on a clarifying question that merely mentioned Germany. Observed landing on sponsoring-066-germany at 0.95. Promote to blocking after a second consecutive pass.",
       "answer_must_not_contain": [
         "do not contain enough information"
-      ]
+      ],
+      "answer_must_not_remove_numbers": true
     },
     {
       "id": "belgium-office-hours-survive-repair",
@@ -272,7 +273,8 @@
         "aren't part of the approved documents"
       ],
       "blocking": false,
-      "non_blocking_reason": "Added 2026-09-08 after the New Zealand delivery-cost question received the corpus-boundary answer, denying the documents cover it. Promote to blocking once a deploy shows it passing."
+      "non_blocking_reason": "Added 2026-09-08 after the New Zealand delivery-cost question received the corpus-boundary answer, denying the documents cover it. Promote to blocking once a deploy shows it passing.",
+      "answer_must_not_remove_numbers": true
     },
     {
       "id": "algeria-minimum-order-delivered",

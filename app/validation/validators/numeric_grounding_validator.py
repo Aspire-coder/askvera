@@ -7,6 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+from services.market_config import find_market_mentions
 from utils.redaction import PHONE_RE
 
 
@@ -169,7 +170,9 @@ def _capitalized_entity_phrases(text: str) -> list[str]:
     return entities
 
 
-def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
+def _subject_token_sets(
+    claim: MeasurableClaim, document_markets: frozenset[str] = frozenset()
+) -> list[set[str]]:
     """Extract named subjects that connect a number to the policy topic."""
     # Preserve this occurrence's position: splitting on the numeric text links
     # repeated values to the first subject instead of the current claim. The
@@ -193,6 +196,25 @@ def _subject_token_sets(claim: MeasurableClaim) -> list[set[str]]:
     sentence_prefix = re.split(r"[\n\r]|(?<=[.!?])\s", claim.prefix)[-1]
     phrases = _capitalized_entity_phrases(sentence_prefix)
     phrases = [phrase for phrase in phrases if len(_word_tokens(phrase)) >= 2][-1:]
+    # A subject that names the market this document is about is established by
+    # the document, not by the sentence beside the number.
+    #
+    # Observed live 2026-09-08. The New Zealand record states
+    # "• Delivery Cost: $8 +gst ($9,20)." and the answer said "For New Zealand,
+    # the delivery cost is $8 +GST ($9.20)." The subject became {new, zealand},
+    # every token has to appear in the local source window, and that bullet does
+    # not repeat the country -- the country is the record's identity. Both
+    # figures were reported ungrounded and deleted. Removing the country from
+    # the sentence made the same answer ground cleanly, which is backwards:
+    # naming the market is what a good answer does.
+    #
+    # Only the market is forgiven, never an arbitrary title word. A rank subject
+    # such as {assistant, manager} still has to be found next to the number, so
+    # a figure belonging to a different rank cannot pass.
+    if document_markets:
+        phrases = [
+            phrase for phrase in phrases if not (find_market_mentions(phrase) & document_markets)
+        ]
 
     token_sets: list[set[str]] = []
     for phrase in phrases:
@@ -236,9 +258,11 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
     return windows
 
 
-def _claim_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
+def _claim_is_supported(
+    claim: MeasurableClaim, source_text: str, document_markets: frozenset[str] = frozenset()
+) -> bool:
     """Return true only when the same number is linked to the same named topic."""
-    subject_token_sets = _subject_token_sets(claim)
+    subject_token_sets = _subject_token_sets(claim, document_markets)
     for number in _number_variants(claim.number):
         for window in _source_windows(source_text, number):
             window_tokens = _word_tokens(window)
@@ -443,19 +467,29 @@ def _grounded_time_spans(answer: str, source_texts: list[str]) -> list[tuple[int
 
 def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> list[MeasurableClaim]:
     """Return factual numeric claims that no retrieved source supports."""
-    source_texts = [
-        _normalize(str(getattr(document, "content", "") or ""))
+    # The title travels with the content because it carries which market the
+    # record is about, and a subject naming that market is established by the
+    # document rather than by the sentence beside the number.
+    sources = [
+        (
+            _normalize(str(getattr(document, "content", "") or "")),
+            frozenset(find_market_mentions(str(getattr(document, "title", "") or ""))),
+        )
         for document in source_documents
         if getattr(document, "content", "")
     ]
-    if not source_texts:
+    if not sources:
         return []
+    source_texts = [source_text for source_text, _ in sources]
     grounded_spans = _grounded_phone_spans(answer, source_texts) + _grounded_time_spans(answer, source_texts)
     return [
         claim
         for claim in _extract_claims(answer)
         if not any(start <= claim.start and claim.end <= end for start, end in grounded_spans)
-        if not any(_claim_is_supported(claim, source_text) for source_text in source_texts)
+        if not any(
+            _claim_is_supported(claim, source_text, document_markets)
+            for source_text, document_markets in sources
+        )
     ]
 
 
