@@ -265,6 +265,18 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
     """Return clause-bounded source windows around the same number."""
     windows: list[str] = []
     pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
+    # A range is a pair of figures, and the source rarely writes it the way an
+    # answer does. Algeria's record says "between 48h to 96h"; the model wrote
+    # "48-96", the literal string was absent, and repair deleted a correctly
+    # stated delivery time. The endpoints and their order are what matter, not
+    # the unit letters or the joining word between them.
+    range_parts = re.fullmatch(r"(?P<low>\d[\d.,]*)-(?P<high>\d[\d.,]*)", number)
+    if range_parts:
+        low, high = range_parts.group("low", "high")
+        pattern = re.compile(
+            rf"(?<![\d.]){re.escape(low)}\s*[^\d\s]{{0,4}}\s*(?:-|to|through|until)\s*"
+            rf"{re.escape(high)}(?!\d|\.\d)"
+        )
     for match in pattern.finditer(source_text):
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
@@ -398,8 +410,16 @@ def _is_structural_reference(answer: str, start: int, end: int) -> bool:
 
     line_start = answer.rfind("\n", 0, start) + 1
     line_prefix = answer[line_start:start]
-    if not line_prefix.strip() and after in {")", ":"}:
-        return True
+    if not line_prefix.strip():
+        # "3)" and "3:" were recognised; "3." - the markdown ordered list
+        # marker - was not, so an answer laying its steps out as a numbered
+        # list had those numbers treated as measurable claims. Observed in the
+        # Belgium sponsoring answer on 2026-09-08: repair removed 3, 4, 5 and 6
+        # from a delivered answer, taking the sentences with them.
+        if after in {")", ":"}:
+            return True
+        if after == "." and answer[end + 1 : end + 2] in {" ", "", "\n"}:
+            return True
     return False
 
 

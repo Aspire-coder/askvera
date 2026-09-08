@@ -184,3 +184,61 @@ def test_a_re_rendered_figure_stays_grounded(record: str, number: str, rendering
         f"{record}: the record writes {number!r} and an answer writing {rendering!r} "
         f"was rejected as ungrounded ({unsupported})"
     )
+
+
+# A range is written in the source with units and a joining word, and in an
+# answer as a dash. Kept as explicit pairs rather than generated, because the
+# source form is prose rather than a re-rendering of a single figure.
+RANGE_CASES = [
+    ("between 48h to 96h", "48-96"),
+    ("between 48h to 96h", "48\u201396"),
+    ("between 48h to 96h", "48 - 96"),
+    ("delivery in 24 to 72 hours", "24-72"),
+    ("delivery in 24-72 hours", "24 to 72"),
+]
+
+
+@pytest.mark.parametrize("source_form,answer_form", RANGE_CASES)
+def test_a_range_matches_however_the_record_writes_it(source_form: str, answer_form: str) -> None:
+    """Observed live: the record says "between 48h to 96h", the model wrote
+    "48-96", and repair deleted a correctly stated delivery time.
+
+    Only the endpoints and their order carry meaning; the unit letters and the
+    joining word are presentation.
+    """
+    text = f"Forever Algeria. Average lead time for orders to arrive: {source_form}."
+    answer = f"Average lead time for orders to arrive in Algeria is {answer_form} hours."
+    document = _document(text, "Forever Algeria", "sponsoring-001-algeria")
+
+    assert not [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+
+def test_a_different_range_is_still_ungrounded() -> None:
+    """Flexible joining must not become a flexible value."""
+    text = "Forever Algeria. Average lead time for orders to arrive: between 48h to 96h."
+    document = _document(text, "Forever Algeria", "sponsoring-001-algeria")
+
+    unsupported = [
+        claim.number
+        for claim in unsupported_numeric_claims(
+            "Average lead time for orders to arrive in Algeria is 24-48 hours.", [document]
+        )
+    ]
+    assert unsupported
+
+
+def test_an_ordered_list_marker_is_not_a_measurable_claim() -> None:
+    """Observed live in the Belgium sponsoring answer: repair removed 3, 4, 5
+    and 6 from a delivered answer, taking the sentences with them.
+
+    "3)" and "3:" were already recognised as presentation. "3." - the markdown
+    ordered list marker, which is what a model actually writes - was not.
+    """
+    text = "Forever Belgium. Minimum order size FBO: 1CC."
+    answer = (
+        "Steps to sponsor:\n\n1. Register online\n2. Confirm the details\n"
+        "3. Place a first order\n4. Await approval"
+    )
+    document = _document(text, "Forever Belgium", "sponsoring-053-belgium")
+
+    assert not [claim.number for claim in unsupported_numeric_claims(answer, [document])]
