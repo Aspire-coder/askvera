@@ -7,14 +7,46 @@ from socket import gethostname
 from typing import Any
 
 
-def _environment() -> str:
-    """Return current deployment environment label."""
+def environment_label() -> str:
+    """Return the environment dimension every metric and alarm must agree on.
+
+    Published metrics and the alarms that watch them have to name the same
+    environment or the alarm sees no data. They previously derived it
+    separately, with different fallbacks -- "local" here and "production" in
+    app/monitoring/alarms.py -- so they agreed only because APP_ENV happens to
+    be set on the box. Both now call this, so agreement is structural.
+    """
     return os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "local"))
 
 
+def _environment() -> str:
+    """Return current deployment environment label."""
+    return environment_label()
+
+
+def version_label() -> str:
+    """Return the version dimension every metric and alarm must agree on."""
+    return _version()
+
+
 def _version() -> str:
-    """Return current application version label."""
-    return os.environ.get("APP_VERSION", "unknown")
+    """Return current application version label.
+
+    Falls back to the code-owned settings value rather than "unknown".
+
+    The alarms in app/monitoring/alarms.py filter on settings.APP_VERSION,
+    which is the literal "1.0.0". Nothing sets an APP_VERSION environment
+    variable on the box, so every metric published a Version of "unknown" and
+    every application alarm watched a dimension combination that had no data.
+    Confirmed on 2026-09-08 from the service journal, hours after the metrics
+    themselves were verified as arriving in CloudWatch.
+
+    Imported inside the function so this module keeps its import-time
+    independence from config, which the rest of the metrics package relies on.
+    """
+    from config import settings
+
+    return os.environ.get("APP_VERSION") or settings.APP_VERSION
 
 
 @dataclass(frozen=True)

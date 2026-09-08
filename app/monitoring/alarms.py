@@ -24,6 +24,7 @@ from app.metrics.names import (
     TOTAL_REQUESTS,
     VALIDATION_HEALTH,
 )
+from app.metrics.models import environment_label, version_label
 from app.monitoring.notifications import AlarmNotificationActions
 
 LOGGER = get_logger("app.monitoring.alarms")
@@ -539,7 +540,7 @@ def _metric_query(query_id: str, metric_name: str, statistic: str, dimensions: d
 def _app_dimensions(hostname: str) -> dict[str, str]:
     return {
         "Environment": _environment(),
-        "Version": settings.APP_VERSION,
+        "Version": version_label(),
         "Hostname": hostname,
     }
 
@@ -547,12 +548,15 @@ def _app_dimensions(hostname: str) -> dict[str, str]:
 def _aggregate_dimensions() -> dict[str, str]:
     return {
         "Environment": _environment(),
-        "Version": settings.APP_VERSION,
+        "Version": version_label(),
     }
 
 
 def _environment() -> str:
-    return os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "production"))
+    # Delegated to the metrics package so an alarm can never watch an
+    # environment label the metrics do not publish. These derived it
+    # separately until 2026-09-08, with different fallbacks.
+    return environment_label()
 
 
 def _description(trigger: str, impact: str, first_step: str) -> str:
