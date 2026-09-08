@@ -145,3 +145,45 @@ def test_alarm_manager_reports_cloudwatch_failures() -> None:
 
     assert result.success is False
     assert "cloudwatch unavailable" in result.error
+
+
+def test_ratio_alarms_compare_on_the_scale_their_metric_emits() -> None:
+    """Four alarms would have sat permanently in ALARM once data flowed.
+
+    GovernanceHealth, RetrievalHealth, ValidationHealth and CacheHitRatio are
+    published as ratios - 1.0 for healthy - while their thresholds are written
+    as percentages because that is how a person reading settings.py thinks
+    about them. Comparing 1.0 against 95.0 with LessThanThreshold means every
+    healthy sample breaches.
+
+    The mismatch was invisible while nothing published these metrics. Wiring
+    them up on 2026-09-08 would have turned four permanently silent alarms into
+    four permanently firing ones: the same amount of information, considerably
+    more noise, and the fastest way to teach people to ignore an alarm.
+    """
+    from app.monitoring.alarms import build_alarm_definitions
+
+    ratio_metrics = {"GovernanceHealth", "RetrievalHealth", "ValidationHealth", "CacheHitRatio"}
+    checked = [
+        definition
+        for definition in build_alarm_definitions()
+        if definition.metric_name in ratio_metrics
+    ]
+
+    assert len(checked) == len(ratio_metrics), "expected one alarm per ratio metric"
+    for definition in checked:
+        assert definition.comparison_operator == "LessThanThreshold"
+        assert 0.0 < definition.threshold <= 1.0, (
+            f"{definition.name} compares a 0-1 ratio against {definition.threshold}, "
+            "so a healthy sample would breach it"
+        )
+
+
+def test_a_healthy_sample_does_not_breach_a_ratio_alarm() -> None:
+    """The property that actually matters, stated directly."""
+    from app.monitoring.alarms import build_alarm_definitions
+
+    healthy = 1.0
+    for definition in build_alarm_definitions():
+        if definition.metric_name in {"GovernanceHealth", "RetrievalHealth", "ValidationHealth"}:
+            assert not healthy < definition.threshold, definition.name
