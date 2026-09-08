@@ -287,8 +287,29 @@ def get_widget_country_codes() -> set[str]:
 
 @lru_cache(maxsize=1)
 def _localized_market_names() -> dict[str, list[str]]:
+    """Localised market names, generated plus curated.
+
+    market_name_aliases.json is generated from Unicode CLDR by
+    scripts/generate-market-name-aliases.mjs, which reads nothing but the
+    market codes - so anything hand-added there disappears the next time it
+    runs. Everyday abbreviations CLDR does not carry live in a separate
+    curated file and are merged here, which keeps the generated file
+    generated and makes the provenance of every alias legible.
+    """
     path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json")
-    return json.loads(path.read_text(encoding="utf-8"))["names"]
+    names: dict[str, list[str]] = json.loads(path.read_text(encoding="utf-8"))["names"]
+
+    extra_path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases_extra.json")
+    if extra_path.exists():
+        curated: dict[str, list[str]] = json.loads(
+            extra_path.read_text(encoding="utf-8")
+        ).get("names", {})
+        merged = {code: list(values) for code, values in names.items()}
+        for code, values in curated.items():
+            merged.setdefault(code, [])
+            merged[code].extend(value for value in values if value not in merged[code])
+        return merged
+    return names
 
 
 # Words that can sit in front of a country name without qualifying it.

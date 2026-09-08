@@ -122,23 +122,28 @@ def test_an_unconfigured_country_is_not_substituted() -> None:
 # is a safety property, and that is code.
 
 
-@pytest.mark.parametrize("question", ["DR Congo", "dr congo", "orders in DR Congo"])
-def test_an_unrecognised_qualifier_does_not_route_to_the_other_congo(question: str) -> None:
+@pytest.mark.parametrize(
+    "question", ["Upper Congo", "Northern Congo", "West Congo", "Outer Guinea"]
+)
+def test_an_unrecognised_qualifier_does_not_route_to_the_contained_country(
+    question: str,
+) -> None:
     """The substitution, closed.
 
     "Congo" also sits inside "Democratic Republic of Congo", so it is only safe
     on its own. With an unrecognised word in front of it the mention is
     ambiguous, and returning nothing lets the caller ask which country is
-    meant. Answering as CG was the wrong country's policy.
+    meant. Answering as CG was the wrong country's policy - which is exactly
+    what "DR Congo" did before it was recognised.
     """
     assert find_market_mentions(question) == set()
 
 
-def test_an_unknown_abbreviation_resolves_to_nothing_rather_than_a_neighbour() -> None:
-    """DRC fails differently from "DR Congo": it contains no country name at
-    all, so it never matched anything. Recorded because the two look like one
-    defect and are not."""
-    assert find_market_mentions("DRC") == set()
+def test_a_qualifier_the_catalogue_does_not_know_is_never_guessed() -> None:
+    """An abbreviation belonging to no configured market resolves to nothing
+    rather than to the nearest-looking one."""
+    assert find_market_mentions("RoC") == set()
+    assert find_market_mentions("What is the delivery cost in Mainland China?") == set()
 
 
 def test_a_neutral_word_before_a_shared_name_still_resolves() -> None:
@@ -147,17 +152,66 @@ def test_a_neutral_word_before_a_shared_name_still_resolves() -> None:
         assert find_market_mentions(question) == {"CG"}, question
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Catalogue gap, now contained rather than dangerous: 'DR Congo' returns "
-        "nothing instead of the wrong country. Recognising it as CD means adding "
-        "approved aliases to market_name_aliases.json - a decision about which "
-        "abbreviations are official, not a code change."
-    ),
-    strict=True,
+@pytest.mark.parametrize(
+    "question",
+    ["DR Congo", "DRC", "the DRC", "orders in DR Congo", "What is the minimum order in DRC?"],
 )
-def test_the_common_abbreviation_resolves_to_the_democratic_republic() -> None:
-    assert find_market_mentions("DR Congo") == {"CD"}
+def test_the_common_abbreviations_resolve_to_the_democratic_republic(question: str) -> None:
+    """Now recognised, from curated catalogue data rather than code.
+
+    The guard alone made these safe - they returned nothing rather than the
+    wrong country. Recognising them needed a decision about which
+    abbreviations are official, which is data.
+    """
+    assert find_market_mentions(question) == {"CD"}
+
+
+def test_the_curated_aliases_do_not_live_in_the_generated_file() -> None:
+    """market_name_aliases.json is generated from CLDR by
+    scripts/generate-market-name-aliases.mjs, which reads only market codes.
+    Anything hand-added there is silently dropped the next time it runs, so a
+    routing decision must not be stored in it."""
+    import json
+
+    from services.market_config import DEFAULT_MARKETS_CONFIG_PATH
+
+    generated = json.loads(
+        DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "DR Congo" not in generated["names"]["CD"]
+    assert "DRC" not in generated["names"]["CD"]
+
+    curated = json.loads(
+        DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases_extra.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert curated["names"]["CD"] == ["DR Congo", "DRC"]
+
+
+def test_a_curated_alias_never_belongs_to_two_markets() -> None:
+    """An abbreviation shared by two countries must not be listed at all: an
+    unrecognised name resolves to nothing and the reader is asked, which is
+    safer than a confident guess."""
+    import json
+
+    from services.market_config import (
+        DEFAULT_MARKETS_CONFIG_PATH,
+        _market_name_index,
+        _normalize_market_text,
+    )
+
+    curated = json.loads(
+        DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases_extra.json").read_text(
+            encoding="utf-8"
+        )
+    )["names"]
+    names, _, _ = _market_name_index()
+    for code, values in curated.items():
+        for value in values:
+            assert names[_normalize_market_text(value)] == frozenset({code}), value
 
 
 # --- the guard's own cost ---------------------------------------------------

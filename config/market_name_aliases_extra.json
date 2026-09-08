@@ -1,0 +1,11 @@
+{
+  "source": "Curated by hand. Merged with market_name_aliases.json, which is generated from Unicode CLDR by scripts/generate-market-name-aliases.mjs and must not be hand-edited - a regeneration would silently drop anything added there.",
+  "purpose": "Common abbreviations and everyday spellings that CLDR does not carry. Names only. This file never grants access to a market, never enables one, and never changes which documents a reader may see; it only lets a question be routed to the market the reader meant.",
+  "review": "Every entry is a routing decision. An abbreviation that belongs to two countries must not be listed at all - an unrecognised name resolves to nothing and the reader is asked which country they mean, which is safer than a confident guess.",
+  "names": {
+    "CD": [
+      "DR Congo",
+      "DRC"
+    ]
+  }
+}
