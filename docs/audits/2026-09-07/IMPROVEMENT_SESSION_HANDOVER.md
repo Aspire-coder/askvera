@@ -65,6 +65,41 @@ Plus `docs/selector-ranking-weakness`, merged as PR #79.
 Every branch has the full suite green under `pytest tests`, which is what
 `deploy.sh` runs, not just `tests/unit`.
 
+## Review findings, fixed
+
+An external code review of `e73742c` raised five issues. Four were verified
+against current `main` and fixed; one was already superseded.
+
+| Branch | Finding |
+|--------|---------|
+| `fix/canary-single-execution` | The gate ran two retrievals per case and bypassed no caches |
+| `fix/preflight-page-coverage` | One scanned page in a readable PDF was silently dropped |
+| `fix/evidence-contract-coverage` | The contract checked claims-in-answer but not answer-in-claims |
+| `fix/followup-market-continuity` | A market named in a skipped follow-up turn was lost |
+
+**The review's headline finding was stale.** It scored passage selection 5/10
+citing "8 out of 10" on the Kyrgyzstan question - that is the pre-fix baseline
+from this document, read at a commit predating the temperature merge. Measured
+after: 0 failures in 30. Its methodological point stands and is why we measured.
+
+**Its finding about the evidence contract is real but not live.**
+`EVIDENCE_GATED_OUTPUT_ENABLED` is false and unset in SSM, so that component
+does not run in production. Fixed so it is safer to enable, not because it was
+hurting anyone.
+
+**Two of the four carry operational consequences worth knowing before merge.**
+
+The preflight fix converts silent page loss into a rejected upload.
+`ADMIN_TEXTRACT_OCR_ENABLED` is false in production, so a PDF containing even
+one scanned page will now be refused where it previously published minus that
+page. Failing loudly is the right trade for an assistant whose answers
+distributors act on, but it will block uploads that used to succeed.
+
+The canary fix changes what `--repeat` measures. It was partly measuring the
+cache; it now measures the pipeline every run. Expect delivered-answer cases to
+cost more and to be less uniformly green than before, because they were
+previously being answered from cache after the first run.
+
 ## Blocking question for the remaining three
 
 None of that work reaches CloudWatch unless SSM sets both of these. The code
