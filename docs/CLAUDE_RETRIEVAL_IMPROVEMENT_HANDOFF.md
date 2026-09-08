@@ -86,8 +86,23 @@ This is the one mechanism that changes answers, and it took three attempts.
 2. **Document-wide presence** (`168db8e`). A claim's unit must appear somewhere
    in the source. Caught a bare source figure with an invented currency, a
    heading-scoped unit, and an unlisted code.
-3. **Governing row** (`6bb6b18`). The unit is the one beside the figure, or the
-   nearest unit token before it, bounded at 300 characters.
+3. **Governing row** (`6bb6b18`, bounded in `52627fd`). The unit is the one
+   beside the figure, or the nearest unit token before it, within 300
+   characters and **not across a clause boundary**.
+
+**This is a heuristic, not table-row understanding.** It has no notion of a row,
+a column or a cell. Two limits are asserted in tests rather than left to be
+found:
+
+- Two currencies in one sentence with no delimiter between them: the nearer one
+  governs and can be the wrong one, rejecting a correct claim. Conservative, but
+  it costs a correct answer, and closing it needs structural parsing rather than
+  a different window size.
+- A bare figure with no unit in its clause has no attributable currency. The
+  validator neither invents one nor rejects a claim it cannot confirm.
+
+Untested against real layouts: page breaks, tables continuing across pages, and
+whether 300 characters suits real records.
 
 Layer 3 exists because review supplied a counterexample layer 2 accepted:
 
@@ -122,7 +137,7 @@ a live run.
 | 5. Ingestion and extraction | Partially done. Header-over-scan detected and logged. Table continuation, metadata conflicts, chunk boundaries not started. |
 | 6. Benchmark expansion | Blocked on corpus text for non-English documents. |
 | 7. Automatic quality checks | Substantially covered by task 2. |
-| 8. Resilience | **Not started.** Timeout, dependency-failure and retry tests are feasible locally and were not reached. |
+| 8. Resilience | Partially done. Timeout-versus-service-failure distinction, transient-versus-permanent retry, fallback carries no citations, fallback never cached. Injected-failure testing through the running pipeline and recovery timing remain undone. |
 
 ## 7. Known gaps and unverified claims
 
