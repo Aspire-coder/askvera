@@ -9,7 +9,7 @@ live configuration was touched. No paid model call was made.**
 | | |
 |---|---|
 | Starting commit | `bde45fb` on `main` |
-| Ending commit | `245047c` on `feat/preflight-flags-low-text-image-pages` |
+| Ending commit | see §13 — stack extended after review |
 | `main` | unchanged, still `bde45fb` |
 | Working tree | pre-existing untracked files only (`.claude/`, `docs/audits/**`, `scratch/`, four untracked `docs/*.md`), all left untouched |
 | Pre-existing unmerged branches | 12, none touched |
@@ -253,3 +253,106 @@ Nothing was merged. Nothing was pushed. Nothing was deployed. No index, AWS
 resource, credential or live configuration was modified. No scheduled task was
 created or restarted. No paid model call was made. No existing branch, worktree,
 source document or uncommitted user change was deleted or overwritten.
+
+
+---
+
+# 13. Second round — changes made after your review
+
+Your review was acted on rather than filed. Five more commits, same stack,
+still nothing merged, pushed or deployed.
+
+| Commit | Branch | Your point |
+|---|---|---|
+| `168db8e` | `test/unit-binding-contrast-cases` | 1. Unit binding still permissive |
+| `6a9c483` | `feat/separate-development-from-heldout` | 3. Evaluation set not cleanly held out |
+| `8660acb` | `feat/surface-low-text-image-pages-at-ingestion` | 2. Detected is not recovered |
+| `f1b0a0f` | `docs/correct-accent-and-translation-claims` | 4. Accent fix needs an experiment, not a reindex |
+
+## 13.1 Unit binding was permissive — confirmed and closed
+
+You were right. Probing the cases you named found three genuine holes: a bare
+source figure beside an answer that invents a currency, a unit stated once in a
+table header rather than beside each figure, and a code no vocabulary lists.
+
+One rule closes all three: **a claim's unit must appear somewhere in the source
+document**, not merely beside the matched figure. That handles the header case
+adjacency cannot. An unlisted three-letter code now counts as a unit when the
+answer capitalises it — case survives on the answer side and not on the source
+side, which is casefolded.
+
+Two of my five original probes were badly built, and the conclusions should not
+be over-read: the "wrong fee sharing a number" source genuinely did support the
+claim, and the ambiguous-dollar probe paired New Zealand content with Algeria's
+title, so it failed on market matching rather than currency. Rebuilt, all seven
+behave correctly.
+
+**Still not proven:** units inherited across a page break, and a unit present in
+the source for a different figure entirely. Both need corpus text.
+
+## 13.2 The evaluation set — stronger than the handoff first admitted
+
+Not three adjusted cases among sixteen clean ones. **Every case was authored or
+adjusted while fixing the system on 2026-09-08. The held-out set is empty.**
+
+Cases now carry a required `evaluation_set`, the summary reports the two apart
+rather than averaging, and `held_out_cases` is reported explicitly so a run that
+establishes nothing about generalisation says so in its own output.
+
+Your related point is not solved by a label and remains open: a corrected
+expectation must come from the source, not from what the bot did. The
+office-hours case is the one to re-check — both facts are in the record, but the
+change was prompted by a failing run.
+
+## 13.3 Detected is not recovered — closed at the reporting level
+
+`low_text_image_page_numbers` was computed and read by no caller. Ingestion now
+logs the pages and filename where they exist. It still does not block, and
+**when an unresolved page should block publication is the decision I am leaving
+to you** rather than defaulting.
+
+## 13.4 Two claims corrected
+
+The accent section recommended reindexing outright; it now says inspect the
+analyser, measure a candidate index, and decide per language whether folding
+merges words that should stay distinct.
+
+And I had written that live translation of refusal copy "is right". The premise
+holds, the conclusion does not follow, and it is recorded as an open governance
+gap rather than a settled design choice.
+
+## 13.5 Runtime-changing diff, isolated as requested
+
+Across the whole stack, four runtime files change:
+
+| File | Removed lines | Nature |
+|---|---:|---|
+| `app/evidence.py` | 0 | new function only |
+| `services/document_preflight.py` | 0 | new field only |
+| `services/knowledge_ingestion.py` | 0 | new logging only |
+| `app/validation/validators/numeric_grounding_validator.py` | 3 | **the only behaviour change** |
+
+**One mechanism carries all the runtime risk: unit binding.** If the canary
+shows a grounding regression, revert `80b99a3` and `168db8e`; everything else is
+additive.
+
+## 13.6 Verification after round two
+
+```
+python -m pytest tests -p no:cacheprovider     1333 passed, 1 skipped
+python -m flake8 api app config services utils main.py    exit 0
+python scripts/run_benchmark.py --dry-run      16 cases, 48 runs, 54 generation calls
+python scripts/run_retrieval_canary.py --validate-only    valid, 23 cases
+```
+
+Baseline was 1267. **66 tests added**, no pre-existing failure disturbed.
+
+## 13.7 Still not done from your list
+
+- **Role and language-switch tests.** Feasible in principle; a role case needs
+  the Algeria record's FBO-versus-Preferred-Customer distinction expressed as a
+  benchmark case, which cannot be validated without a live run.
+- **Failure-recovery and resilience tests.** Not started.
+- **Table continuation, metadata conflicts, chunk boundaries.** Not started.
+- **A bounded live comparison.** Needs your authorisation and is the only thing
+  that would turn any of this into evidence about delivered answers.
