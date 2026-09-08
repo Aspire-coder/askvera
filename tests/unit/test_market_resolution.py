@@ -264,3 +264,157 @@ def test_every_overlapping_pair_resolves_both_ways() -> None:
         assert find_market_mentions(f"{short} and {long}") == set(names[short]) | set(
             names[long]
         ), (short, long)
+
+
+# --- safeguard: a suppressed mention is not the same as no mention ----------
+
+
+@pytest.mark.parametrize(
+    "question", ["Upper Congo", "Mainland China", "What is the delivery cost in Upper Congo?"]
+)
+def test_a_suppressed_mention_is_reported_as_unresolved(question: str) -> None:
+    """Returning nothing must not read as "the reader named no country".
+
+    A question naming no market can reasonably use the session's own market. A
+    question naming something country-shaped that could not be resolved should
+    be asked about instead. Both produced an empty set, so a caller could not
+    tell them apart - and the second silently became "answer for the session
+    country".
+    """
+    from services.market_config import find_unresolved_market_mentions
+
+    assert find_market_mentions(question) == set()
+    assert find_unresolved_market_mentions(question) != set()
+
+
+@pytest.mark.parametrize(
+    "question", ["What are the delivery charges?", "How do I sponsor someone?", ""]
+)
+def test_a_question_naming_no_country_reports_nothing_unresolved(question: str) -> None:
+    from services.market_config import find_unresolved_market_mentions
+
+    assert find_unresolved_market_mentions(question) == set()
+
+
+@pytest.mark.parametrize("question", ["Congo", "DR Congo", "delivery in Congo", "Belgium"])
+def test_a_resolved_question_reports_nothing_unresolved(question: str) -> None:
+    from services.market_config import find_unresolved_market_mentions
+
+    assert find_unresolved_market_mentions(question) == set()
+
+
+# --- safeguard: curated names must not collide with generated ones ---------
+
+
+def test_no_curated_alias_collides_with_another_market_after_normalization() -> None:
+    """Checked across BOTH files, after the matcher's own normalization.
+
+    A curated alias that normalises onto a different country's generated alias
+    would make one of them unusable - names mapping to two codes are skipped -
+    or would route to the wrong market.
+    """
+    import json
+
+    from services.market_config import (
+        DEFAULT_MARKETS_CONFIG_PATH,
+        _normalize_market_text,
+    )
+
+    generated = json.loads(
+        DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json").read_text(
+            encoding="utf-8"
+        )
+    )["names"]
+    curated = json.loads(
+        DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases_extra.json").read_text(
+            encoding="utf-8"
+        )
+    )["names"]
+
+    generated_by_name: dict[str, set[str]] = {}
+    for code, values in generated.items():
+        for value in values:
+            generated_by_name.setdefault(_normalize_market_text(value), set()).add(code)
+
+    for code, values in curated.items():
+        for value in values:
+            owners = generated_by_name.get(_normalize_market_text(value), set())
+            assert owners <= {code}, (
+                f"curated alias {value!r} for {code} collides with generated names "
+                f"for {sorted(owners)}"
+            )
+
+
+def test_the_collision_check_would_catch_a_real_collision() -> None:
+    """A check that cannot fail proves nothing. This plants one and detects it."""
+    import json
+
+    from services.market_config import (
+        DEFAULT_MARKETS_CONFIG_PATH,
+        _normalize_market_text,
+    )
+
+    generated = json.loads(
+        DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json").read_text(
+            encoding="utf-8"
+        )
+    )["names"]
+    generated_by_name: dict[str, set[str]] = {}
+    for code, values in generated.items():
+        for value in values:
+            generated_by_name.setdefault(_normalize_market_text(value), set()).add(code)
+
+    stolen, owner = next(
+        (name, sorted(codes)[0])
+        for name, codes in generated_by_name.items()
+        if len(codes) == 1 and name
+    )
+    pretend_owner = "ZZ" if owner != "ZZ" else "YY"
+
+    assert not (generated_by_name[stolen] <= {pretend_owner}), (
+        f"planting {stolen!r} under {pretend_owner} should be detected as a collision "
+        f"with {owner}"
+    )
+
+
+# --- safeguard: the curated file has to reach the running service ----------
+
+
+def test_the_curated_file_is_tracked_and_loaded_by_absolute_path() -> None:
+    """Deployment is a git pull, so an untracked config file never arrives; and
+    loading must not depend on the working directory the service starts in."""
+    import subprocess
+
+    from services.market_config import DEFAULT_MARKETS_CONFIG_PATH
+
+    path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases_extra.json")
+    assert path.is_absolute()
+    assert path.exists()
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", str(path)],
+        capture_output=True,
+        cwd=path.parent.parent,
+    )
+    assert tracked.returncode == 0, "the curated aliases are not tracked by git"
+
+
+# --- recognition gaps, recorded as gaps ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "question,intended",
+    [("Mainland China", "CN"), ("Upper Congo", "CG or CD - genuinely ambiguous")],
+)
+def test_wording_a_reader_might_use_is_not_yet_recognised(question, intended) -> None:
+    """Not a success. These are plausible things a reader could type, and the
+    guard declines them rather than resolving them.
+
+    Declining is the safe behaviour and it is not the desired one: "Mainland
+    China" almost certainly means CN. Recorded as an open recognition gap so it
+    is not mistaken for coverage.
+    """
+    from services.market_config import find_unresolved_market_mentions
+
+    assert find_market_mentions(question) == set()
+    assert find_unresolved_market_mentions(question) != set(), intended

@@ -388,6 +388,26 @@ def _market_name_index() -> tuple[
     return names, frozenset(stems), own_words
 
 
+def find_unresolved_market_mentions(message: str) -> set[str]:
+    """Phrases that looked like a country and were deliberately not resolved.
+
+    "Upper Congo" contains a configured country name behind a qualifier nobody
+    configured, so resolving it would answer from the Republic of Congo. The
+    matcher suppresses it - and suppression is indistinguishable from "no
+    country was mentioned" if all a caller sees is an empty set.
+
+    That difference matters: a question naming no market can reasonably use the
+    session's own market, while a question naming something country-shaped that
+    could not be resolved should be asked about rather than answered. This
+    returns the suppressed phrases so a caller can tell the two apart.
+
+    Nothing in the pipeline consumes this yet - wiring it into the
+    clarification path is a change to how requests are answered, and belongs
+    with its own end-to-end test.
+    """
+    return _match_markets(message)[1]
+
+
 def find_market_mentions(message: str) -> set[str]:
     """Return enabled markets whose configured name is present in a message.
 
@@ -401,15 +421,21 @@ def find_market_mentions(message: str) -> set[str]:
     such as ``it`` and ``us`` would otherwise create false global-directory
     searches.
     """
+    return _match_markets(message)[0]
+
+
+def _match_markets(message: str) -> tuple[set[str], set[str]]:
+    """Resolved market codes, and the phrases suppressed as ambiguous."""
     normalized_message = _normalize_market_text(message)
     if not normalized_message:
-        return set()
+        return set(), set()
 
     names, stems, own_words = _market_name_index()
     # Match longer names first so "Equatorial Guinea" does not also select
     # Guinea. Unambiguous full names only; never infer access from an alias.
     padded_message = f" {normalized_message} "
     matches: set[str] = set()
+    suppressed: set[str] = set()
     for name in sorted(names, key=len, reverse=True):
         if len(names[name]) != 1 or f" {name} " not in padded_message:
             continue
@@ -422,11 +448,12 @@ def find_market_mentions(message: str) -> set[str]:
             qualifier = _qualifier_before(padded_message, name)
             if qualifier and qualifier not in _MARKET_NAME_NEUTRAL_PREFIXES:
                 if qualifier not in own_words[name]:
+                    suppressed.add(f"{qualifier} {name}")
                     padded_message = padded_message.replace(f" {name} ", " ")
                     continue
         matches.update(names[name])
         padded_message = padded_message.replace(f" {name} ", " ")
-    return matches
+    return matches, suppressed
 
 
 def find_probable_market_typo(message: str) -> str | None:
