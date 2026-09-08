@@ -278,6 +278,7 @@ def run_pipeline_once(case: dict[str, Any], sequence: int):
         run.removed_numeric_claims,
     )
 
+
 def run_case(case: dict[str, Any], sequence: int, default_repeat: int) -> dict[str, Any]:
     """Run one case repeatedly and require every run to pass.
 

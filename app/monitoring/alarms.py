@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import os
 from socket import gethostname
 from typing import Any
 
