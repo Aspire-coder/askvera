@@ -193,6 +193,26 @@ def get_markets() -> list[dict[str, Any]]:
     return sorted(enabled_markets, key=lambda market: (market.get("displayOrder", 9999), market.get("name", "")))
 
 
+def market_display_name(code: str) -> str:
+    """Return a market's configured name, or an empty string if it has none.
+
+    find_market_mentions returns codes, and a code is not something to put in
+    a sentence a reader will see: "What is the telephone number for GB?" is
+    worse than the reference it replaces. The global directory list is checked
+    too, because it names markets that markets.json does not carry.
+    """
+    normalized = str(code or "").strip().upper()
+    if not normalized:
+        return ""
+    for market in load_market_config()["markets"]:
+        if str(market.get("code") or "").upper() == normalized:
+            return str(market.get("name") or "").strip()
+    for market in load_global_directory_markets():
+        if str(market.get("code") or "").upper() == normalized:
+            return str(market.get("name") or "").strip()
+    return ""
+
+
 def get_countries() -> list[dict[str, Any]]:
     """Return the country/language shape expected by the public API."""
     countries: list[dict[str, Any]] = []

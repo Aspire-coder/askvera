@@ -949,7 +949,13 @@ def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> N
     assert response is not None
     assert "telephone number" in response.answer
     assert response.metadata["response_source"] == "directory_clarification"
-    assert response.cards[0]["prompt"] == "What is the telephone number for that country?"
+    # The card names the market the message resolved to, rather than "that
+    # country". Reported live: a reader asked about the UK office, tapped the
+    # telephone card, and the resulting "...for that country?" was answered
+    # with insufficient evidence, because nothing in that sentence says which
+    # country. A card is a question the system asks on the reader's behalf, so
+    # it has to be answerable on its own.
+    assert response.cards[0]["prompt"] == "What is the telephone number for Cameroon?"
 
 
 def test_directory_evidence_failure_skips_clarification_when_field_already_named(monkeypatch) -> None:
