@@ -259,3 +259,20 @@ def test_refusal_detection_covers_every_approved_way_of_declining():
         copy = localized_conversation_response(key, "en")
         assert copy, f"{key} has no approved English copy"
         assert benchmark._abstained(copy, "en") is True, key
+
+
+def test_every_answerable_case_names_the_sections_it_depends_on():
+    """An answerable case without required_sections scores retrieval on nothing.
+
+    The sponsoring directory is a single document holding every market, so a
+    case that does not name its section cannot tell "found the right record"
+    from "found some other country's record in the same PDF" - which is the
+    failure this benchmark exists to catch.
+    """
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    answerable = [case for case in cases if case["expected"]["kind"] == "answer"]
+    assert answerable, "the fixture must contain answerable cases, not only refusals"
+    for case in answerable:
+        assert case["expected"].get("required_sections"), case["id"]
+        # Provenance has to name where the text came from, not just assert it.
+        assert "dump" in case["provenance"].lower() or "index" in case["provenance"].lower(), case["id"]
