@@ -1897,9 +1897,13 @@ def publish_ingestion_job(
             decision="publish",
             reason=review_reason,
         )
-    # Enforced here rather than in the route, because this is the single place
-    # every publication path arrives at - the API endpoint, a retry, and any
-    # future caller. A disabled button in the portal is not enforcement.
+    # Enforced here rather than in the route, so the API endpoint, a retry and
+    # any future caller hit the same check - a disabled button in the portal is
+    # not enforcement. This is not the only path that can activate an index
+    # generation: process_ingestion_job activates directly when
+    # review_before_publish is false. That path is covered by _assess_document
+    # forcing the flag true whenever there is anything to find, not by this
+    # check, and the two together are what close it.
     revision = _enforce_publication_gate(job, resolution)
     count, documents = _staging_documents(job_id, limit=10000)
     expected = int(job.get("section_count") or 0)

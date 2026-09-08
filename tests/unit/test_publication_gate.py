@@ -188,8 +188,12 @@ def test_no_flag_appears_in_this_module() -> None:
 def test_the_gate_is_enforced_inside_publish_not_in_the_route() -> None:
     """A direct API call or a retry must hit the same check.
 
-    Enforcement in the route would be bypassed by any other caller. The service
-    function is where every publication path arrives, so the check lives there.
+    Enforcement in the route would be bypassed by any other caller, so it lives
+    in the service function. That covers the reviewed route and not the whole
+    problem: process_ingestion_job activates a generation directly when
+    review_before_publish is false, and what covers that is the flag being
+    forced true whenever an assessment finds anything. Both are needed, and
+    test_every_activation_path_is_covered is the one that checks the other.
     """
     import inspect
 
