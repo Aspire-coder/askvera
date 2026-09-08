@@ -266,6 +266,12 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     return cleaned, replacements > 0
 
 
+# A minimum-order field value is a figure with at most a currency equivalent,
+# such as "0,200CC (7 800DZD)". Anything materially longer is record prose that
+# the capture ran into rather than a value worth restoring.
+_MAX_RESTORED_VALUE_CHARS = 80
+
+
 def restore_missing_requested_order_size(
     answer: str,
     source_texts: Iterable[str],
@@ -284,6 +290,14 @@ def restore_missing_requested_order_size(
         if not match:
             continue
         value = " ".join(match.group("value").split()).strip()
+        # The capture runs to the next period or newline, so in a record whose
+        # minimum-order line continues into prose it swallows that prose too.
+        # Appending it as a sentence then ends the answer mid-phrase - which is
+        # how the Algeria answer came to end on the word "the", and be discarded
+        # whole by the output validator as structurally incomplete. A field
+        # value is short; a paragraph is not this function's to append.
+        if len(value) > _MAX_RESTORED_VALUE_CHARS:
+            return corrected, False
         if value and _normalize_for_comparison(value) not in _normalize_for_comparison(corrected):
             separator = "\n\n" if corrected.strip() else ""
             corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."

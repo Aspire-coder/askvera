@@ -28,6 +28,7 @@ from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.response.quality import (
     contact_for_country,
     format_period_not_covered,
+    has_incomplete_ending,
     remove_or_replace_contact_placeholders,
     unsupported_requested_years,
 )
@@ -533,6 +534,22 @@ class AIOrchestrator:
             (document.content for document in retrieval_result.documents),
             user_question,
         )
+        # A restoration that leaves the answer structurally incomplete is worse
+        # than the omission it fixes: the output validator discards the whole
+        # answer and the reader is told the approved documents do not cover
+        # their question. That is what happened to the Algeria minimum-order
+        # answer, where retrieval was correct and the model's reply was fine
+        # until this step appended a fragment to it.
+        #
+        # The check is the validator's own, so this step cannot drift back into
+        # producing answers the validator will throw away.
+        if order_restored and has_incomplete_ending(order_safe_answer, language):
+            LOGGER.warning(
+                "directory_order_size_restore_skipped",
+                correlation_id=correlation_id,
+                reason="restored_answer_would_be_incomplete",
+            )
+            order_restored = False
         if order_restored:
             chat_response = self._replace_answer(
                 chat_response,
