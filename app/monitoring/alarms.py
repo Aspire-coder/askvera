@@ -314,7 +314,7 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
             metric_name=CACHE_HIT_RATIO,
             namespace=APP_NAMESPACE,
             statistic="Average",
-            threshold=CACHE_HIT_THRESHOLD,
+            threshold=_as_ratio(CACHE_HIT_THRESHOLD),
             comparison_operator="LessThanThreshold",
             dimensions=aggregate_dimensions,
             period=300,
@@ -426,6 +426,25 @@ def _high_fallback_rate_alarm(dimensions: dict[str, str]) -> AlarmDefinition:
     )
 
 
+def _as_ratio(percentage: float) -> float:
+    """Convert an operator-facing percentage to the 0-1 scale a metric emits.
+
+    GovernanceHealth, RetrievalHealth, ValidationHealth and CacheHitRatio are
+    published as ratios -- 1.0 for healthy, 0.0 for not -- while their
+    thresholds are written as percentages because that is how a person reading
+    settings.py thinks about them. Comparing 1.0 against 95.0 with
+    LessThanThreshold means every healthy sample breaches, so all four alarms
+    would have sat permanently in ALARM.
+
+    The mismatch was invisible for as long as nothing published these metrics.
+    Wiring them up on 2026-09-08 turned four permanently silent alarms into
+    four permanently firing ones, which is the same amount of information and
+    considerably more noise. Converting here keeps the setting readable and the
+    comparison correct.
+    """
+    return percentage / 100.0
+
+
 def _health_alarm(name: str, metric_name: str, description: str, dimensions: dict[str, str]) -> AlarmDefinition:
     return AlarmDefinition(
         name=name,
@@ -433,7 +452,7 @@ def _health_alarm(name: str, metric_name: str, description: str, dimensions: dic
         metric_name=metric_name,
         namespace=APP_NAMESPACE,
         statistic="Average",
-        threshold=PIPELINE_HEALTH_THRESHOLD,
+        threshold=_as_ratio(PIPELINE_HEALTH_THRESHOLD),
         comparison_operator="LessThanThreshold",
         dimensions=dimensions,
         period=300,
