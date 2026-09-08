@@ -307,6 +307,39 @@ _TIME_RE = re.compile(r"(?<![\d:.])(\d{1,2})[:.](\d{2})(?!\d)(?![:.]\d)")
 _MERIDIEM_RE = re.compile(r"^[\s ]*([ap])\.?\s?m\.?\b", re.I)
 
 
+# An hour with a meridiem and no minutes: "9am", "6 pm", "8 p.m.".
+#
+# Three of the 113 directory records that state office hours are written this
+# way -- England, Ireland and Scotland, all as "Monday - 9am - 6pm" -- and the
+# pattern above finds no time in them at all. Without this, a model writing
+# 09:00-18:00 for those markets has nothing in the source to match against and
+# loses the hours, which is the failure this whole check exists to prevent.
+_HOUR_MERIDIEM_RE = re.compile(r"(?<![\d:.])(\d{1,2})\s?([ap])\.?\s?m\.?\b", re.I)
+
+
+def _meridiem_hour_keys(match: re.Match[str]) -> set[str]:
+    """Return the 24-hour form of an hour written without minutes."""
+    hour = int(match.group(1))
+    if match.group(2).lower() == "p" and hour < 12:
+        hour += 12
+    elif match.group(2).lower() == "a" and hour == 12:
+        hour = 0
+    return {f"{hour:02d}00"}
+
+
+def _time_occurrences(text: str) -> list[tuple[int, int, set[str]]]:
+    """Every clock time in the text, in whichever notation it is written."""
+    occurrences = [
+        (match.start(), match.end(), _time_keys(text, match))
+        for match in _TIME_RE.finditer(text)
+    ]
+    occurrences += [
+        (match.start(), match.end(), _meridiem_hour_keys(match))
+        for match in _HOUR_MERIDIEM_RE.finditer(text)
+    ]
+    return sorted(occurrences)
+
+
 def _time_keys(text: str, match: re.Match[str]) -> set[str]:
     """Return the 24-hour forms one written time could mean.
 
@@ -337,14 +370,10 @@ def _grounded_time_spans(answer: str, source_texts: list[str]) -> list[tuple[int
     """
     approved: set[str] = set()
     for source in source_texts:
-        for match in _TIME_RE.finditer(source):
-            approved |= _time_keys(source, match)
+        for _, _, keys in _time_occurrences(source):
+            approved |= keys
 
-    spans = [
-        (match.start(), match.end())
-        for match in _TIME_RE.finditer(answer)
-        if _time_keys(answer, match) & approved
-    ]
+    spans = [(start, end) for start, end, keys in _time_occurrences(answer) if keys & approved]
 
     # Two grounded times joined into a range must become one span. The claim
     # extractor reads "09:00-17:00" greedily and produces "00-17", a claim that
@@ -415,7 +444,49 @@ def remove_unsupported_numeric_sentences(answer: str, source_documents: list[obj
     repaired = _drop_orphaned_delimiters(repaired)
     repaired = re.sub(r"[ \t]+\n", "\n", repaired)
     repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
+    repaired = _drop_orphaned_lead_ins(repaired)
     return repaired, [claim.text for claim in unsupported]
+
+
+def _drop_orphaned_lead_ins(text: str) -> str:
+    """Remove a line that introduces content this repair deleted.
+
+    A colon is not a sentence boundary, so a lead-in survives while everything
+    it promised is removed. Observed live on 2026-09-08 for "what is the
+    delivery cost for sweden?", which was delivered as:
+
+        For Sweden, the delivery costs are:
+
+        The average lead time for orders to arrive in Sweden is 4-7 days.
+
+    The costs were ungrounded and correctly removed; the promise of them was
+    not, and the reader was left with a heading over nothing and an unrelated
+    fact beneath it. That reads as a rendering fault and quietly loses the
+    question that was asked.
+
+    Only a lead-in whose own content is gone is dropped: one still followed by
+    an indented or bulleted line is doing its job and is left alone. This is
+    the same repair as _drop_orphaned_delimiters above, one level up - a
+    fragment whose partner this function removed.
+    """
+    lines = text.split("\n")
+    kept: list[str] = []
+    for index, line in enumerate(lines):
+        if line.rstrip().endswith(":"):
+            following = next(
+                (candidate for candidate in lines[index + 1:] if candidate.strip()),
+                "",
+            )
+            # A list or an indented block is what a lead-in introduces. Ordinary
+            # prose beneath it is a new statement, not the promised content.
+            introduces_content = bool(
+                re.match(r"\s*(?:[-*•]|\d+[.)]|[a-z][.)])\s", following)
+                or (following[:1].isspace() if following else False)
+            )
+            if not introduces_content:
+                continue
+        kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
 def _drop_orphaned_delimiters(text: str) -> str:

@@ -675,3 +675,91 @@ def test_the_hours_sentence_survives_repair() -> None:
 
     assert repaired == answer
     assert removed == []
+
+
+class _UKHoursSource:
+    """England, Ireland and Scotland write hours without minutes."""
+
+    content = "Business Hours Office Monday - 9am - 6pm, Tuesday - 9am - 8pm"
+    title = "International-Sponsoring-Directory.pdf - Forever England"
+    metadata: dict = {}
+
+
+def test_uk_office_hours_survive_a_24_hour_rewrite() -> None:
+    """Three of the 113 records with hours use "9am - 6pm" and no minutes.
+
+    The time pattern found nothing in those sources at all, so a model writing
+    09:00-18:00 had nothing to match against and lost the hours.
+    """
+    assert _hours_flagged("The office is open 09:00-18:00 on Monday.", _UKHoursSource()) == []
+
+
+def test_uk_office_hours_survive_when_echoed_verbatim() -> None:
+    assert _hours_flagged("The office is open 9am - 6pm on Monday.", _UKHoursSource()) == []
+
+
+def test_invented_uk_hours_are_still_removed() -> None:
+    assert _hours_flagged("The office is open 05:00-23:00 on Monday.", _UKHoursSource())
+
+
+class _SwedenSource:
+    """The record has no delivery costs; only a lead time."""
+
+    content = "Welcome to Forever Sweden! +46 31 727 8000. Average lead time for orders is 4-7 days."
+    title = "International-Sponsoring-Directory.pdf - Forever Sweden"
+    metadata: dict = {}
+
+
+def test_a_lead_in_does_not_survive_the_content_it_promised() -> None:
+    """Observed live 2026-09-08 for "what is the delivery cost for sweden?".
+
+    A colon is not a sentence boundary, so the lead-in was kept while every
+    figure beneath it was removed. The reader saw a heading over nothing and an
+    unrelated fact below, which reads as a rendering fault and quietly loses
+    the question that was asked.
+    """
+    from app.validation.validators.numeric_grounding_validator import (
+        remove_unsupported_numeric_sentences,
+    )
+
+    answer = (
+        "For Sweden, the delivery costs are:\n"
+        "- SEK 95.00 for orders below SEK 1,500.00\n"
+        "- Free delivery for orders above SEK 1,500.00\n\n"
+        "The average lead time for orders to arrive in Sweden is 4-7 days."
+    )
+    repaired, removed = remove_unsupported_numeric_sentences(answer, [_SwedenSource()])
+
+    assert removed, "the invented costs should still be removed"
+    assert "delivery costs are:" not in repaired
+    assert repaired == "The average lead time for orders to arrive in Sweden is 4-7 days."
+
+
+def test_a_lead_in_whose_list_survives_is_kept() -> None:
+    """Only a lead-in left with nothing is orphaned; the rest are doing their job."""
+    from app.validation.validators.numeric_grounding_validator import (
+        remove_unsupported_numeric_sentences,
+    )
+
+    class _Source:
+        content = "Requirements: generate 120 Case Credits and sponsor 2 Supervisors."
+        title = "US-EN-Company-Policy.pdf"
+        metadata: dict = {}
+
+    answer = (
+        "To qualify you must meet these requirements:\n"
+        "- Generate 120 Case Credits\n"
+        "- Sponsor 2 Supervisors"
+    )
+    repaired, removed = remove_unsupported_numeric_sentences(answer, [_Source()])
+
+    assert removed == []
+    assert repaired == answer
+
+
+def test_prose_after_a_colon_line_does_not_keep_an_orphaned_lead_in() -> None:
+    """Ordinary prose beneath a lead-in is a new statement, not its content."""
+    from app.validation.validators.numeric_grounding_validator import _drop_orphaned_lead_ins
+
+    text = "The costs are:\n\nOur office is open on weekdays."
+    assert _drop_orphaned_lead_ins(text) == "Our office is open on weekdays."
