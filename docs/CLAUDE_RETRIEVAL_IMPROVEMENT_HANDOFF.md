@@ -173,17 +173,57 @@ python scripts/run_retrieval_canary.py --validate-only
 All five pass on the tip. Branches passing individually is not evidence the
 combination passes; these were run on the combined stack.
 
-After deploying, the blocking canary is the first real check —
+**Run the candidate in the approved test environment BEFORE production
+deployment**, not after. The blocking canary is the first real check —
 `belgium-office-hours-survive-repair` and `algeria-minimum-order-delivered` both
-exercise grounding and would be the first to show a unit-binding regression.
-Then a benchmark run.
+exercise grounding and would be the first to show a unit-binding regression —
+followed by a benchmark run. Post-deployment verification is a separate step
+after that, not a substitute for it.
 
-**Expected benchmark movement: none.** These changes add coverage and fix
-defects no current case exercises. If the score moves, find out why before
-accepting it.
+**No improvement is established yet; investigate any movement in either
+direction.** An earlier version of this document said "expected movement: none",
+which was wrong in kind: a general validator change can affect cases well beyond
+the reproduction it was written for, and a score that improves needs explaining
+just as much as one that drops.
 
 ## 10. Confirmation
 
 Nothing merged. Nothing pushed. Nothing deployed. No index, AWS resource,
 credential or live configuration modified. No paid model call. No branch,
 worktree, source document or uncommitted user change deleted or overwritten.
+
+
+---
+
+# 11. Candidate freeze — 2026-09-08
+
+Recorded so the reviewed thing and the tested thing are the same thing.
+
+| | |
+|---|---|
+| Baseline | `bde45fb` on `main` |
+| Candidate tip | `d8bb18dc6f48a777aa2dee76a2aeefd6d6366484` |
+| Branch | `chore/freeze-candidate-and-correct-handoff`, tip of a 14-commit stack |
+| `main` | unchanged, `bde45fb` |
+
+**Configuration:** none changed. No settings default, SSM parameter, feature
+flag or deployment file was edited. `EVIDENCE_GATED_OUTPUT_ENABLED` remains
+false, `ADMIN_TEXTRACT_OCR_ENABLED` untouched, alarm notification settings
+untouched.
+
+**Test results at the freeze:**
+
+```
+python -m pytest tests -p no:cacheprovider                 1341 passed, 1 skipped
+python -m flake8 api app config services utils main.py     exit 0
+bash tests/shell/test_deploy_log_pruning.sh                all checks passed
+python scripts/run_benchmark.py --dry-run                  17 cases, valid
+python scripts/run_retrieval_canary.py --validate-only     valid, 23 cases
+```
+
+**Preserved and untouched:** 12 pre-existing unmerged branches, all untracked
+working-tree files including `docs/audits/**` and `scratch/`, and every
+uncommitted user change.
+
+Work continuing after this freeze is additive and recorded in the sections
+below; the freeze point is the commit named above.
