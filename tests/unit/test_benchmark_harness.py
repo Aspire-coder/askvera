@@ -54,6 +54,7 @@ def _run(**overrides) -> dict:
         "abstained": False,
         "failure_layer": "",
         "removed_numeric_claims": [],
+        "removed_but_present_in_source": [],
         "top_title": "UK Policy Manual",
         "sections": ["4.2", "4.3"],
         "cited_sections": ["4.2"],
@@ -175,17 +176,49 @@ def test_a_case_naming_no_source_leaves_retrieval_unscored():
     assert summary["retrieval_unscored"] == 1
 
 
-def test_grounding_repair_damage_is_recorded_even_when_the_case_passes():
-    """Repair silently edits an answer, so its firing must stay visible."""
-    scored = benchmark.score_run(VALID_CASE, _run(removed_numeric_claims=["17.00"]))
-    assert scored["passed"] and scored["repair_damaged"]
+def test_removing_an_invented_figure_is_not_counted_as_damage():
+    """Repair removing a figure means two opposite things.
+
+    Both happened today. Algeria's answer carried an invented "50" that appears
+    nowhere in the record, and removing it was the system working. Belgium's
+    answer carried "16" and "3743", both verbatim from the record, and losing
+    them cost the reader two facts and rolled a deploy back. A metric that
+    counts every removal as damage would have scored those identically.
+    """
+    invented = benchmark.score_run(VALID_CASE, _run(removed_numeric_claims=["50"]))
+    assert invented["repair_removed_anything"]
+    assert not invented["repair_damaged"]
+
+    supported = benchmark.score_run(
+        VALID_CASE,
+        _run(removed_numeric_claims=["16", "3743"], removed_but_present_in_source=["16", "3743"]),
+    )
+    assert supported["repair_removed_anything"] and supported["repair_damaged"]
+
+
+def test_the_summary_reports_both_kinds_of_removal_separately():
+    """One rate cannot answer "is repair working" and "is repair hurting"."""
+    runs = [
+        _run() | {"passed": True, "retrieval_hit": True,
+                  "repair_removed_anything": True, "repair_damaged": False},
+        _run() | {"passed": True, "retrieval_hit": True,
+                  "repair_removed_anything": True, "repair_damaged": True},
+    ]
+    results = [{"id": "a", "intent_group": "g", "expected_kind": "answer",
+                "runs_count": 2, "passed_runs": 2, "runs": runs}]
+
+    summary = benchmark.summarise(results, None)
+
+    assert summary["repair_fired"] == "2/2 (100.0%)"
+    assert summary["repair_removed_invented_figure"] == "1/2 (50.0%)"
+    assert summary["repair_removed_supported_figure"] == "1/2 (50.0%)"
 
 
 def test_summary_states_denominators_and_flags_instability():
     results = [
         {"id": "a", "intent_group": "directory", "expected_kind": "answer", "runs_count": 2,
-         "passed_runs": 1, "runs": [_run() | {"passed": True, "retrieval_hit": True, "repair_damaged": False},
-                                    _run() | {"passed": False, "retrieval_hit": True, "repair_damaged": False}]},
+         "passed_runs": 1, "runs": [_run() | {"passed": True, "retrieval_hit": True, "repair_damaged": False, "repair_removed_anything": False},
+                                    _run() | {"passed": False, "retrieval_hit": True, "repair_damaged": False, "repair_removed_anything": False}]},
     ]  # noqa: E501
     summary = benchmark.summarise(results, {"input": 1.0, "output": 5.0})
     assert summary["correct"] == "1/2 (50.0%)"
@@ -200,7 +233,7 @@ def test_summary_states_denominators_and_flags_instability():
 def test_cost_is_omitted_when_no_prices_are_supplied():
     """Prices change; a guessed rate would be reported as a measurement."""
     results = [{"id": "a", "intent_group": "g", "expected_kind": "answer", "runs_count": 1,
-                "passed_runs": 1, "runs": [_run() | {"passed": True, "retrieval_hit": True, "repair_damaged": False}]}]
+                "passed_runs": 1, "runs": [_run() | {"passed": True, "retrieval_hit": True, "repair_damaged": False, "repair_removed_anything": False}]}]
     assert "measured_generation_cost_usd" not in benchmark.summarise(results, None)
 
 

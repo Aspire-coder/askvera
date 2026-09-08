@@ -611,6 +611,30 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
     ]
 
 
+def numbers_present_in_sources(numbers: list[str], source_documents: list[object]) -> dict[str, bool]:
+    """Say, for each figure, whether any retrieved document contains it.
+
+    Repair removing a figure means two opposite things, and the difference is
+    the whole judgement: a number absent from the evidence was invented and its
+    removal is the system working, while a number present in the evidence was
+    real and something rejected it. Anything counting both as damage measures
+    neither.
+    """
+    sources = [
+        _normalize(str(getattr(document, "content", "") or ""))
+        for document in source_documents
+        if getattr(document, "content", "")
+    ]
+    return {
+        str(number): any(
+            _source_windows(source_text, variant)
+            for source_text in sources
+            for variant in _number_variants(str(number))
+        )
+        for number in numbers
+    }
+
+
 def removal_diagnostics(answer: str, source_documents: list[object]) -> list[dict[str, object]]:
     """Say, for each figure repair removed, whether the source contains it at all.
 
