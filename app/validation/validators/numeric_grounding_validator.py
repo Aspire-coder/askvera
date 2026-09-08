@@ -563,6 +563,35 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
     ]
 
 
+def removal_diagnostics(answer: str, source_documents: list[object]) -> list[dict[str, object]]:
+    """Say, for each figure repair removed, whether the source contains it at all.
+
+    Repair deleting a figure has two opposite meanings. If the number appears
+    nowhere in the retrieved documents, the model invented it and the removal
+    is the system working. If it does appear and was removed anyway, the number
+    was real and subject matching rejected it - a correct answer quietly losing
+    a fact the reader asked for.
+
+    The log line cannot distinguish them, and guessing wrong leads to either
+    loosening grounding until fabrications get through or hunting a matching
+    bug that does not exist. This reports which one happened.
+    """
+    sources = [
+        _normalize(str(getattr(document, "content", "") or ""))
+        for document in source_documents
+        if getattr(document, "content", "")
+    ]
+    diagnostics: list[dict[str, object]] = []
+    for claim in unsupported_numeric_claims(answer, source_documents):
+        present = any(
+            _source_windows(source_text, number)
+            for source_text in sources
+            for number in _number_variants(claim.number)
+        )
+        diagnostics.append({"number": claim.number, "present_in_source": present})
+    return diagnostics
+
+
 def remove_unsupported_numeric_sentences(answer: str, source_documents: list[object]) -> tuple[str, list[str]]:
     """Remove only sentences containing unsupported numbers, preserving grounded text."""
     unsupported = unsupported_numeric_claims(answer, source_documents)

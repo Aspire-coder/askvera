@@ -37,7 +37,10 @@ from app.retrieval.models import RetrievalResult
 from app.retrieval.cache_evidence import restore_evidence, serialize_evidence
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
-from app.validation.validators.numeric_grounding_validator import remove_unsupported_numeric_sentences
+from app.validation.validators.numeric_grounding_validator import (
+    remove_unsupported_numeric_sentences,
+    removal_diagnostics,
+)
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES
 from services.audit import write_audit_event
@@ -1991,6 +1994,15 @@ class AIOrchestrator:
                             correlation_id=correlation_id,
                             removed_numeric_claims=removed_numbers,
                             removed_claim_count=len(removed_numbers),
+                            # Whether each removed figure exists in the
+                            # evidence at all. Absent means the model invented
+                            # it and the removal was right; present means the
+                            # figure was real and subject matching rejected it,
+                            # so the reader lost a fact they asked for. The two
+                            # need opposite fixes.
+                            removal_diagnostics=removal_diagnostics(
+                                chat_response.answer or "", retrieval_result.documents
+                            ),
                             evidence_sections=[
                                 str((document.metadata or {}).get("section_id") or "")
                                 for document in retrieval_result.documents[:5]
