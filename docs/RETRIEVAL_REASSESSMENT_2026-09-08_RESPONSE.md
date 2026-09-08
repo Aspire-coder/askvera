@@ -176,3 +176,72 @@ should follow the corpus rather than our habits:
 detect systematic failures on covered intents and never enough to certify the
 corpus. Any published rate must state the denominator and the markets it
 covers.
+
+---
+
+# Addendum 2: 55.6% of the corpus carries no effective date
+
+Measured 2026-09-08 with `--inventory` after two wrong versions of the check.
+The reported figure is now corroborated by a sampled section in the same output
+(`consistent: true`).
+
+## Scale
+
+**15 of 28 documents, 9,951 of 17,896 sections (55.6%), have no effective date.**
+
+| Dated | Undated |
+|---|---|
+| IT-IT, SE-EN, UK-EN, US-EN, AT-DE, CH-DE, DE-DE, BE-EN/NL/FR, NL-EN/NL/FR | CA-EN, CA-FR, DK-DA, DK-EN, FI-EN, FI-FI, KG-RU, LU-EN, LU-FR, NO-EN, NO-NO, RS-SR, SE-SV, US-ES, International-Sponsoring-Directory |
+
+## Why it matters
+
+`unsupported_requested_years` keys date-scope protection off `effective_date`
+and `document_version`, and returns nothing when a document carries neither.
+Asked "what was the FBO support fee in 2024?", a market with dates refuses with
+*period not covered*; a market without them answers from current documents as
+though the current rule had always applied.
+
+So the protection is inert for 55.6% of the corpus, and — worse than being
+uniformly off — it is **inconsistent within a single market**:
+
+- **Sweden**: SE-EN dated, SE-SV undated. The same question about a past year
+  is refused in English and answered in Swedish.
+- **US**: US-EN dated, US-ES undated. Same split between English and Spanish.
+- **Benelux**: BE and NL copies dated in all three languages; the Luxembourg
+  copies of the *same policy* are undated.
+
+The English/other-language split in Sweden and the US is the sharpest form: a
+reader's protection depends on the language they chose, not on anything about
+the policy.
+
+**The entire sponsoring directory is undated** (all 113 global sections), so no
+directory answer has date scope at all.
+
+## An anomaly worth a look
+
+`CA-EN-Company-Policy.pdf` reports `versioned_sections: 737` and
+`dated_sections: 0` — it carries a document version but no effective date. It
+is the only document in that state, which suggests a partial metadata write
+rather than a whole job missing its dates.
+
+## What this is not
+
+This is not a retrieval bug and nothing here is wrong per document. Undated
+sections are still retrieved, still grounded and still cited; the Algeria
+directory answers work fine. It is a metadata gap whose only visible symptom is
+a market answering a dated question it should arguably decline.
+
+## Suggested handling
+
+The fix is re-ingestion with `effective_date` and `document_version` set, which
+is an operational decision rather than a code change. Two things are worth
+settling first:
+
+1. **What should an undated document do?** Today it answers any year. Refusing
+   every dated question against undated evidence would be consistent but would
+   turn a silent gap into 55.6% of the corpus refusing year-qualified
+   questions. That is a product decision, not a technical one.
+2. **Whether the split is deliberate.** If some documents genuinely have no
+   effective date — the sponsoring directory plausibly does not — then the
+   right answer is different per document type, and the directory should be
+   excluded from the count rather than fixed.
