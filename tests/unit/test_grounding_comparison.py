@@ -70,6 +70,7 @@ def _run(**overrides) -> dict:
         "country": "DZ",
         "answer": "Standard delivery costs 900 DZD.",
         "abstained": False,
+        "reached_repair": True,
         "citations": [{"section": "charges-1", "country": "DZ"}],
         "expected": dict(EXPECTED),
         "documents": EVIDENCE,
@@ -166,26 +167,26 @@ def test_preflight_counts_turns_not_cases(capsys) -> None:
 def test_a_missing_required_fact_is_counted(tmp_path) -> None:
     result = _score(tmp_path, [_run(answer="Delivery is charged separately.")])
 
-    assert result["answer_quality_of_the_frozen_sample"]["turns_missing_required_text"] == 1
+    assert result["pre_repair_sample_characteristics"]["turns_missing_required_text"] == 1
 
 
 def test_forbidden_text_is_counted(tmp_path) -> None:
     result = _score(tmp_path, [_run(answer="Delivery is free of charge.")])
 
-    assert result["answer_quality_of_the_frozen_sample"]["turns_with_forbidden_text"] == 1
+    assert result["pre_repair_sample_characteristics"]["turns_with_forbidden_text"] == 1
 
 
 def test_a_wrong_citation_is_counted(tmp_path) -> None:
     """Citing something is not citing the governing section."""
     result = _score(tmp_path, [_run(citations=[{"section": "unrelated-9", "country": "DZ"}])])
 
-    assert result["answer_quality_of_the_frozen_sample"]["turns_with_uncited_required_section"] == 1
+    assert result["pre_repair_sample_characteristics"]["turns_with_uncited_required_section"] == 1
 
 
 def test_no_citation_at_all_is_counted(tmp_path) -> None:
     result = _score(tmp_path, [_run(citations=[])])
 
-    assert result["answer_quality_of_the_frozen_sample"]["turns_with_uncited_required_section"] == 1
+    assert result["pre_repair_sample_characteristics"]["turns_with_uncited_required_section"] == 1
 
 
 def test_citations_are_not_scored_where_the_case_does_not_require_them(tmp_path) -> None:
@@ -193,7 +194,7 @@ def test_citations_are_not_scored_where_the_case_does_not_require_them(tmp_path)
     expected = dict(EXPECTED, must_cite=False)
     result = _score(tmp_path, [_run(citations=[], expected=expected)])
 
-    assert result["answer_quality_of_the_frozen_sample"]["turns_with_uncited_required_section"] == 0
+    assert result["pre_repair_sample_characteristics"]["turns_with_uncited_required_section"] == 0
 
 
 def test_a_correct_answer_scores_clean(tmp_path) -> None:
@@ -201,7 +202,7 @@ def test_a_correct_answer_scores_clean(tmp_path) -> None:
     result = _score(tmp_path, [_run()])
 
     assert result["repair"]["figures_removed"] == 0
-    quality = result["answer_quality_of_the_frozen_sample"]
+    quality = result["pre_repair_sample_characteristics"]
     assert quality["turns_missing_required_text"] == 0
     assert quality["turns_with_forbidden_text"] == 0
     assert quality["turns_with_uncited_required_section"] == 0
@@ -364,5 +365,7 @@ def test_repair_results_are_reported_separately_from_answer_quality(tmp_path) ->
         "removed_and_present_in_evidence",
         "removed_and_absent_from_evidence",
     }
-    assert "note" in result["answer_quality_of_the_frozen_sample"]
-    assert "does not measure either arm" in result["answer_quality_of_the_frozen_sample"]["note"]
+    characteristics = result["pre_repair_sample_characteristics"]
+    assert "measures neither arm" in characteristics["note"]
+    # And it says plainly that this is not the text a reader sees.
+    assert "not what a reader sees" in characteristics["note"]

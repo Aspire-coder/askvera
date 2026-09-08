@@ -120,16 +120,37 @@ have compared the wrong thing. Grounding is **not** disabled during capture:
 every safeguard runs as in production and the hook only observes. The hook is
 `None` in every process that does not install it.
 
-## Checkpointing and resume, accurately
+## Turn accounting, checkpointing and resume
 
-One record per turn, written the moment that turn is captured. A conversation's
-earlier turns survive an interruption, with their own expectations, so they can
-be adjudicated rather than paid for and discarded.
+**Turn identity comes from the conversation runner, not from the capture hook.**
+A turn that refuses early, or answers from cache, never reaches numeric repair
+and so never fires the hook. Counting hook calls as turns therefore gave a
+later answer an earlier turn's expectation, undercounted the requests made
+against `--max-turns`, and let the last captured turn mark a conversation
+complete when its real final turn never was.
 
-A case-attempt is marked complete only when its final turn is recorded.
-`--resume` skips completed case-attempts and **discards partial chains so they
-are captured again in full** - a half-captured conversation scored as though it
-were whole would be a silent wrong answer.
+Every turn the runner performed is recorded, matched to its capture by
+correlation id. A turn that did not reach repair is recorded with
+`reached_repair: false` rather than omitted, because omitting it is what
+shifted the expectations.
+
+**Checkpointing** is per turn, written as each turn is reconciled. If the
+runner raises part way through a case, the turns already captured are written
+and marked `attempt_interrupted` before the error propagates - so an
+interruption keeps what it paid for. Those records carry `superseded: true` and
+are never scored: on that path the turn indexes are capture order, which equals
+turn order only if no earlier turn refused, and a number that might be wrong
+should not be scored as though it were right.
+
+**Resume validates provenance before making any model call.** Fixture hash,
+harness commit, index, model id and chunk profile must all match, and a resume
+across a dirty working tree is refused because the commit can match while the
+code does not. Mixing two runs would produce one file describing no single
+experiment - and it would carry the new run's provenance at the top, so nothing
+downstream could tell.
+
+Incomplete attempts are **preserved, not deleted**. A replay writes new records
+beside them; the record of what the first attempt did and cost survives.
 
 ## Size
 
@@ -148,8 +169,8 @@ calls.
 
 ## Cost, and why a turn limit is not a budget
 
-`--max-turns` bounds workload. It does not bound dollars, because one turn is
-several model calls. Stages that may call a model, per turn:
+`--max-turns` bounds turns. A turn is several model calls, so it does not bound
+spending. Stages that may call a model, per turn:
 
 | Stage | Always? |
 |---|---|
@@ -162,13 +183,24 @@ several model calls. Stages that may call a model, per turn:
 | candidate narrowing / guardrail rephrasing | only under candidate flags |
 | generation retry | on a failed validation |
 
-So a 6-turn pilot is **at least** 12 model calls and plausibly 25-40. I do not
-have Bedrock rates and will not invent a figure. The order to establish it:
+**The harness counts invocations rather than estimating them.** It wraps the
+Bedrock client for the duration of the run, in its own process only, and every
+capture reports `model_calls_this_run`, `input_tokens_this_run` and
+`output_tokens_this_run` - including retries and every stage above.
+
+I have given no verified call-per-turn figure and will not: the earlier
+"plausibly 25-40" was an unverified guess and is withdrawn. The number comes
+out of step 2 below, measured.
 
 1. `--preflight` - free.
-2. `--repeat 1 --max-turns 6` on the pilot list.
-3. Read actual spend from the Bedrock console or CloudWatch for that window.
-4. Multiply by the remaining turns, decide, then continue with `--resume`.
+2. `--repeat 1 --max-turns 6` on the pilot list. Read `model_calls_this_run`
+   and the token counts from the capture, and the spend from the Bedrock
+   console for that window.
+3. Multiply by the remaining turns, agree a cap, then continue with `--resume`.
+
+**A spending cap is a decision, not a flag.** Nothing in this harness can stop
+Bedrock charging; `--max-turns` plus a measured call rate is what makes the
+bound meaningful, and step 2 exists to produce that rate.
 
 ## Provenance
 
@@ -193,11 +225,18 @@ only because the rule differs. This is the comparison.
 | `removed_and_present_in_evidence` | of those, the ones whose string occurs in a retrieved section |
 | `removed_and_absent_from_evidence` | of those, the ones that do not occur at all |
 
-**`answer_quality_of_the_frozen_sample`** - missing required text, forbidden
-text, uncited governing sections, abstentions. These describe the captured
-answers, which neither arm produced, so they are **identical for both arms by
-construction**. They characterise the sample; they do not compare anything.
-Full answer and citation quality per arm needs the separate end-to-end run.
+**`pre_repair_sample_characteristics`** - missing required text, forbidden
+text, uncited governing sections, abstentions, measured on the **pre-repair**
+text. That is not what a reader sees: repair, restoration, formatting and
+governance all run after the capture point. These numbers describe the captured
+sample, are identical for both arms by construction, and compare nothing. Each
+record also keeps `final_answer`, the text that turn actually returned, so
+delivered answer and citation quality can be measured - by the separate
+end-to-end run, not from this block.
+
+**`skipped`** - turns excluded from scoring, and why: `superseded` (records
+from an interrupted attempt) and `did_not_reach_repair` (refusals and early
+returns, which have no evidence for a repair rule to judge).
 
 **"Present in evidence" is not "was correct".** The dry run makes this
 concrete: for the answer *"Standard delivery costs 900 EUR"* against a source

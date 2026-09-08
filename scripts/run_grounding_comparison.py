@@ -209,29 +209,96 @@ def _select(cases: list[dict[str, Any]], wanted: list[str]) -> list[dict[str, An
     return [by_id[identifier] for identifier in wanted]
 
 
-def _load_checkpoint(path: Path) -> tuple[list[dict[str, Any]], set[tuple[str, int]]]:
-    """Resume: the turns already captured, and the case-attempts that finished.
+# Provenance fields that must match for a resume to be legitimate. A capture
+# assembled from two fixtures, two commits or two indexes is one file that
+# describes no single experiment - and it would carry the NEW run's provenance
+# at the top, so nothing downstream could tell.
+_RESUME_MUST_MATCH = (
+    "fixture_sha256",
+    "harness_commit",
+    "opensearch_index",
+    "bedrock_model_id",
+    "chunk_profile",
+)
 
-    A case-attempt is only complete when its final turn was recorded, so an
-    interruption part-way through a conversation is redone rather than left as
-    a half-captured chain that would be scored as though it were whole.
+
+def _load_checkpoint(
+    path: Path, provenance: dict[str, Any]
+) -> tuple[list[dict[str, Any]], set[tuple[str, int]]]:
+    """Resume, refusing to mix incompatible runs. Checked before any model call.
+
+    Incomplete attempts are KEPT, marked superseded rather than deleted. They
+    are evidence of what was paid for and what happened, and a replay writes
+    new records beside them instead of quietly overwriting the evidence of the
+    first attempt.
     """
     if not path.exists():
         return [], set()
     payload = json.loads(path.read_text(encoding="utf-8"))
+    existing = payload.get("provenance") or {}
+
+    mismatched = {
+        field: (existing.get(field), provenance.get(field))
+        for field in _RESUME_MUST_MATCH
+        if existing.get(field) != provenance.get(field)
+    }
+    if mismatched:
+        raise SystemExit(
+            "refusing to resume: the existing capture was produced under "
+            f"different conditions {mismatched}. Start a new capture file."
+        )
+    if existing.get("harness_dirty") or provenance.get("harness_dirty"):
+        raise SystemExit(
+            "refusing to resume across a dirty working tree: the commit matches "
+            "but the code may not. Commit or stash, then start a new capture."
+        )
+
     records = list(payload.get("runs") or [])
-    done = {
+    complete = {
         (str(record["id"]), int(record["attempt"]))
         for record in records
-        if record.get("is_final_turn")
+        if record.get("is_final_turn") and not record.get("superseded")
     }
-    # Discard partial chains so they are captured again in full.
-    kept = [
-        record
-        for record in records
-        if (str(record["id"]), int(record["attempt"])) in done
-    ]
-    return kept, done
+    for record in records:
+        key = (str(record["id"]), int(record["attempt"]))
+        if key not in complete:
+            # Kept, not dropped. The replay adds records; this one stays as the
+            # history of an attempt that did not finish.
+            record["superseded"] = True
+    return records, complete
+
+
+def _count_model_calls():
+    """Wrap the Bedrock client so every invocation is counted, retries included.
+
+    A turn is not a call and a turn limit is not a budget. This counts what was
+    actually invoked, in this process only, and restores the client afterwards.
+    Returns (counter, restore).
+    """
+    from services.aws_clients import get_aws_clients
+
+    counter = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+    try:
+        runtime = get_aws_clients().bedrock_runtime
+    except Exception:
+        return counter, (lambda: None)
+
+    original = runtime.converse
+
+    def _counted(*args, **kwargs):
+        counter["calls"] += 1
+        response = original(*args, **kwargs)
+        usage = (response or {}).get("usage") or {}
+        counter["input_tokens"] += int(usage.get("inputTokens") or 0)
+        counter["output_tokens"] += int(usage.get("outputTokens") or 0)
+        return response
+
+    runtime.converse = _counted
+
+    def _restore() -> None:
+        runtime.converse = original
+
+    return counter, _restore
 
 
 def freeze(
@@ -242,19 +309,20 @@ def freeze(
     cases_wanted: list[str],
     resume: bool,
 ) -> dict[str, Any]:
-    """Capture what numeric repair was given, per turn, with resume.
+    """Capture what numeric repair was given, per turn, with validated resume.
 
-    Every turn is recorded as it happens, from a hook the orchestrator calls at
-    the boundary immediately before repair. That is the input two repair rules
-    have to be compared over. Reading the pipeline's final response instead
-    would sample something else: nine steps run between generation and repair,
-    and more run after it.
+    Turn identity comes from the CONVERSATION RUNNER, not from the capture
+    hook. A turn that refuses early, or answers from cache, never reaches
+    repair and so never fires the hook - and counting hook calls as turns made
+    a later answer inherit an earlier turn's expectation, undercounted the
+    requests actually made, and let the last captured turn mark a conversation
+    complete when its final turn was never captured.
+
+    Every turn is now recorded, including one that did not reach repair, which
+    is marked rather than omitted.
 
     Grounding is NOT disabled. Every safeguard runs exactly as in production;
     the hook only observes, and its return value is discarded.
-
-    The checkpoint is written after each turn, so an interruption keeps the
-    turns already paid for, including the earlier turns of a conversation.
     """
     from app.orchestrator import chat_orchestrator
     import scripts.run_benchmark as benchmark
@@ -263,58 +331,42 @@ def freeze(
     cases, fixture_hash = benchmark.load_fixture(fixture)
     cases = _select(cases, cases_wanted)
 
-    records, completed = _load_checkpoint(checkpoint) if resume else ([], set())
-    if records:
-        print(json.dumps({"resumed_turns": len(records), "completed": len(completed)}))
-
     provenance = _provenance(fixture_hash)
-    executed = 0
-    state: dict[str, Any] = {}
+    # Validated BEFORE any model call, so an incompatible resume costs nothing.
+    records, completed = _load_checkpoint(checkpoint, provenance) if resume else ([], set())
+    if records:
+        print(json.dumps({"resumed_turns": len(records), "completed_attempts": len(completed)}))
 
-    def _write() -> None:
+    counter, restore_client = _count_model_calls()
+    attempted_turns = 0
+    captured: dict[str, dict[str, Any]] = {}
+
+    def _write(status: str) -> None:
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
         checkpoint.write_text(
             json.dumps(
-                {
-                    "provenance": provenance,
-                    "fixture_sha256": fixture_hash,
-                    "turns_captured": len(records),
-                    "captured_at_boundary": "pre_numeric_repair",
-                    "runs": records,
-                },
+                _finish(records, provenance, fixture_hash, attempted_turns, counter, status),
                 indent=2,
             ),
             encoding="utf-8",
         )
 
     def _hook(answer: str, documents: list[Any], correlation_id: str) -> None:
-        """One record per turn, written immediately."""
-        records.append(
-            {
-                "id": state["id"],
-                "attempt": state["attempt"],
-                "turn_index": state["turn_index"],
-                "is_final_turn": False,
-                "correlation_id": correlation_id,
-                "language": state["language"],
-                "country": state["country"],
-                "answer": answer,
-                "expected": state["expected_by_turn"].get(state["turn_index"], {}),
-                "documents": [
-                    {
-                        "content": str(getattr(document, "content", "") or ""),
-                        "title": str(getattr(document, "title", "") or ""),
-                        "country": str(getattr(document, "country", "") or ""),
-                        "section_id": str(
-                            (getattr(document, "metadata", {}) or {}).get("section_id") or ""
-                        ),
-                    }
-                    for document in documents
-                ],
-            }
-        )
-        state["turn_index"] += 1
-        _write()
+        """Only records what repair saw. It decides nothing about turn order."""
+        captured[correlation_id] = {
+            "answer": answer,
+            "documents": [
+                {
+                    "content": str(getattr(document, "content", "") or ""),
+                    "title": str(getattr(document, "title", "") or ""),
+                    "country": str(getattr(document, "country", "") or ""),
+                    "section_id": str(
+                        (getattr(document, "metadata", {}) or {}).get("section_id") or ""
+                    ),
+                }
+                for document in documents
+            ],
+        }
 
     original_hook = chat_orchestrator.pre_repair_capture_hook
     chat_orchestrator.pre_repair_capture_hook = _hook
@@ -324,52 +376,131 @@ def freeze(
             for attempt in range(repeat):
                 if (case["id"], attempt) in completed:
                     continue
-                if max_turns and executed + len(turns) > max_turns:
-                    return _finish(records, provenance, fixture_hash, executed, "max_turns reached")
-                state.clear()
-                state.update(
-                    {
-                        "id": case["id"],
-                        "attempt": attempt,
-                        "turn_index": 0,
-                        "language": case.get("language", ""),
-                        "country": case.get("country", ""),
-                        "expected_by_turn": {
-                            index: _expectations(turn["expected"])
-                            for index, turn in enumerate(turns)
-                        },
-                    }
-                )
-                canary.run_pipeline_capture(case, sequence * 100 + attempt)
-                executed += state["turn_index"]
-                # The chain is whole only now. Marking the last captured turn
-                # is what lets resume tell a finished conversation from one
-                # that was interrupted half way through.
-                for record in reversed(records):
-                    if (record["id"], record["attempt"]) == (case["id"], attempt):
-                        record["is_final_turn"] = True
-                        break
-                _write()
+                if max_turns and attempted_turns + len(turns) > max_turns:
+                    _write("max_turns reached")
+                    return _finish(
+                        records, provenance, fixture_hash, attempted_turns, counter,
+                        "max_turns reached",
+                    )
+                captured.clear()
+                try:
+                    run = canary.run_pipeline_capture(case, sequence * 100 + attempt)
+                except BaseException:
+                    # The turns already performed were paid for. Reconciliation
+                    # normally happens after the runner returns, and on this
+                    # path it never will - so without this, an interruption
+                    # loses every turn of the case, which is the failure this
+                    # whole design exists to avoid.
+                    #
+                    # Only captured turns can be recovered here: a turn that
+                    # refused left no capture and the runner never reported it,
+                    # so the attempt is marked as partially observed rather
+                    # than presented as a complete account of what ran.
+                    for index, (correlation_id, capture) in enumerate(captured.items()):
+                        records.append(
+                            {
+                                "id": case["id"],
+                                "attempt": attempt,
+                                "turn_index": index,
+                                "is_final_turn": False,
+                                "correlation_id": correlation_id,
+                                "language": case.get("language", ""),
+                                "country": case.get("country", ""),
+                                "reached_repair": True,
+                                "answer": capture["answer"],
+                                "documents": capture["documents"],
+                                "final_answer": "",
+                                "abstained": False,
+                                "citations": [],
+                                "expected": (
+                                    _expectations(turns[index]["expected"])
+                                    if index < len(turns)
+                                    else {}
+                                ),
+                                # Turn indexes here are the order captures
+                                # arrived, which equals turn order only if no
+                                # earlier turn refused. Recorded, never scored.
+                                "attempt_interrupted": True,
+                                "superseded": True,
+                            }
+                        )
+                    attempted_turns += len(captured)
+                    _write("interrupted")
+                    raise
+                # Every turn the runner actually performed, in order. This is
+                # the authority on how many there were and which is last.
+                responses = list(getattr(run, "prior_responses", ()) or []) + [run.response]
+                attempted_turns += len(responses)
+
+                for index, response in enumerate(responses):
+                    correlation_id = str(getattr(response, "correlation_id", "") or "")
+                    capture = captured.get(correlation_id)
+                    expectation = (
+                        _expectations(turns[index]["expected"]) if index < len(turns) else {}
+                    )
+                    records.append(
+                        {
+                            "id": case["id"],
+                            "attempt": attempt,
+                            "turn_index": index,
+                            "is_final_turn": index == len(responses) - 1,
+                            "correlation_id": correlation_id,
+                            "language": case.get("language", ""),
+                            "country": case.get("country", ""),
+                            # False means this turn never reached numeric repair
+                            # - a refusal, a cache hit, an early return. It is
+                            # recorded rather than omitted, because omitting it
+                            # is what shifted every later expectation.
+                            "reached_repair": capture is not None,
+                            "answer": (capture or {}).get("answer", ""),
+                            "documents": (capture or {}).get("documents", []),
+                            # The text a reader would have seen for this turn,
+                            # kept separately: it is not what repair was given.
+                            "final_answer": str(getattr(response, "answer", "") or ""),
+                            "abstained": bool(
+                                (getattr(response, "metadata", None) or {}).get("fallback")
+                            ),
+                            "citations": [
+                                {
+                                    "section": str((citation or {}).get("section") or ""),
+                                    "country": str((citation or {}).get("country") or ""),
+                                }
+                                for citation in (getattr(response, "citations", None) or [])
+                            ],
+                            "expected": expectation,
+                        }
+                    )
+                    _write("in progress")
     finally:
         chat_orchestrator.pre_repair_capture_hook = original_hook
+        restore_client()
 
-    return _finish(records, provenance, fixture_hash, executed, "complete")
+    payload = _finish(records, provenance, fixture_hash, attempted_turns, counter, "complete")
+    _write("complete")
+    return payload
 
 
 def _finish(
     records: list[dict[str, Any]],
     provenance: dict[str, Any],
     fixture_hash: str,
-    executed: int,
+    attempted_turns: int,
+    counter: dict[str, int],
     status: str,
 ) -> dict[str, Any]:
+    reached = sum(1 for record in records if record.get("reached_repair"))
     return {
         "provenance": provenance,
         "fixture_sha256": fixture_hash,
-        "turns_captured": len(records),
-        "turns_executed_this_run": executed,
+        "turns_recorded": len(records),
+        "turns_attempted_this_run": attempted_turns,
+        "turns_that_reached_repair": reached,
         "status": status,
         "captured_at_boundary": "pre_numeric_repair",
+        # Measured, not estimated. Includes retries and every stage.
+        "model_calls_this_run": counter["calls"],
+        "input_tokens_this_run": counter["input_tokens"],
+        "output_tokens_this_run": counter["output_tokens"],
         "runs": records,
     }
 
@@ -455,7 +586,18 @@ def score(frozen_path: Path, app_root: Path) -> dict[str, Any]:
     payload = json.loads(frozen_path.read_text(encoding="utf-8"))
 
     per_run: list[dict[str, Any]] = []
+    skipped = {"superseded": 0, "did_not_reach_repair": 0}
     for record in payload["runs"]:
+        # A superseded record is the history of an interrupted attempt; a turn
+        # that never reached repair has no evidence to score. Both are kept in
+        # the capture and neither is scored, because scoring them would count
+        # turns the rule was never asked about.
+        if record.get("superseded"):
+            skipped["superseded"] += 1
+            continue
+        if not record.get("reached_repair", True):
+            skipped["did_not_reach_repair"] += 1
+            continue
         documents = _rehydrate(grounding, record["documents"])
         answer = record["answer"]
         expected = record.get("expected") or {}
@@ -527,7 +669,7 @@ def score(frozen_path: Path, app_root: Path) -> dict[str, Any]:
                 len(run["removed_and_absent_from_evidence"]) for run in per_run
             ),
         },
-        "answer_quality_of_the_frozen_sample": {
+        "pre_repair_sample_characteristics": {
             "turns": len(per_run),
             "turns_missing_required_text": sum(
                 1 for run in per_run if run["missing_required_text"]
@@ -540,11 +682,15 @@ def score(frozen_path: Path, app_root: Path) -> dict[str, Any]:
             ),
             "abstentions": sum(1 for run in per_run if run["abstained"]),
             "note": (
-                "Captured before repair, so this characterises the sample. It "
-                "does not measure either arm, and full answer and citation "
-                "quality per arm needs the separate end-to-end run."
+                "Measured on the PRE-REPAIR text, which is not what a reader "
+                "sees: repair, restoration, formatting and governance all run "
+                "after this point. It characterises the captured sample and "
+                "measures neither arm. Final answers are captured separately "
+                "in each record's final_answer, and answer quality as "
+                "delivered needs the end-to-end run."
             ),
         },
+        "skipped": skipped,
         "qualification": (
             "Every count here is mechanical. 'present in evidence' means the "
             "string occurs in a retrieved section, which is not the same as the "
@@ -709,8 +855,12 @@ def main() -> int:
             json.dumps(
                 {
                     "status": payload["status"],
-                    "turns_captured": payload["turns_captured"],
-                    "turns_executed_this_run": payload["turns_executed_this_run"],
+                    "turns_recorded": payload["turns_recorded"],
+                    "turns_attempted_this_run": payload["turns_attempted_this_run"],
+                    "turns_that_reached_repair": payload["turns_that_reached_repair"],
+                    "model_calls_this_run": payload["model_calls_this_run"],
+                    "input_tokens_this_run": payload["input_tokens_this_run"],
+                    "output_tokens_this_run": payload["output_tokens_this_run"],
                     "provenance": payload["provenance"],
                 },
                 indent=2,
@@ -730,9 +880,10 @@ def main() -> int:
                 {
                     "validator_loaded_from": result["validator_loaded_from"],
                     "repair": result["repair"],
-                    "answer_quality_of_the_frozen_sample": result[
-                        "answer_quality_of_the_frozen_sample"
+                    "pre_repair_sample_characteristics": result[
+                        "pre_repair_sample_characteristics"
                     ],
+                    "skipped": result["skipped"],
                     "qualification": result["qualification"],
                 },
                 indent=2,
