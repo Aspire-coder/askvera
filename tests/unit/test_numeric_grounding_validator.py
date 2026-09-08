@@ -2,7 +2,11 @@ from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationContext, ValidationResult
 from app.response.quality import has_incomplete_ending
-from app.validation.validators.numeric_grounding_validator import NumericGroundingValidator, remove_unsupported_numeric_sentences
+from app.validation.validators.numeric_grounding_validator import (
+    NumericGroundingValidator,
+    remove_unsupported_numeric_sentences,
+    removal_diagnostics,
+)
 import pytest
 
 
@@ -1004,3 +1008,31 @@ def test_directory_phone_reformatting_is_still_accepted() -> None:
     )
 
     assert not result.has_critical()
+
+
+def test_removal_diagnostics_separates_invention_from_a_matching_failure() -> None:
+    """Repair deleting a figure has two opposite meanings; say which happened.
+
+    A number absent from the evidence was invented and its removal is the
+    system working. A number present in the evidence but removed anyway was
+    real, and subject matching rejected it - the reader loses a fact they
+    asked for. Treating those the same leads to either loosening grounding
+    until fabrications get through, or hunting a matching bug that is not there.
+    """
+    source = "Forever Algeria. Minimum order size FBO: 7 800DZD. Delivery time: 48-96 hours."
+    answer = (
+        "The minimum first order is 7,800 DZD. Delivery takes 48-96 hours. "
+        "A monthly fee of 249 EUR applies."
+    )
+    context = _context(answer, source, {"directory_section": "sponsoring", "access_scope": "global"})
+
+    diagnostics = removal_diagnostics(answer, context.retrieval_result.documents)
+    by_number = {str(entry["number"]): entry["present_in_source"] for entry in diagnostics}
+
+    # 249 appears nowhere in the record: invented.
+    assert by_number.get("249") is False
+    # Anything removed that IS in the record is reported as present, so a
+    # matching failure cannot be mistaken for a fabrication.
+    for number, present in by_number.items():
+        if number != "249":
+            assert present is True, f"{number} is in the record but reported absent"
