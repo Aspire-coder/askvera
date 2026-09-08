@@ -73,6 +73,7 @@ from services.knowledge_ingestion import (
     validate_upload,
 )
 from services.document_preflight import analyze_pdf_with_timeout
+from services.publication_attempt import PublicationConflict
 from services.market_config import (
     get_countries,
     get_country_codes,
@@ -782,6 +783,17 @@ class IngestionPreviewTestRequest(BaseModel):
     limit: int = Field(default=5, ge=1, le=10)
 
 
+class IngestionPublishRequest(BaseModel):
+    """The reviewer's reason, and nothing else.
+
+    There is deliberately no reviewer field and no revision field. Who decided
+    comes from the authenticated principal and what they decided about comes
+    from the job, so neither can be asserted by whoever calls this.
+    """
+
+    reason: str = Field(default="", max_length=2000)
+
+
 @admin_router.get("/ingestions/{job_id}/preview")
 def ingestion_preview(job_id: str, request: Request, limit: int = 20) -> dict[str, Any]:
     require_admin_access(request, "knowledge", "view")
@@ -813,7 +825,9 @@ def ingestion_preview_test(
 
 
 @admin_router.post("/ingestions/{job_id}/publish")
-def publish_ingestion(job_id: str, request: Request) -> dict[str, Any]:
+def publish_ingestion(
+    job_id: str, request: Request, body: IngestionPublishRequest | None = None
+) -> dict[str, Any]:
     principal = require_admin_access(request, "knowledge", "publish")
     try:
         preview = preview_ingestion_job(job_id, limit=1)
@@ -824,7 +838,17 @@ def publish_ingestion(job_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="Only a Super Admin can publish global content.")
     accepted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
     try:
-        result = publish_ingestion_job(job_id, accepted_by=accepted_by)
+        result = publish_ingestion_job(
+            job_id,
+            accepted_by=accepted_by,
+            # accepted_by is the authenticated principal, resolved above. The
+            # body carries only the reason.
+            review_reason=str(getattr(body, "reason", "") or ""),
+        )
+    except PublicationConflict as exc:
+        # Someone else is publishing this, or it changed under the approval.
+        # 409, not 400: nothing about the request is malformed.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _payload(result, request)

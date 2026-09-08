@@ -1727,24 +1727,22 @@ def test_ingestion_job(job_id: str, message: str, *, limit: int = 5) -> dict[str
     return {"job": job, "message": message, "matches": matches, "matchCount": len(matches)}
 
 
-def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> str:
-    """Refuse publication when metadata or extraction findings are unresolved.
+def publication_revision(job: dict[str, Any]) -> str:
+    """The fingerprint a decision and a publication attempt both bind to.
 
-    Returns the revision fingerprint the publication attempt binds to, so the
-    content that passed the gate is the content the attempt is authorised for.
-
-    Raises ValueError, which the admin route already turns into a 400 carrying
-    the reasons, so a caller is told what to fix rather than that something
-    went wrong.
+    Derived from the job on the server. A client cannot supply it, so an
+    approval cannot be presented for a revision other than the one being
+    published.
     """
-    from services.metadata_conflicts import detect_metadata_conflicts
-    from services.publication_gate import (
-        PublicationBlocked,
-        evaluate_publication,
-        revision_fingerprint,
+    from services.publication_gate import revision_fingerprint
+
+    return revision_fingerprint(
+        content_hash=str(job.get("content_hash") or ""), metadata=_gate_metadata(job)
     )
 
-    metadata = {
+
+def _gate_metadata(job: dict[str, Any]) -> dict[str, str]:
+    return {
         "filename": str(job.get("filename") or ""),
         "country": str(job.get("country") or ""),
         "language": str(job.get("language") or ""),
@@ -1759,14 +1757,28 @@ def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> str:
         "effective_date": str(job.get("effective_date") or ""),
         "expiry_date": str(job.get("expiry_date") or ""),
     }
+
+
+def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> str:
+    """Refuse publication when metadata or extraction findings are unresolved.
+
+    Returns the revision fingerprint the publication attempt binds to, so the
+    content that passed the gate is the content the attempt is authorised for.
+
+    Raises ValueError, which the admin route already turns into a 400 carrying
+    the reasons, so a caller is told what to fix rather than that something
+    went wrong.
+    """
+    from services.metadata_conflicts import detect_metadata_conflicts
+    from services.publication_gate import PublicationBlocked, evaluate_publication
+
+    metadata = _gate_metadata(job)
     # access_scope changes what publishing means, so it belongs in the revision
     # fingerprint, but it is not something detect_metadata_conflicts inspects.
     findings = detect_metadata_conflicts(
         **{key: value for key, value in metadata.items() if key != "access_scope"}
     )
-    revision = revision_fingerprint(
-        content_hash=str(job.get("content_hash") or ""), metadata=metadata
-    )
+    revision = publication_revision(job)
     try:
         evaluate_publication(
             findings=findings,
@@ -1792,11 +1804,71 @@ def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> str:
     return revision
 
 
+def record_review_decision(
+    *, job_id: str, revision: str, decided_by: str, decision: str, reason: str
+) -> Any:
+    """Persist a reviewer's decision, before and regardless of publication.
+
+    Separate from publication success on purpose. A decision is a record of
+    what a named person concluded about a specific revision; whether the
+    publication that followed then succeeded, failed, or was retried three
+    times is a different fact, and conflating them loses the first one every
+    time the second goes wrong.
+
+    decided_by comes from the authenticated principal at the route. It is never
+    read from a request body.
+    """
+    from services.publication_gate import record_resolution
+
+    resolution = record_resolution(
+        revision=revision, decided_by=decided_by, decision=decision, reason=reason
+    )
+    try:
+        with get_engine().begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO ingestion_review_decisions (
+                        decision_id, job_id, review_revision, decided_by,
+                        decision, reason
+                    ) VALUES (
+                        :decision_id, :job_id, :review_revision, :decided_by,
+                        :decision, :reason
+                    )
+                    """
+                ),
+                {
+                    "decision_id": uuid.uuid4().hex,
+                    "job_id": job_id,
+                    "review_revision": revision,
+                    "decided_by": resolution.decided_by,
+                    "decision": resolution.decision,
+                    "reason": resolution.reason,
+                },
+            )
+    except SQLAlchemyError as exc:
+        # An unrecorded decision must not authorise a publication: the audit
+        # trail is the point, and proceeding would publish on a decision
+        # nobody can later find.
+        LOGGER.exception("review_decision_not_recorded", correlation_id=job_id)
+        raise ValueError(
+            "The decision could not be recorded, so publication was not attempted."
+        ) from exc
+    LOGGER.info(
+        "review_decision_recorded",
+        correlation_id=job_id,
+        decision=resolution.decision,
+        revision=revision,
+    )
+    return resolution
+
+
 def publish_ingestion_job(
     job_id: str,
     *,
     accepted_by: str,
     resolution: Any = None,
+    review_reason: str = "",
     store: Any = None,
 ) -> dict[str, Any]:
     """Publish a reviewed document.
@@ -1805,10 +1877,26 @@ def publish_ingestion_job(
     decided what, and why, about this exact revision. It is required whenever
     the document carries unresolved findings, and it is ignored for findings no
     decision can waive.
+
+    review_reason is the portal's route to the same thing: the resolution is
+    built here, against the revision derived from the job, and attributed to
+    accepted_by - the authenticated principal. A caller cannot name a different
+    reviewer or a different revision.
     """
     job = _ingestion_job(job_id)
     if job.get("status") != "ready_for_review":
         raise ValueError("Only documents marked ready for review can be published.")
+    if resolution is None and str(review_reason or "").strip():
+        # Recorded before the gate runs, so a decision survives even when the
+        # publication it accompanied is then refused. That is the honest
+        # record: someone did decide this, and it was not enough.
+        resolution = record_review_decision(
+            job_id=job_id,
+            revision=publication_revision(job),
+            decided_by=accepted_by,
+            decision="publish",
+            reason=review_reason,
+        )
     # Enforced here rather than in the route, because this is the single place
     # every publication path arrives at - the API endpoint, a retry, and any
     # future caller. A disabled button in the portal is not enforcement.
