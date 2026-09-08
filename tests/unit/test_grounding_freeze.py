@@ -618,3 +618,45 @@ def test_an_existing_capture_is_not_overwritten(tmp_path, capsys, monkeypatch) -
         sys.argv = argv
 
     assert "--resume" in capsys.readouterr().out
+
+
+def test_the_capture_records_which_steps_edited_the_answer(tmp_path, monkeypatch) -> None:
+    """The France pilot turn ended mid-sentence and the capture could not say why.
+
+    Only "fallback" was kept from the metadata, so nine post-generation steps -
+    restoration, contact repair, field removal, numeric repair - were all
+    invisible. "Something corrupted the output" is not a finding; a named step
+    is.
+    """
+    from scripts import run_grounding_comparison as module
+
+    assert "directory_order_size_restored" in module._ANSWER_EDIT_FLAG_NAMES
+
+    class _Edited:
+        correlation_id = "c1"
+        answer = "An answer that a restoration step extended."
+        citations: list = []
+        metadata = {"directory_order_size_restored": True, "fallback": False}
+
+    record = module._turn_record(
+        case_id="france-minimum-order",
+        attempt=0,
+        turn_index=0,
+        correlation_id="c1",
+        language="en",
+        country="FR",
+        capture=None,
+        response=_Edited(),
+        turns=[],
+    )
+
+    assert record["answer_edits"] == ["directory_order_size_restored"]
+
+
+def test_the_edit_flag_list_comes_from_the_orchestrator() -> None:
+    """Two copies of the list would drift, and the drift would be silent."""
+    from app.orchestrator.chat_orchestrator import _ANSWER_EDIT_FLAGS
+
+    from scripts import run_grounding_comparison as module
+
+    assert module._ANSWER_EDIT_FLAG_NAMES == tuple(_ANSWER_EDIT_FLAGS)

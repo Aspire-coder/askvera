@@ -694,6 +694,20 @@ def _instrument_usage() -> tuple[_UsageMeter, Any]:
 LOGGER_UNREGISTER_FAILED: list[bool] = []
 
 
+# Read from the orchestrator so the two cannot drift: it already keeps this
+# list to log which steps touched an answer.
+def _answer_edit_flag_names() -> tuple[str, ...]:
+    try:
+        from app.orchestrator.chat_orchestrator import _ANSWER_EDIT_FLAGS
+
+        return tuple(_ANSWER_EDIT_FLAGS)
+    except Exception:
+        return ()
+
+
+_ANSWER_EDIT_FLAG_NAMES = _answer_edit_flag_names()
+
+
 def _turn_record(
     *,
     case_id: str,
@@ -728,6 +742,16 @@ def _turn_record(
         "documents": (capture or {}).get("documents", []),
         "final_answer": str(getattr(response, "answer", "") or ""),
         "abstained": bool((getattr(response, "metadata", None) or {}).get("fallback")),
+        # Which post-generation steps edited this answer. The France pilot turn
+        # ended in a truncated sentence and the capture could not say which
+        # stage produced it, because only "fallback" was kept. Restoration,
+        # contact repair and numeric repair each set a flag; recording them
+        # turns "something corrupted the output" into a named step.
+        "answer_edits": [
+            name
+            for name in _ANSWER_EDIT_FLAG_NAMES
+            if (getattr(response, "metadata", None) or {}).get(name)
+        ],
         "citations": [
             {
                 "section": str((citation or {}).get("section") or ""),
