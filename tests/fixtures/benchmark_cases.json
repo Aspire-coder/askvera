@@ -111,19 +111,19 @@
       "expected": {
         "kind": "answer",
         "must_contain": [
-          "17.30",
           "Sat"
         ],
         "must_not_contain": [
           "Mon – Fri",
-          "Monday to Friday"
+          "Monday to Friday",
+          "Monday through Friday"
         ],
         "required_sections": [
           "sponsoring-001-algeria"
         ],
         "must_cite": true
       },
-      "source_evidence": "Forever Algeria record: 'Business Hours Office 09.30 am - 17.30 pm (Sat - Thu)'. The working week runs Saturday to Thursday, so an answer naming Mon-Fri is wrong.",
+      "source_evidence": "Forever Algeria record: 'Business Hours Office 09.30 am - 17.30 pm (Sat - Thu)'. The assertion is the Saturday-to-Thursday working week, which is the fact a reader would get wrong, and which no other market in the fixture shares. The clock values are deliberately not asserted: the record writes 17.30 and a model may answer 5:30 PM, which is the same closing time, and a case that fails on notation measures the notation rather than the answer.",
       "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
     },
     {
