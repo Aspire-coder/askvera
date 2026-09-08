@@ -154,16 +154,34 @@ fi
 # script's own exit status rather than tee's.
 DEPLOY_LOG_DIR="${DEPLOY_LOG_DIR:-/var/log/askvera}"
 if mkdir -p "${DEPLOY_LOG_DIR}" 2>/dev/null; then
+  # Keep a bounded history rather than growing without limit. Deploys are
+  # infrequent and these files are small, so the cap is generous.
+  #
+  # Pruning runs BEFORE this deploy's log exists, and every part of it is
+  # allowed to fail. Both matter, and the first deploy after this was added
+  # proved why: it exited 2 having done nothing, before even reaching git pull,
+  # so the box could not pull the fix for the script that had just broken it.
+  #
+  # With no older logs present the glob matched nothing, bash passed the
+  # literal pattern to ls, and ls exited 2. Under `set -o pipefail` and
+  # `set -e` that ends the script, and the 2>/dev/null meant to silence exactly
+  # that case discarded the only explanation. It was also a race: tee creates
+  # the log when it is scheduled, which had not happened yet.
+  #
+  # tail -n +N starts at line N, so keeping N logs in total means removing from
+  # the Nth previous one onward.
+  DEPLOY_LOG_KEEP="${DEPLOY_LOG_KEEP:-50}"
+  prune_deploy_logs() {
+    local existing
+    existing="$(ls -1t "${DEPLOY_LOG_DIR}"/deploy-*.log 2>/dev/null || true)"
+    [[ -n "${existing}" ]] || return 0
+    printf '%s\n' "${existing}" | tail -n +"${DEPLOY_LOG_KEEP}" | xargs -r rm -f
+  }
+  prune_deploy_logs || true
+
   DEPLOY_LOG_FILE="${DEPLOY_LOG_DIR}/deploy-$(date -u +%Y%m%dT%H%M%SZ).log"
   exec > >(tee -a "${DEPLOY_LOG_FILE}") 2>&1
   echo "[deploy] Recording this deploy to ${DEPLOY_LOG_FILE}"
-  # Keep a bounded history rather than growing without limit. Deploys are
-  # infrequent and these files are small, so the cap is generous.
-  # tail -n +N starts at line N, so keeping N files means starting at N+1.
-  DEPLOY_LOG_KEEP="${DEPLOY_LOG_KEEP:-50}"
-  ls -1t "${DEPLOY_LOG_DIR}"/deploy-*.log 2>/dev/null \
-    | tail -n +"$((DEPLOY_LOG_KEEP + 1))" \
-    | xargs -r rm -f
 else
   echo "[deploy] Could not write to ${DEPLOY_LOG_DIR}; continuing without a deploy log." >&2
 fi
