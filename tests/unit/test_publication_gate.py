@@ -331,3 +331,67 @@ def test_review_before_publish_is_only_ever_forced_on_never_off() -> None:
 
     process = inspect.getsource(knowledge_ingestion.process_ingestion_job)
     assert "review_before_publish = review_before_publish or _findings_require_review(" in process
+
+
+def _loaded_row(**overrides) -> dict:
+    """A job shaped the way list_ingestion_jobs actually returns one.
+
+    Handcrafted dictionaries hid a real defect: they used "version", while the
+    loader selects "document_version". Every test passed and the gate read an
+    empty version from every real job.
+    """
+    row = {
+        "job_id": "job-row", "filename": "DK-EN-Company-Policy.pdf", "country": "DK",
+        "language": "EN", "document_type": "policy", "access_scope": "country",
+        "document_version": "2026-07", "status": "ready_for_review", "progress": 100,
+        "section_count": 12, "source_uri": "s3://x", "upload_uri": "s3://y",
+        "content_hash": "abc", "accepted_by": "", "review_before_publish": True,
+        "logical_document_id": "dk-en-policy", "document_owner": "", "approval_reference": "",
+        "effective_date": "2026-07-01", "expiry_date": "", "malware_scan_status": "clean",
+        "attempt_count": 1, "error_message": "", "created_at": "", "updated_at": "",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_the_gate_reads_the_version_the_loader_actually_supplies() -> None:
+    """The field-name mismatch, caught with a realistic row.
+
+    A job loaded from the database carries document_version. Reading only
+    "version" reported every real job as unversioned, which would have made an
+    unresolved finding appear on every single publication.
+    """
+    from services import knowledge_ingestion
+
+    # A fully consistent row must produce no finding at all.
+    knowledge_ingestion._enforce_publication_gate(_loaded_row(), None)
+
+
+def test_a_version_change_invalidates_an_approval_on_a_loaded_row() -> None:
+    """The consequence that mattered more than the over-blocking.
+
+    If the version never reaches the fingerprint, an approval survives the
+    version change it should have invalidated - a decision about revision one
+    authorising the publication of revision two.
+    """
+    from services import knowledge_ingestion
+    from services.publication_gate import record_resolution, revision_fingerprint
+
+    row = _loaded_row(expiry_date="", effective_date="")  # missing date -> needs a decision
+    metadata = {
+        "filename": row["filename"], "country": row["country"], "language": row["language"],
+        "document_type": row["document_type"], "access_scope": row["access_scope"],
+        "version": row["document_version"], "effective_date": "", "expiry_date": "",
+    }
+    approval = record_resolution(
+        revision=revision_fingerprint(content_hash="abc", metadata=metadata),
+        decided_by="reviewer@example.com", decision="publish",
+        reason="Undated by design; confirmed with the document owner.",
+    )
+    knowledge_ingestion._enforce_publication_gate(row, approval)
+
+    with pytest.raises(ValueError) as stale:
+        knowledge_ingestion._enforce_publication_gate(
+            _loaded_row(effective_date="", document_version="2026-08"), approval
+        )
+    assert "different revision" in str(stale.value)

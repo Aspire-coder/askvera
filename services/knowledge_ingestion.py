@@ -1687,7 +1687,12 @@ def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> None:
         "language": str(job.get("language") or ""),
         "document_type": str(job.get("document_type") or ""),
         "access_scope": str(job.get("access_scope") or ""),
-        "version": str(job.get("version") or ""),
+        # The loader selects document_version; "version" is the name used when a
+        # job is created. Reading only "version" made every loaded job look
+        # unversioned - an unresolved finding on every publication - and, worse,
+        # kept a version change out of the revision fingerprint, so an approval
+        # survived the very change it should have invalidated.
+        "version": str(job.get("document_version") or job.get("version") or ""),
         "effective_date": str(job.get("effective_date") or ""),
         "expiry_date": str(job.get("expiry_date") or ""),
     }
