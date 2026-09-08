@@ -482,6 +482,54 @@ def _report_low_text_image_pages(preflight, job_id: str, filename: str) -> None:
     )
 
 
+def _findings_require_review(
+    *,
+    job_id: str,
+    filename: str,
+    country: str,
+    language: str,
+    document_type: str,
+    version: str,
+    effective_date: str,
+    expiry_date: str,
+    low_text_image_pages: list[int],
+) -> bool:
+    """Whether this document must go to a reviewer rather than activating.
+
+    review_before_publish arrives as a form field and defaults to true, but a
+    caller holding publish permission can submit false, and both activation
+    calls are gated on it. Permission to publish is not the same as having
+    looked at what is being published: without this, a document whose expiry
+    precedes its own effective date, or one with a page nobody could read, went
+    straight into the index.
+
+    Returning true routes the job to ready_for_review. The upload is kept and
+    the reasons are logged; nothing is discarded.
+    """
+    from services.metadata_conflicts import detect_metadata_conflicts
+
+    findings = detect_metadata_conflicts(
+        filename=filename,
+        country=country,
+        language=language,
+        document_type=document_type,
+        version=version,
+        effective_date=effective_date,
+        expiry_date=expiry_date,
+    )
+    if not findings and not low_text_image_pages:
+        return False
+
+    LOGGER.warning(
+        "automatic_publication_withheld_pending_review",
+        correlation_id=job_id,
+        filename=filename,
+        findings=[f"{finding.field}:{finding.severity}" for finding in findings],
+        uncertain_pages=list(low_text_image_pages),
+    )
+    return True
+
+
 def process_ingestion_job(
     job_id: str,
     local_path: str,
@@ -513,6 +561,10 @@ def process_ingestion_job(
         # policy PDF does in that case.
         use_directory_extractor = document_type == "office_directory"
         normalized_pages = None
+        # Carried out of the preflight branch so the publication decision below
+        # can see it. Empty when preflight did not run, which is the same
+        # position as before preflight existed.
+        low_text_image_pages: list[int] = []
         if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
             preflight = analyze_pdf_with_timeout(
                 path,
@@ -521,6 +573,7 @@ def process_ingestion_job(
                 max_extracted_characters=settings.ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS,
             )
             _report_low_text_image_pages(preflight, job_id, filename)
+            low_text_image_pages = list(preflight.low_text_image_page_numbers)
             if preflight.requires_ocr:
                 if not settings.ADMIN_TEXTRACT_OCR_ENABLED or not upload_uri:
                     # Named precisely, because this now fires for a mostly
@@ -614,6 +667,21 @@ def process_ingestion_job(
             document_type=document_type,
             access_scope=access_scope,
             source_file=str(sections[0]["source_file"]),
+        )
+        # Both activation paths are gated on this flag, so deciding it here
+        # covers automatic publication as well as the reviewed route. A document
+        # carrying findings is routed to review rather than refused: the upload
+        # is not lost, it just cannot reach the index without someone looking.
+        review_before_publish = review_before_publish or _findings_require_review(
+            job_id=job_id,
+            filename=filename,
+            country=country,
+            language=language,
+            document_type=document_type,
+            version=version,
+            effective_date=effective_date,
+            expiry_date=expiry_date,
+            low_text_image_pages=low_text_image_pages,
         )
         indexed = _index_sections(
             sections,

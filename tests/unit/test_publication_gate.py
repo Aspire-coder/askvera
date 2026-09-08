@@ -248,3 +248,86 @@ def test_an_uncertain_page_blocks_until_a_reviewer_decides_on_that_revision() ->
     with pytest.raises(ValueError) as stale:
         knowledge_ingestion._enforce_publication_gate({**job, "country": "SE"}, approval)
     assert "different revision" in str(stale.value)
+
+
+# ---------------------------------------------------------------------------
+# Every activation path, not only the reviewed one.
+#
+# Putting a check in publish_ingestion_job covers its callers and proves
+# nothing about other code that activates a generation. There is a second path:
+# when review_before_publish is false, processing activates the sections and the
+# generation pointer directly, and publish_ingestion_job is never involved.
+# ---------------------------------------------------------------------------
+
+
+def test_there_are_exactly_two_activation_paths_and_both_are_gated() -> None:
+    """A new activation call site must not appear unnoticed.
+
+    _activate_staged_sections and _activate_generation_pointer are the two
+    functions that make staged content live. If a third caller is added, this
+    fails and whoever added it has to say how it reaches the gate.
+    """
+    import inspect
+
+    from services import knowledge_ingestion
+
+    source = inspect.getsource(knowledge_ingestion)
+    assert source.count("_activate_staged_sections(") == 3  # definition plus two calls
+    assert source.count("_activate_generation_pointer(") == 3
+
+    # The processing-path calls are gated on review_before_publish, and that
+    # flag is forced true when findings exist.
+    process = inspect.getsource(knowledge_ingestion.process_ingestion_job)
+    assert "_findings_require_review(" in process
+    assert process.index("_findings_require_review(") < process.index("_index_sections(")
+
+
+def test_a_contradiction_withholds_automatic_publication() -> None:
+    """The hole this closes.
+
+    review_before_publish arrives as a form field defaulting to true, and a
+    caller holding publish permission can submit false. Both activation calls
+    are gated on it, so before this a document whose expiry preceded its own
+    effective date went straight into the index with no check at all.
+    """
+    from services import knowledge_ingestion
+
+    assert knowledge_ingestion._findings_require_review(
+        job_id="job-1", filename="DK-EN-Company-Policy.pdf", country="DK", language="EN",
+        document_type="policy", version="2026-07",
+        effective_date="2026-07-01", expiry_date="2026-01-01", low_text_image_pages=[],
+    ) is True
+
+
+def test_an_uncertain_page_withholds_automatic_publication() -> None:
+    from services import knowledge_ingestion
+
+    assert knowledge_ingestion._findings_require_review(
+        job_id="job-2", filename="DK-EN-Company-Policy.pdf", country="DK", language="EN",
+        document_type="policy", version="2026-07",
+        effective_date="2026-07-01", expiry_date="", low_text_image_pages=[7],
+    ) is True
+
+
+def test_a_clean_document_still_publishes_automatically() -> None:
+    """Routing everything to review would be a different kind of broken.
+
+    The point is that a document with nothing wrong keeps the behaviour it had.
+    """
+    from services import knowledge_ingestion
+
+    assert knowledge_ingestion._findings_require_review(
+        job_id="job-3", filename="DK-EN-Company-Policy.pdf", country="DK", language="EN",
+        document_type="policy", version="2026-07",
+        effective_date="2026-07-01", expiry_date="", low_text_image_pages=[],
+    ) is False
+
+
+def test_review_before_publish_is_only_ever_forced_on_never_off() -> None:
+    """A client-supplied flag may add review and must not remove it."""
+    import inspect
+
+    from services import knowledge_ingestion
+
+    process = inspect.getsource(knowledge_ingestion.process_ingestion_job)
+    assert "review_before_publish = review_before_publish or _findings_require_review(" in process
