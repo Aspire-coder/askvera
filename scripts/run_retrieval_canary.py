@@ -237,7 +237,12 @@ def run_pipeline_once(case: dict[str, Any], sequence: int):
         # Assertions apply to the final question only. The recorder's last
         # retrieval belongs to it for the same reason.
         response = ask(str(case["question"]), "final")
-        return recorder.last, response.answer or "", len(response.citations or [])
+        # Grounding repair silently edits an answer before the reader sees it,
+        # and the removed figures are the only record of what was taken out.
+        # Surfacing them lets a case assert that nothing was removed, which is
+        # far more robust than guessing how a model will format a time.
+        removed = list((response.metadata or {}).get("removed_numeric_claims") or [])
+        return recorder.last, response.answer or "", len(response.citations or []), removed
     finally:
         for name, original in originals.items():
             setattr(chat_orchestrator, name, original)
@@ -292,14 +297,19 @@ def run_case_once(case: dict[str, Any], sequence: int):
     # else. Routing it to the retrieval-only path would run the final question
     # with no history at all and score it as a first turn -- a multi-turn case
     # that silently stopped being one, which is worse than not having it.
-    uses_pipeline = checks_answer or bool(case.get("conversation"))
+    uses_pipeline = (
+        checks_answer
+        or bool(case.get("conversation"))
+        or bool(case.get("answer_must_not_remove_numbers"))
+    )
 
     answer = ""
     answer_citations = -1
+    removed_numbers: list[str] = []
     if uses_pipeline:
         # One execution supplies both the evidence and the answer, so a case
         # can never report retrieval from a run that produced a different reply.
-        result, answer, answer_citations = run_pipeline_once(case, sequence)
+        result, answer, answer_citations, removed_numbers = run_pipeline_once(case, sequence)
     else:
         # Retrieval-only cases skip generation entirely; it costs a model call
         # and proves nothing they assert.
@@ -363,6 +373,14 @@ def run_case_once(case: dict[str, Any], sequence: int):
         if bool(case.get("answer_must_cite")) and answer_citations < 1:
             failures.append("delivered answer has no citation")
 
+    # Checked outside the answer-assertion block: a case may care only that
+    # repair left the answer alone. Office hours were being deleted from
+    # directory answers over a notation difference, and no assertion about the
+    # answer's text could catch that reliably, because the figures are simply
+    # gone rather than wrong.
+    if bool(case.get("answer_must_not_remove_numbers")) and removed_numbers:
+        failures.append(f"grounding repair removed {removed_numbers} from the delivered answer")
+
     return {
         "id": case["id"],
         "passed": not failures,
@@ -376,6 +394,7 @@ def run_case_once(case: dict[str, Any], sequence: int):
         "document_scores": [round(float(document.score or 0.0), 3) for document in documents],
         "answer_citations": answer_citations,
         "answer_extract": answer[:200],
+        "removed_numeric_claims": removed_numbers,
     }
 
 
