@@ -24,6 +24,7 @@ VALIDATION_HEALTH = "ValidationHealth"
 DELIVERED_RESPONSES_METRIC = "DeliveredResponses"
 FALLBACK_RESPONSES_METRIC = "FallbackResponses"
 FALLBACK_BY_LAYER_METRIC = "FallbackResponsesByLayer"
+NUMERIC_REPAIRS_METRIC = "NumericClaimRepairs"
 
 PIPELINE_STAGE_METRIC_NAMES = {
     "governance": GOVERNANCE_LATENCY,
@@ -43,6 +44,7 @@ SYSTEM_METRIC_NAMES = {
     "delivered_responses": DELIVERED_RESPONSES_METRIC,
     "fallback_responses": FALLBACK_RESPONSES_METRIC,
     "fallback_by_layer": FALLBACK_BY_LAYER_METRIC,
+    "numeric_claim_repairs": NUMERIC_REPAIRS_METRIC,
 }
 
 # System metrics that carry one extra CloudWatch dimension, taken from the

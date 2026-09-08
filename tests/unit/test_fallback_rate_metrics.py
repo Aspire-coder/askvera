@@ -188,3 +188,21 @@ def test_fallback_rate_alarm_is_defined_and_valid():
     assert all(
         query["MetricStat"]["Stat"] == "Sum" for query in alarm.metric_queries if "MetricStat" in query
     )
+
+
+def test_numeric_repair_is_counted(monkeypatch):
+    """Repair silently edits an answer, so it has to be countable."""
+    publisher = _capture(monkeypatch)
+
+    response_metrics.record_numeric_repair(2)
+
+    recorded = _by_name(publisher)
+    assert recorded["numeric_claim_repairs"].value == 2.0
+
+
+def test_numeric_repair_count_is_never_negative(monkeypatch):
+    publisher = _capture(monkeypatch)
+
+    response_metrics.record_numeric_repair(-1)
+
+    assert _by_name(publisher)["numeric_claim_repairs"].value == 0.0
