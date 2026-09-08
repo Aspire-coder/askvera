@@ -372,3 +372,83 @@ def test_a_genuine_blank_separator_is_still_blank(monkeypatch: pytest.MonkeyPatc
     assert report.blank_page_numbers == (2,)
     assert report.undetermined_page_numbers == ()
     assert report.requires_ocr is False
+
+
+class _HeaderOverScanPage:
+    """A readable heading above a body this parser cannot read.
+
+    The heading alone clears the 40-character bar, so the page counted as fully
+    extracted and its image was never inspected. A scanned fee table under a
+    printed section title has exactly this shape.
+    """
+
+    def extract_text(self, extraction_mode=None):
+        # Long enough to clear the 40-character "has text" bar, which is the
+        # whole point: a shorter heading would be classified as a scanned page
+        # and caught already.
+        return "Section 4.07 Pricing and Discount Structure for Preferred Customers"
+
+    def get(self, key, default=None):
+        if key == "/Resources":
+            return {"/XObject": {"/Im0": {"/Subtype": "/Image"}}}
+        return default
+
+
+def test_a_readable_heading_over_a_scanned_body_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reported, not treated as scanned.
+
+    A page carrying an image is not by itself evidence of missing content -
+    policy pages carry letterheads - so forcing OCR on every one of them would
+    hold documents that are entirely fine. The number is surfaced instead, so a
+    reviewer can look.
+    """
+    monkeypatch.setattr(
+        document_preflight, "PdfReader", _reader_for([_TextPage(), _HeaderOverScanPage()])
+    )
+
+    report = analyze_pdf(Path("header-over-scan.pdf"))
+
+    assert report.low_text_image_page_numbers == (2,)
+    assert report.text_page_count == 2
+    assert report.scanned_page_numbers == ()
+    # Deliberately does not force OCR on its own.
+    assert report.requires_ocr is False
+
+
+def test_a_full_page_of_text_with_a_letterhead_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The control: an ordinary page with an image must not be flagged."""
+
+    class _FullPageWithLetterhead:
+        def extract_text(self, extraction_mode=None):
+            return "Section 4.07 Pricing. " + ("The Company sets prices for all products. " * 20)
+
+        def get(self, key, default=None):
+            if key == "/Resources":
+                return {"/XObject": {"/Im0": {"/Subtype": "/Image"}}}
+            return default
+
+    monkeypatch.setattr(
+        document_preflight, "PdfReader", _reader_for([_TextPage(), _FullPageWithLetterhead()])
+    )
+
+    report = analyze_pdf(Path("letterhead.pdf"))
+
+    assert report.low_text_image_page_numbers == ()
+    assert report.requires_ocr is False
+
+
+def test_a_heading_only_page_without_an_image_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A short page is only interesting when something unreadable sits on it."""
+
+    class _HeadingOnly:
+        def extract_text(self, extraction_mode=None):
+            return "Section 4.07 Pricing and Discount Structure for Preferred Customers"
+
+        def get(self, key, default=None):
+            if key == "/Resources":
+                return {"/Font": {"/F1": {}}}
+            return default
+
+    monkeypatch.setattr(document_preflight, "PdfReader", _reader_for([_TextPage(), _HeadingOnly()]))
+
+    assert analyze_pdf(Path("heading.pdf")).low_text_image_page_numbers == ()
