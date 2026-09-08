@@ -34,9 +34,11 @@ class FakeProvider:
         language: str,
         correlation_id: str,
         allow_claim_topics: bool = False,
+        is_generated_answer: bool = False,
     ) -> GovernanceDecision:
         self.called = True
         self.allow_claim_topics = allow_claim_topics
+        self.is_generated_answer = is_generated_answer
         if self.exc:
             raise self.exc
         return self.decision
@@ -179,3 +181,24 @@ def test_governance_blocks_provider_failure() -> None:
     assert decision.allowed is False
     assert decision.action == GovernanceAction.BLOCK
     assert decision.metadata["providerError"] == "RuntimeError"
+
+
+def test_is_generated_answer_is_forwarded_to_the_provider() -> None:
+    """Negation-aware guardrailing must reach the provider, defaulting off.
+
+    It relaxes the denied-phrase check so an answer stating there is no
+    guaranteed income is not read as claiming one. That relaxation is only
+    sound for text this system generated, so the default has to be off and the
+    flag has to arrive where it is used.
+    """
+    provider = FakeProvider()
+    _engine(_risk_decision(), provider).evaluate(
+        text="hello", country="US", language="en", correlation_id="cid"
+    )
+    assert provider.is_generated_answer is False
+
+    provider = FakeProvider()
+    _engine(_risk_decision(), provider).evaluate(
+        text="hello", country="US", language="en", correlation_id="cid", is_generated_answer=True
+    )
+    assert provider.is_generated_answer is True
