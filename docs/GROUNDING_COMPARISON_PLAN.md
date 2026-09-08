@@ -341,3 +341,86 @@ There is no threshold that decides it without reading the list.
 - Anything about arm 3.
 - Anything about the publication changes; those are covered by the PostgreSQL
   checks and the unit tests.
+
+
+---
+
+# Pilot result — 2026-09-08
+
+Six turns, one repeat, run on the application host. Capture
+`/tmp/pilot.json`, scored arms `/tmp/main.json` and `/tmp/candidate.json`.
+**Archive these before deleting anything: they are purchased evidence.**
+
+| | |
+|---|---|
+| Harness commit | `0fd1a08`, clean tree |
+| Corpus signature | `pointer;active=17896;slots=28;320ae0c478731911` |
+| Turns | 6 attempted, 6 recorded, 6 reached repair, 0 unaccounted |
+| Model calls | 60 (17 Claude Haiku 4.5, 43 Titan embed v2) |
+| Tokens | 57,995 in / 2,068 out (Haiku); embeddings not reported |
+| Failures / SDK retries | 0 / 0 |
+
+**Measured rate: 10 model calls per turn.**
+
+## What it establishes
+
+Both rules made identical removal decisions: one figure removed by each,
+`changed_decisions: []`.
+
+That is all it establishes. Specifically it does **not** establish:
+
+- that the candidate rule is "inert on this corpus". Six samples cannot
+  support a corpus-wide claim, and identical outputs do not show which
+  internal branches ran. An earlier version of this document said inert; that
+  was an overreach and is withdrawn.
+- that the removed figure was invented. "Absent from evidence" is a string
+  search. A figure can be legitimately derived, or written in a notation the
+  search does not match, and the source has to be read.
+- that either rule is right. Two validators agreeing can mean both are correct
+  or both miss the same thing.
+
+## Still to adjudicate
+
+The scored sample carries flags that need reading against the sources and the
+captured final answers. They may overlap and are not automatically defects:
+
+| Flag | Count |
+|---|---:|
+| Missing required text | 1 |
+| Forbidden text present | 1 |
+| Required section not cited | 2 |
+| Abstention | 1 |
+
+`--review` prints each turn with its final answer, its pre-repair text, every
+removed figure with the surrounding source, and the flags. A worked example
+from a synthetic case shows why this matters: an answer reading "5000 DZD"
+against a fixture requiring "5 000" is flagged as missing required text and is
+a notation artefact, not an answer defect.
+
+## Cost
+
+At the published rates quoted (~$1/M input, ~$5/M output for Haiku 4.5) the
+Haiku arithmetic is **$0.068335**. Those rates are unverified here, embedding
+usage is not reported by `invoke_model`, and this excludes OpenSearch and every
+other AWS charge - so it is not the AWS bill. The earlier "under $0.10" was
+unconfirmed and is withdrawn. Read the console for the actual figure.
+
+## Model
+
+The capture shows **the pilot** used
+`global.anthropic.claude-haiku-4-5-20251001-v1:0`. That is evidence about this
+run, not a verified statement about the running production service - model
+routing and per-request overrides exist. Documents saying Sonnet 4.5 should not
+be rewritten until the running configuration is checked directly.
+
+## Next, by coverage rather than volume
+
+1. Archive the capture and scored files with the code revisions that made them.
+2. Review all six final answers, starting with the flags and the removed figure.
+3. Read real documents for inherited-unit shapes: table headings, continued
+   tables, mixed currencies in one record.
+4. Build source-verified cases for both correct acceptance and correct
+   rejection, with expectations written down before the candidate is run
+   against them, and report every outcome including the ones that disagree.
+5. Only then a broader comparison, including held-out cases nothing was tuned
+   against.

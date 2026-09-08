@@ -1288,6 +1288,119 @@ def compare(first: Path, second: Path) -> dict[str, Any]:
     }
 
 
+def review(frozen_path: Path, app_root: Path) -> str:
+    """Print every captured turn for adjudication against its sources.
+
+    The totals cannot decide anything. This is what a person reads: the final
+    answer a reader would have seen, the pre-repair text, every figure a rule
+    removed with the evidence around it, and each expectation the turn missed.
+
+    Nothing here is a verdict. "Absent from evidence" is a string search, not a
+    finding that a figure was invented - a number can be legitimately derived,
+    or written in a notation the search does not match - so the source excerpt
+    is printed beside it rather than a conclusion.
+    """
+    grounding, loaded_from = _load_application(app_root)
+    payload = json.loads(frozen_path.read_text(encoding="utf-8"))
+    lines: list[str] = [
+        "=" * 78,
+        f"REVIEW  {frozen_path}",
+        f"validator: {loaded_from}",
+        f"provenance: {json.dumps(payload.get('provenance', {}), sort_keys=True)}",
+        "=" * 78,
+    ]
+
+    for record in payload["runs"]:
+        expected = record.get("expected") or {}
+        documents = _rehydrate(grounding, record["documents"])
+        answer = record.get("answer", "")
+        removed = [
+            claim.number for claim in grounding.unsupported_numeric_claims(answer, documents)
+        ]
+        presence = grounding.numbers_present_in_sources(removed, documents) if removed else {}
+        cited = _cited_keys(record.get("citations") or [])
+        required = list(expected.get("required_sections") or []) if expected.get("must_cite") else []
+
+        lines += [
+            "",
+            "-" * 78,
+            f"CASE {record['id']}  turn {record['turn_index']}"
+            f"  reached_repair={record.get('reached_repair')}"
+            f"  abstained={record.get('abstained')}",
+            "-" * 78,
+        ]
+
+        flags = []
+        for phrase in expected.get("must_contain") or []:
+            if phrase.lower() not in answer.lower():
+                flags.append(f"MISSING required text: {phrase!r}")
+        for phrase in expected.get("must_not_contain") or []:
+            if phrase.lower() in answer.lower():
+                flags.append(f"FORBIDDEN text present: {phrase!r}")
+        for section in required:
+            if not _is_cited(section, cited):
+                flags.append(f"UNCITED required section: {section}")
+        lines += ["FLAGS: " + ("; ".join(flags) if flags else "none")]
+
+        if removed:
+            for number in removed:
+                lines.append(
+                    f"REMOVED FIGURE {number!r}  present_in_evidence="
+                    f"{presence.get(number)}"
+                )
+                lines += _evidence_excerpts(number, record["documents"])
+        else:
+            lines.append("REMOVED FIGURES: none")
+
+        lines += [
+            "",
+            "FINAL ANSWER (what a reader would have seen):",
+            _indent(record.get("final_answer", "")),
+            "",
+            "PRE-REPAIR TEXT (what the rule was given):",
+            _indent(answer),
+            "",
+            "EVIDENCE SECTIONS: "
+            + ", ".join(
+                sorted({str(document.get("section_id") or "?") for document in record["documents"]})
+            ),
+            "CITED: " + (", ".join(sorted(cited)) or "none"),
+        ]
+
+    return "\n".join(lines)
+
+
+def _indent(text: str) -> str:
+    return "\n".join(f"    {line}" for line in (text or "(empty)").splitlines()) or "    (empty)"
+
+
+def _evidence_excerpts(number: str, documents: list[dict[str, Any]], radius: int = 140) -> list[str]:
+    """Where the figure does or does not appear, so a person can judge it.
+
+    A digits-only search, deliberately separate from the validator's notation
+    handling: if the validator says absent and this finds the digits, the
+    difference is the notation, which is exactly what an adjudicator needs to
+    see.
+    """
+    digits = "".join(character for character in number if character.isdigit())
+    found: list[str] = []
+    for document in documents:
+        content = str(document.get("content") or "")
+        haystack = "".join(character for character in content if character.isdigit())
+        if digits and digits in haystack:
+            index = content.find(number)
+            if index == -1:
+                found.append(
+                    f"    ~ {document.get('section_id')}: digits {digits} occur in a "
+                    "different notation than the claim"
+                )
+                continue
+            start = max(0, index - radius)
+            excerpt = " ".join(content[start:index + len(number) + radius].split())
+            found.append(f"    ~ {document.get('section_id')}: ...{excerpt}...")
+    return found or [f"    ~ digits {digits or number} appear in no retrieved section"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preflight", action="store_true", help="Estimate the run. Makes no calls.")
@@ -1296,6 +1409,11 @@ def main() -> int:
     parser.add_argument("--app-root", type=Path, help="Checkout to load the validator from.")
     parser.add_argument("--out", type=Path, help="Where to write a scored arm.")
     parser.add_argument("--compare", type=Path, nargs=2, help="Diff two scored arms.")
+    parser.add_argument(
+        "--review",
+        type=Path,
+        help="Print every captured turn for adjudication. Offline, no model calls.",
+    )
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--arms", type=int, default=2, help="Preflight only.")
@@ -1455,11 +1573,17 @@ def main() -> int:
         )
         return 0
 
+    if args.review:
+        if not args.app_root:
+            parser.error("--review requires --app-root")
+        print(review(args.review, args.app_root))
+        return 0
+
     if args.compare:
         print(json.dumps(compare(args.compare[0], args.compare[1]), indent=2))
         return 0
 
-    parser.error("one of --preflight, --freeze, --score or --compare is required")
+    parser.error("one of --preflight, --freeze, --score, --review or --compare is required")
     return 2
 
 
