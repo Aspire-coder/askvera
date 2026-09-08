@@ -245,3 +245,73 @@ settling first:
    effective date — the sponsoring directory plausibly does not — then the
    right answer is different per document type, and the directory should be
    excluded from the count rather than fixed.
+
+---
+
+# Addendum 3: the index does not fold accents
+
+Measured 2026-09-08 against the live index, with ASCII controls:
+
+| Phrase searched | Sections matched |
+|---|---:|
+| `Reunion` | **0** |
+| `Réunion` | 6 |
+| `Algeria` (control) | 9 |
+| `Belgium` (control) | 3 |
+
+An unaccented query cannot match accented document text. The controls rule out
+a broken test.
+
+## How it was found
+
+`reunion-delivery-cost` was the only benchmark case to fail on retrieval rather
+than on a later layer: `governing sections not retrieved`, with a top score of
+1.398 against 9.5 for comparable directory questions. Market detection was
+never the problem - `Reunion` is a configured alias and resolves to RE
+correctly - so the failure had to be in matching the document text.
+
+## Why it is wider than one market
+
+Only one configured market name carries an accent (Saint-Barthélemy), which
+makes this look small. It is not, for two reasons.
+
+**The config and the corpus disagree.** `global_directory_markets.json` calls it
+"Reunion Island"; the record in the index is titled "Forever Réunion Island".
+The ingestion pipeline mangled the accent when generating the section id, which
+reads `sponsoring-084-r-union-island` - the `é` was dropped rather than folded,
+so the damage is already visible in the identifier.
+
+**Fifteen of twenty-eight documents are not in English.** Italian, Finnish,
+Swedish, Danish, Norwegian, French, Spanish, German, Serbian and Russian policy
+documents carry accented and non-Latin text throughout, and 1,871 accented
+alias spellings are configured across the markets. Readers routinely type
+without diacritics. Every one of those queries is currently matching less text
+than it should on the lexical channel.
+
+This does not mean those questions fail outright: hybrid retrieval still has a
+vector channel, which is presumably why the corpus has worked as well as it
+has. It means the lexical half is silently degraded for a large part of the
+corpus, and nothing measures that today.
+
+## Options
+
+1. **Reindex with an asciifolding filter.** The correct fix. The index mapping
+   is not defined in this repository - it was created outside the codebase - so
+   this is an operational change plus a reindex of 17,896 sections, and it needs
+   a staged publish and rollback plan like any other index migration.
+2. **Query-side expansion.** When a market is detected, add its configured
+   alias spellings to the lexical query, so "Reunion" also searches "Réunion".
+   Cheap and reversible, but it only covers market names, not the accented
+   content words that make up most of the affected text. It also risks diluting
+   ranking, and that risk cannot be assessed without measuring retrieval.
+
+Recommended: option 1, and do not attempt option 2 as a substitute. A mitigation
+that fixes the one case we happened to measure, while leaving the general defect
+in place, is worse than leaving it open - it removes the symptom that would
+otherwise keep prompting the real fix.
+
+## What to measure once it is fixed
+
+Recall on the same question with and without diacritics should be equal. That is
+a metamorphic property, cheap to test, and it belongs in the generated suite
+rather than as a one-off case.
