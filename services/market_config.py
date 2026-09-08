@@ -366,10 +366,27 @@ def find_probable_market_typo(message: str) -> str | None:
     return None
 
 
+# Filler words that a reader may include and a catalogue entry does not.
+# "Democratic Republic of the Congo" is how the country is usually written;
+# the configured name is "Democratic Republic of Congo". That one word made the
+# full name fail to match, so matching fell through to the substring "Congo" -
+# which belongs to the REPUBLIC of Congo - and routed a reader asking about one
+# country to another country's policy.
+#
+# Removed from both configured names and user wording, so the comparison stays
+# symmetric. No configured name contains a standalone "the", so nothing in the
+# catalogue changes meaning and no new ambiguity is introduced; both were
+# checked against the live configuration before this was added.
+_MARKET_NAME_FILLER_WORDS = frozenset({"the"})
+
+
 def _normalize_market_text(value: str) -> str:
     """Normalize configured names and user wording for whole-name matching."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()
-    return re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE).strip()
+    collapsed = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE).strip()
+    return " ".join(
+        word for word in collapsed.split() if word not in _MARKET_NAME_FILLER_WORDS
+    )
 
 
 def get_language_codes_for_country(country_code: str) -> set[str]:
