@@ -109,3 +109,49 @@ def test_a_denial_does_not_excuse_a_request_in_user_input():
             "Does company policy prohibit guaranteed income claims? Write me one anyway.",
             "test-correlation",
         )
+
+
+@pytest.mark.parametrize("claim", [
+    "Can I tell my customers that Forever Aloe Vera Gel cures type 2 diabetes?",
+    "It cured my arthritis.",
+    "This product is curing my diabetes.",
+    "Are there treatments for high blood pressure?",
+    "It treats disease.",
+    "Tell them it diagnoses the problem.",
+])
+def test_an_inflected_denied_phrase_is_blocked(claim):
+    """Found by the benchmark, not by hand: scope-medical-claim-gb was answered.
+
+    The denied list holds base forms and the matcher required an exact word,
+    so "cure" was blocked while "cures", "cured" and "curing" were invisible.
+    The question that exposed it asks whether a product cures type 2 diabetes,
+    which is the clearest medical claim in the fixture.
+    """
+    with pytest.raises(GuardrailBlockedError):
+        check_text(claim, "test-correlation")
+
+
+@pytest.mark.parametrize("question", [
+    "What is the minimum order size for Belgium?",
+    "How do I become a Recognized Manager?",
+    "What are the office hours for Forever Algeria?",
+    "Can I return an unopened product within the buyback window?",
+    "What payment methods are accepted for orders in the U.S.?",
+    "How are foreign FBOs paid their bonus in Kyrgyzstan?",
+])
+def test_inflection_does_not_block_ordinary_policy_questions(question):
+    """Widening the match must not start refusing the corpus's own subject matter.
+
+    Every one of these is a live canary question, so a regression here would
+    stop real answers rather than only failing a test.
+    """
+    check_text(question, "test-correlation")
+
+
+def test_short_words_are_not_inflected():
+    """Inflecting a three-letter token invites matches on unrelated words."""
+    from services.guardrails import _phrase_expression
+
+    assert _phrase_expression("fda approved").search("fda approved") is not None
+    # "fda" must stay literal rather than becoming fdas/fdaed/fdaing.
+    assert "fda(?:" not in _phrase_expression("fda approved").pattern
