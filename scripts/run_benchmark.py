@@ -131,24 +131,38 @@ _REFUSAL_KEYS = (
 )
 
 
-def _refusal_markers(language: str) -> list[str]:
-    """Opening clauses of every approved way of declining, in one locale."""
-    from app.evidence import localized_conversation_response
+def _refusal_markers(language: str) -> tuple[list[str], bool]:
+    """Opening clauses of every approved way of declining, in one locale.
 
-    markers = []
+    Reviewed copy only. localized_conversation_response would translate a
+    missing key with a live model call, which costs money to build a marker and
+    returns wording that can differ between requests - so the marker would not
+    reliably match the refusal the reader actually saw.
+
+    The flag says whether every marker is reviewed for this locale. Seven of
+    the twelve configured locales have no reviewed insufficient_evidence copy,
+    which is the commonest refusal of all, so classification there is weaker
+    than in English and the summary says so rather than quietly scoring it.
+    """
+    from app.evidence import configured_conversation_response
+
+    markers: list[str] = []
+    complete = True
     for key in _REFUSAL_KEYS:
-        copy = localized_conversation_response(key, language) or ""
+        copy, reviewed = configured_conversation_response(key, language)
+        complete = complete and reviewed
         if copy:
             # The opening clause is the stable part; the tail names a contact
             # route that varies by market.
             markers.append(" ".join(copy.split())[:60].casefold())
-    return markers
+    return markers, complete
 
 
 def _abstained(answer: str, language: str) -> bool:
     """Whether the delivered text declines rather than answers, in its own locale."""
     folded = " ".join((answer or "").split()).casefold()
-    return any(marker and marker in folded for marker in _refusal_markers(language))
+    markers, _complete = _refusal_markers(language)
+    return any(marker and marker in folded for marker in markers)
 
 
 def _is_cited(required: str, cited: set[str]) -> bool:
@@ -379,6 +393,17 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
             group: rate(sum(1 for run in group_runs if run["passed"]), len(group_runs))
             for group, group_runs in sorted(by_group.items())
         },
+        # Locales whose refusal classification rests on English wording, because
+        # the locale has no reviewed copy for some refusal. A case in one of
+        # these is scored, but an abstention judgement there is weaker than in
+        # English and should not be read as equivalent evidence.
+        "languages_with_unreviewed_refusal_copy": sorted(
+            {
+                case.get("language", "en")
+                for case in results
+                if not _refusal_markers(case.get("language", "en"))[1]
+            }
+        ),
         "latency_ms_p50": round(statistics.median(run["duration_ms"] for run in runs), 1) if runs else 0,
         "latency_ms_max": round(max((run["duration_ms"] for run in runs), default=0), 1),
         "generation_input_tokens": generation_input,
@@ -472,6 +497,7 @@ def main() -> int:
         results.append({
             "id": case["id"],
             "question": case["question"],
+            "language": case["language"],
             "intent_group": case["intent_group"],
             "expected_kind": case["expected"]["kind"],
             "provenance": case["provenance"],

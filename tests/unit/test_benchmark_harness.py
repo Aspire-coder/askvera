@@ -442,3 +442,52 @@ def test_the_scope_pair_passes_when_each_market_cites_its_own_parent():
         cited_sections=benchmark._section_keys([("2", "SE")]),
     ))
     assert not wrong_market["passed"]
+
+
+def test_refusal_markers_use_reviewed_copy_and_make_no_model_call():
+    """Markers must not be built by translating at request time.
+
+    localized_conversation_response falls back to a live model translation when
+    a locale lacks reviewed copy. Building a marker that way costs a model call
+    and returns wording that can differ between requests, so it would not
+    reliably match the refusal the reader actually saw.
+    """
+    import app.evidence as evidence
+
+    called = []
+    original = evidence.localize_reviewed_copy
+    evidence.localize_reviewed_copy = lambda *a, **k: called.append(a) or "translated"
+    try:
+        for language in ("en", "fr", "fi", "sv", "ru"):
+            markers, _complete = benchmark._refusal_markers(language)
+            assert markers, language
+    finally:
+        evidence.localize_reviewed_copy = original
+
+    assert called == [], "building refusal markers triggered a translation call"
+
+
+def test_locales_without_reviewed_refusal_copy_are_reported():
+    """Seven of twelve locales have no reviewed insufficient_evidence copy.
+
+    That is the commonest refusal in the corpus, and those markets - Italian,
+    Danish, Finnish, Norwegian, Serbian, Swedish, Russian - hold most of it.
+    A reader there receives a live translation of the English wording, which is
+    constrained but not approved copy, and refusal classification against it is
+    correspondingly weaker. The flag exists so a summary cannot present those
+    cases as equivalent evidence to the English ones.
+    """
+    assert benchmark._refusal_markers("en")[1] is True
+    for language in ("it", "da", "fi", "no", "sr", "sv", "ru"):
+        assert benchmark._refusal_markers(language)[1] is False, language
+
+
+def test_the_summary_names_languages_with_weaker_classification():
+    results = [{
+        "id": "a", "intent_group": "g", "expected_kind": "abstain", "language": "fi",
+        "runs_count": 1, "passed_runs": 1,
+        "runs": [_run() | {"passed": True, "retrieval_hit": None,
+                           "repair_removed_anything": False, "repair_damaged": False}],
+    }]
+    summary = benchmark.summarise(results, None)
+    assert summary["languages_with_unreviewed_refusal_copy"] == ["fi"]
