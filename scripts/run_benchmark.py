@@ -123,6 +123,23 @@ def _abstained(answer: str, language: str) -> bool:
     return any(marker and marker in folded for marker in _refusal_markers(language))
 
 
+def _section_keys(pairs: list[tuple[str, str]]) -> list[str]:
+    """Section identifiers, both bare and country-qualified.
+
+    A case can then require "2-part-1-definition-18" when the section is
+    unambiguous, or "DK:2-part-1-definition-18" when the same identifier exists
+    in several markets and only one of them is the reader's.
+    """
+    keys: list[str] = []
+    for section, country in pairs:
+        if not section:
+            continue
+        keys.append(section)
+        if country:
+            keys.append(f"{country.upper()}:{section}")
+    return keys
+
+
 def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]:
     """Run one question through the real pipeline and record what came back.
 
@@ -150,14 +167,23 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         # Every retrieved section, so a case can require the governing one to
         # be present rather than merely first, and can say which sections the
         # answer was actually built from.
-        "sections": [
-            str((document.metadata or {}).get("section_id") or "") for document in documents
-        ],
+        #
+        # Country-qualified keys are included because section IDs are not
+        # unique across markets. "2-part-1-definition-18" is the FBO Support
+        # fee in Denmark, Sweden, Norway and Finland - the same ID holding the
+        # same 635 characters in four countries - and is "Forever Business
+        # Owner (FBO)" in Canada. Matching on the ID alone cannot tell a Danish
+        # reader's answer from Sweden's copy of it.
+        "sections": _section_keys(
+            [(str((d.metadata or {}).get("section_id") or ""), str(d.country or "")) for d in documents]
+        ),
         # Citations are source dicts; "section" is the passage actually cited.
-        "cited_sections": [
-            str((citation or {}).get("section") or "")
-            for citation in (response.citations or [])
-        ],
+        "cited_sections": _section_keys(
+            [
+                (str((citation or {}).get("section") or ""), str((citation or {}).get("country") or ""))
+                for citation in (response.citations or [])
+            ]
+        ),
         "confidence": round(float(run.retrieval.confidence), 3) if run.retrieval else 0.0,
         "input_tokens": int(usage.get("inputTokens") or 0),
         "output_tokens": int(usage.get("outputTokens") or 0),

@@ -276,3 +276,48 @@ def test_every_answerable_case_names_the_sections_it_depends_on():
         assert case["expected"].get("required_sections"), case["id"]
         # Provenance has to name where the text came from, not just assert it.
         assert "dump" in case["provenance"].lower() or "index" in case["provenance"].lower(), case["id"]
+
+
+def test_a_country_qualified_section_distinguishes_duplicate_markets():
+    """Section IDs repeat across markets, so the ID alone cannot score scope.
+
+    "2-part-1-definition-18" is the FBO Support fee in Denmark, Sweden, Norway
+    and Finland - the same identifier holding the same 635 characters in four
+    documents - and is "Forever Business Owner (FBO)" in Canada. A Danish
+    reader served Sweden's copy gets a correctly grounded, correctly cited
+    answer from the wrong country, which is invisible in the answer text.
+    """
+    case = {
+        **VALID_CASE,
+        "expected": {
+            **VALID_CASE["expected"],
+            "required_sections": ["DK:2-part-1-definition-18"],
+            "must_cite": True,
+        },
+    }
+
+    swedish_copy = benchmark.score_run(
+        case,
+        _run(
+            sections=benchmark._section_keys([("2-part-1-definition-18", "SE")]),
+            cited_sections=benchmark._section_keys([("2-part-1-definition-18", "SE")]),
+        ),
+    )
+    assert swedish_copy["retrieval_hit"] is False
+
+    danish_copy = benchmark.score_run(
+        case,
+        _run(
+            sections=benchmark._section_keys([("2-part-1-definition-18", "DK")]),
+            cited_sections=benchmark._section_keys([("2-part-1-definition-18", "DK")]),
+        ),
+    )
+    assert danish_copy["retrieval_hit"] is True
+    assert danish_copy["passed"]
+
+
+def test_an_unqualified_section_still_matches_any_market():
+    """Global directory sections are unambiguous and must stay simple to write."""
+    keys = benchmark._section_keys([("sponsoring-001-algeria", "GLOBAL")])
+    assert "sponsoring-001-algeria" in keys
+    assert "GLOBAL:sponsoring-001-algeria" in keys
