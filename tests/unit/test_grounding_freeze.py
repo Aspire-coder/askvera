@@ -127,7 +127,7 @@ def _pipeline(monkeypatch, *, plan: dict[str, list[str]], fail_after: int | None
             "harness_dirty": False,
             "fixture_sha256": fixture_hash,
             "opensearch_index": "askvera-policy-sections",
-            "bedrock_model_id": "us.anthropic.claude-sonnet-4-5",
+            "bedrock_model_arn": "arn:aws:bedrock:us-east-1:0:inference-profile/haiku",
             "chunk_profile": "current",
             "generation_pointer_enabled": True,
             "corpus_signature": "active=17896;generations=28;deadbeefdeadbeef",
@@ -348,7 +348,7 @@ def test_a_resume_across_a_different_fixture_is_refused(tmp_path, monkeypatch) -
 
 
 @pytest.mark.parametrize(
-    "field", ["harness_commit", "opensearch_index", "bedrock_model_id", "chunk_profile"]
+    "field", ["harness_commit", "opensearch_index", "bedrock_model_arn", "chunk_profile"]
 )
 def test_a_resume_across_different_conditions_is_refused(tmp_path, monkeypatch, field) -> None:
     checkpoint = tmp_path / "frozen.json"
@@ -570,7 +570,7 @@ def test_the_capture_records_what_produced_it(tmp_path, monkeypatch) -> None:
         "harness_commit",
         "harness_dirty",
         "opensearch_index",
-        "bedrock_model_id",
+        "bedrock_model_arn",
         "chunk_profile",
         "generation_pointer_enabled",
         "corpus_signature",

@@ -185,7 +185,12 @@ def _provenance(fixture_hash: str) -> dict[str, Any]:
         "harness_dirty": bool(_git("status", "--porcelain")),
         "fixture_sha256": fixture_hash,
         "opensearch_index": getattr(settings, "OPENSEARCH_INDEX", ""),
-        "bedrock_model_id": getattr(settings, "BEDROCK_MODEL_ID", ""),
+        # BEDROCK_MODEL_ARN, not BEDROCK_MODEL_ID: the latter does not exist,
+        # so provenance recorded an empty string for the one field that says
+        # which model produced the answers. The pilot capture on 2026-09-08 has
+        # that blank; the usage block named the model and the provenance did
+        # not, which is exactly backwards for a record meant to outlive the run.
+        "bedrock_model_arn": getattr(settings, "BEDROCK_MODEL_ARN", ""),
         "chunk_profile": getattr(settings, "ADMIN_INGESTION_CHUNK_PROFILE", ""),
         "generation_pointer_enabled": bool(
             getattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
@@ -461,7 +466,7 @@ _RESUME_MUST_MATCH = (
     "fixture_sha256",
     "harness_commit",
     "opensearch_index",
-    "bedrock_model_id",
+    "bedrock_model_arn",
     "chunk_profile",
     # Changes which documents retrieval can see at all, so a capture taken with
     # it on and one taken with it off describe different corpora.
