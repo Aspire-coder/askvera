@@ -452,3 +452,54 @@ def test_a_heading_only_page_without_an_image_is_not_reported(monkeypatch: pytes
     monkeypatch.setattr(document_preflight, "PdfReader", _reader_for([_TextPage(), _HeadingOnly()]))
 
     assert analyze_pdf(Path("heading.pdf")).low_text_image_page_numbers == ()
+
+
+def test_low_text_image_pages_are_reported_at_ingestion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detection that reaches nobody changes nothing.
+
+    The field was computed and read by no caller, so a readable heading above a
+    scanned body was recorded in an object and then discarded. It is now logged
+    during ingestion, with the page numbers and the filename, so a reviewer can
+    act on it.
+
+    It still does not block: whether an unresolved page should hold publication
+    is a policy decision rather than a default.
+    """
+    from services import knowledge_ingestion
+
+    logged: list[tuple] = []
+    monkeypatch.setattr(
+        knowledge_ingestion.LOGGER, "warning", lambda event, **fields: logged.append((event, fields))
+    )
+
+    class _Preflight:
+        low_text_image_page_numbers = (7, 9)
+        page_count = 12
+        requires_ocr = False
+
+    knowledge_ingestion._report_low_text_image_pages(_Preflight(), "job-1", "UK-EN-Policy.pdf")
+
+    assert logged, "a low-text image page was found and nothing was logged"
+    event, fields = logged[0]
+    assert event == "preflight_low_text_image_pages"
+    assert fields["pages"] == [7, 9]
+    assert fields["filename"] == "UK-EN-Policy.pdf"
+
+
+def test_nothing_is_logged_when_no_such_page_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ordinary document must not produce a warning on every ingestion."""
+    from services import knowledge_ingestion
+
+    logged: list[tuple] = []
+    monkeypatch.setattr(
+        knowledge_ingestion.LOGGER, "warning", lambda event, **fields: logged.append((event, fields))
+    )
+
+    class _Clean:
+        low_text_image_page_numbers = ()
+        page_count = 12
+        requires_ocr = False
+
+    knowledge_ingestion._report_low_text_image_pages(_Clean(), "job-2", "UK-EN-Policy.pdf")
+
+    assert logged == []

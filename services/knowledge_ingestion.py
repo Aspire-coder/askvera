@@ -459,6 +459,29 @@ def _extract_directory_sections(
     )
 
 
+def _report_low_text_image_pages(preflight, job_id: str, filename: str) -> None:
+    """Surface pages holding a readable heading above something unreadable.
+
+    Reported, never blocking. A page carrying an image is not by itself
+    evidence of missing content - policy pages carry letterheads on every page
+    - so this cannot decide publication on its own. Without the log it was a
+    detection that reached nobody and therefore changed nothing.
+
+    Whether an unresolved page should hold publication is a policy decision,
+    and deliberately not defaulted here.
+    """
+    if not preflight.low_text_image_page_numbers:
+        return
+    LOGGER.warning(
+        "preflight_low_text_image_pages",
+        correlation_id=job_id,
+        filename=filename,
+        pages=list(preflight.low_text_image_page_numbers),
+        page_count=preflight.page_count,
+        requires_ocr=preflight.requires_ocr,
+    )
+
+
 def process_ingestion_job(
     job_id: str,
     local_path: str,
@@ -497,6 +520,7 @@ def process_ingestion_job(
                 max_pages=settings.ADMIN_INGESTION_MAX_PDF_PAGES,
                 max_extracted_characters=settings.ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS,
             )
+            _report_low_text_image_pages(preflight, job_id, filename)
             if preflight.requires_ocr:
                 if not settings.ADMIN_TEXTRACT_OCR_ENABLED or not upload_uri:
                     # Named precisely, because this now fires for a mostly
