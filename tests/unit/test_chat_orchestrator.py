@@ -1981,3 +1981,72 @@ def test_insufficient_evidence_fallback_appends_office_contact_when_available(mo
     assert "+32 2 000 0000" in response.answer
     assert response.metadata["office_contact_offered"] is True
     assert response.citations == []
+
+
+def test_chained_followup_keeps_the_market_introduced_two_turns_ago() -> None:
+    """The reported defect: a skipped turn changed the country and it was lost.
+
+    The anchor search walks back past context-dependent turns, which is right
+    for "Tell me more" and wrong when one of those turns changed the market.
+    The reader was answered about Belgium, the market they had moved away from
+    two turns earlier, with Germany absent from retrieval entirely.
+    """
+    orchestrator = AIOrchestrator()
+    history = "\n".join(
+        [
+            "user: How do I sponsor someone in Belgium?",
+            "vera: Belgium sponsoring details.",
+            "user: What about Germany?",
+            "vera: Germany sponsoring details.",
+        ]
+    )
+
+    query = orchestrator._build_retrieval_query("Tell me more.", history, "cid")
+
+    assert "Germany" in query, query
+    assert "Tell me more." in query
+
+
+def test_the_most_recent_market_shift_wins() -> None:
+    """Two shifts in a row must not resurrect the first one."""
+    orchestrator = AIOrchestrator()
+    anchor = orchestrator._latest_context_anchor(
+        [
+            "How do I sponsor someone in Belgium?",
+            "What about Germany?",
+            "What about Thailand?",
+            "Tell me more.",
+        ]
+    )
+
+    assert "Thailand" in anchor
+    assert "Germany" not in anchor
+
+
+def test_a_plain_followup_without_a_market_shift_is_unchanged() -> None:
+    """No shift, no change: this path must not start rewriting ordinary follow-ups."""
+    orchestrator = AIOrchestrator()
+    anchor = orchestrator._latest_context_anchor(
+        ["How do I sponsor someone in Belgium?", "Tell me more."]
+    )
+
+    assert anchor == "How do I sponsor someone in Belgium?"
+
+
+def test_a_followup_on_a_marketless_question_is_unchanged() -> None:
+    orchestrator = AIOrchestrator()
+    anchor = orchestrator._latest_context_anchor(
+        ["How many Case Credits do I need to reach Supervisor?", "Tell me more."]
+    )
+
+    assert anchor == "How many Case Credits do I need to reach Supervisor?"
+
+
+def test_a_followup_repeating_the_same_market_does_not_duplicate_it() -> None:
+    """Naming the same market again is not a shift and must not be carried."""
+    orchestrator = AIOrchestrator()
+    anchor = orchestrator._latest_context_anchor(
+        ["How do I sponsor someone in Belgium?", "What about Belgium then?", "Tell me more."]
+    )
+
+    assert anchor == "How do I sponsor someone in Belgium?"
