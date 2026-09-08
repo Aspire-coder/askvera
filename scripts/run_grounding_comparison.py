@@ -161,85 +161,215 @@ def preflight(fixture: Path, repeat: int, arms: int) -> dict[str, Any]:
 # --- freezing --------------------------------------------------------------
 
 
-def freeze(fixture: Path, repeat: int, max_turns: int, checkpoint: Path) -> dict[str, Any]:
-    """Capture pre-repair answers and the evidence behind them, once.
+def _provenance(fixture_hash: str) -> dict[str, Any]:
+    """What was run, so a result can be tied to the code that produced it.
 
-    Numeric grounding is neutralised for the duration so the pipeline returns
-    what the model produced rather than what repair left. That is the whole
-    point: both arms must score the same input, and an answer that one arm's
-    repair has already trimmed is not the same input.
-
-    Writes a checkpoint after every turn, so an interrupted run is resumable
-    and a bounded run is genuinely bounded rather than bounded on paper.
+    A capture with no provenance is a number without a claim attached: nobody
+    can tell later which commit, which index or which model it describes.
     """
-    from app.validation.validators import numeric_grounding_validator as grounding
+    import subprocess
+
+    from config import settings
+
+    def _git(*args: str) -> str:
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=HARNESS_ROOT, capture_output=True, text=True, timeout=10
+            ).stdout.strip()
+        except Exception:
+            return ""
+
+    return {
+        "harness_commit": _git("rev-parse", "HEAD"),
+        "harness_dirty": bool(_git("status", "--porcelain")),
+        "fixture_sha256": fixture_hash,
+        "opensearch_index": getattr(settings, "OPENSEARCH_INDEX", ""),
+        "bedrock_model_id": getattr(settings, "BEDROCK_MODEL_ID", ""),
+        "chunk_profile": getattr(settings, "ADMIN_INGESTION_CHUNK_PROFILE", ""),
+        "generation_pointer_enabled": bool(
+            getattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+        ),
+    }
+
+
+def _select(cases: list[dict[str, Any]], wanted: list[str]) -> list[dict[str, Any]]:
+    """Restrict to named cases, refusing a name that is not in the fixture.
+
+    A pilot has to be chosen, not taken from the top of the file. The first six
+    turns of this fixture are scope refusals, which carry no figures at all and
+    would measure a grounding rule against answers that contain nothing for it
+    to judge.
+    """
+    if not wanted:
+        return cases
+    by_id = {case["id"]: case for case in cases}
+    missing = [identifier for identifier in wanted if identifier not in by_id]
+    if missing:
+        raise SystemExit(f"--case names not in the fixture: {missing}")
+    return [by_id[identifier] for identifier in wanted]
+
+
+def _load_checkpoint(path: Path) -> tuple[list[dict[str, Any]], set[tuple[str, int]]]:
+    """Resume: the turns already captured, and the case-attempts that finished.
+
+    A case-attempt is only complete when its final turn was recorded, so an
+    interruption part-way through a conversation is redone rather than left as
+    a half-captured chain that would be scored as though it were whole.
+    """
+    if not path.exists():
+        return [], set()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    records = list(payload.get("runs") or [])
+    done = {
+        (str(record["id"]), int(record["attempt"]))
+        for record in records
+        if record.get("is_final_turn")
+    }
+    # Discard partial chains so they are captured again in full.
+    kept = [
+        record
+        for record in records
+        if (str(record["id"]), int(record["attempt"])) in done
+    ]
+    return kept, done
+
+
+def freeze(
+    fixture: Path,
+    repeat: int,
+    max_turns: int,
+    checkpoint: Path,
+    cases_wanted: list[str],
+    resume: bool,
+) -> dict[str, Any]:
+    """Capture what numeric repair was given, per turn, with resume.
+
+    Every turn is recorded as it happens, from a hook the orchestrator calls at
+    the boundary immediately before repair. That is the input two repair rules
+    have to be compared over. Reading the pipeline's final response instead
+    would sample something else: nine steps run between generation and repair,
+    and more run after it.
+
+    Grounding is NOT disabled. Every safeguard runs exactly as in production;
+    the hook only observes, and its return value is discarded.
+
+    The checkpoint is written after each turn, so an interruption keeps the
+    turns already paid for, including the earlier turns of a conversation.
+    """
+    from app.orchestrator import chat_orchestrator
     import scripts.run_benchmark as benchmark
     import scripts.run_retrieval_canary as canary
 
     cases, fixture_hash = benchmark.load_fixture(fixture)
+    cases = _select(cases, cases_wanted)
 
-    original = grounding.unsupported_numeric_claims
-    grounding.unsupported_numeric_claims = lambda answer, documents: []
-    records: list[dict[str, Any]] = []
+    records, completed = _load_checkpoint(checkpoint) if resume else ([], set())
+    if records:
+        print(json.dumps({"resumed_turns": len(records), "completed": len(completed)}))
+
+    provenance = _provenance(fixture_hash)
     executed = 0
+    state: dict[str, Any] = {}
+
+    def _write() -> None:
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint.write_text(
+            json.dumps(
+                {
+                    "provenance": provenance,
+                    "fixture_sha256": fixture_hash,
+                    "turns_captured": len(records),
+                    "captured_at_boundary": "pre_numeric_repair",
+                    "runs": records,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    def _hook(answer: str, documents: list[Any], correlation_id: str) -> None:
+        """One record per turn, written immediately."""
+        records.append(
+            {
+                "id": state["id"],
+                "attempt": state["attempt"],
+                "turn_index": state["turn_index"],
+                "is_final_turn": False,
+                "correlation_id": correlation_id,
+                "language": state["language"],
+                "country": state["country"],
+                "answer": answer,
+                "expected": state["expected_by_turn"].get(state["turn_index"], {}),
+                "documents": [
+                    {
+                        "content": str(getattr(document, "content", "") or ""),
+                        "title": str(getattr(document, "title", "") or ""),
+                        "country": str(getattr(document, "country", "") or ""),
+                        "section_id": str(
+                            (getattr(document, "metadata", {}) or {}).get("section_id") or ""
+                        ),
+                    }
+                    for document in documents
+                ],
+            }
+        )
+        state["turn_index"] += 1
+        _write()
+
+    original_hook = chat_orchestrator.pre_repair_capture_hook
+    chat_orchestrator.pre_repair_capture_hook = _hook
     try:
         for sequence, case in enumerate(cases, start=1):
             turns = _turns(case)
-            if max_turns and executed + len(turns) * repeat > max_turns:
-                break
             for attempt in range(repeat):
-                run = canary.run_pipeline_capture(case, sequence * 100 + attempt)
-                response = run.response
-                documents = run.retrieval.documents if run.retrieval else []
-                executed += len(turns)
-                records.append(
+                if (case["id"], attempt) in completed:
+                    continue
+                if max_turns and executed + len(turns) > max_turns:
+                    return _finish(records, provenance, fixture_hash, executed, "max_turns reached")
+                state.clear()
+                state.update(
                     {
-                        "id": case.get("id"),
+                        "id": case["id"],
                         "attempt": attempt,
-                        "turns": len(turns),
+                        "turn_index": 0,
                         "language": case.get("language", ""),
                         "country": case.get("country", ""),
-                        # Pre-repair, because grounding is neutralised above.
-                        "answer": response.answer or "",
-                        "abstained": bool((response.metadata or {}).get("fallback")),
-                        "citations": [
-                            {
-                                "section": str((citation or {}).get("section") or ""),
-                                "country": str((citation or {}).get("country") or ""),
-                            }
-                            for citation in (response.citations or [])
-                        ],
-                        # The final turn's expectations, which is what the
-                        # answer is judged against.
-                        "expected": _expectations(turns[-1]["expected"]),
-                        "documents": [
-                            {
-                                "content": str(getattr(document, "content", "") or ""),
-                                "title": str(getattr(document, "title", "") or ""),
-                                "country": str(getattr(document, "country", "") or ""),
-                                "section_id": str(
-                                    (getattr(document, "metadata", {}) or {}).get("section_id") or ""
-                                ),
-                            }
-                            for document in documents
-                        ],
+                        "expected_by_turn": {
+                            index: _expectations(turn["expected"])
+                            for index, turn in enumerate(turns)
+                        },
                     }
                 )
-                payload = {
-                    "fixture_sha256": fixture_hash,
-                    "turn_executions": executed,
-                    "grounding_neutralised": True,
-                    "runs": records,
-                }
-                checkpoint.parent.mkdir(parents=True, exist_ok=True)
-                checkpoint.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                canary.run_pipeline_capture(case, sequence * 100 + attempt)
+                executed += state["turn_index"]
+                # The chain is whole only now. Marking the last captured turn
+                # is what lets resume tell a finished conversation from one
+                # that was interrupted half way through.
+                for record in reversed(records):
+                    if (record["id"], record["attempt"]) == (case["id"], attempt):
+                        record["is_final_turn"] = True
+                        break
+                _write()
     finally:
-        grounding.unsupported_numeric_claims = original
+        chat_orchestrator.pre_repair_capture_hook = original_hook
 
+    return _finish(records, provenance, fixture_hash, executed, "complete")
+
+
+def _finish(
+    records: list[dict[str, Any]],
+    provenance: dict[str, Any],
+    fixture_hash: str,
+    executed: int,
+    status: str,
+) -> dict[str, Any]:
     return {
+        "provenance": provenance,
         "fixture_sha256": fixture_hash,
-        "turn_executions": executed,
-        "grounding_neutralised": True,
+        "turns_captured": len(records),
+        "turns_executed_this_run": executed,
+        "status": status,
+        "captured_at_boundary": "pre_numeric_repair",
         "runs": records,
     }
 
@@ -377,9 +507,18 @@ def score(frozen_path: Path, app_root: Path) -> dict[str, Any]:
     return {
         "frozen": str(frozen_path),
         "app_root": str(app_root.resolve()),
+        "provenance": payload.get("provenance", {}),
         "validator_loaded_from": str(loaded_from),
-        "totals": {
-            "runs": len(per_run),
+        # Two blocks, not one, because they answer different questions and
+        # only the first is isolated. Repair is a pure function of this frozen
+        # input, so its numbers differ between arms only because the rule
+        # differs. Answer quality describes the captured answers themselves,
+        # which the arm being scored did not produce - it is the same for both
+        # arms by construction, and it is here to characterise the sample, not
+        # to compare arms. Mixing them invites reading a fixed number as a
+        # result.
+        "repair": {
+            "turns": len(per_run),
             "figures_removed": sum(len(run["removed"]) for run in per_run),
             "removed_and_present_in_evidence": sum(
                 len(run["removed_and_present_in_evidence"]) for run in per_run
@@ -387,12 +526,24 @@ def score(frozen_path: Path, app_root: Path) -> dict[str, Any]:
             "removed_and_absent_from_evidence": sum(
                 len(run["removed_and_absent_from_evidence"]) for run in per_run
             ),
-            "runs_missing_required_text": sum(1 for run in per_run if run["missing_required_text"]),
-            "runs_with_forbidden_text": sum(1 for run in per_run if run["present_forbidden_text"]),
-            "runs_with_uncited_required_section": sum(
+        },
+        "answer_quality_of_the_frozen_sample": {
+            "turns": len(per_run),
+            "turns_missing_required_text": sum(
+                1 for run in per_run if run["missing_required_text"]
+            ),
+            "turns_with_forbidden_text": sum(
+                1 for run in per_run if run["present_forbidden_text"]
+            ),
+            "turns_with_uncited_required_section": sum(
                 1 for run in per_run if run["uncited_required_sections"]
             ),
             "abstentions": sum(1 for run in per_run if run["abstained"]),
+            "note": (
+                "Captured before repair, so this characterises the sample. It "
+                "does not measure either arm, and full answer and citation "
+                "quality per arm needs the separate end-to-end run."
+            ),
         },
         "qualification": (
             "Every count here is mechanical. 'present in evidence' means the "
@@ -444,8 +595,12 @@ def compare(first: Path, second: Path) -> dict[str, Any]:
             )
 
     return {
-        "first": {"arm": left.get("validator_loaded_from"), "totals": left["totals"]},
-        "second": {"arm": right.get("validator_loaded_from"), "totals": right["totals"]},
+        "first": {"arm": left.get("validator_loaded_from"), "repair": left["repair"]},
+        "second": {"arm": right.get("validator_loaded_from"), "repair": right["repair"]},
+        "provenance": {
+            "first": left.get("provenance", {}),
+            "second": right.get("provenance", {}),
+        },
         "changed_decisions": changed,
         "note": (
             "Each changed decision is unreviewed until a person opens the section "
@@ -471,6 +626,17 @@ def main() -> int:
         type=int,
         default=0,
         help="Stop before exceeding this many turn executions. 0 means no bound.",
+    )
+    parser.add_argument(
+        "--case",
+        action="append",
+        default=[],
+        help="Case id to include. Repeatable. A pilot is chosen, not taken from the top.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue an existing capture. Required to write to a file that exists.",
     )
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument(
@@ -510,16 +676,44 @@ def main() -> int:
                 )
             )
             return 2
+        if args.freeze.exists() and not args.resume:
+            print(
+                json.dumps(
+                    {
+                        "status": "refused",
+                        "reason": (
+                            f"{args.freeze} already exists. Pass --resume to continue it, "
+                            "or choose another path. Overwriting a capture destroys turns "
+                            "that were paid for."
+                        ),
+                    },
+                    indent=2,
+                )
+            )
+            return 2
         if args.load_ssm:
             from services.aws_clients import init_aws_clients
 
             init_aws_clients()
-        payload = freeze(args.fixture, args.repeat, args.max_turns, args.freeze)
+        payload = freeze(
+            args.fixture,
+            args.repeat,
+            args.max_turns,
+            args.freeze,
+            args.case,
+            args.resume,
+        )
         args.freeze.parent.mkdir(parents=True, exist_ok=True)
         args.freeze.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(
             json.dumps(
-                {"status": "frozen", "turn_executions": payload["turn_executions"]}, indent=2
+                {
+                    "status": payload["status"],
+                    "turns_captured": payload["turns_captured"],
+                    "turns_executed_this_run": payload["turns_executed_this_run"],
+                    "provenance": payload["provenance"],
+                },
+                indent=2,
             )
         )
         return 0
@@ -535,7 +729,10 @@ def main() -> int:
             json.dumps(
                 {
                     "validator_loaded_from": result["validator_loaded_from"],
-                    "totals": result["totals"],
+                    "repair": result["repair"],
+                    "answer_quality_of_the_frozen_sample": result[
+                        "answer_quality_of_the_frozen_sample"
+                    ],
                     "qualification": result["qualification"],
                 },
                 indent=2,

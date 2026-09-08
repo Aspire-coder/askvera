@@ -191,6 +191,14 @@ OFFICE_CONTACT_LOOKUP_QUERY = "What is the office phone number, email address, a
 OFFICE_CONTACT_FIELD_RE = re.compile(r"phone|telephone|email|e-mail", re.IGNORECASE)
 
 
+# Set only by scripts/run_grounding_comparison.py, in its own process, to
+# record what numeric repair was given. Left as None everywhere else, checked
+# with `is not None` so no import or configuration can switch it on by
+# accident, and wrapped in try/except at the call site so a measurement
+# harness can never affect a served answer.
+pre_repair_capture_hook = None
+
+
 class ConsentRequiredError(Exception):
     """Raised when a chat request has not accepted the current legal terms."""
 
@@ -1987,6 +1995,25 @@ class AIOrchestrator:
         # Recorded before any repair attempt, so ValidationHealth reflects what
         # the model produced rather than what repair rescued.
         record_validation_outcome(has_critical=result.has_critical())
+        # The boundary a repair-only comparison has to sample: the exact text
+        # and evidence that numeric repair is about to see. Nine steps run
+        # between generation and here and several of them delete text, so the
+        # final response is not this string, and neither is the model's raw
+        # output. Comparing two repair rules needs THIS one.
+        #
+        # None in every normal process. Only an isolated measurement process
+        # sets it, it cannot change the answer - the return value is discarded
+        # and every later safeguard runs unchanged - and a failure inside it is
+        # logged rather than raised.
+        if pre_repair_capture_hook is not None:
+            try:
+                pre_repair_capture_hook(
+                    chat_response.answer or "",
+                    (retrieval_result.documents if retrieval_result else []),
+                    correlation_id,
+                )
+            except Exception:
+                LOGGER.exception("pre_repair_capture_hook_failed", correlation_id=correlation_id)
         if result.has_critical():
             critical_codes = {
                 str(issue.code).upper()

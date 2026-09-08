@@ -166,26 +166,26 @@ def test_preflight_counts_turns_not_cases(capsys) -> None:
 def test_a_missing_required_fact_is_counted(tmp_path) -> None:
     result = _score(tmp_path, [_run(answer="Delivery is charged separately.")])
 
-    assert result["totals"]["runs_missing_required_text"] == 1
+    assert result["answer_quality_of_the_frozen_sample"]["turns_missing_required_text"] == 1
 
 
 def test_forbidden_text_is_counted(tmp_path) -> None:
     result = _score(tmp_path, [_run(answer="Delivery is free of charge.")])
 
-    assert result["totals"]["runs_with_forbidden_text"] == 1
+    assert result["answer_quality_of_the_frozen_sample"]["turns_with_forbidden_text"] == 1
 
 
 def test_a_wrong_citation_is_counted(tmp_path) -> None:
     """Citing something is not citing the governing section."""
     result = _score(tmp_path, [_run(citations=[{"section": "unrelated-9", "country": "DZ"}])])
 
-    assert result["totals"]["runs_with_uncited_required_section"] == 1
+    assert result["answer_quality_of_the_frozen_sample"]["turns_with_uncited_required_section"] == 1
 
 
 def test_no_citation_at_all_is_counted(tmp_path) -> None:
     result = _score(tmp_path, [_run(citations=[])])
 
-    assert result["totals"]["runs_with_uncited_required_section"] == 1
+    assert result["answer_quality_of_the_frozen_sample"]["turns_with_uncited_required_section"] == 1
 
 
 def test_citations_are_not_scored_where_the_case_does_not_require_them(tmp_path) -> None:
@@ -193,17 +193,18 @@ def test_citations_are_not_scored_where_the_case_does_not_require_them(tmp_path)
     expected = dict(EXPECTED, must_cite=False)
     result = _score(tmp_path, [_run(citations=[], expected=expected)])
 
-    assert result["totals"]["runs_with_uncited_required_section"] == 0
+    assert result["answer_quality_of_the_frozen_sample"]["turns_with_uncited_required_section"] == 0
 
 
 def test_a_correct_answer_scores_clean(tmp_path) -> None:
     """The control. Without it every metric above could be counting everything."""
-    totals = _score(tmp_path, [_run()])["totals"]
+    result = _score(tmp_path, [_run()])
 
-    assert totals["figures_removed"] == 0
-    assert totals["runs_missing_required_text"] == 0
-    assert totals["runs_with_forbidden_text"] == 0
-    assert totals["runs_with_uncited_required_section"] == 0
+    assert result["repair"]["figures_removed"] == 0
+    quality = result["answer_quality_of_the_frozen_sample"]
+    assert quality["turns_missing_required_text"] == 0
+    assert quality["turns_with_forbidden_text"] == 0
+    assert quality["turns_with_uncited_required_section"] == 0
 
 
 # --- labels ---------------------------------------------------------------
@@ -221,8 +222,8 @@ def test_a_removed_figure_present_in_the_evidence_is_not_labelled_correct(
     """
     result = _score(tmp_path, [_run(answer="Standard delivery costs 900 EUR.")])
 
-    assert result["totals"]["removed_and_present_in_evidence"] == 1
-    assert "correct" not in str(result["totals"])
+    assert result["repair"]["removed_and_present_in_evidence"] == 1
+    assert "correct" not in str(result["repair"])
     assert "only source adjudication can" in result["qualification"]
 
 
@@ -234,7 +235,7 @@ def test_every_changed_decision_is_marked_unreviewed(tmp_path) -> None:
             {
                 "frozen": "f",
                 "validator_loaded_from": "/a/validator.py",
-                "totals": {},
+                "repair": {},
                 "runs": [{"id": "x", "attempt": 0, "removed": [], "removed_and_present_in_evidence": []}],
             }
         ),
@@ -245,7 +246,7 @@ def test_every_changed_decision_is_marked_unreviewed(tmp_path) -> None:
             {
                 "frozen": "f",
                 "validator_loaded_from": "/b/validator.py",
-                "totals": {},
+                "repair": {},
                 "runs": [
                     {
                         "id": "x",
@@ -313,7 +314,7 @@ def test_comparing_an_arm_with_itself_is_refused(tmp_path) -> None:
     scored = tmp_path / "arm.json"
     scored.write_text(
         json.dumps(
-            {"frozen": "f", "validator_loaded_from": "/a/validator.py", "totals": {}, "runs": []}
+            {"frozen": "f", "validator_loaded_from": "/a/validator.py", "repair": {}, "runs": []}
         ),
         encoding="utf-8",
     )
@@ -327,11 +328,11 @@ def test_comparing_across_different_frozen_sets_is_refused(tmp_path) -> None:
     first = tmp_path / "first.json"
     second = tmp_path / "second.json"
     first.write_text(
-        json.dumps({"frozen": "a", "validator_loaded_from": "/a.py", "totals": {}, "runs": []}),
+        json.dumps({"frozen": "a", "validator_loaded_from": "/a.py", "repair": {}, "runs": []}),
         encoding="utf-8",
     )
     second.write_text(
-        json.dumps({"frozen": "b", "validator_loaded_from": "/b.py", "totals": {}, "runs": []}),
+        json.dumps({"frozen": "b", "validator_loaded_from": "/b.py", "repair": {}, "runs": []}),
         encoding="utf-8",
     )
 
@@ -344,3 +345,24 @@ def test_scoring_reports_the_file_the_validator_actually_loaded(tmp_path) -> Non
     result = _score(tmp_path, [_run()])
 
     assert result["validator_loaded_from"].endswith("numeric_grounding_validator.py")
+
+
+def test_repair_results_are_reported_separately_from_answer_quality(tmp_path) -> None:
+    """They answer different questions and only one is isolated.
+
+    Repair is a pure function of the frozen input, so it differs between arms
+    only because the rule differs. Answer quality describes the captured
+    sample, which neither arm produced - it is identical for both by
+    construction. One combined block invites reading a fixed number as a
+    result.
+    """
+    result = _score(tmp_path, [_run()])
+
+    assert set(result["repair"]) == {
+        "turns",
+        "figures_removed",
+        "removed_and_present_in_evidence",
+        "removed_and_absent_from_evidence",
+    }
+    assert "note" in result["answer_quality_of_the_frozen_sample"]
+    assert "does not measure either arm" in result["answer_quality_of_the_frozen_sample"]["note"]

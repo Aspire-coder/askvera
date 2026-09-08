@@ -53,6 +53,41 @@ loaded the same file, or if they scored different frozen sets.
 Arm 3 stays separate: it changes stored data rather than behaviour, and the
 heading-carrying fix and the attribution rule can be adopted independently.
 
+## The pilot, chosen rather than taken from the top
+
+The first six turns in fixture order are **five scope refusals and one
+answer**. A grounding rule judged against refusals is measured on answers that
+contain nothing for it to judge, so `--max-turns 6` alone would have produced a
+result about nothing.
+
+Six answerable numeric cases, chosen to cover the mechanisms the rule touches:
+
+| Case | Why it is in the pilot |
+|---|---|
+| `algeria-delivery-cost` | 900 DZD; a unit adjacent to the figure, the dominant shape in this corpus |
+| `reunion-delivery-cost` | `6EUR`, unit glued to the digits |
+| `france-minimum-order` | `150EUR` glued, in a record naming two currencies |
+| `algeria-repeat-order-minimum` | `5 000 DZD`, grouped thousands |
+| `dk-fbo-support-fee-scope` | a Nordic market whose documents are byte-identical across DK/SE/NO/FI |
+| `algeria-existing-fbo-order-minimum-role` | role-conditioned, and never validated live |
+
+Six single-turn cases, so 6 turns per repeat.
+
+```bash
+python scripts/run_grounding_comparison.py --freeze out/frozen.json --load-ssm \
+    --i-have-approval-for-paid-model-calls --max-turns 18 --repeat 3 \
+    --case algeria-delivery-cost \
+    --case reunion-delivery-cost \
+    --case france-minimum-order \
+    --case algeria-repeat-order-minimum \
+    --case dk-fbo-support-fee-scope \
+    --case algeria-existing-fbo-order-minimum-role
+```
+
+Start with `--repeat 1 --max-turns 6`, read the actual cost, then decide
+whether to continue. `--resume` continues the same file; without it the harness
+refuses to write over an existing capture.
+
 ## Commands
 
 ```bash
@@ -60,8 +95,9 @@ git worktree add ../askvera-main main
 
 python scripts/run_grounding_comparison.py --preflight
 
+# paid, bounded, resumable - see the pilot above for the case list
 python scripts/run_grounding_comparison.py --freeze out/frozen.json --load-ssm \
-    --i-have-approval-for-paid-model-calls --max-turns 6
+    --i-have-approval-for-paid-model-calls --max-turns 6 --repeat 1 --case ...
 
 python scripts/run_grounding_comparison.py --score out/frozen.json \
     --app-root ../askvera-main --out out/main.json
@@ -70,46 +106,98 @@ python scripts/run_grounding_comparison.py --score out/frozen.json \
 python scripts/run_grounding_comparison.py --compare out/main.json out/candidate.json
 ```
 
-## Size, and why the first estimate was wrong
+## What is captured, and where
+
+At the boundary immediately before numeric repair, through a hook the
+orchestrator calls there. That is the input two repair rules must be compared
+over.
+
+It is deliberately **not** the pipeline's final response, and not the model's
+raw output either. Nine steps run between generation and repair and more run
+after it - restoration, formatting, governance - so the final response is a
+different string, and an earlier version of this harness that read it would
+have compared the wrong thing. Grounding is **not** disabled during capture:
+every safeguard runs as in production and the hook only observes. The hook is
+`None` in every process that does not install it.
+
+## Checkpointing and resume, accurately
+
+One record per turn, written the moment that turn is captured. A conversation's
+earlier turns survive an interruption, with their own expectations, so they can
+be adjudicated rather than paid for and discarded.
+
+A case-attempt is marked complete only when its final turn is recorded.
+`--resume` skips completed case-attempts and **discards partial chains so they
+are captured again in full** - a half-captured conversation scored as though it
+were whole would be a silent wrong answer.
+
+## Size
 
 The fixture is **17 cases but 19 turns**: `belgium-then-germany-market-continuity`
 replays two prior turns and then asks its own question, so it costs three
 executions. An earlier estimate counted cases and called them calls.
 
-Freezing is one arm, not two — that is the point of the repair-only design:
-
-| | turns | × repeat 3 | 
+| | turns | × repeat 3 |
 |---|---:|---:|
-| freeze (one arm) | 19 | **57 turn executions** |
-| end-to-end, later, two arms | 19 | 114 turn executions |
+| full fixture, freeze (one arm) | 19 | 57 turn executions |
+| the pilot above, freeze (one arm) | 6 | **18 turn executions** |
+| end-to-end, later, two arms, full fixture | 19 | 114 turn executions |
 
-**A turn is not one paid call.** Routing, planning, evidence selection,
-generation, retries and repair may each call a model. Treat 57 as a lower
-bound on calls, not an estimate of them.
+57 is correct for one full three-repeat freeze. It counts turns, not model
+calls.
 
-I do not have Bedrock rates and cannot give a figure. Measure it instead:
+## Cost, and why a turn limit is not a budget
 
-1. `--preflight` — free, confirms the counts.
-2. `--freeze --max-turns 6 --repeat 1` — a handful of turns. Read the real
-   cost from CloudWatch or the Bedrock console before continuing.
-3. Multiply, decide, then run the rest with `--max-turns` set to that decision.
+`--max-turns` bounds workload. It does not bound dollars, because one turn is
+several model calls. Stages that may call a model, per turn:
 
-A checkpoint is written after every turn, so an interrupted run keeps what it
-paid for and the bound is real rather than nominal.
+| Stage | Always? |
+|---|---|
+| query embedding for vector search | yes |
+| LLM query planner (`_planned_retrieval_plan`) | when planning is enabled |
+| LLM evidence selector (`_select_evidence_rows`) | when there are rows to select |
+| global-document query translation (`_global_search_query`) | non-English or global scope |
+| conversation intent verification (`_verified_conversation_intent`) | follow-up turns |
+| answer generation (`BedrockProvider.generate`) | yes |
+| candidate narrowing / guardrail rephrasing | only under candidate flags |
+| generation retry | on a failed validation |
+
+So a 6-turn pilot is **at least** 12 model calls and plausibly 25-40. I do not
+have Bedrock rates and will not invent a figure. The order to establish it:
+
+1. `--preflight` - free.
+2. `--repeat 1 --max-turns 6` on the pilot list.
+3. Read actual spend from the Bedrock console or CloudWatch for that window.
+4. Multiply by the remaining turns, decide, then continue with `--resume`.
+
+## Provenance
+
+Every capture records the harness commit, whether the tree was dirty, the
+fixture hash, the OpenSearch index, the model id, the chunk profile and the
+generation-pointer flag. Scored arms carry it through, and `--compare` reports
+both. A result that cannot be tied to the code and index that produced it is
+not evidence of anything.
 
 ## Metrics
 
 Every count is mechanical. None of them labels a figure correct or invented.
+
+Reported in two blocks, because only one of them compares arms.
+
+**`repair`** - a pure function of the frozen input, so it differs between arms
+only because the rule differs. This is the comparison.
 
 | Metric | What it counts |
 |---|---|
 | `figures_removed` | figures this arm's rule removed |
 | `removed_and_present_in_evidence` | of those, the ones whose string occurs in a retrieved section |
 | `removed_and_absent_from_evidence` | of those, the ones that do not occur at all |
-| `runs_missing_required_text` | the answer lost a fact the case requires |
-| `runs_with_forbidden_text` | the answer contains something the case forbids |
-| `runs_with_uncited_required_section` | the governing section was not cited, where the case requires citation |
-| `abstentions` | the arm refused to answer |
+
+**`answer_quality_of_the_frozen_sample`** - missing required text, forbidden
+text, uncited governing sections, abstentions. These describe the captured
+answers, which neither arm produced, so they are **identical for both arms by
+construction**. They characterise the sample; they do not compare anything.
+Full answer and citation quality per arm needs the separate end-to-end run.
 
 **"Present in evidence" is not "was correct".** The dry run makes this
 concrete: for the answer *"Standard delivery costs 900 EUR"* against a source

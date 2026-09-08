@@ -56,11 +56,21 @@ version of this note said restricting it would block all automatic ingestion:
 that was wrong. It withholds **activation**, not ingestion - the document is
 still uploaded, extracted, indexed as staging and queued for review.
 
-**Operational impact, stated plainly.** With
-`ADMIN_INGESTION_GENERATION_POINTER_ENABLED` off, no document reaches readers
-by any route. Uploads work. Review works. Publication is refused on both paths.
-Enabling the pointer restores publication on both and is the intended fix - it
-is a deployment change nobody in this repository can make.
+**Operational impact, stated precisely.** With
+`ADMIN_INGESTION_GENERATION_POINTER_ENABLED` off, **new** publication is
+withheld: uploads work, extraction works, review works, and nothing new
+activates by either route.
+
+**Documents already published stay published.** Nothing here retires,
+deletes or hides existing content, and with the pointer disabled retrieval
+applies no generation filter at all - so what readers can already reach is
+exactly what they could reach before. What is withheld is a *new* version
+becoming visible, which means a market can sit on a superseded document until
+the flag is enabled. That is a staleness risk, not an availability one, and it
+is the reason to enable the pointer promptly rather than to leave it off.
+
+Enabling it restores publication on both paths and is the intended fix - a
+deployment change nobody in this repository can make.
 
 The destructive call itself, `_older_source_actions`, is no longer imported by
 `services/knowledge_ingestion.py` at all, so neither path can reach it.
