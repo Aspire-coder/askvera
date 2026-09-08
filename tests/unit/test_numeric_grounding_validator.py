@@ -1036,3 +1036,54 @@ def test_removal_diagnostics_separates_invention_from_a_matching_failure() -> No
     for number, present in by_number.items():
         if number != "249":
             assert present is True, f"{number} is in the record but reported absent"
+
+
+def test_a_trailing_zero_does_not_make_a_figure_ungrounded() -> None:
+    """Found by the first live benchmark run, not by a unit test.
+
+    The Algeria record states "Delivery Cost: 900 DZD ($7.5)". The model wrote
+    "$7.50" and the whole answer was discarded as an ungrounded numeric claim.
+    Retrieval was correct, the record was correct, the figure was correct; only
+    the formatting differed by one character.
+    """
+    source = "Forever Algeria. Delivery Cost: 900 DZD ($7.5). Minimum order size FBO: 0,200CC."
+    context = _context(
+        "The delivery cost for orders in Algeria is 900 DZD (approximately $7.50).",
+        source,
+        {"directory_section": "sponsoring", "access_scope": "global"},
+    )
+    result = ValidationResult()
+    NumericGroundingValidator().validate(context, result)
+
+    assert not result.has_critical()
+    assert remove_unsupported_numeric_sentences(
+        context.chat_response.answer, context.retrieval_result.documents
+    )[1] == []
+
+
+def test_a_different_figure_is_still_ungrounded() -> None:
+    """Zero-tolerance must not become value-tolerance."""
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "The delivery cost for orders in Algeria is 900 DZD ($8.20).",
+            "Forever Algeria. Delivery Cost: 900 DZD ($7.5).",
+            {"directory_section": "sponsoring", "access_scope": "global"},
+        ),
+        result,
+    )
+    assert result.has_critical()
+
+
+def test_a_thousands_group_is_not_reduced_to_its_leading_digit() -> None:
+    """"1.000" may mean one thousand, so it must never match a source saying "1".
+
+    Trailing zeros are stripped only while a fractional digit remains, so the
+    shortest form reachable is "1.0".
+    """
+    from app.validation.validators.numeric_grounding_validator import _number_variants
+
+    variants = _number_variants("1.000")
+    assert "1.0" in variants
+    assert "1" not in variants
+    assert "1," not in variants and "1." not in variants
