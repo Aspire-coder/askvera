@@ -126,7 +126,18 @@ def main() -> int:
                         "terms": {"field": "country", "size": 100},
                         "aggs": {"types": {"terms": {"field": "document_type", "size": 20}}},
                     },
-                    "documents": {"terms": {"field": "source_file", "size": 100}},
+                    "documents": {
+                        "terms": {"field": "source_file", "size": 100},
+                        # Date-scope protection keys off effective_date and
+                        # document_version. A document carrying neither answers
+                        # a question about a past year normally, while an
+                        # otherwise identical document that has them refuses it
+                        # as a period not covered. Sizing that needs the counts.
+                        "aggs": {
+                            "dated": {"filter": {"exists": {"field": "effective_date"}}},
+                            "versioned": {"filter": {"exists": {"field": "document_version"}}},
+                        },
+                    },
                 },
             },
         )
@@ -146,9 +157,19 @@ def main() -> int:
                 for bucket in aggregations.get("countries", {}).get("buckets", [])
             ],
             "by_document": [
-                {"source_file": bucket["key"], "sections": bucket["doc_count"]}
+                {
+                    "source_file": bucket["key"],
+                    "sections": bucket["doc_count"],
+                    "dated_sections": bucket.get("dated", {}).get("doc_count", 0),
+                    "versioned_sections": bucket.get("versioned", {}).get("doc_count", 0),
+                }
                 for bucket in aggregations.get("documents", {}).get("buckets", [])
             ],
+            "undated_documents": sorted(
+                bucket["key"]
+                for bucket in aggregations.get("documents", {}).get("buckets", [])
+                if bucket.get("dated", {}).get("doc_count", 0) == 0
+            ),
         }, indent=2, ensure_ascii=False))
         return 0
     if total == 0:
