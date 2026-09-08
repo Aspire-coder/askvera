@@ -327,6 +327,13 @@ def _directory_field_value(text: str) -> str:
     Across line breaks, because the PDF wraps mid-field and stopping at the
     newline delivered "...yet a newly sponsored." to a reader. Not across a
     sentence boundary or a bullet, because that is the next field.
+
+    Fixed for the tested cases, not solved in general. Capitalization and
+    punctuation are heuristics: an abbreviation followed by a capitalised word
+    ("Ref. Number 830") still ends the field early, a sentence that begins in
+    lower case does not end it, and languages that punctuate differently are
+    untested. Those are known limits, recorded rather than papered over; the
+    length guard is what keeps the damage to "declined" rather than "truncated".
     """
     end = len(text)
     sentence = _FIELD_SENTENCE_END_RE.search(text)
