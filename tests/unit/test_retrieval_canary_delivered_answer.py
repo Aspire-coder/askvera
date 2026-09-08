@@ -462,25 +462,24 @@ def test_the_cases_guarding_the_2026_09_08_fixes_can_stop_a_release():
         assert by_id[case_id].get("blocking", True) is True, case_id
 
 
-def test_a_case_for_an_unfixed_defect_stays_observed_only():
-    """algeria-minimum-order-delivered passes now, and still should not block.
+def test_the_algeria_case_now_blocks_and_is_still_sampled():
+    """It passed 5/5 on two consecutive deploys, after four separate fixes.
 
-    It first passed on 2026-09-08, once. The deploy immediately before it
-    failed with grounding repair removing four figures, and the only difference
-    between those two deploys was an added log field - same code, different
-    answer. The case is model-variable, so a single green run is one sample of
-    a distribution, and promoting on it would put the release gate at the mercy
-    of a coin flip.
+    Its history is why it stays repeated rather than dropping to a single run:
+    2/5, then 4/5, then 5/5 twice, as the minimum-order restorer, the trailing
+    zero, the range notation and the contact restoration were each fixed. A
+    case that moved that much should keep reporting its own stability.
 
-    It is repeated instead, so each deploy reports whether it is stable rather
-    than whether it got lucky. Promote once several consecutive deploys report
-    it neither failed nor flaky.
+    Three runs rather than five. A blocking case must pass every repeat, so the
+    repeat count multiplies the chance an ordinary variation rolls a deploy
+    back: at a true failure rate of 5%, five runs block 22.6% of deploys and
+    three block 14.3%. Ten clean runs bound that rate only loosely - the 95%
+    upper bound is around 26% - so the lower multiplier is the honest setting
+    until more runs accumulate.
     """
     cases, _ = canary.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json")
     case = next(c for c in cases if c["id"] == "algeria-minimum-order-delivered")
 
-    assert case["blocking"] is False
-    assert case["non_blocking_reason"].strip()
-    # Repetition is the whole point of leaving it observed: an unrepeated
-    # observed case tells us no more than the single run that misled us.
+    assert case["blocking"] is True
     assert case["repeat"] >= 3
+    assert "non_blocking_reason" not in case

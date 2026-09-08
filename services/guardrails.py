@@ -1,6 +1,7 @@
 """Guardrail pre-check and post-check logic."""
 
 import re
+from functools import lru_cache
 
 from config.guardrail_topics import DENIED_TOPICS
 from config.vera_persona import FALLBACK_RESPONSES
@@ -40,6 +41,35 @@ _NEGATION_RE = re.compile(
     r"disallow(?:s|ed)?|illegal|misleading|false)(?!\w)",
     re.IGNORECASE,
 )
+
+
+@lru_cache(maxsize=256)
+def _phrase_expression(phrase: str) -> re.Pattern[str]:
+    """Match a denied phrase and its ordinary inflections.
+
+    The list holds base forms, and an exact word-boundary match let every
+    inflection through. Measured on 2026-09-08: "Can I tell my customers that
+    Forever Aloe Vera Gel cures type 2 diabetes?" was answered rather than
+    refused, because the denied phrase is "cure" and the question says "cures".
+    "cured", "curing" and "treatments" were all equally invisible.
+
+    Short words are left literal, because inflecting a three-letter token
+    invites matches on unrelated words. A word ending in "e" drops it before
+    the suffix, so "cure" reaches "curing" rather than the non-word "cureing".
+    Every word of a phrase is inflected independently and the order is kept, so
+    "treat disease" also matches "treats diseases" without matching either word
+    on its own.
+    """
+    words = []
+    for word in phrase.split():
+        escaped = re.escape(word)
+        if len(word) < 4 or not word.isalpha():
+            words.append(escaped)
+        elif word.endswith("e"):
+            words.append(re.escape(word[:-1]) + r"(?:e|es|ed|ing)")
+        else:
+            words.append(escaped + r"(?:s|es|ed|ing)?")
+    return re.compile(r"(?<!\w)" + r"\s+".join(words) + r"(?!\w)", flags=re.IGNORECASE)
 
 
 def _is_denial(text: str, start: int) -> bool:
@@ -86,7 +116,7 @@ def _matched_phrase(topic: str, text: str, negation_aware: bool = False) -> str:
         return ""
     negation_aware = negation_aware and topic in {"income_claim", "medical_claim"}
     for pattern in DENIED_TOPICS[topic]:
-        expression = re.compile(r"(?<!\w)" + re.escape(pattern) + r"(?!\w)", flags=re.IGNORECASE)
+        expression = _phrase_expression(pattern)
         for found in expression.finditer(text):
             if negation_aware and _is_denial(text, found.start()):
                 continue
