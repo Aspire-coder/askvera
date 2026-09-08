@@ -438,6 +438,7 @@ class AIOrchestrator:
             body,
             correlation_id,
             allow_claim_topics=self._answer_explains_reviewed_policy(body, chat_response),
+            is_generated_answer=True,
         )
         if not governance_decision.allowed:
             return self._governance_fallback(
@@ -705,6 +706,7 @@ class AIOrchestrator:
             body,
             correlation_id,
             allow_claim_topics=self._answer_explains_reviewed_policy(body, chat_response),
+            is_generated_answer=True,
         )
         if not governance_decision.allowed:
             LOGGER.warning(
@@ -1182,6 +1184,7 @@ class AIOrchestrator:
         correlation_id: str,
         *,
         allow_claim_topics: bool = False,
+        is_generated_answer: bool = False,
     ) -> GovernanceDecision:
         """Run unified governance checks for input or output text."""
         return self.governance_engine.evaluate(
@@ -1191,6 +1194,7 @@ class AIOrchestrator:
             role=body.role,
             correlation_id=correlation_id,
             allow_claim_topics=allow_claim_topics,
+            is_generated_answer=is_generated_answer,
         )
 
     def _answer_explains_reviewed_policy(self, body: ChatRequest, chat_response: ChatResponse) -> bool:
