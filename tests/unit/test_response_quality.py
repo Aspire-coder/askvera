@@ -250,3 +250,31 @@ def test_every_answer_editing_step_is_named_in_the_diagnostic_flag_list():
     recorded = set(re.findall(r'\{"(\w+)":', source))
     missing = recorded - set(chat_orchestrator._ANSWER_EDIT_FLAGS)
     assert not missing, f"answer-editing flags missing from _ANSWER_EDIT_FLAGS: {sorted(missing)}"
+
+
+def test_an_undated_document_answers_a_past_year_that_a_dated_one_refuses():
+    """Missing effective_date silently disables date-scope protection.
+
+    Observed in the live corpus on 2026-09-08: DK-EN-Company-Policy.pdf and
+    SE-EN-Company-Policy.pdf hold byte-identical FBO Support fee text, but
+    Sweden's document carries effective_date 2026-07-01 and Denmark's carries
+    none. The same question about a past year is therefore refused as a period
+    not covered in one market and answered normally in the other, for the same
+    words.
+
+    This pins the mechanism so the divergence is understood as a metadata gap
+    rather than a retrieval bug when it is next seen in a log.
+    """
+    from types import SimpleNamespace
+
+    def document(version: str, effective: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            content="FBO Support fee: a monthly fee of up to 3 EUR deducted from the bonus.",
+            document_version=version,
+            metadata={"effective_date": effective, "expiry_date": "", "document_version": version},
+        )
+
+    question = "What was the FBO support fee in 2024?"
+
+    assert unsupported_requested_years(question, [document("2026-07", "2026-07-01")]) == [2024]
+    assert unsupported_requested_years(question, [document("", "")]) == []
