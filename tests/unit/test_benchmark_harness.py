@@ -55,6 +55,8 @@ def _run(**overrides) -> dict:
         "failure_layer": "",
         "removed_numeric_claims": [],
         "top_title": "UK Policy Manual",
+        "sections": ["4.2", "4.3"],
+        "cited_sections": ["4.2"],
         "confidence": 0.9,
         "input_tokens": 100,
         "output_tokens": 20,
@@ -137,6 +139,42 @@ def test_wrong_governing_source_is_reported_separately():
     assert "governing source not retrieved first" in scored["failures"][0]
 
 
+def test_required_sections_beat_a_title_match():
+    """One title covers every market, so a title match is not evidence.
+
+    The sponsoring directory is a single document holding every country's
+    record. "Retrieved the right document" is satisfied by the wrong market
+    entirely, which is the failure this benchmark exists to catch.
+    """
+    case = {**VALID_CASE, "expected": {**VALID_CASE["expected"], "required_sections": ["sponsoring-001-algeria"]}}
+    scored = benchmark.score_run(case, _run(sections=["sponsoring-053-belgium"]))
+    assert scored["retrieval_hit"] is False
+    assert "governing sections not retrieved" in scored["failures"][0]
+
+
+def test_citing_the_wrong_passage_fails_even_when_retrieval_found_it():
+    """Citation correctness, not citation count."""
+    case = {
+        **VALID_CASE,
+        "expected": {**VALID_CASE["expected"], "required_sections": ["4.2"], "must_cite": True},
+    }
+    scored = benchmark.score_run(case, _run(sections=["4.2"], cited_sections=["9.9"], citations=1))
+    assert scored["retrieval_hit"] is True
+    assert any("not cited" in failure for failure in scored["failures"])
+
+
+def test_a_case_naming_no_source_leaves_retrieval_unscored():
+    """An unscored run must not be averaged in as a success."""
+    scored = benchmark.score_run(VALID_CASE, _run())
+    assert scored["retrieval_hit"] is None
+
+    results = [{"id": "a", "intent_group": "g", "expected_kind": "answer", "runs_count": 1,
+                "passed_runs": 1, "runs": [scored]}]
+    summary = benchmark.summarise(results, None)
+    assert summary["retrieval_hit"] == "0/0 (n/a)"
+    assert summary["retrieval_unscored"] == 1
+
+
 def test_grounding_repair_damage_is_recorded_even_when_the_case_passes():
     """Repair silently edits an answer, so its firing must stay visible."""
     scored = benchmark.score_run(VALID_CASE, _run(removed_numeric_claims=["17.00"]))
@@ -148,7 +186,7 @@ def test_summary_states_denominators_and_flags_instability():
         {"id": "a", "intent_group": "directory", "expected_kind": "answer", "runs_count": 2,
          "passed_runs": 1, "runs": [_run() | {"passed": True, "retrieval_hit": True, "repair_damaged": False},
                                     _run() | {"passed": False, "retrieval_hit": True, "repair_damaged": False}]},
-    ]
+    ]  # noqa: E501
     summary = benchmark.summarise(results, {"input": 1.0, "output": 5.0})
     assert summary["correct"] == "1/2 (50.0%)"
     # A case that passes sometimes is not a passing case.
@@ -193,3 +231,48 @@ def test_canary_tuple_entry_point_still_matches_capture():
     )
     canary.run_pipeline_capture = lambda case, sequence: captured
     assert canary.run_pipeline_once({}, 1) == ("result", "text", 2, ["9"])
+
+
+def test_a_french_refusal_is_recognised_as_a_refusal():
+    """Matching English copy against a French answer invents failures.
+
+    A correct French refusal scored as a wrong answer would make every
+    non-English case report a failure the system did not commit, and the whole
+    point of the benchmark is covering markets beyond GB/English.
+    """
+    from app.evidence import localized_conversation_response
+
+    french = localized_conversation_response("insufficient_evidence", "fr") or ""
+    assert french, "French refusal copy is required for this test to mean anything"
+
+    assert benchmark._abstained(french, "fr") is True
+    # The same text must not be mistaken for an answer just because the
+    # English markers do not appear in it.
+    assert benchmark._abstained("Le montant minimum est de 2 CC.", "fr") is False
+
+
+def test_refusal_detection_covers_every_approved_way_of_declining():
+    """A refusal route missing from the list scores correct behaviour as failure."""
+    from app.evidence import localized_conversation_response
+
+    for key in benchmark._REFUSAL_KEYS:
+        copy = localized_conversation_response(key, "en")
+        assert copy, f"{key} has no approved English copy"
+        assert benchmark._abstained(copy, "en") is True, key
+
+
+def test_every_answerable_case_names_the_sections_it_depends_on():
+    """An answerable case without required_sections scores retrieval on nothing.
+
+    The sponsoring directory is a single document holding every market, so a
+    case that does not name its section cannot tell "found the right record"
+    from "found some other country's record in the same PDF" - which is the
+    failure this benchmark exists to catch.
+    """
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    answerable = [case for case in cases if case["expected"]["kind"] == "answer"]
+    assert answerable, "the fixture must contain answerable cases, not only refusals"
+    for case in answerable:
+        assert case["expected"].get("required_sections"), case["id"]
+        # Provenance has to name where the text came from, not just assert it.
+        assert "dump" in case["provenance"].lower() or "index" in case["provenance"].lower(), case["id"]

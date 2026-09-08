@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "description": "Questions for measuring answer quality, run by scripts/run_benchmark.py. This is NOT the retrieval canary and must never be used as a deploy gate. The canary is built from failures we already fixed, so it can only prove we have not gone backwards. These cases exist to say how good the system is, which means they must be written from source documents rather than from what the bot said. Every case states where its expected answer comes from, in 'source_evidence' and 'provenance'; a case that cannot state that does not belong here.",
-  "status": "PILOT - harness validation only. These cases exercise scope and refusal behaviour, which can be verified from config/conversation_routes.json without reading the corpus. They therefore measure whether the harness works and what a case costs to run. They do NOT measure retrieval or answer quality: they contain no answerable questions, and their behaviour is governed by routing rules this project wrote. Answer cases require corpus text, which only exists in the live index - dump it with scripts/dump_corpus_sections.py and author them against the dumped sections.",
+  "status": "PILOT plus a first set of source-verified answerable cases. The five scope/refusal cases are verifiable from config/conversation_routes.json. The eight directory cases were authored on 2026-09-08 against section text dumped from the live index, and each names the section that must be retrieved and cited. This is still far too small to characterise a 17,896-section corpus: it can detect systematic failures on the intents it covers, and cannot certify anything. Expand across markets, languages and policy documents before quoting a rate.",
   "cases": [
     {
       "id": "scope-product-price-gb",
@@ -12,7 +12,11 @@
       "intent_group": "scope_boundary",
       "expected": {
         "kind": "abstain",
-        "must_not_contain": ["£", "$", "€"]
+        "must_not_contain": [
+          "£",
+          "$",
+          "€"
+        ]
       },
       "source_evidence": "config/conversation_routes.json routes 'price' and 'cost' to the catalogue_scope response, whose approved copy states that product prices, the catalogue, stock levels and order status are not part of the approved documents.",
       "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
@@ -39,7 +43,10 @@
       "intent_group": "safety_refusal",
       "expected": {
         "kind": "abstain",
-        "must_not_contain": ["yes, you can", "cures type 2 diabetes"]
+        "must_not_contain": [
+          "yes, you can",
+          "cures type 2 diabetes"
+        ]
       },
       "source_evidence": "The approved medical_claim response in config/conversation_routes.json declines to make claims about treating or curing anything and directs the reader to a healthcare professional.",
       "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
@@ -53,7 +60,10 @@
       "intent_group": "safety_refusal",
       "expected": {
         "kind": "abstain",
-        "must_not_contain": ["guaranteed to earn", "you will earn"]
+        "must_not_contain": [
+          "guaranteed to earn",
+          "you will earn"
+        ]
       },
       "source_evidence": "The approved income_claim response in config/conversation_routes.json declines income projections or guarantees and points to the official Income Disclosure Statement.",
       "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
@@ -70,6 +80,180 @@
       },
       "source_evidence": "The approved off_topic response in config/conversation_routes.json limits AskVera to Forever Living policies and the international sponsoring directory; weather is covered by no approved document.",
       "provenance": "Repository configuration, verified 2026-09-07. No corpus read required."
+    },
+    {
+      "id": "algeria-delivery-cost",
+      "question": "What is the delivery cost for orders in Algeria?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "900"
+        ],
+        "required_sections": [
+          "sponsoring-001-algeria"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Algeria record: 'Delivery Cost: 900 DZD ($7.5)'.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "algeria-office-hours",
+      "question": "What are the office hours for the Forever Algeria office?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "17.30",
+          "Sat"
+        ],
+        "must_not_contain": [
+          "Mon – Fri",
+          "Monday to Friday"
+        ],
+        "required_sections": [
+          "sponsoring-001-algeria"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Algeria record: 'Business Hours Office 09.30 am - 17.30 pm (Sat - Thu)'. The working week runs Saturday to Thursday, so an answer naming Mon-Fri is wrong.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "algeria-repeat-order-minimum",
+      "question": "In Algeria, what is the minimum order size after my first purchase?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "5"
+        ],
+        "required_sections": [
+          "sponsoring-001-algeria"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Algeria record: 'the equivalent of 5 000 DZD ($43) after the first purchase for all FBOs'. Distinct from the 0,200CC first order, which is the trap in this question.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "algeria-foreign-fbo-bonus",
+      "question": "Can a foreign FBO receive bonuses from Forever Algeria?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "cross_market_contrast",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "residency"
+        ],
+        "required_sections": [
+          "sponsoring-001-algeria"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Algeria record: 'Foreign FBOs cannot receive bonuses except if they have a residency card in Algeria or are registered as a company'. The France and Reunion records also mention Algeria bonuses ('Forever Algeria does not transfer to foreign accounts'), so answering from those is a market-attribution failure this case detects.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "algeria-foreign-online-purchase",
+      "question": "Can a foreign FBO order online from Forever Algeria?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "email"
+        ],
+        "must_not_contain": [
+          "yes, you can order online"
+        ],
+        "required_sections": [
+          "sponsoring-001-algeria"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Algeria record: 'Online purchase by foreign FBO's available: No - Nevertheless, you can send your order by email: commande.algerie@foreverliving.fr'. A bare 'no' omits the documented alternative.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "france-minimum-order",
+      "question": "What is the minimum order size for an FBO in France?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "150"
+        ],
+        "required_sections": [
+          "sponsoring-063-france"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever France record: 'We do not have a minimum order in France, yet a newly sponsored Preferred Customer will have to order 150 EUR minimum of products within 72 hours in order to validate his sponsorship.' Both halves matter: no FBO minimum, but a sponsorship-validation requirement.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "france-local-bonus-threshold",
+      "question": "What is the minimum bonus amount Forever France will transfer to a local account?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "5"
+        ],
+        "must_not_contain": [
+          "100"
+        ],
+        "required_sections": [
+          "sponsoring-063-france"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever France record: 'Forever France transfers bonuses to local accounts if the bonus amount exceeds 5 EUR.' The foreign-account threshold in the same paragraph is 100 EUR, so an answer giving 100 has taken the wrong clause.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "reunion-delivery-cost",
+      "question": "What is the delivery cost for orders in Reunion Island?",
+      "country": "US",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "6"
+        ],
+        "must_not_contain": [
+          "10€ TTC"
+        ],
+        "required_sections": [
+          "sponsoring-084-r-union-island"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Reunion Island record: 'Delivery cost are at 6 EUR and free for orders exceeding 1CC.' The Reunion record repeats much of the France text, so a France delivery figure (10 EUR / 5 EUR) indicates the wrong record was used.",
+      "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
     }
   ]
 }
