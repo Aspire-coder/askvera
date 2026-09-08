@@ -58,8 +58,8 @@ def _run(**overrides) -> dict:
         "sections": ["4.2", "4.3"],
         "cited_sections": ["4.2"],
         "confidence": 0.9,
-        "input_tokens": 100,
-        "output_tokens": 20,
+        "generation_input_tokens": 100,
+        "generation_output_tokens": 20,
         "duration_ms": 500.0,
     }
     run.update(overrides)
@@ -192,14 +192,16 @@ def test_summary_states_denominators_and_flags_instability():
     # A case that passes sometimes is not a passing case.
     assert summary["unstable_cases"] == ["a"]
     # 200 input + 40 output tokens at $1/$5 per million.
-    assert summary["measured_cost_usd"] == pytest.approx(0.0004, abs=1e-6)
+    assert summary["measured_generation_cost_usd"] == pytest.approx(0.0004, abs=1e-6)
+    # The name must say what it covers: nine other model calls are not counted.
+    assert "query_planner" in summary["cost_excludes"]
 
 
 def test_cost_is_omitted_when_no_prices_are_supplied():
     """Prices change; a guessed rate would be reported as a measurement."""
     results = [{"id": "a", "intent_group": "g", "expected_kind": "answer", "runs_count": 1,
                 "passed_runs": 1, "runs": [_run() | {"passed": True, "retrieval_hit": True, "repair_damaged": False}]}]
-    assert "measured_cost_usd" not in benchmark.summarise(results, None)
+    assert "measured_generation_cost_usd" not in benchmark.summarise(results, None)
 
 
 def test_shipped_pilot_fixture_is_valid():

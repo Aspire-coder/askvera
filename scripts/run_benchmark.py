@@ -185,8 +185,8 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
             ]
         ),
         "confidence": round(float(run.retrieval.confidence), 3) if run.retrieval else 0.0,
-        "input_tokens": int(usage.get("inputTokens") or 0),
-        "output_tokens": int(usage.get("outputTokens") or 0),
+        "generation_input_tokens": int(usage.get("inputTokens") or 0),
+        "generation_output_tokens": int(usage.get("outputTokens") or 0),
         "duration_ms": run.duration_ms,
     }
 
@@ -269,8 +269,8 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
     for case in results:
         by_group[case["intent_group"]].extend(case["runs"])
 
-    input_tokens = sum(run["input_tokens"] for run in runs)
-    output_tokens = sum(run["output_tokens"] for run in runs)
+    generation_input = sum(run["generation_input_tokens"] for run in runs)
+    generation_output = sum(run["generation_output_tokens"] for run in runs)
     summary = {
         "cases": len(results),
         "runs": len(runs),
@@ -298,13 +298,23 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         },
         "latency_ms_p50": round(statistics.median(run["duration_ms"] for run in runs), 1) if runs else 0,
         "latency_ms_max": round(max((run["duration_ms"] for run in runs), default=0), 1),
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
+        "generation_input_tokens": generation_input,
+        "generation_output_tokens": generation_output,
     }
     if rates:
-        cost = input_tokens / 1_000_000 * rates["input"] + output_tokens / 1_000_000 * rates["output"]
-        summary["measured_cost_usd"] = round(cost, 4)
-        summary["cost_per_case_usd"] = round(cost / max(1, len(results)), 4)
+        cost = generation_input / 1_000_000 * rates["input"] + generation_output / 1_000_000 * rates["output"]
+        # Named for what it actually measures. Only the final generation call
+        # reports its usage through response metadata; the query planner,
+        # evidence selector, candidate narrowing, guardrail, translation and
+        # support routing each make their own Bedrock call and none of them are
+        # counted here. Real spend is higher, and the planner and selector see
+        # the whole candidate set, so the gap is not small.
+        summary["measured_generation_cost_usd"] = round(cost, 4)
+        summary["generation_cost_per_case_usd"] = round(cost / max(1, len(results)), 4)
+        summary["cost_excludes"] = [
+            "query_planner", "evidence_selector", "candidate_narrowing",
+            "guardrail", "global_translation", "support_routing", "controlled_copy",
+        ]
     return summary
 
 
