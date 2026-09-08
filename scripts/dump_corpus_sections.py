@@ -42,6 +42,20 @@ def _safe_name(value: str, fallback: str) -> str:
     return (cleaned or fallback)[:120]
 
 
+def _has_value(field: str) -> dict[str, Any]:
+    """Match sections where a metadata field is present AND not empty.
+
+    Ingestion writes these fields as empty strings rather than leaving them
+    out, so `exists` is satisfied by a document that carries no date at all.
+    """
+    return {
+        "bool": {
+            "must": [{"exists": {"field": field}}],
+            "must_not": [{"term": {field: ""}}],
+        }
+    }
+
+
 def _filters(args: argparse.Namespace) -> list[dict[str, Any]]:
     clauses: list[dict[str, Any]] = []
     for field, value in (
@@ -133,9 +147,15 @@ def main() -> int:
                         # a question about a past year normally, while an
                         # otherwise identical document that has them refuses it
                         # as a period not covered. Sizing that needs the counts.
+                        # An exists filter alone is wrong here: these fields are
+                        # written as empty strings rather than omitted, and
+                        # OpenSearch counts an empty string as present. The first
+                        # version of this reported every document dated, including
+                        # DK-EN-Company-Policy.pdf, whose sections were then found
+                        # to carry an empty effective_date.
                         "aggs": {
-                            "dated": {"filter": {"exists": {"field": "effective_date"}}},
-                            "versioned": {"filter": {"exists": {"field": "document_version"}}},
+                            "dated": {"filter": _has_value("effective_date")},
+                            "versioned": {"filter": _has_value("document_version")},
                         },
                     },
                 },
