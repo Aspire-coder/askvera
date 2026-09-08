@@ -3,6 +3,7 @@
 from time import perf_counter
 
 from app.metrics import STAGE_GOVERNANCE
+from app.metrics.health import record_governance_outcome
 from app.metrics.pipeline import record_pipeline_metric
 from app.risk import PolicyAction, RiskContext, RiskDecision, RiskEngine, risk_engine
 from utils.logging import get_logger
@@ -105,6 +106,14 @@ class GovernanceEngine:
             success = decision.allowed
             return decision
         finally:
+            # A refusal is not ill health -- governance blocking an income claim
+            # is the system working. Only an inability to reach a verdict counts
+            # against GovernanceHealth: a provider exception, or an unexpected
+            # error that left no decision at all.
+            record_governance_outcome(
+                allowed=bool(decision and decision.allowed),
+                provider_failed=decision is None or bool((decision.metadata or {}).get("providerError")),
+            )
             record_pipeline_metric(
                 stage=STAGE_GOVERNANCE,
                 duration_ms=round((perf_counter() - started) * 1000, 2),

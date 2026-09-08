@@ -2,6 +2,8 @@
 
 import asyncio
 
+from app.metrics.health import record_audit_queue_depth
+
 from .models import AuditEvent
 from .queue import audit_queue, queue_capacity, queue_size, queue_utilization
 from utils.logging import get_logger
@@ -16,6 +18,9 @@ class AuditPublisher:
         """Enqueue an audit event without blocking the request path."""
         try:
             audit_queue.put_nowait(event)
+            # Sampled after a successful enqueue, so AuditQueueDepth reflects
+            # real backlog. The drop path below already logs its own depth.
+            record_audit_queue_depth(queue_size())
         except asyncio.QueueFull:
             LOGGER.warning(
                 "audit_queue_full_dropped_event",

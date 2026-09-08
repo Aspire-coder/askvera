@@ -6,6 +6,7 @@ from time import perf_counter
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.metrics.health import record_validation_outcome
 from app.metrics.responses import record_delivered_response, record_numeric_repair
 from app.models.responses import ModelResponse
 from app.orchestrator.compound_requests import separate_question_and_command
@@ -1877,6 +1878,9 @@ class AIOrchestrator:
                     for issue in result.issues
                 ],
             )
+        # Recorded before any repair attempt, so ValidationHealth reflects what
+        # the model produced rather than what repair rescued.
+        record_validation_outcome(has_critical=result.has_critical())
         if result.has_critical():
             critical_codes = {
                 str(issue.code).upper()
