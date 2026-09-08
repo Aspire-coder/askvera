@@ -118,8 +118,10 @@ def _number_variants(number: str) -> set[str]:
         trimmed = fraction.rstrip("0") or "0"
         variants.add(f"{whole}{separator}{trimmed}")
         # The mirror case: the answer writes "7.5" where the record writes
-        # "7.50".
-        variants.add(f"{whole}{separator}{fraction}0")
+        # "7.50", or "0.2" where it writes "0,200". Padding stops at three
+        # decimal places, which is as precise as this corpus gets.
+        for width in range(len(fraction) + 1, 4):
+            variants.add(f"{whole}{separator}{fraction.ljust(width, '0')}")
     return variants
 
 
@@ -255,6 +257,10 @@ def _subject_token_sets(
     return token_sets
 
 
+# A sentence or clause end, but never the point inside a decimal figure.
+_CLAUSE_DELIMITER_RE = re.compile(r"(?<!\d)[.;](?!\d)")
+
+
 def _source_windows(source_text: str, number: str, radius: int = 260) -> list[str]:
     """Return clause-bounded source windows around the same number."""
     windows: list[str] = []
@@ -263,16 +269,17 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
         # lists. Keep those lines attached to the heading that names the rule.
-        left_boundary = max(source_text.rfind(delimiter, 0, index) for delimiter in (".", ";"))
-        right_candidates = [
-            position
-            for position in (
-                source_text.find(".", match.end()),
-                source_text.find(";", match.end()),
-            )
-            if position != -1
-        ]
-        right_boundary = min(right_candidates) if right_candidates else len(source_text)
+        # A decimal point is not a clause boundary. Treating it as one truncates
+        # the window at the previous figure, and the subject that qualifies this
+        # one is usually in front of it: in "The GO2FBO pack costs 352.38EUR and
+        # it represents 1.612CC", the window for 1.612 began after "352." and no
+        # longer contained "GO2FBO", so a correctly stated figure was reported
+        # ungrounded. Found by generated notation coverage over real records.
+        left_boundary = -1
+        for delimiter in _CLAUSE_DELIMITER_RE.finditer(source_text, 0, index):
+            left_boundary = delimiter.start()
+        right_delimiter = _CLAUSE_DELIMITER_RE.search(source_text, match.end())
+        right_boundary = right_delimiter.start() if right_delimiter else len(source_text)
         window_start = max(left_boundary + 1 if left_boundary != -1 else 0, index - radius)
         window_end = min(right_boundary, match.end() + radius)
         windows.append(source_text[window_start:window_end])
