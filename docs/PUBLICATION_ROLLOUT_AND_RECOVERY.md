@@ -28,6 +28,34 @@ been made.
 **Not yet run.** The combined candidate comparison — canary and benchmark
 against the live pipeline. It needs paid model calls and separate approval.
 
+## One supported publication mode
+
+Reviewed publication **requires** `ADMIN_INGESTION_GENERATION_POINTER_ENABLED`.
+It refuses otherwise, and that is a deployment prerequisite: the flag defaults
+to false, so somebody has to set it before any document can be published
+through the review workflow.
+
+Why it is refused rather than protected. Without the pointer, publishing is
+activate-then-delete against OpenSearch: flip the new sections to active, then
+delete every section for that source carrying a different ingestion id. Both
+writes are reader-visible immediately, and neither can join the ownership
+transaction, because OpenSearch is a second system and no check spanning the
+two is atomic.
+
+The failure that makes this unacceptable: a worker paused before those writes,
+whose lease expires and whose job is republished by someone else, resumes and
+deletes the newer generation - "a different ingestion id" is exactly what the
+newer one is - then reinstates its own stale content. Verification would report
+that afterwards, having already lost the live document. Detecting a bad outcome
+is not preventing it.
+
+**Still carrying that window:** `process_ingestion_job` performs the same
+legacy replacement when `review_before_publish` is false. That is pre-existing
+and unchanged. Restricting it would block all automatic ingestion in the
+default configuration, which is a decision for whoever owns the deployment -
+but enabling the pointer removes the window there too, which is the other
+reason to enable it.
+
 ## How ownership works
 
 Three separate things, and conflating any two of them was a defect:
@@ -49,6 +77,11 @@ job row:
 
 - the generation pointer update, before it takes the advisory lock;
 - finalization - the document record and the job status - as one transaction.
+
+Ownership is also checked before the index is touched. That one is **not**
+transactional and is not claimed to be: OpenSearch is a second system. It stops
+a worker that has already lost the job before it activates sections, and with
+the pointer on those sections would have been invisible anyway.
 
 An advisory lock alone was not enough and the reasoning that it was is the
 defect this closed. It serialises writers. A worker whose lease expired takes
@@ -151,6 +184,10 @@ answers; the candidate comparison is what would measure it.
 
 ## Still open
 
-- The combined candidate comparison against the live pipeline (needs approval).
+- The combined candidate comparison against the live pipeline (needs
+  approval). Prepared in `docs/GROUNDING_COMPARISON_PLAN.md` and
+  `scripts/run_grounding_comparison.py`; not run.
+- Enabling `ADMIN_INGESTION_GENERATION_POINTER_ENABLED`, which is now a
+  prerequisite for publishing at all.
 - The append-only grant.
 - Whether 300 characters is the right unit lookback for real layouts.
