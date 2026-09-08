@@ -1599,10 +1599,79 @@ def test_ingestion_job(job_id: str, message: str, *, limit: int = 5) -> dict[str
     return {"job": job, "message": message, "matches": matches, "matchCount": len(matches)}
 
 
-def publish_ingestion_job(job_id: str, *, accepted_by: str) -> dict[str, Any]:
+def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> None:
+    """Refuse publication when metadata or extraction findings are unresolved.
+
+    Raises ValueError, which the admin route already turns into a 400 carrying
+    the reasons, so a caller is told what to fix rather than that something
+    went wrong.
+    """
+    from services.metadata_conflicts import detect_metadata_conflicts
+    from services.publication_gate import (
+        PublicationBlocked,
+        evaluate_publication,
+        revision_fingerprint,
+    )
+
+    metadata = {
+        "filename": str(job.get("filename") or ""),
+        "country": str(job.get("country") or ""),
+        "language": str(job.get("language") or ""),
+        "document_type": str(job.get("document_type") or ""),
+        "access_scope": str(job.get("access_scope") or ""),
+        "version": str(job.get("version") or ""),
+        "effective_date": str(job.get("effective_date") or ""),
+        "expiry_date": str(job.get("expiry_date") or ""),
+    }
+    # access_scope changes what publishing means, so it belongs in the revision
+    # fingerprint, but it is not something detect_metadata_conflicts inspects.
+    findings = detect_metadata_conflicts(
+        **{key: value for key, value in metadata.items() if key != "access_scope"}
+    )
+    revision = revision_fingerprint(
+        content_hash=str(job.get("content_hash") or ""), metadata=metadata
+    )
+    try:
+        evaluate_publication(
+            findings=findings,
+            # Confirmed-unreadable pages already block earlier, during
+            # processing, so a job reaching review has none. Passed explicitly
+            # so the gate's contract is complete rather than implied.
+            extraction_blocking_pages=[],
+            extraction_uncertain_pages=[
+                int(page) for page in (job.get("low_text_image_pages") or [])
+            ],
+            revision=revision,
+            resolution=resolution,
+        )
+    except PublicationBlocked as blocked:
+        LOGGER.warning(
+            "publication_blocked",
+            correlation_id=str(job.get("job_id") or ""),
+            filename=metadata["filename"],
+            reason_count=len(blocked.reasons),
+            revision=revision,
+        )
+        raise ValueError(" ".join(blocked.reasons)) from blocked
+
+
+def publish_ingestion_job(
+    job_id: str, *, accepted_by: str, resolution: Any = None
+) -> dict[str, Any]:
+    """Publish a reviewed document.
+
+    resolution is a services.publication_gate.ReviewerResolution recording who
+    decided what, and why, about this exact revision. It is required whenever
+    the document carries unresolved findings, and it is ignored for findings no
+    decision can waive.
+    """
     job = _ingestion_job(job_id)
     if job.get("status") != "ready_for_review":
         raise ValueError("Only documents marked ready for review can be published.")
+    # Enforced here rather than in the route, because this is the single place
+    # every publication path arrives at - the API endpoint, a retry, and any
+    # future caller. A disabled button in the portal is not enforcement.
+    _enforce_publication_gate(job, resolution)
     count, documents = _staging_documents(job_id, limit=10000)
     expected = int(job.get("section_count") or 0)
     if count != expected or not documents:
