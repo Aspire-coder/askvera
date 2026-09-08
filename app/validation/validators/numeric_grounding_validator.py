@@ -261,8 +261,82 @@ def _subject_token_sets(
 _CLAUSE_DELIMITER_RE = re.compile(r"(?<!\d)[.;](?!\d)")
 
 
-def _source_windows(source_text: str, number: str, radius: int = 260) -> list[str]:
-    """Return clause-bounded source windows around the same number."""
+# A currency or unit written beside a figure. Same value, different unit, is a
+# different fact: "900 DZD" and "900 EUR" are not the same delivery cost, and
+# "0,200CC" is not "0,200 DZD". Grounding checked the number and the subject
+# and never the unit, so both of those were accepted.
+_UNIT_ALIASES = {
+    "$": "usd", "us$": "usd", "usd": "usd",
+    "€": "eur", "eur": "eur",
+    "£": "gbp", "gbp": "gbp",
+    "cc": "cc", "case credit": "cc", "case credits": "cc",
+    "%": "pct", "percent": "pct",
+}
+# A unit is a currency symbol, an all-capitals currency code, Case Credits, or
+# a percent sign. Ordinary lowercase words are deliberately excluded: matching
+# any two-to-four letter token treated the "and" in "48 and 96 hours" as a
+# unit, and every bare figure in the corpus stopped being groundable.
+# Currency codes this corpus can plausibly state. An explicit vocabulary is
+# used rather than "any three letters" because the source text is casefolded
+# before matching, so a case-based rule cannot work on both sides, and matching
+# any short token treated the "and" in "48 and 96 hours" as a unit. A code that
+# is not listed simply yields no unit, which is the behaviour that existed
+# before this check, so an omission cannot cause a false rejection.
+_CURRENCY_CODES = frozenset("""
+AED ARS AUD BDT BOB BRL CAD CHF CLP CNY COP CRC CZK DKK DOP DZD EGP EUR GBP
+GHS GTQ HKD HUF IDR ILS INR JPY KES KGS KRW KZT LKR MAD MXN MYR NGN NOK NZD
+PAB PEN PHP PKR PLN PYG RON RSD RUB SAR SEK SGD THB TND TRY TWD TZS UAH UGX
+USD UYU VND ZAR
+""".split())
+
+_UNIT_AFTER_RE = re.compile(
+    r"\s{0,2}(case\s+credits?|cc|[a-z]{3}|%|€|£|\$)", re.IGNORECASE
+)
+_UNIT_BEFORE_RE = re.compile(r"(us\$|\$|€|£)\s{0,2}$", re.IGNORECASE)
+
+
+def _normalize_unit(raw: str) -> str:
+    """Map a currency symbol or unit token to a comparable name, or empty.
+
+    An unrecognised code keeps its own name rather than becoming "no unit".
+    DZD is not in the alias table and normalising it to an empty string meant
+    "900 EUR" was accepted against a record stating "900 DZD" - the unit check
+    silently did nothing for every currency the table did not happen to list.
+    """
+    cleaned = " ".join((raw or "").strip().lower().split())
+    if not cleaned:
+        return ""
+    if cleaned in _UNIT_ALIASES:
+        return _UNIT_ALIASES[cleaned]
+    return cleaned if cleaned.upper() in _CURRENCY_CODES else ""
+
+
+def _unit_beside(text: str, start: int, end: int) -> str:
+    """The unit attached to the figure at these offsets, or an empty string.
+
+    A prefix symbol wins over a following word, because "$60" states its unit
+    in front and whatever follows belongs to the sentence rather than to the
+    figure.
+    """
+    before = _UNIT_BEFORE_RE.search(text[max(0, start - 4):start])
+    if before:
+        return _normalize_unit(before.group(1))
+    after = _UNIT_AFTER_RE.match(text[end:end + 16])
+    return _normalize_unit(after.group(1)) if after else ""
+
+
+def _source_windows(
+    source_text: str, number: str, radius: int = 260, required_unit: str = ""
+) -> list[str]:
+    """Return clause-bounded source windows around the same number.
+
+    When the claim carries a unit, an occurrence written with a different unit
+    is not support for it. The record states a delivery cost of "900 DZD"; an
+    answer saying "900 EUR" matched the number, matched the subject, and was
+    accepted. Occurrences whose own unit disagrees are skipped, while an
+    occurrence with no unit at all still counts - plenty of figures in the
+    corpus are bare.
+    """
     windows: list[str] = []
     pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
     # A range is a pair of figures, and the source rarely writes it the way an
@@ -278,6 +352,10 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
             rf"{re.escape(high)}(?!\d|\.\d)"
         )
     for match in pattern.finditer(source_text):
+        if required_unit:
+            found_unit = _unit_beside(source_text, match.start(), match.end())
+            if found_unit and found_unit != required_unit:
+                continue
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
         # lists. Keep those lines attached to the heading that names the rule.
@@ -298,13 +376,22 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
     return windows
 
 
+def _offsets_in(claim: MeasurableClaim) -> tuple[int, int]:
+    """Where the claim's number sits inside its own sentence."""
+    index = claim.sentence.find(claim.text)
+    if index == -1:
+        return (0, 0)
+    return (index, index + len(claim.text))
+
+
 def _claim_is_supported(
     claim: MeasurableClaim, source_text: str, document_markets: frozenset[str] = frozenset()
 ) -> bool:
     """Return true only when the same number is linked to the same named topic."""
     subject_token_sets = _subject_token_sets(claim, document_markets)
+    required_unit = _unit_beside(claim.sentence, *_offsets_in(claim))
     for number in _number_variants(claim.number):
-        for window in _source_windows(source_text, number):
+        for window in _source_windows(source_text, number, required_unit=required_unit):
             window_tokens = _word_tokens(window)
             if subject_token_sets and any(
                 _subject_matches_window(subject_tokens, window_tokens) for subject_tokens in subject_token_sets

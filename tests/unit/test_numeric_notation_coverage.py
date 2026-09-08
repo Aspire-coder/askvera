@@ -279,3 +279,135 @@ def test_citation_support_recognises_the_same_value_written_differently(
     shared = builder._numbers(answer) & builder._numbers(record)
 
     assert bool(shared) is should_match, sorted(shared)
+
+
+# ---------------------------------------------------------------------------
+# Negative controls.
+#
+# Everything above asserts that a value written differently is still
+# recognised. On its own that is a machine for teaching a validator to accept
+# anything: every test passes if grounding simply says yes. These generate the
+# opposite - the same sentence with the value actually changed - and require
+# rejection.
+#
+# A mutation is only a valid control if the new value is genuinely absent from
+# the record. The Algeria record holds 900, 7 800, 60, 5 000, 43, 48 and 96,
+# so a mutation that lands on one of those would be correctly grounded and
+# would fail this test for the right reason. Those are skipped rather than
+# asserted.
+# ---------------------------------------------------------------------------
+
+
+def _mutations(number: str) -> set[str]:
+    """Values that differ from the original, in the ways a model gets it wrong."""
+    digits = number.replace(" ", "")
+    changed: set[str] = set()
+
+    trailing = re.fullmatch(r"(?P<head>.*?)(?P<last>\d)", digits)
+    if trailing:
+        head, last = trailing.group("head", "last")
+        changed.add(f"{head}{(int(last) + 1) % 10}")
+
+    # An order-of-magnitude slip: the failure that matters most in a Case
+    # Credit threshold or a currency amount.
+    if re.fullmatch(r"\d+", digits):
+        changed.add(digits + "0")
+    decimal = re.fullmatch(r"(\d+)([.,])(\d+)", digits)
+    if decimal:
+        whole, separator, fraction = decimal.groups()
+        changed.add(f"{whole}{separator}{fraction[:-1]}{(int(fraction[-1]) + 5) % 10}")
+        # Moving the separator changes the value by a factor of ten.
+        if len(whole) > 1:
+            changed.add(f"{whole[:-1]}{separator}{whole[-1]}{fraction}")
+
+    return {value for value in changed if value and value != digits}
+
+
+def _mutation_cases() -> list[tuple[str, str, str]]:
+    collected: list[tuple[str, str, str]] = []
+    for name, (text, _title, _section) in RECORDS.items():
+        normalized_source = " ".join(text.split())
+        for number in _figures(text):
+            for mutated in sorted(_mutations(number)):
+                # Skip a mutation that happens to be another real figure in the
+                # same record: grounding is right to accept it.
+                if re.search(rf"(?<![\d.,]){re.escape(mutated)}(?![\d])", normalized_source):
+                    continue
+                collected.append((name, number, mutated))
+    return collected
+
+
+MUTATION_CASES = _mutation_cases()
+
+
+def test_the_mutation_generator_produced_controls() -> None:
+    """A silent zero-case run would make the rejection assertions vacuous."""
+    assert len(MUTATION_CASES) > 15, len(MUTATION_CASES)
+
+
+@pytest.mark.parametrize("record,number,mutated", MUTATION_CASES, ids=lambda value: str(value))
+def test_a_changed_value_is_rejected(record: str, number: str, mutated: str) -> None:
+    """The contrast case for every equivalence above.
+
+    Positive-only generated tests risk proving that the validator accepts
+    everything. Each of these takes a sentence the record supports and changes
+    the figure in it, so grounding has to refuse a claim the source does not
+    make.
+    """
+    text, title, section_id = RECORDS[record]
+    answer = _clause_for(text, number).replace(number, mutated)
+    document = _document(text, title, section_id)
+
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+    assert unsupported, (
+        f"{record}: the record writes {number!r} and an answer writing {mutated!r} "
+        "was accepted as grounded"
+    )
+
+
+# The same figure with a different unit is a different fact. Grounding checked
+# the number and the subject and never what the number was denominated in.
+UNIT_CASES = [
+    ("The delivery cost for orders in Algeria is 900 DZD.", True),
+    ("The delivery cost for orders in Algeria is 900 EUR.", False),
+    ("The minimum first order is 0,200 DZD.", False),
+    ("The minimum first order is 0.200 Case Credits.", True),
+    ("The minimum first order is 0.200 CC.", True),
+    ("The minimum first order is about $60.", True),
+    ("The minimum first order is about 60 EUR.", False),
+]
+
+
+@pytest.mark.parametrize("answer,should_be_grounded", UNIT_CASES)
+def test_a_figure_is_bound_to_its_unit(answer: str, should_be_grounded: bool) -> None:
+    """900 DZD and 900 EUR are not the same delivery cost.
+
+    Both were accepted before this: the number matched, the subject matched,
+    and nothing compared what the figure was denominated in. "0,200CC" being
+    reported as "0,200 DZD" is the same defect on a Case Credit threshold,
+    which is the kind of number a distributor acts on.
+    """
+    text, title, section_id = RECORDS["algeria"]
+    document = _document(text, title, section_id)
+
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+    assert (not unsupported) is should_be_grounded, unsupported
+
+
+def test_an_unlisted_currency_code_does_not_cause_a_false_rejection() -> None:
+    """An omission from the currency vocabulary must degrade to no check.
+
+    The source is casefolded before matching, so the unit rule cannot key off
+    capitalisation and needs an explicit vocabulary. A code nobody listed
+    therefore yields no unit at all, which is exactly the behaviour that
+    existed before the check - safe, rather than silently rejecting.
+    """
+    from app.validation.validators.numeric_grounding_validator import _normalize_unit
+
+    assert _normalize_unit("DZD") == "dzd"
+    assert _normalize_unit("XYZ") == ""
+    assert _normalize_unit("and") == ""
+    assert _normalize_unit("Case Credits") == "cc"
+    assert _normalize_unit("$") == "usd"
