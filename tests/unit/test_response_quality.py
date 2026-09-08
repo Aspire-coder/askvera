@@ -229,3 +229,24 @@ def test_truncation_verdict_is_logged_with_the_reported_stop_reason():
     assert "finish_reason=" in source
     assert "output_tokens=" in source
     assert "max_output_tokens=" in source
+
+
+def test_every_answer_editing_step_is_named_in_the_diagnostic_flag_list():
+    """A step that edits the answer must appear in _ANSWER_EDIT_FLAGS.
+
+    Nine steps run between generation and validation and several delete text.
+    When one of them leaves an answer malformed, the validator discards the
+    whole thing and tells the reader the documents do not cover their question.
+    The flag list is how that gets traced back to a step, so a new editor that
+    is missing from it is invisible exactly when something goes wrong.
+    """
+    import inspect
+    import re
+
+    from app.orchestrator import chat_orchestrator
+
+    source = inspect.getsource(chat_orchestrator.AIOrchestrator._secure_and_complete_response)
+    # Every _replace_answer call passes a metadata dict of flags it records.
+    recorded = set(re.findall(r'\{"(\w+)":', source))
+    missing = recorded - set(chat_orchestrator._ANSWER_EDIT_FLAGS)
+    assert not missing, f"answer-editing flags missing from _ANSWER_EDIT_FLAGS: {sorted(missing)}"

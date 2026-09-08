@@ -183,6 +183,24 @@ class ConsentRequiredError(Exception):
     """Raised when a chat request has not accepted the current legal terms."""
 
 
+# Metadata flags recorded by the answer-editing steps in
+# _secure_and_complete_response. Kept in one list so the diagnostic log stays
+# complete when a step is added: a new editor that records a flag missing from
+# here is invisible exactly when something goes wrong.
+_ANSWER_EDIT_FLAGS = (
+    "inline_citations_separated",
+    "directory_contacts_restored",
+    "directory_role_label_corrected",
+    "unrequested_directory_fields_removed",
+    "directory_order_size_restored",
+    "directory_source_contradiction_corrected",
+    "response_pii_scrubbed",
+    "contact_placeholder_actions",
+    "unresolved_pii_placeholders_removed",
+    "empty_after_output_cleanup",
+)
+
+
 class AIOrchestrator:
     """Coordinate the existing ASK Vera chat request lifecycle."""
 
@@ -1876,6 +1894,14 @@ class AIOrchestrator:
                 issue_count=len(result.issues),
                 highest_severity=result.highest_severity.value,
                 finish_reason=(model_response.finish_reason if model_response else ""),
+                # Which post-generation edits touched this answer. Nine steps
+                # run between generation and here, several of which delete
+                # text, and each records a flag when it fires. Naming them
+                # beside the verdict identifies the step that damaged an answer
+                # without putting any of the answer into the logs.
+                answer_edits=[
+                    name for name in _ANSWER_EDIT_FLAGS if (chat_response.metadata or {}).get(name)
+                ],
                 output_tokens=(
                     int((model_response.token_usage or {}).get("outputTokens") or 0)
                     if model_response
