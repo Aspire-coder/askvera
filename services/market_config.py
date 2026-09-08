@@ -291,6 +291,82 @@ def _localized_market_names() -> dict[str, list[str]]:
     return json.loads(path.read_text(encoding="utf-8"))["names"]
 
 
+# Words that can sit in front of a country name without qualifying it.
+# Anything else in that position may be turning one country's name into
+# another's - "DR Congo" is "Congo" with a qualifier - and a qualifier we do not
+# recognise is a reason to ask, not to pick.
+_MARKET_NAME_NEUTRAL_PREFIXES = frozenset(
+    {
+        "in", "for", "to", "from", "at", "on", "of", "and", "or", "with", "into",
+        "a", "an", "my", "our", "your", "their", "its", "this", "that",
+        "i", "we", "you", "they", "is", "are", "was", "were", "do", "does",
+        "what", "how", "when", "where", "which", "who", "about", "regarding",
+        "here", "there", "within", "across", "between", "customers", "orders",
+    }
+)
+
+
+def _qualifier_before(padded_message: str, name: str) -> str:
+    """The word immediately before this name in the message, if any."""
+    index = padded_message.find(f" {name} ")
+    if index <= 0:
+        return ""
+    preceding = padded_message[:index].split()
+    return preceding[-1] if preceding else ""
+
+
+@lru_cache(maxsize=1)
+def _market_name_index() -> tuple[
+    dict[str, frozenset[str]], frozenset[str], dict[str, frozenset[str]]
+]:
+    """Configured names, the ones that sit inside another market's name, and
+    each name's own vocabulary.
+
+    Built once. The shared-stem calculation compares every name against every
+    other, which is 3,216 names and about ten million comparisons - measured at
+    913ms when it ran per call, on a function every request uses. Cached the
+    way the rest of this module caches its configuration.
+    """
+    markets = [
+        market for market in load_market_config()["markets"] if market.get("enabled", True)
+    ]
+    markets.extend(load_global_directory_markets())
+    localized = _localized_market_names()
+
+    collected: dict[str, set[str]] = {}
+    for market in markets:
+        code = str(market["code"]).upper()
+        for name in [market["name"], *localized.get(code, [])]:
+            normalized_name = _normalize_market_text(name)
+            if normalized_name:
+                collected.setdefault(normalized_name, set()).add(code)
+
+    names = {name: frozenset(codes) for name, codes in collected.items()}
+
+    # Group by the codes a name maps to, so containment is compared between
+    # different markets only, and each name's own vocabulary is available
+    # without rescanning.
+    by_codes: dict[frozenset[str], set[str]] = {}
+    for name, codes in names.items():
+        by_codes.setdefault(codes, set()).add(name)
+
+    stems: set[str] = set()
+    for name, codes in names.items():
+        padded = f" {name} "
+        for other, other_codes in names.items():
+            if other_codes == codes:
+                continue
+            if padded in f" {other} ":
+                stems.add(name)
+                break
+
+    own_words = {
+        name: frozenset(word for sibling in by_codes[codes] for word in sibling.split())
+        for name, codes in names.items()
+    }
+    return names, frozenset(stems), own_words
+
+
 def find_market_mentions(message: str) -> set[str]:
     """Return enabled markets whose configured name is present in a message.
 
@@ -308,24 +384,27 @@ def find_market_mentions(message: str) -> set[str]:
     if not normalized_message:
         return set()
 
-    markets = [market for market in load_market_config()["markets"] if market.get("enabled", True)]
-    markets.extend(load_global_directory_markets())
-    names: dict[str, set[str]] = {}
-    localized = _localized_market_names()
-    for market in markets:
-        code = str(market["code"]).upper()
-        for name in [market["name"], *localized.get(code, [])]:
-            normalized_name = _normalize_market_text(name)
-            if normalized_name:
-                names.setdefault(normalized_name, set()).add(code)
+    names, stems, own_words = _market_name_index()
     # Match longer names first so "Equatorial Guinea" does not also select
     # Guinea. Unambiguous full names only; never infer access from an alias.
     padded_message = f" {normalized_message} "
     matches: set[str] = set()
     for name in sorted(names, key=len, reverse=True):
-        if len(names[name]) == 1 and f" {name} " in padded_message:
-            matches.update(names[name])
-            padded_message = padded_message.replace(f" {name} ", " ")
+        if len(names[name]) != 1 or f" {name} " not in padded_message:
+            continue
+        # A name that also sits inside another country's name is only safe on
+        # its own. "Congo" preceded by a word we do not recognise may be
+        # naming the other Congo - which is what "DR Congo" did, answering a
+        # reader from the wrong country's policy. Returning nothing lets the
+        # caller ask which country is meant; guessing does not.
+        if name in stems:
+            qualifier = _qualifier_before(padded_message, name)
+            if qualifier and qualifier not in _MARKET_NAME_NEUTRAL_PREFIXES:
+                if qualifier not in own_words[name]:
+                    padded_message = padded_message.replace(f" {name} ", " ")
+                    continue
+        matches.update(names[name])
+        padded_message = padded_message.replace(f" {name} ", " ")
     return matches
 
 
