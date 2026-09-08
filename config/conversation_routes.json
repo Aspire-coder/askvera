@@ -88,7 +88,18 @@
           "make me laugh"
         ]
       },
+      "scope_terms": {
+        "catalogue": [
+          "price", "prices", "pricing", "price list",
+          "cost", "costs", "cost of the product", "product cost",
+          "catalogue", "catalog",
+          "in stock", "out of stock", "stock level",
+          "order status", "track my order", "where is my order",
+          "shipping cost", "delivery cost"
+        ]
+      },
       "responses": {
+        "catalogue_scope": "I don't have product prices, the catalogue, stock levels or order status - those aren't part of the approved documents I work from, so I can't look them up. Your upline or Forever Living support can give you current pricing and order information.",
         "wellbeing": "I'm doing well, thanks for asking! What can I help you find today?",
         "greeting": "Hi there, I'm AskVera! I can help with Forever Living policy questions or finding an office's contact details - what can I help you with?",
         "thanks": "Anytime! I'm here if anything else comes up.",

@@ -366,6 +366,34 @@ def _composed_assistant_meta_category(
     return categories[-1] if categories else None
 
 
+def mentions_out_of_corpus_topic(topic: str, message: str, language: str = "") -> bool:
+    """True when a message names a subject the approved documents never cover.
+
+    Kept in `scope_terms` rather than `patterns` on purpose. The pattern
+    matcher routes a message whose *whole text* equals a phrase, which is right
+    for greetings; these terms have to be found inside a longer question, and
+    adding them to `patterns` would make a bare "price" route as a
+    conversational category.
+
+    Locale terms are checked alongside the English ones, because a reader on a
+    non-English market often still asks in English. Only English terms ship
+    today: guessing commerce vocabulary in eleven languages risks matching
+    ordinary policy questions, and this copy belongs in the wording review that
+    already governs user-visible text.
+    """
+    normalized = _normalize_text(message)
+    if not normalized:
+        return False
+    routes = _conversation_routes()
+    locale = _locale_key(language)
+    terms: set[str] = set()
+    for candidate in {locale, "en"}:
+        entries = (routes.get(candidate, {}).get("scope_terms", {}) or {}).get(topic) or []
+        terms.update(_normalize_text(str(entry)) for entry in entries)
+    padded = f" {normalized} "
+    return any(term and f" {term} " in padded for term in terms)
+
+
 def _locale_key(language: str) -> str:
     """Use the primary language tag for locale configuration and metadata checks."""
     return (language or "en").split("-", 1)[0].lower()
