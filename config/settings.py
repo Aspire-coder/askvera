@@ -555,6 +555,14 @@ PROMPT_BUILD_LATENCY_THRESHOLD = _env_int("PROMPT_BUILD_LATENCY_THRESHOLD", 500)
 PIPELINE_HEALTH_THRESHOLD = _env_float("PIPELINE_HEALTH_THRESHOLD", 95.0)
 AUDIT_QUEUE_DEPTH_THRESHOLD = _env_int("AUDIT_QUEUE_DEPTH_THRESHOLD", 100)
 FIREHOSE_DELIVERY_FAILURE_THRESHOLD = _env_int("FIREHOSE_DELIVERY_FAILURE_THRESHOLD", 0)
+# Share of delivered answers that were fallbacks, as a percentage. Deliberately
+# loose to start: nobody has measured the normal rate yet, so this is set to
+# catch a step change rather than to express a quality target. Tighten it once
+# a fortnight of FallbackResponses data exists to read a real baseline from.
+FALLBACK_RATE_THRESHOLD = _env_float("FALLBACK_RATE_THRESHOLD", 35.0)
+# Delivered answers required in a period before the rate is judged at all, so a
+# single out-of-scope question on a quiet night cannot read as 100%.
+FALLBACK_RATE_MIN_SAMPLE = _env_int("FALLBACK_RATE_MIN_SAMPLE", 20)
 # SNS alarm notification configuration. Disabled by default until operators opt in.
 ENABLE_ALARM_NOTIFICATIONS = _env_bool("ENABLE_ALARM_NOTIFICATIONS", False)
 SNS_TOPIC_NAME = _env_str("SNS_TOPIC_NAME", "askvera-alerts")

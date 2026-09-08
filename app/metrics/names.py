@@ -17,6 +17,13 @@ AUDIT_QUEUE_DEPTH = "AuditQueueDepth"
 RETRIEVAL_HEALTH = "RetrievalHealth"
 GOVERNANCE_HEALTH = "GovernanceHealth"
 VALIDATION_HEALTH = "ValidationHealth"
+# Suffixed, unlike the metric names above, to stay distinct from
+# config.vera_persona.FALLBACK_RESPONSES -- the canned fallback *texts*, which
+# chat_orchestrator.py already imports under that exact name. The CloudWatch
+# metric strings are unaffected.
+DELIVERED_RESPONSES_METRIC = "DeliveredResponses"
+FALLBACK_RESPONSES_METRIC = "FallbackResponses"
+FALLBACK_BY_LAYER_METRIC = "FallbackResponsesByLayer"
 
 PIPELINE_STAGE_METRIC_NAMES = {
     "governance": GOVERNANCE_LATENCY,
@@ -33,4 +40,22 @@ SYSTEM_METRIC_NAMES = {
     "retrieval_health": RETRIEVAL_HEALTH,
     "governance_health": GOVERNANCE_HEALTH,
     "validation_health": VALIDATION_HEALTH,
+    "delivered_responses": DELIVERED_RESPONSES_METRIC,
+    "fallback_responses": FALLBACK_RESPONSES_METRIC,
+    "fallback_by_layer": FALLBACK_BY_LAYER_METRIC,
 }
+
+# System metrics that carry one extra CloudWatch dimension, taken from the
+# metric's own metadata: {metric name: (metadata key, dimension name)}.
+#
+# Cardinality is the reason this is an explicit allowlist rather than "promote
+# every metadata key". CloudWatch bills per distinct dimension combination, so
+# only bounded, enumerable values belong here. `failure_layer` is drawn from a
+# fixed set defined in the orchestrator, not from user input.
+SYSTEM_METRIC_DIMENSIONS = {
+    "fallback_by_layer": ("failure_layer", "FailureLayer"),
+}
+
+# Substituted when a dimension's metadata value is missing or blank.
+# CloudWatch rejects empty dimension values outright.
+UNKNOWN_DIMENSION_VALUE = "unknown"

@@ -6,6 +6,7 @@ from time import perf_counter
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from app.metrics.responses import record_delivered_response
 from app.models.responses import ModelResponse
 from app.orchestrator.compound_requests import separate_question_and_command
 from app.operations import pipeline_trace_store
@@ -234,6 +235,12 @@ class AIOrchestrator:
         # Persist the original request and the actual delivered response exactly
         # once, including refusals, cache hits and partial mixed-intent answers.
         append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
+        # Counted at the same single choke point, and for the same reason: this
+        # is the one place every return path has converged, so the fallback rate
+        # measures what was actually delivered rather than what one branch
+        # intended. Sessions that raise above (expired, consent) are not
+        # deliveries and are correctly absent.
+        record_delivered_response(response.metadata)
         return response
 
     def _mixed_request_response(

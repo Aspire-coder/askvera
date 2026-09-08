@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from threading import RLock
+from time import monotonic
 from typing import Any
 
 from config import settings
@@ -17,8 +18,10 @@ from app.metrics.names import (
     REQUEST_COUNT,
     REQUEST_DURATION,
     SUCCESSFUL_REQUESTS,
+    SYSTEM_METRIC_DIMENSIONS,
     SYSTEM_METRIC_NAMES,
     TOTAL_REQUESTS,
+    UNKNOWN_DIMENSION_VALUE,
 )
 
 LOGGER = get_logger("app.metrics.cloudwatch")
@@ -53,6 +56,7 @@ class CloudWatchMetricsProvider:
         self.flush_interval = settings.CLOUDWATCH_FLUSH_INTERVAL
         self._lock = RLock()
         self._pending: list[dict[str, Any]] = []
+        self._last_flush = monotonic()
         self.client = client
         if self.enabled and self.client is None:
             self.client = self._build_client()
@@ -157,10 +161,11 @@ class CloudWatchMetricsProvider:
         if not self.enabled:
             return
         metric_name = SYSTEM_METRIC_NAMES.get(metric.name, self._metric_name(metric.name))
+        extra = self._extra_dimensions(metric)
         self._queue_metric(
             {
                 "MetricName": metric_name,
-                "Dimensions": self._base_dimensions(metric.environment, metric.version, metric.hostname),
+                "Dimensions": self._base_dimensions(metric.environment, metric.version, metric.hostname) + extra,
                 "Timestamp": self._timestamp(metric.timestamp),
                 "Value": metric.value,
                 "Unit": self._cloudwatch_unit(metric.unit),
@@ -170,7 +175,7 @@ class CloudWatchMetricsProvider:
             self._queue_metric(
                 {
                     "MetricName": metric_name,
-                    "Dimensions": self._aggregate_dimensions(metric.environment, metric.version),
+                    "Dimensions": self._aggregate_dimensions(metric.environment, metric.version) + extra,
                     "Timestamp": self._timestamp(metric.timestamp),
                     "Value": metric.value,
                     "Unit": self._cloudwatch_unit(metric.unit),
@@ -182,6 +187,9 @@ class CloudWatchMetricsProvider:
         if not self.enabled or not self.client:
             return
         with self._lock:
+            # Stamped even when there is nothing to send, so an idle period does
+            # not leave the next single metric looking overdue.
+            self._last_flush = monotonic()
             if not self._pending:
                 return
             batches = [
@@ -204,7 +212,17 @@ class CloudWatchMetricsProvider:
     def _queue_metric(self, metric_data: dict[str, Any]) -> None:
         with self._lock:
             self._pending.append(metric_data)
-            should_flush = len(self._pending) >= self.batch_size
+            # Size alone used to decide this, so on a quiet day a partial batch
+            # sat in memory indefinitely and was lost on restart -- precisely
+            # when a low-traffic incident most needs its metrics. The age check
+            # bounds that wait by CLOUDWATCH_FLUSH_INTERVAL. It is evaluated on
+            # the next queued metric rather than by a background timer, which
+            # keeps this provider free of thread lifecycle: metrics that are
+            # not being produced cannot be late.
+            should_flush = (
+                len(self._pending) >= self.batch_size
+                or monotonic() - self._last_flush >= self.flush_interval
+            )
         if should_flush:
             self.flush()
 
@@ -217,6 +235,16 @@ class CloudWatchMetricsProvider:
             self.enabled = False
             LOGGER.warning("cloudwatch_metric_client_init_failed", error=str(exc))
             return None
+
+    @staticmethod
+    def _extra_dimensions(metric: SystemMetric) -> list[dict[str, str]]:
+        """Return the one allowlisted metadata dimension for this metric, if any."""
+        mapping = SYSTEM_METRIC_DIMENSIONS.get(metric.name)
+        if not mapping:
+            return []
+        metadata_key, dimension_name = mapping
+        value = str((metric.metadata or {}).get(metadata_key) or "").strip()
+        return [{"Name": dimension_name, "Value": value or UNKNOWN_DIMENSION_VALUE}]
 
     @staticmethod
     def _base_dimensions(environment: str, version: str, hostname: str) -> list[dict[str, str]]:

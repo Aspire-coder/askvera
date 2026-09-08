@@ -14,7 +14,9 @@ from app.metrics.names import (
     AUDIT_QUEUE_DEPTH,
     AVERAGE_REQUEST_DURATION,
     CACHE_HIT_RATIO,
+    DELIVERED_RESPONSES_METRIC,
     FAILED_REQUESTS,
+    FALLBACK_RESPONSES_METRIC,
     GOVERNANCE_HEALTH,
     MODEL_LATENCY,
     PROMPT_BUILD_LATENCY,
@@ -41,11 +43,14 @@ MODEL_LATENCY_THRESHOLD = settings.MODEL_LATENCY_THRESHOLD
 PROMPT_BUILD_LATENCY_THRESHOLD = settings.PROMPT_BUILD_LATENCY_THRESHOLD
 PIPELINE_HEALTH_THRESHOLD = settings.PIPELINE_HEALTH_THRESHOLD
 AUDIT_QUEUE_DEPTH_THRESHOLD = settings.AUDIT_QUEUE_DEPTH_THRESHOLD
+FALLBACK_RATE_THRESHOLD = settings.FALLBACK_RATE_THRESHOLD
+FALLBACK_RATE_MIN_SAMPLE = settings.FALLBACK_RATE_MIN_SAMPLE
 FIREHOSE_DELIVERY_FAILURE_THRESHOLD = settings.FIREHOSE_DELIVERY_FAILURE_THRESHOLD
 
 _ALARM_SUFFIXES = {
     "high_latency": "HighLatency",
     "high_error_rate": "HighErrorRate",
+    "high_fallback_rate": "HighFallbackRate",
     "no_requests": "NoRequests",
     "governance_health": "GovernanceHealth",
     "retrieval_health": "RetrievalHealth",
@@ -199,6 +204,7 @@ def build_alarm_definitions() -> list[AlarmDefinition]:
     aggregate_dimensions = _aggregate_dimensions()
     definitions = [
         _high_error_rate_alarm(app_dimensions),
+        _high_fallback_rate_alarm(aggregate_dimensions),
         AlarmDefinition(
             name=ALARM_NAMES["high_latency"],
             description=_description(
@@ -374,6 +380,46 @@ def _high_error_rate_alarm(dimensions: dict[str, str]) -> AlarmDefinition:
                 "Id": "error_rate",
                 "Expression": "IF(total>0,100*(failed/total),0)",
                 "Label": "ErrorRate",
+                "ReturnData": True,
+            },
+        ],
+    )
+
+
+def _high_fallback_rate_alarm(dimensions: dict[str, str]) -> AlarmDefinition:
+    """Alarm when too large a share of delivered answers were fallbacks.
+
+    This is the answer-quality counterpart to the request error rate: a request
+    that returns a fallback is a *successful* HTTP request, so HighErrorRate
+    cannot see it. Both are expressed as metric math over Sums rather than as an
+    Average of the ratio, so periods with more traffic weigh proportionally.
+
+    The volume floor matters more here than for error rate. Fallbacks are a
+    normal outcome for genuinely out-of-scope questions, so on a quiet period a
+    single such question is 100% and would page somebody at 3am about the system
+    behaving exactly as designed.
+    """
+    return AlarmDefinition(
+        name=ALARM_NAMES["high_fallback_rate"],
+        description=_description(
+            f"More than {FALLBACK_RATE_THRESHOLD:.0f}% of delivered answers were fallbacks.",
+            "Users are being told the assistant cannot answer, on questions the documents may well cover.",
+            "Check FallbackResponsesByLayer to see which layer is refusing, then that layer's logs by "
+            "correlation ID. Compare against the last deploy and the retrieval canary results.",
+        ),
+        threshold=FALLBACK_RATE_THRESHOLD,
+        comparison_operator="GreaterThanThreshold",
+        period=900,
+        evaluation_periods=2,
+        metric_queries=[
+            _metric_query("fallbacks", FALLBACK_RESPONSES_METRIC, "Sum", dimensions),
+            _metric_query("delivered", DELIVERED_RESPONSES_METRIC, "Sum", dimensions),
+            {
+                "Id": "fallback_rate",
+                "Expression": (
+                    f"IF(delivered>={FALLBACK_RATE_MIN_SAMPLE},100*(fallbacks/delivered),0)"
+                ),
+                "Label": "FallbackRate",
                 "ReturnData": True,
             },
         ],
