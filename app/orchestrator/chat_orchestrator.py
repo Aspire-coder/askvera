@@ -1064,12 +1064,30 @@ class AIOrchestrator:
         # reader has to retype their whole question after being asked to
         # clarify.
         #
+        # Gated on a clarification actually being pending. Anchoring on any
+        # history would let a bare country name revive an unrelated question
+        # from earlier in the session: "How do I sponsor someone?" ... "DRC"
+        # would be answered as sponsoring in the DRC, which the reader never
+        # asked. The signal is the PREVIOUS USER MESSAGE carrying a country
+        # phrase that could not be resolved, which is what prompted the
+        # question - not the wording of the assistant's reply, which is
+        # translated per locale and would make this depend on copy.
+        #
         # A follow-up that IS a question keeps its existing handling: "And in
         # Uganda?" is deliberately left to the follow-up markers, so this does
         # not quietly widen when history is inherited.
         if user_message.strip().endswith("?"):
             return False
-        return word_count <= 6 and bool(find_market_mentions(normalized))
+        if not (word_count <= 6 and find_market_mentions(normalized)):
+            return False
+        return self._clarification_is_pending(history)
+
+    def _clarification_is_pending(self, history: str) -> bool:
+        """Whether the last thing the reader said needed a country clarified."""
+        user_messages = self._user_messages_from_history(history)
+        if not user_messages:
+            return False
+        return bool(find_unresolved_market_mentions(user_messages[-1]))
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""

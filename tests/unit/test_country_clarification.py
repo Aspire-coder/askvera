@@ -175,3 +175,135 @@ def test_the_clarification_copy_is_reviewed_for_english_only() -> None:
 
     assert reviewed == ["en"]
     assert len(routes) > 1, "other locales exist and will receive translated copy"
+
+
+# --- access restrictions survive the clarification --------------------------
+#
+# Clarifying a country must not turn a question the reader may not have
+# answered into one they may. These run against approve_evidence now rather
+# than waiting for the expansion candidate, and are meant to be reused by it.
+
+
+from app.evidence import approve_evidence  # noqa: E402
+from app.retrieval.models import RetrievalResult, RetrievedDocument  # noqa: E402
+
+
+def _document(country: str, access_scope: str, language: str = "en") -> RetrievedDocument:
+    return RetrievedDocument(
+        id="section-1",
+        title="Company Policy",
+        content="Delivery costs 6EUR and the FBO support fee is 3 EUR per month.",
+        source="s3://bucket/doc.pdf",
+        country=country,
+        language=language,
+        score=0.9,
+        metadata={"access_scope": access_scope, "section_id": "section-1"},
+    )
+
+
+def _result(*documents: RetrievedDocument) -> RetrievalResult:
+    return RetrievalResult(documents=list(documents), citations=[], confidence=0.9)
+
+
+def test_a_us_session_cannot_reach_belgiums_local_company_policy() -> None:
+    """The restriction that must not move."""
+    decision = approve_evidence(
+        "What is the company policy in Belgium?",
+        _result(_document("BE", "country")),
+        "US",
+        "en",
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "cross_market_policy_request"
+
+
+def test_a_us_session_may_use_approved_global_sponsoring_evidence() -> None:
+    """Global directory content is approved for any market, and must stay so."""
+    decision = approve_evidence(
+        "How do I sponsor someone in Belgium?",
+        _result(_document("GLOBAL", "global")),
+        "US",
+        "en",
+    )
+
+    assert decision.approved is True
+
+
+def test_a_clarified_country_does_not_unlock_a_foreign_local_policy() -> None:
+    """The control for this change.
+
+    The reader asked for a local company policy in a country that had to be
+    clarified. Once "DRC" resolves, the anchored question still names a foreign
+    market, and the restriction must apply exactly as if they had named it
+    outright.
+    """
+    orchestrator = _orchestrator()
+    history = (
+        "user: What is the local company policy in Upper Congo?\n"
+        "vera: Which country do you mean?"
+    )
+    resumed = orchestrator._build_retrieval_query("DRC", history, "cid")
+
+    from services.market_config import find_market_mentions
+
+    assert find_market_mentions(resumed) == {"CD"}, resumed
+
+    decision = approve_evidence(resumed, _result(_document("CD", "country")), "US", "en")
+
+    assert decision.approved is False
+    assert decision.reason == "cross_market_policy_request"
+
+
+def test_the_resumed_question_keeps_the_original_intent() -> None:
+    """Anchoring appends rather than replaces, so the question is not lost."""
+    orchestrator = _orchestrator()
+    history = (
+        "user: What is the delivery cost in Upper Congo?\nvera: Which country do you mean?"
+    )
+
+    resumed = orchestrator._build_retrieval_query("DRC", history, "cid")
+
+    assert "delivery" in resumed.lower()
+    assert "drc" in resumed.lower()
+
+
+# --- history anchoring depends on a pending clarification ------------------
+
+
+def test_a_bare_country_does_not_revive_an_unrelated_question() -> None:
+    """Anchoring on any history would answer a question the reader never asked.
+
+    "How do I sponsor someone?" ... "DRC" must not become "how do I sponsor
+    someone in the DRC". The signal is the previous user message carrying a
+    country phrase that could not be resolved - not the assistant's wording,
+    which is translated per locale.
+    """
+    orchestrator = _orchestrator()
+    unrelated = "user: How do I sponsor someone?\nvera: Here is how sponsoring works."
+
+    assert orchestrator._needs_history_context("DRC", unrelated) is False
+    assert orchestrator._build_retrieval_query("DRC", unrelated, "cid") == "DRC"
+
+
+def test_a_bare_country_resumes_only_a_pending_clarification() -> None:
+    orchestrator = _orchestrator()
+    pending = "user: What is the delivery cost in Upper Congo?\nvera: Which country do you mean?"
+
+    assert orchestrator._needs_history_context("DRC", pending) is True
+
+
+# --- translated copy: failure behaviour ------------------------------------
+
+
+def test_a_failed_translation_falls_back_to_the_reviewed_english(monkeypatch) -> None:
+    """Request-time translation can fail or be slow. It must not take the
+    clarification down with it - an untranslated question still asks the
+    reader which country they mean, which is better than an error."""
+    import app.evidence as evidence
+
+    monkeypatch.setattr(evidence, "localize_reviewed_copy", lambda *a, **k: None)
+
+    text = evidence.localized_conversation_response("country_clarification", "fr")
+
+    assert text and "which country" in text.lower()
