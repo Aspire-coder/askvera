@@ -206,3 +206,56 @@ def test_numeric_repair_count_is_never_negative(monkeypatch):
     response_metrics.record_numeric_repair(-1)
 
     assert _by_name(publisher)["numeric_claim_repairs"].value == 0.0
+
+
+def test_shutdown_flushes_batched_metrics(monkeypatch):
+    """Batched metrics still in memory at shutdown are otherwise lost.
+
+    Measured 2026-09-08: a canary run delivered 10 answers and CloudWatch
+    recorded 9. The provider batches at CLOUDWATCH_BATCH_SIZE and the age check
+    only fires when the next metric is queued, so whatever is pending when a
+    process ends is discarded. The service restarts on every deploy, which
+    drops readings from exactly the window an incident review would want.
+    """
+    import main
+
+    flushed: list[bool] = []
+
+    class _Publisher:
+        def flush(self):
+            flushed.append(True)
+
+    import app.metrics as metrics_package
+
+    monkeypatch.setattr(metrics_package, "metrics_publisher", _Publisher())
+    main._flush_metrics()
+
+    assert flushed == [True]
+
+
+def test_a_failing_flush_never_blocks_shutdown(monkeypatch):
+    """Losing a metric is small; a restart that hangs on CloudWatch is not."""
+    import main
+
+    class _Broken:
+        def flush(self):
+            raise RuntimeError("cloudwatch unavailable")
+
+    import app.metrics as metrics_package
+
+    monkeypatch.setattr(metrics_package, "metrics_publisher", _Broken())
+    main._flush_metrics()
+
+
+def test_lifespan_is_still_the_async_context_manager():
+    """The flush helper was first inserted between the decorator and lifespan.
+
+    That silently moved @asynccontextmanager onto the helper and left lifespan
+    undecorated, which would have failed at startup rather than in any test.
+    """
+    import inspect
+
+    import main
+
+    assert inspect.isasyncgenfunction(main.lifespan.__wrapped__)
+    assert main.app.router.lifespan_context is not None

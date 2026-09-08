@@ -57,6 +57,20 @@ def _init_optional_cache(max_attempts: int = 3) -> None:
             time.sleep(delay_seconds)
 
 
+def _flush_metrics() -> None:
+    """Send any batched metrics before the process ends.
+
+    Never allowed to prevent a clean shutdown: losing a metric is a small
+    problem, and a restart that hangs on the metrics backend is a larger one.
+    """
+    try:
+        from app.metrics import metrics_publisher
+
+        metrics_publisher.flush()
+    except Exception as exc:  # noqa: BLE001 - shutdown must not fail on metrics.
+        LOGGER.warning("metrics_flush_on_shutdown_failed", error=str(exc))
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
     """Validate config, initialise clients, and close cleanly on shutdown."""
@@ -105,6 +119,12 @@ async def lifespan(_app: FastAPI) -> Generator[None, None, None]:
         shutdown_requested = True
         LOGGER.info("shutdown_draining")
         await audit_lifecycle.stop()
+        # Metrics are batched, so whatever has not reached the batch size is
+        # still in memory here and is lost when the process ends. Measured on
+        # 2026-09-08: a canary run delivered 10 answers and CloudWatch recorded
+        # 9. The service restarts on every deploy, so on a quiet day this drops
+        # the readings from precisely the period an incident review would want.
+        _flush_metrics()
         close_cache()
         close_db()
         LOGGER.info("shutdown_complete")
