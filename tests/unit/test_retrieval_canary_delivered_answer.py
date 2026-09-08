@@ -70,9 +70,9 @@ def stub_pipeline(monkeypatch):
     return retrieval
 
 
-def _pipeline(retrieval, text, citations=1):
-    """Stand in for one real pipeline execution: its retrieval, and its answer."""
-    return lambda case, sequence: (retrieval, text, citations)
+def _pipeline(retrieval, text, citations=1, removed=None):
+    """Stand in for one real pipeline execution: retrieval, answer, repairs."""
+    return lambda case, sequence: (retrieval, text, citations, list(removed or []))
 
 
 def test_a_delivered_fallback_fails_the_case(stub_pipeline, monkeypatch):
@@ -193,7 +193,7 @@ def test_an_answer_produced_without_retrieval_is_reported_not_crashed(stub_pipel
     reported as a failure rather than raised as an exception that would bury it
     in a stack trace.
     """
-    monkeypatch.setattr(canary, "run_pipeline_once", lambda case, sequence: (None, "Hello.", 0))
+    monkeypatch.setattr(canary, "run_pipeline_once", lambda case, sequence: (None, "Hello.", 0, []))
     outcome = canary.run_case_once(_case(answer_must_contain=["120"]), 1)
 
     assert not outcome["passed"]
@@ -266,6 +266,7 @@ def test_a_conversation_case_replays_every_turn_in_order(monkeypatch):
     class _FakeResponse:
         answer = "An answer."
         citations = [{"id": "section-1"}]
+        metadata: dict = {}
 
     class _FakeOrchestrator:
         def __init__(self, retriever=None):
@@ -343,7 +344,7 @@ def test_a_conversation_case_replays_even_when_it_asserts_only_retrieval(monkeyp
 
     def _fake_pipeline(case, sequence):
         seen.append(case.get("conversation"))
-        return stub_retrieval(), "", 0
+        return stub_retrieval(), "", 0, []
 
     def stub_retrieval():
         return SimpleNamespace(
@@ -371,3 +372,67 @@ def test_a_conversation_case_replays_even_when_it_asserts_only_retrieval(monkeyp
 
     assert seen == [["How do I sponsor in Belgium?", "What about Germany?"]]
     assert outcome["passed"], outcome["failure_reasons"]
+
+
+def test_a_case_can_require_that_repair_removed_nothing(stub_pipeline, monkeypatch):
+    """Office hours were deleted over a notation difference alone.
+
+    No assertion about the answer's text catches that reliably, because the
+    figures are simply gone rather than wrong, and the wording that remains
+    reads perfectly well. Asserting on the repair itself is the only check that
+    does not depend on guessing whether the model writes 09:00, 9:00 am or
+    09.00.
+    """
+    monkeypatch.setattr(
+        canary,
+        "run_pipeline_once",
+        _pipeline(stub_pipeline, "The office is open Monday to Friday.", 1, removed=["09", "00", "17", "00"]),
+    )
+    outcome = canary.run_case_once(_case(answer_must_not_remove_numbers=True), 1)
+
+    assert not outcome["passed"]
+    assert any("grounding repair removed" in reason for reason in outcome["failure_reasons"])
+    assert outcome["removed_numeric_claims"] == ["09", "00", "17", "00"]
+
+
+def test_an_answer_repair_left_alone_passes(stub_pipeline, monkeypatch):
+    monkeypatch.setattr(
+        canary,
+        "run_pipeline_once",
+        _pipeline(stub_pipeline, "The office is open Monday to Friday, 09:00-17:00.", 1),
+    )
+    outcome = canary.run_case_once(_case(answer_must_not_remove_numbers=True), 1)
+
+    assert outcome["passed"], outcome["failure_reasons"]
+    assert outcome["removed_numeric_claims"] == []
+
+
+def test_the_repair_assertion_reaches_the_pipeline_on_its_own(stub_pipeline, monkeypatch):
+    """It asserts nothing about the answer's text, so it must still generate one."""
+    called: list[bool] = []
+
+    def _fake(case, sequence):
+        called.append(True)
+        return stub_pipeline, "An answer.", 1, []
+
+    monkeypatch.setattr(canary, "run_pipeline_once", _fake)
+    canary.run_case_once(_case(answer_must_not_remove_numbers=True), 1)
+
+    assert called, "a repair assertion must run the pipeline, not retrieval alone"
+
+
+def test_the_shipped_office_hours_case_asserts_on_repair():
+    """The case exists to guard the 2026-09-08 fix; a weaker assertion is not it."""
+    cases, _ = canary.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json")
+    case = next(c for c in cases if c["id"] == "belgium-office-hours-survive-repair")
+
+    assert case["answer_must_not_remove_numbers"] is True
+
+
+def test_the_chained_followup_case_asserts_retrieval_not_a_mention():
+    """Its first version passed on a clarifying question that merely said "Germany"."""
+    cases, _ = canary.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json")
+    case = next(c for c in cases if c["id"] == "chained-followup-market-continuity")
+
+    assert case["expected_title_contains"] == "Forever Germany"
+    assert "answer_must_contain" not in case

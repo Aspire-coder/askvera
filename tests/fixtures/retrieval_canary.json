@@ -202,8 +202,7 @@
         "do not contain enough information"
       ],
       "answer_must_cite": true,
-      "blocking": false,
-      "non_blocking_reason": "Added 2026-09-07 without a run against the live index, so it is observed rather than blocking. Promote to blocking once a deploy shows it passing; an unverified assertion that fails would roll back a sound deploy."
+      "blocking": true
     },
     {
       "id": "product-price-out-of-scope-delivered",
@@ -235,17 +234,30 @@
       "country": "US",
       "language": "en",
       "role": "new_prospect",
-      "expected_title_contains": "",
-      "minimum_confidence": 0.0,
-      "evidence_must_be_approved": false,
-      "answer_must_contain": [
-        "Germany"
-      ],
+      "expected_title_contains": "Forever Germany",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true,
       "blocking": false,
-      "non_blocking_reason": "Added 2026-09-07 alongside fix/followup-market-continuity and not yet run against the live index. Costs three generation calls per run. Promote to blocking once a deploy shows it passing.",
+      "non_blocking_reason": "Retrieval assertion added 2026-09-08 after the first version passed on a clarifying question that merely mentioned Germany. Observed landing on sponsoring-066-germany at 0.95. Promote to blocking after a second consecutive pass.",
       "answer_must_not_contain": [
         "do not contain enough information"
       ]
+    },
+    {
+      "id": "belgium-office-hours-survive-repair",
+      "question": "What are the office hours for the Forever Belgium office?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Belgium",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true,
+      "answer_must_not_contain": [
+        "do not contain enough information"
+      ],
+      "answer_must_not_remove_numbers": true,
+      "blocking": false,
+      "non_blocking_reason": "Added 2026-09-08 with fix/office-hours-numeric-grounding. The source writes '09.00 am - 17.00 pm' and repair was deleting the sentence whenever the model wrote 09:00-17:00. Promote to blocking once a deploy shows it passing."
     }
   ]
 }
