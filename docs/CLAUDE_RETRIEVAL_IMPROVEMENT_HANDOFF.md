@@ -333,3 +333,62 @@ numbers, decision history and requiring a written reason.
 - Two grounding defects found by the chunk-boundary tests, recorded and unfixed
   (§5).
 - Nothing here has been exercised against the live pipeline or the real corpus.
+
+
+---
+
+# 13. Review round: ownership, verification and the grounding defects
+
+| | |
+|---|---|
+| Tip | `439877f` |
+| `main` | unchanged, `bde45fb` |
+| Tests | 1461 passed, 15 skipped (skips are the PostgreSQL file when no database is configured, plus the pre-existing AWS opt-in) |
+
+Five findings were raised against `21d4d64`. All five were correct.
+
+**Concurrency.** Recovery treated "the pointer does not name this job" as
+evidence the previous worker had died, so two workers could activate at once
+despite the initial conditional claim. The root cause was one key doing two
+jobs: `job_id:revision` identified both the logical publication and the
+attempt, so two recovering requests computed the same value and neither could
+fence against the other. Ownership is now a lease with a per-attempt uuid,
+decided before the question of what happened is asked.
+
+**Attempt-bound writes.** `settle()` updated by `job_id` alone. Every
+completion and failure write now carries the attempt token and the revision,
+and the rowcount is checked.
+
+**Finalization.** Success was recorded before the document record and the job
+status, so a retry returned early and left the portal showing a live document
+as awaiting review. `succeeded` now means finished, and a recovery that finds
+the pointer already active resumes finalization.
+
+**Pointer-disabled.** "Succeeded, visibility unverified" is gone. With no
+pointer to read, publication verifies by counting active sections. Refusing
+publication outright was the alternative and would have broken the default
+configuration, where the flag defaults to false.
+
+**The migrations have been executed.** All 14 checks pass against PostgreSQL 16
+in a throwaway container, six of them concurrency checks including two
+overlapping transactions racing for one row. Running them found a defect in the
+harness rather than the migrations - it applied migrations differently from the
+deploy - which is the sort of thing only running them finds.
+
+**Both grounding defects are fixed**, each with the counter-case that stops the
+fix going too far, and there is now a test that asserts on chunks actually
+emitted by `build_sections` rather than reasoning about two constants.
+
+## What is still not established
+
+- Nothing about the production RDS instance. Different major version,
+  different extensions, different data.
+- The combined candidate comparison against the live pipeline. It needs paid
+  model calls and separate approval, and it is the only thing that would say
+  anything about delivered answers.
+- The append-only database grant.
+- A worker alive but stuck past its lease can be taken over while running.
+  That cannot corrupt the pointer and cannot let a stale worker record an
+  outcome, but its activation work may be redone.
+- The heading-carrying fix applies at ingestion, so documents already in the
+  index keep the chunking they have until re-ingested.
