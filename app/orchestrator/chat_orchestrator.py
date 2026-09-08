@@ -1250,7 +1250,23 @@ class AIOrchestrator:
         only after the pipeline has already failed to answer, so a false match
         cannot displace a real answer.
         """
-        if user_message and mentions_out_of_corpus_topic("catalogue", user_message, language):
+        # A question naming a market keeps the ordinary fallback. The corpus
+        # boundary is a statement about the whole corpus -- "those aren't part
+        # of the approved documents I work from" -- and that is only safe for
+        # subjects the documents never carry for anyone.
+        #
+        # The sponsoring directory holds per-market commercial detail: minimum
+        # order sizes are in it, and delivery terms plausibly are. Observed
+        # 2026-09-08, "What is the delivery cost for orders in New Zealand?"
+        # received the boundary answer, asserting the documents do not cover it
+        # when the directory may well cover it and retrieval simply failed. An
+        # unhelpful "I could not find that" is honest; a confident wrong denial
+        # is not, and it stops the reader asking again.
+        if (
+            user_message
+            and not find_market_mentions(user_message)
+            and mentions_out_of_corpus_topic("catalogue", user_message, language)
+        ):
             boundary = localized_conversation_response("catalogue_scope", language)
             if boundary:
                 return boundary
