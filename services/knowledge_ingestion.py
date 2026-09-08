@@ -1174,6 +1174,42 @@ def _index_sections(
     return int(success)
 
 
+def _assert_publication_owner(connection: Any, *, job_id: str, owner: Any) -> None:
+    """Refuse to write unless this attempt still owns the job, in THIS transaction.
+
+    An advisory lock serialises writers. It does not stop a worker whose lease
+    expired from writing stale state after a takeover, because it holds the
+    lock perfectly legitimately - it is simply out of date. Ownership has to be
+    checked at the write, inside the same transaction as the write, or the
+    check describes a moment that has passed by the time the row changes.
+
+    FOR UPDATE is what makes it hold: a concurrent takeover blocks on this row
+    until this transaction ends, and a takeover that already happened leaves no
+    row matching this token, so the write is abandoned before it touches
+    anything.
+    """
+    if owner is None:
+        return
+    from services.publication_attempt import OwnershipLost
+
+    row = connection.execute(
+        text(
+            """
+            SELECT 1 FROM ingestion_jobs
+            WHERE job_id = :job_id
+              AND review_revision = :revision
+              AND publication_attempt_key = :token
+            FOR UPDATE
+            """
+        ),
+        {"job_id": job_id, "revision": owner.revision, "token": owner.token},
+    ).first()
+    if row is None:
+        raise OwnershipLost(
+            "This publication attempt no longer owns the job, so its writes were abandoned."
+        )
+
+
 def _activate_generation_pointer(
     *,
     logical_document_id: str,
@@ -1184,9 +1220,16 @@ def _activate_generation_pointer(
     document_type: str,
     access_scope: str,
     activated_by: str,
+    owner: Any = None,
 ) -> None:
-    """Atomically switch the stable document slot to a verified generation."""
+    """Atomically switch the stable document slot to a verified generation.
+
+    owner is the publication attempt's claim. This is the authoritative write -
+    it is what decides what a reader can see - so ownership is verified here,
+    in the same transaction, and not only before the work began.
+    """
     with get_engine().begin() as connection:
+        _assert_publication_owner(connection, job_id=ingestion_id, owner=owner)
         # Serialize publication for this logical document even when its pointer
         # row does not exist yet. SELECT FOR UPDATE alone cannot lock a missing row.
         connection.execute(
@@ -1326,22 +1369,73 @@ def _active_section_count(ingestion_id: str) -> int:
     return int(result.get("count", 0))
 
 
-def _visibility_verifier(job_id: str, expected: int) -> Any:
-    """How to check that a generation is live, in the deployment we are in.
+def _superseded_section_count(
+    *, country: str, language: str, source_file: str, ingestion_id: str
+) -> int:
+    """How many sections of an OLDER generation are still reachable.
+
+    Without the generation pointer, publishing is a replacement: activate the
+    new sections, then delete the previous ones. Between those two steps a
+    reader can match both versions of the same document, which is the failure
+    that matters and the one a count of new sections cannot see.
+    """
+    client = _client()
+    client.indices.refresh(index=settings.OPENSEARCH_INDEX)
+    result = client.count(
+        index=settings.OPENSEARCH_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"country": country}},
+                        {"term": {"language": language}},
+                        {"term": {"source_file": source_file}},
+                        {"terms": {"status": ["active", "staging"]}},
+                    ],
+                    "must_not": [exact_term_query("ingestion_id", ingestion_id)],
+                }
+            }
+        },
+    )
+    return int(result.get("count", 0))
+
+
+def _visibility_verifier(
+    job_id: str,
+    expected: int,
+    *,
+    country: str = "",
+    language: str = "",
+    source_file: str = "",
+) -> Any:
+    """How to check that publication took effect, in the deployment we are in.
 
     With the generation pointer enabled the pointer is the authority and the
-    attempt store reads it directly. With it disabled there is no pointer to
-    read and visibility is the index itself - so it is counted. Publication
-    without a pointer is not therefore unverifiable, and recording it as
-    "succeeded, visibility unverified" was labelling an unknown outcome as
-    success. It is verified differently, and if the count does not match, the
-    attempt fails rather than being called a success with a caveat.
+    attempt store reads it directly: moving it is a single atomic write, and
+    the previous generation stops being reachable the instant it moves.
+
+    With it disabled there is no pointer, and publishing is a two-step
+    replacement rather than a switch. Counting the new sections proves they
+    exist; it does not prove the old ones are gone, and a failure between the
+    two leaves readers able to match both versions of the same document. So the
+    verifier checks both halves: the expected number of new sections is
+    reachable AND no section of any older generation still is.
     """
     if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
         return None
 
     def _verify() -> bool:
-        return _active_section_count(job_id) == expected
+        if _active_section_count(job_id) != expected:
+            return False
+        return (
+            _superseded_section_count(
+                country=country,
+                language=language,
+                source_file=source_file,
+                ingestion_id=job_id,
+            )
+            == 0
+        )
 
     return _verify
 
@@ -1450,9 +1544,22 @@ def _update_job(job_id: str, **values: Any) -> None:
         LOGGER.exception("ingestion_job_update_failed", job_id=job_id)
 
 
-def _record_document(**values: Any) -> None:
-    with get_engine().begin() as connection:
-        connection.execute(
+def _record_document(connection: Any = None, **values: Any) -> None:
+    """Upsert the document row, optionally inside a transaction the caller owns.
+
+    Publication passes its connection so the row lands in the same transaction
+    as the ownership check, rather than in one of its own where a worker that
+    has already lost its lease could still write it.
+    """
+    if connection is not None:
+        _record_document_statement(connection, values)
+        return
+    with get_engine().begin() as owned:
+        _record_document_statement(owned, values)
+
+
+def _record_document_statement(connection: Any, values: dict[str, Any]) -> None:
+    connection.execute(
             text(
                 """
                 INSERT INTO knowledge_documents (
@@ -2107,7 +2214,13 @@ def publish_ingestion_job(
     # is still live. begin() returns None only when this revision is fully
     # published, finalization included.
     attempt_store = store or publication_attempt.PostgresAttemptStore()
-    verify_visible = _visibility_verifier(job_id, expected)
+    verify_visible = _visibility_verifier(
+        job_id,
+        expected,
+        country=str(job.get("country") or first.get("country") or ""),
+        language=str(job.get("language") or first.get("language") or ""),
+        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+    )
     claim = publication_attempt.begin(
         attempt_store,
         job_id=job_id,
@@ -2131,6 +2244,7 @@ def publish_ingestion_job(
                 documents=documents,
                 logical_document_id=logical_document_id,
                 accepted_by=accepted_by,
+                owner=claim,
             )
             publication_attempt.confirm_visible(
                 attempt_store,
@@ -2146,7 +2260,56 @@ def publish_ingestion_job(
         # writes are idempotent - _record_document upserts on document_id, and
         # the job update is a plain assignment - so repeating them after a
         # failure is safe.
+        _finalize_publication(
+            job=job,
+            job_id=job_id,
+            count=count,
+            accepted_by=accepted_by,
+            logical_document_id=logical_document_id,
+            owner=claim,
+        )
+    except publication_attempt.OwnershipLost:
+        raise
+    except Exception as exc:
+        # Recoverable, not "did not happen". Which one it was is decided by the
+        # next attempt, after it takes ownership - never inferred here from the
+        # fact that an exception was raised.
+        publication_attempt.fail(attempt_store, job_id=job_id, claim=claim, detail=str(exc))
+        raise
+
+    # Succeeded means finished, not activated. Written last, so a retry that
+    # sees it can safely do nothing.
+    publication_attempt.complete(
+        attempt_store,
+        job_id=job_id,
+        claim=claim,
+        detail="verified visible and finalized",
+    )
+    clear_active_generation_cache()
+    return {"job": _ingestion_job(job_id), "publishedCount": count}
+
+
+def _finalize_publication(
+    *,
+    job: dict[str, Any],
+    job_id: str,
+    count: int,
+    accepted_by: str,
+    logical_document_id: str,
+    owner: Any,
+) -> None:
+    """The bookkeeping after activation, in one transaction this attempt owns.
+
+    Both writes together, behind one ownership check, because separately they
+    are two windows in which a worker that has already lost its lease can write
+    over a newer attempt's state. Idempotent, so the recovery path repeats them
+    safely: the document row upserts on document_id and the job update is a
+    plain assignment.
+    """
+    with get_engine().begin() as connection:
+        _assert_publication_owner(connection, job_id=job_id, owner=owner)
         _record_document(
+            connection,
             job_id=job_id,
             filename=str(job.get("filename") or "document"),
             source_uri=str(job.get("source_uri") or ""),
@@ -2165,26 +2328,17 @@ def publish_ingestion_job(
             expiry_date=str(job.get("expiry_date") or ""),
             malware_scan_status=str(job.get("malware_scan_status") or "not_required"),
         )
-    except publication_attempt.OwnershipLost:
-        raise
-    except Exception as exc:
-        # Recoverable, not "did not happen". Which one it was is decided by the
-        # next attempt, after it takes ownership - never inferred here from the
-        # fact that an exception was raised.
-        publication_attempt.fail(attempt_store, job_id=job_id, claim=claim, detail=str(exc))
-        raise
-
-    _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
-    # Succeeded means finished, not activated. Written last, so a retry that
-    # sees it can safely do nothing.
-    publication_attempt.complete(
-        attempt_store,
-        job_id=job_id,
-        claim=claim,
-        detail="verified visible and finalized",
-    )
-    clear_active_generation_cache()
-    return {"job": _ingestion_job(job_id), "publishedCount": count}
+        connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs
+                SET status = 'ready', accepted_by = :accepted_by,
+                    review_before_publish = FALSE, updated_at = now()
+                WHERE job_id = :job_id
+                """
+            ),
+            {"job_id": job_id, "accepted_by": accepted_by},
+        )
 
 
 def _publish_activated_generation(
@@ -2196,6 +2350,7 @@ def _publish_activated_generation(
     documents: list[dict[str, Any]],
     logical_document_id: str,
     accepted_by: str,
+    owner: Any = None,
 ) -> None:
     """Activate the staged sections, then move the pointer that makes them visible.
 
@@ -2222,6 +2377,7 @@ def _publish_activated_generation(
             document_type=str(job.get("document_type") or "policy"),
             access_scope=str(job.get("access_scope") or "country"),
             activated_by=accepted_by,
+            owner=owner,
         )
     else:
         delete_actions = _older_source_actions(

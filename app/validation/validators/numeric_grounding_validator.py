@@ -62,7 +62,13 @@ _DIGIT_GROUP_RE = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
 def _normalize(text: str) -> str:
     """Normalize text for tolerant, Unicode-safe source matching."""
     normalized = unicodedata.normalize("NFKC", text or "").casefold()
-    normalized = re.sub(r"\s+", " ", normalized)
+    # Horizontal whitespace collapses; line breaks survive. A table's
+    # structure is carried by its lines, and a heading stating a currency
+    # once for the rows beneath it is only distinguishable from a row by
+    # standing on its own line. Collapsing everything to spaces threw that
+    # away and left unit inheritance guessing from proximity.
+    normalized = re.sub(r"[^\S\n]+", " ", normalized)
+    normalized = re.sub(r" ?\n ?", "\n", normalized)
     normalized = re.sub(r"\s*(?:-|\u2013|\u2014)\s*", "-", normalized)
     normalized = _DIGIT_GROUP_RE.sub("", normalized)
     return normalized.strip()
@@ -370,11 +376,13 @@ def _source_windows(
             if found_unit and found_unit != required_unit:
                 continue
             # Nothing governs this occurrence, because a clause boundary cut
-            # the inheritance. Document-wide presence is not enough on its own:
-            # it accepted a claim naming a currency that belongs to a different
-            # table in the same document.
-            if not found_unit and not _unit_precedes(
-                source_text, match.start(), required_unit
+            # the inheritance. A declaration - a heading or footer stating the
+            # unit and carrying no figures - is the only thing that may supply
+            # one. Where no declaration covers the figure there is no support
+            # for any unit, and an unsupported unit is not accepted merely
+            # because the document mentions it somewhere else.
+            if not found_unit and required_unit != _inherited_unit(
+                source_text, match.start(), _row_topic(source_text, match.start())
             ):
                 continue
         index = match.start()
@@ -411,6 +419,17 @@ _UNIT_TOKEN_RE = re.compile(
 # unrelated one.
 _UNIT_LOOKBACK_CHARACTERS = 300
 
+# Where a unit stops governing. Wider than the clause delimiter, because a line
+# break ends a table row: without this the currency written beside one row's
+# figure became the "nearest preceding unit" for the next row's bare figure, so
+# "Annual membership: 20 EUR / Standard delivery: 900" made 900 EUR.
+#
+# This is NOT the same boundary as the subject window's. That one deliberately
+# reads across line breaks, because PDF extraction wraps a single sentence over
+# several lines and the subject qualifying a figure is usually on the line
+# above it.
+_UNIT_SCOPE_RE = re.compile(r"(?<!\d)[.;](?!\d)|\n")
+
 
 def _governing_unit(source_text: str, start: int, end: int) -> str:
     """The unit this figure is denominated in, adjacent or inherited.
@@ -436,7 +455,7 @@ def _governing_unit(source_text: str, start: int, end: int) -> str:
     # correct claim of 900 DZD - a false rejection, which destroys a correct
     # answer rather than merely letting a wrong one through.
     window_start = max(0, start - _UNIT_LOOKBACK_CHARACTERS)
-    for delimiter in _CLAUSE_DELIMITER_RE.finditer(source_text, window_start, start):
+    for delimiter in _UNIT_SCOPE_RE.finditer(source_text, window_start, start):
         window_start = delimiter.end()
 
     nearest = None
@@ -445,33 +464,90 @@ def _governing_unit(source_text: str, start: int, end: int) -> str:
     return _normalize_unit(nearest.group(0)) if nearest else ""
 
 
-def _unit_precedes(source_text: str, start: int, unit: str) -> bool:
-    """Whether this unit is among those stated before the figure, if any are.
+# A declaration is a heading or a footer: it names a unit and carries no
+# figures of its own. "Delivery charges - DZD" declares; "Standard delivery:
+# 900 DZD" is a row, and its unit is adjacent rather than inherited. Segments
+# are split on line breaks and sentence ends, because extraction gives tables
+# as lines and prose as sentences and both carry declarations.
+_SEGMENT_SPLIT_RE = re.compile(r"\n|(?<!\d)\.(?!\d)|;")
+_DIGIT_RE = re.compile(r"\d")
 
-    Used only when no unit governs the occurrence, because a clause boundary
-    cut the inheritance. Without this the check fell back to document-wide
-    presence and accepted any unit named anywhere - so a delivery charge in
-    DZD could be stated in EUR because a membership table further down was
-    priced in EUR.
 
-    When nothing at all precedes the figure the answer is true, deliberately.
-    A table whose currency is declared in a footer, or a bare figure with no
-    units in the document before it, must not be rejected on the strength of
-    evidence that does not exist.
+@dataclass(frozen=True)
+class _UnitDeclaration:
+    """A heading or footer stating the unit for the rows it covers."""
+
+    end: int
+    unit: str
+    topic: frozenset[str]
+
+
+def _unit_declarations(source_text: str) -> list[_UnitDeclaration]:
+    """Every segment that states a unit and no figure, in document order."""
+    declarations: list[_UnitDeclaration] = []
+    position = 0
+    for segment in _SEGMENT_SPLIT_RE.split(source_text):
+        start = position
+        position += len(segment) + 1
+        if _DIGIT_RE.search(segment):
+            continue
+        units = {
+            _normalize_unit(match.group(0)) for match in _UNIT_TOKEN_RE.finditer(segment)
+        }
+        units.discard("")
+        # A segment naming two currencies declares neither. "Prices in DZD or
+        # EUR" cannot govern a row, and picking one would be a guess.
+        if len(units) != 1:
+            continue
+        declarations.append(
+            _UnitDeclaration(
+                end=start + len(segment),
+                unit=units.pop(),
+                topic=frozenset(_word_tokens(segment)),
+            )
+        )
+    return declarations
+
+
+def _inherited_unit(source_text: str, start: int, row_topic: frozenset[str]) -> str:
+    """The unit a declaration gives this figure, or "" if none does.
+
+    Structure, not proximity. The earlier version asked only whether the
+    claimed unit appeared somewhere before the figure, which is not evidence
+    about this row - and it accepted any unit at all when nothing preceded,
+    so a missing header licensed an invented currency. Absence of evidence is
+    now absence of support.
+
+    Among the declarations before the figure, one naming the same thing as the
+    row wins: in "Delivery charges - DZD. Membership fees are payable in EUR
+    each year. Standard delivery: 900", the delivery heading governs the
+    delivery row even though the membership sentence is nearer. Without a topic
+    match the nearest preceding declaration governs, which is how a plain table
+    header works.
+
+    A declaration after the figure counts only when the document declares one
+    unit and no other - the footer case, "All charges are stated in DZD".
     """
-    window_start = max(0, start - _UNIT_LOOKBACK_CHARACTERS)
-    # Clause boundaries are ignored here on purpose. They decide what GOVERNS a
-    # figure, which must be strict or a correct claim is rejected. This decides
-    # what CONTRADICTS it, and a currency stated two sentences earlier is still
-    # evidence about which currency this row is in.
-    preceding = {
-        _normalize_unit(match.group(0))
-        for match in _UNIT_TOKEN_RE.finditer(source_text, window_start, start)
-    }
-    preceding.discard("")
-    if not preceding:
-        return True
-    return unit in preceding
+    preceding = [
+        declaration for declaration in _unit_declarations(source_text)
+        if declaration.end <= start
+    ]
+    if preceding:
+        on_topic = [
+            declaration for declaration in preceding if declaration.topic & row_topic
+        ]
+        return (on_topic or preceding)[-1].unit
+
+    units = {declaration.unit for declaration in _unit_declarations(source_text)}
+    return units.pop() if len(units) == 1 else ""
+
+
+def _row_topic(source_text: str, start: int) -> frozenset[str]:
+    """The words of the segment the figure sits in - its row, in a table."""
+    boundaries = [0] + [
+        match.end() for match in _SEGMENT_SPLIT_RE.finditer(source_text, 0, start)
+    ]
+    return frozenset(_word_tokens(source_text[boundaries[-1]:start]))
 
 
 def text_declares_unit(text_value: str) -> bool:
