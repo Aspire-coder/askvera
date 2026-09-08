@@ -60,7 +60,12 @@ from services.semantic_cache import (
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
 from services.guardrails import is_policy_safety_question
-from services.market_config import find_market_mentions, find_probable_market_typo, market_display_name
+from services.market_config import (
+    find_market_mentions,
+    find_probable_market_typo,
+    find_unresolved_market_mentions,
+    market_display_name,
+)
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -1051,7 +1056,20 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
-        return word_count <= 14 and self._contains_follow_up_marker(normalized)
+        if word_count <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        # A short reply that is just a country name, and is not itself a
+        # question, is answering something the assistant asked - "Which country
+        # do you mean?" - and carries no question of its own. Without this the
+        # reader has to retype their whole question after being asked to
+        # clarify.
+        #
+        # A follow-up that IS a question keeps its existing handling: "And in
+        # Uganda?" is deliberately left to the follow-up markers, so this does
+        # not quietly widen when history is inherited.
+        if user_message.strip().endswith("?"):
+            return False
+        return word_count <= 6 and bool(find_market_mentions(normalized))
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
@@ -1584,6 +1602,21 @@ class AIOrchestrator:
         if intent == "assistant_meta":
             return self._static_assistant_response(body, correlation_id, candidate_flags)
         if intent == "policy_fact" and not find_market_mentions(scrubbed_input):
+            # A country-shaped phrase that could not be resolved is asked
+            # about, never answered. Without this the message resolved to no
+            # market and fell through to retrieval on the SESSION's country -
+            # so "Upper Congo delivery?" from a US session was answered from US
+            # policy. That is the wrong-country answer the matcher's guard
+            # exists to prevent, arriving by a different route.
+            #
+            # Placed here, before the exact and semantic caches and before
+            # retrieval, so no country-specific answer is produced or served
+            # from cache for a question whose country is unknown.
+            unresolved = find_unresolved_market_mentions(scrubbed_input)
+            if unresolved:
+                return self._country_clarification_response(
+                    sorted(unresolved)[0], body, correlation_id
+                )
             # A named market takes the normal retrieval path; this only fires
             # when no market was recognized at all, so a likely typo (e.g.
             # "Nigar" for "Niger", TRB-19189) doesn't fall straight through to
@@ -1592,6 +1625,33 @@ class AIOrchestrator:
             if probable_country:
                 return self._market_typo_confirmation_response(probable_country, body, correlation_id)
         return None
+
+    def _country_clarification_response(
+        self,
+        mention: str,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse:
+        """Ask which country a country-shaped phrase meant.
+
+        Never substitutes: not the country whose name is inside the phrase -
+        "Upper Congo" contains "Congo" and may mean either Congo - and not the
+        session's own market, which is what happened before this existed.
+        """
+        template = localized_conversation_response("country_clarification", body.language) or (
+            'Which country do you mean by "{mention}"? Please reply with the country '
+            "name and I will answer your question for that market."
+        )
+        answer = template.replace("{mention}", mention)
+        return self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "fallback": False,
+                "response_source": "country_clarification",
+                "unresolved_market_mention": mention,
+            },
+        )
 
     def _market_typo_confirmation_response(
         self,
