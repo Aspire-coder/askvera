@@ -278,3 +278,30 @@ def test_an_undated_document_answers_a_past_year_that_a_dated_one_refuses():
 
     assert unsupported_requested_years(question, [document("2026-07", "2026-07-01")]) == [2024]
     assert unsupported_requested_years(question, [document("", "")]) == []
+
+
+def test_directory_clarification_cards_name_a_market_or_stay_neutral():
+    """The cards ask a question on the reader's behalf; it must be answerable.
+
+    Reported live: a reader asked for the UK office's customer care number, was
+    shown a card reading "What is the telephone number for that country?", and
+    the answer to that card was "the approved policy documents do not contain
+    enough information" - because nothing in that sentence says which country.
+
+    Naming the market removes the dependency on the next turn resolving a
+    reference. Where the message does not resolve to exactly one market the
+    wording stays neutral, and in particular the request's own country is never
+    substituted: the reported case was a United States widget asking about the
+    UK, so naming the widget's country would have asked a confident question
+    about the wrong market.
+    """
+    from services.market_config import find_market_mentions, market_display_name
+
+    def card_market(message: str) -> str:
+        found = find_market_mentions(message)
+        return (market_display_name(next(iter(found))) if len(found) == 1 else "") or "that country"
+
+    assert card_market("what is the customer care number for the UK forever office") == "United Kingdom"
+    assert card_market("what are the office hours") == "that country"
+    # Two markets named: neither may be asserted.
+    assert card_market("compare the UK and Belgium offices") == "that country"

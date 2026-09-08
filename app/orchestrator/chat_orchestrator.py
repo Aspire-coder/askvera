@@ -60,7 +60,7 @@ from services.semantic_cache import (
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
 from services.guardrails import is_policy_safety_question
-from services.market_config import find_market_mentions, find_probable_market_typo
+from services.market_config import find_market_mentions, find_probable_market_typo, market_display_name
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -163,7 +163,15 @@ DIRECTORY_DETAIL_TERMS = re.compile(
 # doesn't ask them to choose again from a card that duplicates what they
 # already said (TRB-19189-follow-up, reported after deploy).
 DIRECTORY_FIELD_TERMS: dict[str, re.Pattern[str]] = {
-    "directory-telephone": re.compile(r"\b(telephone|phone)\b", re.IGNORECASE),
+    # "number" alone is ambiguous - an FBO number and an order number are both
+    # numbers - so it counts only when qualified by a word meaning a line you
+    # call. Without this, "what is the customer care number for the UK office?"
+    # named no field at all, and the reader who had just said which detail they
+    # wanted was asked to choose it from a list of seven.
+    "directory-telephone": re.compile(
+        r"\b(telephone|phone)\b|\b(?:customer\s+care|contact|helpline|support|care)\s+numbers?\b",
+        re.IGNORECASE,
+    ),
     "directory-hours": re.compile(r"\b(business\s+hours?|office\s+hours?|hours)\b", re.IGNORECASE),
     "directory-email": re.compile(r"\bemail\b", re.IGNORECASE),
     # Excludes "address" inside "email address" (e.g. "what's the email
@@ -1866,6 +1874,22 @@ class AIOrchestrator:
             # clarification. Fall through to the normal insufficient-evidence
             # path instead.
             return None
+        # These card prompts are questions the system asks on the reader's
+        # behalf, so they must not depend on a reference being resolved a turn
+        # later. They read "for that country", and a reader who asked about the
+        # UK office and tapped "Telephone number" sent "What is the telephone
+        # number for that country?" - answered with insufficient evidence,
+        # because nothing in that sentence says which country. Naming the market
+        # removes the dependency instead of trusting history to carry it.
+        # Only a market the message itself resolves to is named. The request's
+        # own country is deliberately not used as a fallback: the reported case
+        # was a widget set to the United States asking about the UK office, and
+        # naming the widget's country would have produced "What is the telephone
+        # number for United States?" - a confident question about the wrong
+        # market, which is worse than the unresolvable reference it replaces.
+        mentioned = find_market_mentions(body.message or "")
+        market_phrase = market_display_name(next(iter(mentioned))) if len(mentioned) == 1 else ""
+        market_phrase = market_phrase or "that country"
         answer = (
             "I found approved directory information, but I need one more detail to answer accurately. "
             "Are you asking for the telephone number, business hours, email address, office address, "
@@ -1880,12 +1904,19 @@ class AIOrchestrator:
                 "fallback": False,
             },
             cards=[
-                {"id": "directory-telephone", "label": "Telephone number", "prompt": "What is the telephone number for that country?"},
-                {"id": "directory-hours", "label": "Business hours", "prompt": "What are the business hours for that country?"},
-                {"id": "directory-email", "label": "Email address", "prompt": "What is the email address for that country?"},
-                {"id": "directory-address", "label": "Office address", "prompt": "What is the office address for that country?"},
-                {"id": "directory-website", "label": "Website", "prompt": "What is the website for that country?"},
-                {"id": "directory-sponsoring", "label": "Sponsoring information", "prompt": "What sponsoring information is available for that country?"},
+                {"id": card_id, "label": label, "prompt": prompt.format(market=market_phrase)}
+                for card_id, label, prompt in (
+                    ("directory-telephone", "Telephone number", "What is the telephone number for {market}?"),
+                    ("directory-hours", "Business hours", "What are the business hours for {market}?"),
+                    ("directory-email", "Email address", "What is the email address for {market}?"),
+                    ("directory-address", "Office address", "What is the office address for {market}?"),
+                    ("directory-website", "Website", "What is the website for {market}?"),
+                    (
+                        "directory-sponsoring",
+                        "Sponsoring information",
+                        "What sponsoring information is available for {market}?",
+                    ),
+                )
             ],
         )
         return response

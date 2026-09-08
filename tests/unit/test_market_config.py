@@ -291,3 +291,27 @@ def test_chat_request_rejects_a_language_no_market_publishes() -> None:
             country="US",
             language="ja",
         )
+
+
+def test_uk_is_recognised_as_a_market():
+    """Reported live: "the UK forever office" resolved to no market at all.
+
+    GB carried "United Kingdom" and thirty localised spellings but not the
+    commonest English abbreviation, so a reader asking about the UK office was
+    treated as naming no country. Matching is whole-token and requires an alias
+    to be unambiguous, so a two-letter alias is safe here in a way that a bare
+    market code is not.
+    """
+    from services.market_config import find_market_mentions, market_display_name
+
+    assert find_market_mentions("what is the customer care number for the UK forever office") == {"GB"}
+    assert market_display_name("GB") == "United Kingdom"
+
+
+def test_market_display_name_covers_directory_only_markets():
+    """Algeria is in the global directory rather than markets.json."""
+    from services.market_config import market_display_name
+
+    assert market_display_name("DZ") == "Algeria"
+    assert market_display_name("ZZ") == ""
+    assert market_display_name("") == ""
