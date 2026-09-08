@@ -3,6 +3,11 @@
 import json
 import pytest
 
+from app.evidence_contract import (  # noqa: F401
+    MIN_CHECKED_CONTENT_TOKENS,
+    _content_tokens,
+    _uncovered_sentence,
+)
 from app.evidence_contract import parse_evidence_contract
 from app.retrieval.models import RetrievedDocument
 
@@ -192,3 +197,35 @@ def test_an_invented_figure_beside_a_supported_claim_is_rejected() -> None:
 
     assert result.valid is False
     assert result.reason == "answer_contains_unsupported_claim"
+
+
+def test_a_short_assertion_bypasses_coverage_entirely() -> None:
+    """Known gap, pinned so it cannot change without someone deciding to.
+
+    Coverage skips any sentence with fewer than MIN_CHECKED_CONTENT_TOKENS
+    content tokens, on the grounds that "This applies to all FBOs." asserts too
+    little to score by overlap. The rationale is sound; the consequence is not
+    symmetric. Skipping means accepting, and the shortest sentences include the
+    most dangerous ones: "Income is guaranteed." carries two content tokens.
+
+    This is a component-level gap, not a live one. EVIDENCE_GATED_OUTPUT_ENABLED
+    defaults to false and production does not override it, so the contract does
+    not run at all today; and income claims are separately routed to reviewed
+    refusal copy. It matters when the flag is turned on.
+
+    Closing it means either scoring short sentences strictly - which risks
+    rejecting ordinary short replies such as "Yes, you can." - or judging
+    materiality, which needs a false-rejection measurement first. Until that
+    exists, the behaviour is recorded rather than quietly changed.
+    """
+    claims = [{"text": "FBO means Forever Business Owner."}]
+    answer = "FBO means Forever Business Owner. Income is guaranteed."
+
+    assert _uncovered_sentence(answer, claims) == ""
+    assert len(_content_tokens("Income is guaranteed.")) < MIN_CHECKED_CONTENT_TOKENS
+
+    # A longer unsupported claim is still caught, so the gap is specifically
+    # about length rather than coverage being broken.
+    assert _uncovered_sentence(
+        "FBO means Forever Business Owner. You will earn 5000 EUR every month.", claims
+    ) != ""

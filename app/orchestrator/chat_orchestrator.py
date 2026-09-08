@@ -547,10 +547,20 @@ class AIOrchestrator:
         # The check is the validator's own, so this step cannot drift back into
         # producing answers the validator will throw away.
         if order_restored and has_incomplete_ending(order_safe_answer, language):
+            # Whether the answer already carries the figure. Skipping keeps the
+            # answer well formed, which is not the same as keeping it complete:
+            # if the model never stated the minimum order, refusing to restore
+            # it leaves the reader without the fact they asked for. Recorded so
+            # that case is visible rather than assumed not to happen.
+            restored_only = order_safe_answer[len(chat_response.answer.strip()):]
             LOGGER.warning(
                 "directory_order_size_restore_skipped",
                 correlation_id=correlation_id,
                 reason="restored_answer_would_be_incomplete",
+                answer_already_states_a_minimum_order=bool(
+                    re.search(r"minimum\s+(?:first\s+)?order", chat_response.answer or "", re.IGNORECASE)
+                ),
+                skipped_addition_chars=len(restored_only.strip()),
             )
             order_restored = False
         if order_restored:
