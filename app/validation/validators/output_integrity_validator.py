@@ -3,7 +3,7 @@
 from app.response.quality import (
     contains_internal_retrieval_language,
     contains_unresolved_placeholder,
-    has_incomplete_ending,
+    incomplete_ending_reason,
 )
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
 
@@ -24,11 +24,19 @@ class OutputIntegrityValidator:
                     field="answer",
                 )
             )
-        if has_incomplete_ending(answer, context.language):
+        # The message names the rule that fired. Rejecting an answer replaces it
+        # with the insufficient-evidence fallback, and the rejected text is
+        # never logged, so without the rule name a wrongly discarded answer
+        # leaves nothing to diagnose.
+        incomplete_reason = incomplete_ending_reason(answer, context.language)
+        if incomplete_reason:
             result.add_issue(
                 ValidationIssue(
                     code="INCOMPLETE_OUTPUT",
-                    message="Chat response appears truncated or structurally incomplete.",
+                    message=(
+                        "Chat response appears truncated or structurally incomplete "
+                        f"({incomplete_reason})."
+                    ),
                     severity=ValidationSeverity.CRITICAL,
                     field="answer",
                 )

@@ -96,11 +96,23 @@ def contains_unresolved_placeholder(answer: str) -> bool:
     return bool(_PLACEHOLDER_RE.search(answer or ""))
 
 
-def has_incomplete_ending(answer: str, language: str = "") -> bool:
-    """Detect high-confidence broken endings without rewriting factual content."""
+def incomplete_ending_reason(answer: str, language: str = "") -> str | None:
+    """Name the rule that judged an answer broken, or None if it looks whole.
+
+    The reason exists because this check discards a complete answer and shows
+    the reader the insufficient-evidence fallback instead, and the rejected
+    text is deliberately never logged. That left "INCOMPLETE_OUTPUT" as the
+    entire record of the decision -- true of the Algeria minimum-order case,
+    where retrieval scored 9.542 on the right record, evidence was approved,
+    grounding repair removed nothing, and the reader still got the fallback
+    with no way to tell which of these rules had fired.
+
+    Every reason is drawn from this function's own vocabulary or from counts,
+    never from the answer, so naming it adds no answer text to the logs.
+    """
     text = (answer or "").strip()
     if not text:
-        return True
+        return "empty"
     # Only an UNCLOSED opener indicates truncation. Surplus closers are how
     # enumerations are written - "a) ... b) ... c) ..." - and policy answers list
     # requirements that way constantly.
@@ -110,10 +122,20 @@ def has_incomplete_ending(answer: str, language: str = "") -> bool:
     # 0 "(" against 3 ")". The answers were complete, correct and cited, ending
     # in a normal closing question; they were replaced by "the approved policy
     # documents do not contain enough information".
-    if text.count("(") > text.count(")") or text.count("[") > text.count("]"):
-        return True
+    if text.count("(") > text.count(")"):
+        return f"unclosed_paren:{text.count('(')}>{text.count(')')}"
+    if text.count("[") > text.count("]"):
+        return f"unclosed_bracket:{text.count('[')}>{text.count(']')}"
     locale = (language or "en").split("-", 1)[0].lower()
-    return locale == "en" and bool(_INCOMPLETE_ENGLISH_END_RE.search(text))
+    if locale != "en":
+        return None
+    match = _INCOMPLETE_ENGLISH_END_RE.search(text)
+    return f"dangling_word:{match.group(0).strip().lower()}" if match else None
+
+
+def has_incomplete_ending(answer: str, language: str = "") -> bool:
+    """Detect high-confidence broken endings without rewriting factual content."""
+    return incomplete_ending_reason(answer, language) is not None
 
 
 def contains_internal_retrieval_language(answer: str) -> bool:
