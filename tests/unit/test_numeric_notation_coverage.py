@@ -523,3 +523,77 @@ def test_a_heading_does_not_govern_across_a_long_gap() -> None:
 
     assert len(filler) > _UNIT_LOOKBACK_CHARACTERS
     assert _governing_unit(record, index, index + 3) == ""
+
+
+# Boundary behaviour of unit inheritance, requested in review. "Nearest
+# preceding unit within 300 characters" is a heuristic, not table-row
+# understanding, and these fix its edges in place so the limits are visible.
+_UNRELATED_SENTENCE_APART = (
+    "Delivery charges - DZD\n"
+    "Membership fees are payable in EUR each year.\n"
+    "Standard delivery: 900"
+)
+_UNRELATED_SAME_SENTENCE = "Delivery charges - DZD and membership in EUR, standard delivery: 900"
+
+
+def test_a_currency_in_a_finished_sentence_does_not_govern_the_next_one() -> None:
+    """The dangerous direction: a false rejection destroys a correct answer.
+
+    Before inheritance was bounded at a clause boundary, EUR in the preceding
+    sentence became the nearest preceding unit and a correct claim of 900 DZD
+    was rejected.
+    """
+    document = _document(_UNRELATED_SENTENCE_APART, "Forever Algeria", "sponsoring-001-algeria")
+    assert not [
+        claim.number
+        for claim in unsupported_numeric_claims("Standard delivery costs 900 DZD.", [document])
+    ]
+
+
+def test_a_currency_in_the_same_sentence_still_wins_and_that_is_a_known_limit() -> None:
+    """Documented limitation, asserted so it cannot change unnoticed.
+
+    Where two currencies sit in one sentence with no delimiter between them,
+    the nearer one governs, and here that is the wrong one: a correct claim of
+    900 DZD is rejected. The heuristic cannot see that "membership in EUR" is a
+    different subject, because it has no notion of a row.
+
+    Rejecting is the conservative direction - the validator declines rather
+    than asserting a currency it cannot attribute - but it costs a correct
+    answer, and closing it needs structural parsing rather than a wider or
+    narrower window.
+    """
+    document = _document(_UNRELATED_SAME_SENTENCE, "Forever Algeria", "sponsoring-001-algeria")
+    assert [
+        claim.number
+        for claim in unsupported_numeric_claims("Standard delivery costs 900 DZD.", [document])
+    ] == ["900"]
+
+
+def test_a_bare_figure_with_no_governing_unit_is_not_rejected() -> None:
+    """Permissive where nothing can be established, by design.
+
+    A figure with no unit beside it and none in its clause has no attributable
+    currency. The validator does not invent one, and does not reject a claim
+    for a unit it simply cannot confirm - many corpus figures are bare.
+    """
+    record = "Delivery charges - DZD. Membership section follows. Annual membership: 20"
+    document = _document(record, "Forever Algeria", "sponsoring-001-algeria")
+
+    assert not [
+        claim.number
+        for claim in unsupported_numeric_claims("Annual membership costs 20 DZD.", [document])
+    ]
+
+
+def test_the_reviewers_counterexample_holds_in_all_four_directions() -> None:
+    """Guarded directly, so a later change to the window cannot quietly undo it."""
+    document = _document(_MIXED_UNIT_RECORD, "Forever Algeria", "sponsoring-001-algeria")
+
+    def flagged(answer: str) -> list[str]:
+        return [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+    assert flagged("Standard delivery costs 900 EUR.") == ["900"]
+    assert flagged("Standard delivery costs 900 DZD.") == []
+    assert flagged("Annual membership costs 20 EUR.") == []
+    assert flagged("Annual membership costs 20 DZD.") == ["20"]

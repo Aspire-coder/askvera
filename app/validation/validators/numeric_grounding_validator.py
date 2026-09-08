@@ -420,10 +420,19 @@ def _governing_unit(source_text: str, start: int, end: int) -> str:
     adjacent = _unit_beside(source_text, start, end)
     if adjacent:
         return adjacent
+
+    # Inheritance stops at the last clause boundary, so a currency mentioned in
+    # a finished sentence cannot govern a figure in the next one. Without this,
+    # "Delivery charges - DZD. Membership fees are payable in EUR each year.
+    # Standard delivery: 900" made EUR the nearest preceding unit and rejected a
+    # correct claim of 900 DZD - a false rejection, which destroys a correct
+    # answer rather than merely letting a wrong one through.
+    window_start = max(0, start - _UNIT_LOOKBACK_CHARACTERS)
+    for delimiter in _CLAUSE_DELIMITER_RE.finditer(source_text, window_start, start):
+        window_start = delimiter.end()
+
     nearest = None
-    for match in _UNIT_TOKEN_RE.finditer(
-        source_text, max(0, start - _UNIT_LOOKBACK_CHARACTERS), start
-    ):
+    for match in _UNIT_TOKEN_RE.finditer(source_text, window_start, start):
         nearest = match
     return _normalize_unit(nearest.group(0)) if nearest else ""
 
