@@ -293,3 +293,82 @@ def test_a_real_pdf_with_an_image_xobject_is_detected_as_scanned() -> None:
 
     real_page = pypdf.PdfReader(buffer).pages[0]
     assert document_preflight._page_has_image(real_page) is True
+
+
+class _NestedScanPage:
+    """A scan placed inside a Form XObject, which is how many tools emit one.
+
+    There is no image XObject directly on the page, so a top-level-only check
+    reports the page as imageless.
+    """
+
+    def extract_text(self, extraction_mode=None):
+        return ""
+
+    def get(self, key, default=None):
+        if key == "/Resources":
+            return {
+                "/XObject": {
+                    "/Fm0": {
+                        "/Subtype": "/Form",
+                        "/Resources": {"/XObject": {"/Im0": {"/Subtype": "/Image"}}},
+                    }
+                }
+            }
+        return default
+
+
+def test_a_scan_nested_in_a_form_xobject_is_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otherwise the page is filed as blank and its content never reaches the corpus."""
+    monkeypatch.setattr(
+        document_preflight, "PdfReader", _reader_for([_TextPage(), _NestedScanPage()])
+    )
+
+    report = analyze_pdf(Path("nested.pdf"))
+
+    assert report.scanned_page_numbers == (2,)
+    assert report.blank_page_numbers == ()
+    assert report.requires_ocr is True
+
+
+def test_a_page_whose_images_cannot_be_read_is_not_called_blank(monkeypatch: pytest.MonkeyPatch) -> None:
+    """"We found nothing" and "we could not look" are different answers.
+
+    A readable document with one unparseable empty page previously recorded
+    that page as a blank separator and reported requires_ocr False, so a
+    scanned rule that happened to sit behind a malformed resource tree was
+    published with its content silently missing.
+    """
+
+    class _UnreadableResourcesPage:
+        def extract_text(self, extraction_mode=None):
+            return ""
+
+        def get(self, key, default=None):
+            if key == "/Resources":
+                raise RuntimeError("malformed resource tree")
+            return default
+
+    monkeypatch.setattr(
+        document_preflight,
+        "PdfReader",
+        _reader_for([_TextPage(), _UnreadableResourcesPage()]),
+    )
+
+    report = analyze_pdf(Path("partly-broken.pdf"))
+
+    assert report.undetermined_page_numbers == (2,)
+    assert report.blank_page_numbers == ()
+    assert report.requires_ocr is True
+    assert report.has_unextracted_pages is True
+
+
+def test_a_genuine_blank_separator_is_still_blank(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The distinction must not turn every empty page into a suspected scan."""
+    monkeypatch.setattr(document_preflight, "PdfReader", _reader_for([_TextPage(), _BlankPage()]))
+
+    report = analyze_pdf(Path("separator.pdf"))
+
+    assert report.blank_page_numbers == (2,)
+    assert report.undetermined_page_numbers == ()
+    assert report.requires_ocr is False

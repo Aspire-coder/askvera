@@ -34,6 +34,12 @@ class DocumentPreflight:
     # Page numbers with neither text nor an image: genuinely blank separators,
     # which are normal and do not warrant OCR.
     blank_page_numbers: tuple[int, ...] = ()
+    # Page numbers with no text whose image content could not be established,
+    # because the resource tree could not be read or nests beyond the depth
+    # cap. Deliberately not folded into blank_page_numbers: "we found nothing"
+    # and "we could not look" support opposite decisions, and only one of them
+    # is safe to publish unread.
+    undetermined_page_numbers: tuple[int, ...] = ()
 
     @property
     def text_coverage_ratio(self) -> float:
@@ -44,8 +50,12 @@ class DocumentPreflight:
 
     @property
     def has_unextracted_pages(self) -> bool:
-        """True when at least one page holds content this parser could not read."""
-        return bool(self.scanned_page_numbers)
+        """True when a page may hold content this parser could not read.
+
+        Undetermined pages count. Treating them as readable asserts the one
+        thing preflight failed to establish.
+        """
+        return bool(self.scanned_page_numbers) or bool(self.undetermined_page_numbers)
 
     def to_dict(self) -> dict[str, object]:
         # The derived values are included explicitly because asdict() skips
@@ -85,36 +95,76 @@ def is_table_like_layout(text: str) -> bool:
     return aligned_rows >= 3 and aligned_rows / max(1, len(lines)) >= 0.12
 
 
-def _page_has_image(page) -> bool:
-    """True when a page embeds an image XObject.
+# How much of a page's image content this parser was able to establish.
+# "unknown" is not "none": a resource tree that cannot be read says nothing
+# about whether the page holds a scan, and treating silence as absence is what
+# lets an unreadable page be filed as blank.
+_IMAGE_PRESENT = "image"
+_IMAGE_ABSENT = "none"
+_IMAGE_UNKNOWN = "unknown"
+
+# Form XObjects can nest. The depth cap stops a malformed or hostile PDF whose
+# forms refer to each other from looping; real documents nest a few levels.
+_MAX_XOBJECT_DEPTH = 6
+
+
+def _resolve(value):
+    """Follow a PDF indirect reference to the object it points at."""
+    return value.get_object() if hasattr(value, "get_object") else value
+
+
+def _page_image_state(page) -> str:
+    """Report whether a page embeds an image, or that it could not be told.
 
     Resources are inspected rather than pypdf's `page.images`, which decodes
     pixel data and is far too slow to run over every page of every upload.
 
-    A page with no text is only interesting if it has an image: that is a
-    scanned page whose content is invisible to text extraction. A page with
-    neither text nor image is a blank separator and needs nothing.
+    Images are looked for inside Form XObjects too. A scan placed in a form -
+    which is how plenty of tools emit a scanned page - has no image XObject
+    directly on the page, so a top-level-only check reports the page as
+    imageless and the caller then records a page it cannot read as blank.
     """
     try:
-        resources = page.get("/Resources")
+        resources = _resolve(page.get("/Resources"))
         if resources is None:
-            return False
-        if hasattr(resources, "get_object"):
-            resources = resources.get_object()
-        xobjects = resources.get("/XObject")
-        if xobjects is None:
-            return False
-        if hasattr(xobjects, "get_object"):
-            xobjects = xobjects.get_object()
-        for key in xobjects:
-            entry = xobjects[key]
-            if hasattr(entry, "get_object"):
-                entry = entry.get_object()
-            if entry.get("/Subtype") == "/Image":
-                return True
+            return _IMAGE_ABSENT
+        return _xobject_image_state(_resolve(resources.get("/XObject")), 0)
     except Exception:  # noqa: BLE001 - a malformed resource tree must not fail preflight.
-        return False
-    return False
+        # Previously this returned False, so a page whose resources could not
+        # be parsed was indistinguishable from one with no image, and a
+        # scanned page that failed to parse was published as a blank
+        # separator with its content silently missing from the corpus.
+        return _IMAGE_UNKNOWN
+
+
+def _xobject_image_state(xobjects, depth: int) -> str:
+    """Walk an XObject dictionary, descending into nested forms."""
+    if xobjects is None:
+        return _IMAGE_ABSENT
+    if depth >= _MAX_XOBJECT_DEPTH:
+        return _IMAGE_UNKNOWN
+    state = _IMAGE_ABSENT
+    for key in xobjects:
+        entry = _resolve(xobjects[key])
+        subtype = entry.get("/Subtype")
+        if subtype == "/Image":
+            return _IMAGE_PRESENT
+        if subtype == "/Form":
+            nested = _resolve(_resolve(entry.get("/Resources")) or {})
+            nested_state = _xobject_image_state(
+                _resolve(nested.get("/XObject")) if hasattr(nested, "get") else None,
+                depth + 1,
+            )
+            if nested_state == _IMAGE_PRESENT:
+                return _IMAGE_PRESENT
+            if nested_state == _IMAGE_UNKNOWN:
+                state = _IMAGE_UNKNOWN
+    return state
+
+
+def _page_has_image(page) -> bool:
+    """True when a page embeds an image, directly or inside a form."""
+    return _page_image_state(page) == _IMAGE_PRESENT
 
 
 def _garbled_character_count(text: str) -> int:
@@ -147,6 +197,7 @@ def analyze_pdf(
     garbled_count = 0
     scanned_pages: list[int] = []
     blank_pages: list[int] = []
+    undetermined_pages: list[int] = []
     for number, page in enumerate(reader.pages, start=1):
         plain = extract_pdf_page_text(page)
         layout = extract_pdf_page_text(page, preserve_layout=True)
@@ -162,8 +213,16 @@ def analyze_pdf(
             # Separating scanned pages from blank ones is the whole point. A
             # page with an image and no text is content this parser cannot
             # see; a page with neither is a separator and needs nothing.
-            if _page_has_image(page):
+            # A page whose image content could not be established is recorded
+            # as unreadable rather than blank. Calling it blank asserts there
+            # is nothing to recover, which is the one thing that was not
+            # determined, and it would leave the page out of the corpus with
+            # no trace.
+            state = _page_image_state(page)
+            if state == _IMAGE_PRESENT:
                 scanned_pages.append(number)
+            elif state == _IMAGE_UNKNOWN:
+                undetermined_pages.append(number)
             else:
                 blank_pages.append(number)
         if is_table_like_layout(layout):
@@ -175,7 +234,11 @@ def analyze_pdf(
     # silently missing -- a scanned fee table or eligibility rule would simply
     # not exist as far as retrieval was concerned. Retrieval cannot rank a
     # passage that was never extracted.
-    requires_ocr = page_count > 0 and (text_pages == 0 or bool(scanned_pages))
+    # An undetermined page counts towards OCR for the same reason it is not
+    # called blank: it may hold content nobody can currently read.
+    requires_ocr = page_count > 0 and (
+        text_pages == 0 or bool(scanned_pages) or bool(undetermined_pages)
+    )
     return DocumentPreflight(
         page_count=page_count,
         text_page_count=text_pages,
@@ -188,6 +251,7 @@ def analyze_pdf(
         encoding_corruption_detected=garbled_count > 0,
         scanned_page_numbers=tuple(scanned_pages),
         blank_page_numbers=tuple(blank_pages),
+        undetermined_page_numbers=tuple(undetermined_pages),
     )
 
 
