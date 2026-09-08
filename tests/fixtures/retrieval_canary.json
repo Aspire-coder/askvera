@@ -216,10 +216,14 @@
       "evidence_must_be_approved": false,
       "answer_must_not_contain": [
         "which product",
-        "let me look"
+        "let me look",
+        "rephrase"
       ],
       "blocking": false,
-      "non_blocking_reason": "Added 2026-09-07 without a run against the live index, so it is observed rather than blocking. Promote to blocking once a deploy shows it passing; an unverified assertion that fails would roll back a sound deploy."
+      "non_blocking_reason": "Added 2026-09-07 and strengthened once the boundary answer existed. The assertion previously passed vacuously: it only checked for the absence of two phrases, and the pipeline returned a generic insufficient-evidence fallback containing neither. Promote to blocking once a deploy shows it passing against the live index.",
+      "answer_must_contain": [
+        "prices"
+      ]
     },
     {
       "id": "chained-followup-market-continuity",

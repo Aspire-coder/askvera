@@ -17,6 +17,7 @@ from app.evidence import (
     classify_intent,
     is_planner_trusted_low_risk_subtype,
     localized_conversation_response,
+    mentions_out_of_corpus_topic,
     with_approved_evidence,
 )
 from app.evidence_contract import parse_evidence_contract
@@ -329,7 +330,7 @@ class AIOrchestrator:
                     )
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language),
+                    self._insufficient_evidence_message(body.language, body.message),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -356,7 +357,7 @@ class AIOrchestrator:
         if contracted_response is None:
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language),
+                    self._insufficient_evidence_message(body.language, body.message),
                     correlation_id,
                     metadata={"failure_layer": "evidence_contract"},
                 ),
@@ -559,7 +560,7 @@ class AIOrchestrator:
         if not chat_response.answer.strip():
             chat_response = self._replace_answer(
                 chat_response,
-                self._insufficient_evidence_message(language),
+                self._insufficient_evidence_message(language, user_question),
                 {"empty_after_output_cleanup": True, "fallback": True},
             )
         return chat_response
@@ -1194,8 +1195,29 @@ class AIOrchestrator:
             )
         )
 
-    def _insufficient_evidence_message(self, language: str = "en") -> str:
-        """Use the approved fallback while remaining compatible with older config."""
+    def _insufficient_evidence_message(self, language: str = "en", user_message: str = "") -> str:
+        """Use the approved fallback while remaining compatible with older config.
+
+        A question about prices, the catalogue, stock or order status gets a
+        different answer, because "the documents do not contain enough
+        information, please rephrase" is not true and not useful: no rephrasing
+        will help, since the corpus has never held that content. Observed live
+        on 2026-09-07, where "How much does Forever Aloe Vera Gel cost?"
+        returned the generic message and the reader was invited to try again.
+
+        The prompt already carries this rule, but evidence approval rejects
+        first on these questions, so generation never runs and the rule never
+        fires. This is the same statement made on the path that actually
+        executes.
+
+        This only ever replaces one fallback with a better one. It is reached
+        only after the pipeline has already failed to answer, so a false match
+        cannot displace a real answer.
+        """
+        if user_message and mentions_out_of_corpus_topic("catalogue", user_message, language):
+            boundary = localized_conversation_response("catalogue_scope", language)
+            if boundary:
+                return boundary
         return localized_conversation_response("insufficient_evidence", language) or FALLBACK_RESPONSES.get(
             "insufficient_evidence",
             FALLBACK_RESPONSES.get(
@@ -1648,7 +1670,7 @@ class AIOrchestrator:
             narrowing_response = self._candidate_narrowing_response(body, correlation_id, history)
             if narrowing_response:
                 return narrowing_response, approved_result, evidence_decision
-        fallback_message = self._insufficient_evidence_message(body.language)
+        fallback_message = self._insufficient_evidence_message(body.language, body.message)
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:
             fallback_message = f"{fallback_message}\n\n{office_contact_addendum}"
@@ -1847,7 +1869,7 @@ class AIOrchestrator:
             )
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language),
+                    self._insufficient_evidence_message(body.language, body.message),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
