@@ -90,28 +90,38 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
     return cases, hashlib.sha256(raw).hexdigest()
 
 
-def _abstained(answer: str) -> bool:
-    """Whether the delivered text declines rather than answers.
+# A refusal is only recognisable against the copy the system actually uses, and
+# that copy is per-locale. Matching English text against a French answer scores
+# a correct French refusal as a wrong answer, so every non-English case would
+# report a failure the system did not commit.
+_REFUSAL_KEYS = (
+    "insufficient_evidence",
+    "catalogue_scope",
+    "off_topic",
+    "medical_claim",
+    "income_claim",
+    "period_not_covered",
+)
 
-    Matched against the approved fallback copy rather than guessed phrasing, so
-    this stays true when the wording is revised.
-    """
+
+def _refusal_markers(language: str) -> list[str]:
+    """Opening clauses of every approved way of declining, in one locale."""
     from app.evidence import localized_conversation_response
 
     markers = []
-    # Every approved way of declining. A refusal is a legitimate outcome, so
-    # the benchmark has to recognise all of them or it will score a correct
-    # refusal as a wrong answer.
-    for key in (
-        "insufficient_evidence", "catalogue_scope", "off_topic",
-        "medical_claim", "income_claim", "period_not_covered",
-    ):
-        copy = localized_conversation_response(key, "en") or ""
-        # The opening clause is the stable part; the tail names a contact route.
+    for key in _REFUSAL_KEYS:
+        copy = localized_conversation_response(key, language) or ""
         if copy:
+            # The opening clause is the stable part; the tail names a contact
+            # route that varies by market.
             markers.append(" ".join(copy.split())[:60].casefold())
-    folded = " ".join(answer.split()).casefold()
-    return any(marker and marker in folded for marker in markers)
+    return markers
+
+
+def _abstained(answer: str, language: str) -> bool:
+    """Whether the delivered text declines rather than answers, in its own locale."""
+    folded = " ".join((answer or "").split()).casefold()
+    return any(marker and marker in folded for marker in _refusal_markers(language))
 
 
 def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]:
@@ -131,13 +141,24 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
     return {
         "answer": answer,
         "citations": len(response.citations or []),
-        "abstained": bool(metadata.get("fallback")) or _abstained(answer),
+        "abstained": bool(metadata.get("fallback")) or _abstained(answer, str(case["language"])),
         "failure_layer": metadata.get("failure_layer") or "",
         # Why generation stopped. "max_tokens" is Bedrock stating it ran out of
         # room, which is a fact, unlike a heuristic reading of the text.
         "finish_reason": str(metadata.get("finish_reason") or ""),
         "removed_numeric_claims": run.removed_numeric_claims,
         "top_title": documents[0].title if documents else "",
+        # Every retrieved section, so a case can require the governing one to
+        # be present rather than merely first, and can say which sections the
+        # answer was actually built from.
+        "sections": [
+            str((document.metadata or {}).get("section_id") or "") for document in documents
+        ],
+        # Citations are source dicts; "section" is the passage actually cited.
+        "cited_sections": [
+            str((citation or {}).get("section") or "")
+            for citation in (response.citations or [])
+        ],
         "confidence": round(float(run.retrieval.confidence), 3) if run.retrieval else 0.0,
         "input_tokens": int(usage.get("inputTokens") or 0),
         "output_tokens": int(usage.get("outputTokens") or 0),
@@ -167,10 +188,33 @@ def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         if str(forbidden).casefold() in folded:
             failures.append(f"contains {forbidden!r}")
 
-    source = str(expected.get("source_title_contains") or "")
-    retrieval_hit = (not source) or source.casefold() in run["top_title"].casefold()
-    if source and not retrieval_hit:
-        failures.append(f"governing source not retrieved first: got {run['top_title']!r}")
+    # Retrieval is scored against section IDs when the case names them. A
+    # title match is not evidence that the governing passage was found: the
+    # sponsoring directory is one title covering every market, so "the right
+    # document" can still be the wrong record entirely. A case that names no
+    # source is left unscored for retrieval rather than counted as a success.
+    required = [str(value) for value in (expected.get("required_sections") or [])]
+    retrieved = set(run["sections"])
+    cited = set(run["cited_sections"])
+    if required:
+        missing = [section for section in required if section not in retrieved]
+        retrieval_hit = not missing
+        if missing:
+            failures.append(f"governing sections not retrieved: {missing}")
+        # Citation correctness, not citation count: an answer can cite a real
+        # passage that does not support what it says.
+        if expected.get("must_cite"):
+            uncited = [section for section in required if section not in cited]
+            if not missing and uncited:
+                failures.append(f"governing sections retrieved but not cited: {uncited}")
+    else:
+        title = str(expected.get("source_title_contains") or "")
+        if title:
+            retrieval_hit = title.casefold() in run["top_title"].casefold()
+            if not retrieval_hit:
+                failures.append(f"governing source not retrieved first: got {run['top_title']!r}")
+        else:
+            retrieval_hit = None
 
     return {
         **run,
@@ -214,7 +258,13 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         "answered_when_it_should_not": rate(
             sum(1 for run in unanswerable if not run["abstained"]), len(unanswerable)
         ),
-        "retrieval_hit": rate(sum(1 for run in runs if run["retrieval_hit"]), len(runs)),
+        # Only cases that named a governing source are counted. Averaging in
+        # cases that specified none would inflate the rate with unscored runs.
+        "retrieval_hit": rate(
+            sum(1 for run in runs if run["retrieval_hit"] is True),
+            sum(1 for run in runs if run["retrieval_hit"] is not None),
+        ),
+        "retrieval_unscored": sum(1 for run in runs if run["retrieval_hit"] is None),
         "cited": rate(sum(1 for run in answerable if run["citations"] > 0), len(answerable)),
         "repair_damage": rate(sum(1 for run in runs if run["repair_damaged"]), len(runs)),
         "by_intent_group": {
