@@ -306,6 +306,38 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
 _MAX_RESTORED_VALUE_CHARS = 80
 
 
+# Where a directory field's value ends.
+#
+# A period ends it only when it is not inside a number and what follows starts
+# something new - an uppercase word, the next bullet, or the end of the text.
+# Requiring that is what keeps "1.612CC" and "(Ref. 830)" intact: the first
+# period sits between digits, the second is followed by a digit, and neither
+# ends a sentence.
+_FIELD_SENTENCE_END_RE = re.compile(r"(?<!\d)\.(?=\s*(?:[A-Z\u2022]|$))")
+
+# The bullet that separates directory fields in this corpus. A value must never
+# run into the next field: "2 CC" followed by "Grouped order possible?: No" is
+# two fields, not one long one.
+_FIELD_BREAK_RE = re.compile(r"\u2022")
+
+
+def _directory_field_value(text: str) -> str:
+    """The value of a directory field, to the end of its sentence.
+
+    Across line breaks, because the PDF wraps mid-field and stopping at the
+    newline delivered "...yet a newly sponsored." to a reader. Not across a
+    sentence boundary or a bullet, because that is the next field.
+    """
+    end = len(text)
+    sentence = _FIELD_SENTENCE_END_RE.search(text)
+    if sentence:
+        end = sentence.end()
+    bullet = _FIELD_BREAK_RE.search(text)
+    if bullet and bullet.start() < end:
+        end = bullet.start()
+    return " ".join(text[:end].split()).strip().rstrip(".").strip()
+
+
 def restore_missing_requested_order_size(
     answer: str,
     source_texts: Iterable[str],
@@ -317,13 +349,13 @@ def restore_missing_requested_order_size(
     corrected = answer or ""
     for source in source_texts:
         match = re.search(
-            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.]+)",
+            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[\s\S]+)",
             source or "",
             re.IGNORECASE,
         )
         if not match:
             continue
-        value = " ".join(match.group("value").split()).strip()
+        value = _directory_field_value(match.group("value"))
         # The capture runs to the next period or newline, so in a record whose
         # minimum-order line continues into prose it swallows that prose too.
         # Appending it as a sentence then ends the answer mid-phrase - which is

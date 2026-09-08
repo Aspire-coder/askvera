@@ -452,3 +452,62 @@ def test_a_prose_field_is_declined_rather_than_truncated() -> None:
     _, changed = restore_missing_requested_order_size("An answer.", [algeria], ORDER_QUESTION)
 
     assert changed is False
+
+
+# --- where a field value ends ----------------------------------------------
+#
+# "Stop at the sentence end" is only safe if it knows what a sentence end is.
+# A first attempt stopped at the first period of any kind, which truncated
+# inside the number it was restoring - worse than the newline bug it replaced.
+
+
+def _restored_tail(source: str) -> str:
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", [source], ORDER_QUESTION
+    )
+    assert changed is True
+    return restored[len("An answer."):].strip()
+
+
+def test_a_decimal_point_does_not_end_the_field() -> None:
+    """The regression this check exists for: truncating inside 1.612."""
+    assert _restored_tail("Minimum order size FBO: 1.612CC per order.").endswith(
+        "Minimum order size FBO: 1.612CC per order."
+    )
+
+
+def test_an_abbreviation_does_not_end_the_field() -> None:
+    assert _restored_tail("Minimum order size FBO: 2 CC (Ref. 830) per order.").endswith(
+        "Minimum order size FBO: 2 CC (Ref. 830) per order."
+    )
+
+
+def test_the_next_field_heading_ends_the_field() -> None:
+    """A value must never run into the next bullet - that is a different field."""
+    tail = _restored_tail("Minimum order size FBO: 2 CC\n\u2022 Grouped order possible?: No.")
+
+    assert tail.endswith("Minimum order size FBO: 2 CC.")
+    assert "Grouped order" not in tail
+
+
+def test_a_sentence_end_ends_the_field() -> None:
+    source = "Minimum order size FBO: 2 CC per order. The Preferred may order any products."
+
+    tail = _restored_tail(source)
+
+    assert tail.endswith("Minimum order size FBO: 2 CC per order.")
+    assert "Preferred may order" not in tail
+
+
+def test_a_thousands_separator_survives() -> None:
+    assert _restored_tail("Minimum order size FBO: 1,612CC per order.").endswith("1,612CC per order.")
+
+
+def test_the_field_value_helper_is_directly_exercised() -> None:
+    """The boundary rule itself, without the surrounding restoration."""
+    from utils.directory_fields import _directory_field_value
+
+    assert _directory_field_value("1.612CC per order.") == "1.612CC per order"
+    assert _directory_field_value("2 CC\n\u2022 Grouped order?: No.") == "2 CC"
+    assert _directory_field_value("2 CC per\norder. Next sentence.") == "2 CC per order"
+    assert _directory_field_value("2 CC (Ref. 830).") == "2 CC (Ref. 830)"
