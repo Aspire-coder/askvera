@@ -296,6 +296,55 @@
       },
       "source_evidence": "'FBO Support fee: A monthly fee of up to EUR 3 deducted from the bonus of all FBOs who reach the level of Assistant Supervisor or higher... This fee is only payable in months when commission is earned.' The text is byte-identical in Denmark and Sweden, so the answer cannot show which market's copy was used and only the cited section can. This is the first test of country scope over the Benelux and Nordic policies, which are 68% of the corpus and previously had no coverage.",
       "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure."
+    },
+    {
+      "id": "belgium-then-germany-market-continuity",
+      "question": "And what is the minimum order size there?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "intent_group": "conversation",
+      "conversation": [
+        {
+          "question": "How do I sponsor someone in Belgium?",
+          "expected": {
+            "kind": "answer",
+            "must_contain": [
+              "Belgium"
+            ],
+            "required_sections": [
+              "sponsoring-053-belgium"
+            ]
+          }
+        },
+        {
+          "question": "What about Germany?",
+          "expected": {
+            "kind": "answer",
+            "must_contain": [
+              "Germany"
+            ],
+            "required_sections": [
+              "sponsoring-066-germany"
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "Germany"
+        ],
+        "must_not_contain": [
+          "Belgium's minimum"
+        ],
+        "required_sections": [
+          "sponsoring-066-germany"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "International-Sponsoring-Directory.pdf sections sponsoring-053-belgium and sponsoring-066-germany. Each turn asserts its own market, so a chain that answers Belgium's rule to a question about Germany fails on the turn that got it wrong rather than only at the end. The final turn says 'there', which resolves to the most recently established market: Germany.",
+      "provenance": "Section identifiers observed in deployment canary output on 2026-09-08 (chained-followup-market-continuity, top_section sponsoring-066-germany). The expected minimum-order values are deliberately not asserted: the Belgium and Germany record text has not been dumped, so asserting a figure would be inventing it."
     }
   ]
 }

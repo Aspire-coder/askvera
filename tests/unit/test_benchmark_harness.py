@@ -491,3 +491,77 @@ def test_the_summary_names_languages_with_weaker_classification():
     }]
     summary = benchmark.summarise(results, None)
     assert summary["languages_with_unreviewed_refusal_copy"] == ["fi"]
+
+
+class _Reply:
+    """Minimal stand-in for a ChatResponse in a replayed turn."""
+
+    def __init__(self, answer: str, citations=None, fallback: bool = False) -> None:
+        self.answer = answer
+        self.citations = citations or []
+        self.metadata = {"fallback": fallback}
+
+
+def test_a_wrong_answer_in_an_earlier_turn_fails_the_case():
+    """The failure a final-turn-only assertion cannot see.
+
+    A chain's last question is usually a follow-up whose subject was
+    established earlier, so a case can pass while turn one answered the wrong
+    market entirely. Scope and market carry-forward go wrong in the middle.
+    """
+    case = {
+        **VALID_CASE,
+        "conversation": [
+            {
+                "question": "What is the minimum order size in Belgium?",
+                "expected": {"kind": "answer", "must_contain": ["Belgium"],
+                             "must_not_contain": ["Netherlands"]},
+            },
+        ],
+    }
+
+    good = benchmark._score_prior_turns(case, (_Reply("The Belgium minimum order is 1 CC."),))
+    assert good == []
+
+    wrong_market = benchmark._score_prior_turns(
+        case, (_Reply("The Netherlands minimum order is 1 CC."),)
+    )
+    assert any("missing required fact" in failure for failure in wrong_market)
+    assert any("contains" in failure for failure in wrong_market)
+    assert all(failure.startswith("turn 1:") for failure in wrong_market)
+
+
+def test_a_turn_can_require_a_refusal_and_a_citation():
+    case = {
+        **VALID_CASE,
+        "conversation": [
+            {"question": "Will I earn 5000 a month?", "expected": {"kind": "abstain"}},
+            {
+                "question": "What is the FBO Support fee?",
+                "expected": {"kind": "answer", "required_sections": ["DK:2-part-1-definition-18"]},
+            },
+        ],
+    }
+    responses = (
+        _Reply("Here is what you will earn.", fallback=False),
+        _Reply("The fee is 3 EUR.", citations=[{"section": "2", "country": "SE"}]),
+    )
+
+    failures = benchmark._score_prior_turns(case, responses)
+
+    assert any("turn 1: answered a question the documents do not cover" == f for f in failures)
+    # Cited the right section from the wrong market.
+    assert any("turn 2: did not cite DK:2-part-1-definition-18" == f for f in failures)
+
+
+def test_turns_without_expectations_are_replayed_but_not_scored():
+    """Bare-string turns keep working exactly as before."""
+    case = {**VALID_CASE, "conversation": ["How do I sponsor someone in Belgium?"]}
+    assert benchmark._score_prior_turns(case, (_Reply("Anything at all."),)) == []
+
+
+def test_a_conversation_turn_missing_its_question_is_refused(tmp_path):
+    case = copy.deepcopy(VALID_CASE)
+    case["conversation"] = [{"expected": {"kind": "answer"}}]
+    with pytest.raises(ValueError, match="no question"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))

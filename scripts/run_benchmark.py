@@ -63,6 +63,30 @@ def _valid_countries() -> frozenset[str]:
     )
 
 
+def _validate_conversation(identifier: str, turns: object) -> None:
+    """Check a case's prior turns, each of which may carry its own expectations.
+
+    A turn is either a bare question, as before, or a question with the facts
+    it must produce. Asserting only the final answer cannot tell a chain that
+    held its scope throughout from one that lost it and recovered.
+    """
+    if turns is None:
+        return
+    if not isinstance(turns, list) or not turns:
+        raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+    for position, turn in enumerate(turns, start=1):
+        if isinstance(turn, dict):
+            if not str(turn.get("question") or "").strip():
+                raise ValueError(f"Turn {position} of {identifier} has no question.")
+            kind = (turn.get("expected") or {}).get("kind", "answer")
+            if kind not in VALID_KINDS:
+                raise ValueError(
+                    f"Turn {position} of {identifier} needs expected.kind of {sorted(VALID_KINDS)}."
+                )
+        elif not str(turn).strip():
+            raise ValueError(f"Turn {position} of {identifier} is empty.")
+
+
 def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
     """Load and validate benchmark cases, refusing anything unverifiable."""
     import hashlib
@@ -109,10 +133,7 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
                 f"Case {identifier} expects an answer but asserts nothing it must contain, "
                 "so it would pass on any reply at all."
             )
-        if "conversation" in case and (
-            not isinstance(case["conversation"], list) or not case["conversation"]
-        ):
-            raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+        _validate_conversation(identifier, case.get("conversation"))
 
     return cases, hashlib.sha256(raw).hexdigest()
 
@@ -213,6 +234,52 @@ def _presence(numbers: list[str], documents: list[Any]) -> dict[str, bool]:
     return numbers_present_in_sources(numbers, documents) if numbers else {}
 
 
+def _score_prior_turns(case: dict[str, Any], responses: tuple) -> list[str]:
+    """Check each earlier turn that states what it expects.
+
+    A conversation case that asserts only its last answer can pass while an
+    earlier turn answered the wrong market entirely, because the final turn is
+    often a follow-up whose subject was already established. Scope and market
+    carry-forward go wrong in the middle of a chain, which is exactly the part
+    that was never checked.
+
+    Turns without expectations are replayed and not scored, as before.
+    """
+    failures: list[str] = []
+    language = str(case["language"])
+    for position, (turn, response) in enumerate(zip(case.get("conversation") or [], responses), start=1):
+        if not isinstance(turn, dict) or not turn.get("expected"):
+            continue
+        expected = turn["expected"]
+        answer = (getattr(response, "answer", "") or "")
+        folded = " ".join(answer.split()).casefold()
+        abstained = bool((getattr(response, "metadata", None) or {}).get("fallback")) or _abstained(
+            answer, language
+        )
+
+        if expected.get("kind", "answer") == "abstain":
+            if not abstained:
+                failures.append(f"turn {position}: answered a question the documents do not cover")
+        elif abstained:
+            failures.append(f"turn {position}: abstained on an answerable question")
+
+        for required in expected.get("must_contain") or []:
+            if str(required).casefold() not in folded:
+                failures.append(f"turn {position}: missing required fact {required!r}")
+        for forbidden in expected.get("must_not_contain") or []:
+            if str(forbidden).casefold() in folded:
+                failures.append(f"turn {position}: contains {forbidden!r}")
+
+        cited = _section_keys([
+            (str((citation or {}).get("section") or ""), str((citation or {}).get("country") or ""))
+            for citation in (getattr(response, "citations", None) or [])
+        ])
+        for section in expected.get("required_sections") or []:
+            if not _is_cited(str(section), set(cited)):
+                failures.append(f"turn {position}: did not cite {section}")
+    return failures
+
+
 def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]:
     """Run one question through the real pipeline and record what came back.
 
@@ -222,6 +289,7 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
     """
     run = canary.run_pipeline_capture(case, sequence)
     response = run.response
+    turn_failures = _score_prior_turns(case, run.prior_responses)
     metadata = response.metadata or {}
     usage = metadata.get("token_usage") or {}
     documents = run.retrieval.documents if run.retrieval else []
@@ -272,6 +340,7 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         "generation_input_tokens": int(usage.get("inputTokens") or 0),
         "generation_output_tokens": int(usage.get("outputTokens") or 0),
         "duration_ms": run.duration_ms,
+        "turn_failures": turn_failures,
     }
 
 
@@ -324,6 +393,8 @@ def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
                 failures.append(f"governing source not retrieved first: got {run['top_title']!r}")
         else:
             retrieval_hit = None
+
+    failures.extend(run.get("turn_failures") or [])
 
     return {
         **run,
