@@ -247,8 +247,40 @@ class ResponseBuilder:
         }
 
     def _numbers(self, text: str) -> set[str]:
-        """Return numeric values for answer/source support matching."""
-        return set(re.findall(r"\b\d+(?:\.\d+)?\b", text.lower()))
+        """Return comparable numeric keys for answer/source support matching.
+
+        This has to recognise the same value written two ways, because a
+        directory record and an answer routinely differ in notation. Measured
+        on 2026-09-08: the Algeria record writes office hours as
+        "09.30 am - 17.30 pm", a model wrote "9:30 AM to 5:30 PM", and the two
+        sets shared nothing at all - so a correct, retrieved, grounded answer
+        was delivered to the reader with no citation on it.
+
+        The keys come from the numeric grounding validator rather than a fourth
+        private notion of sameness. Clock times are keyed by that module's
+        meridiem-aware logic, and plain figures carry their notation variants,
+        so "7.5" and "7.50" compare equal here exactly as they do there.
+        """
+        from app.validation.validators.numeric_grounding_validator import (
+            _number_variants,
+            _time_occurrences,
+        )
+
+        lowered = (text or "").lower()
+        keys: set[str] = set()
+        time_spans: list[tuple[int, int]] = []
+        for start, end, time_keys in _time_occurrences(lowered):
+            time_spans.append((start, end))
+            keys |= time_keys
+
+        for match in re.finditer(r"\b\d+(?:[.,]\d+)?\b", lowered):
+            # A figure inside a clock time is already represented by its time
+            # key; counting "30" separately would match any source mentioning
+            # thirty of anything.
+            if any(start <= match.start() < end for start, end in time_spans):
+                continue
+            keys |= _number_variants(match.group(0))
+        return keys
 
     def _phrase_overlap(self, answer: str, source_text: str) -> float:
         """Reward sources that contain named concepts from the answer."""

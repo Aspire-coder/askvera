@@ -242,3 +242,40 @@ def test_an_ordered_list_marker_is_not_a_measurable_claim() -> None:
     document = _document(text, "Forever Belgium", "sponsoring-053-belgium")
 
     assert not [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+
+# Citation support is a third place that asks "does this number appear in the
+# source", after grounding and repair. It had its own weaker notion of sameness.
+CITATION_CASES = [
+    ("The office is open 9:30 AM to 5:30 PM, Saturday to Thursday.", True),
+    ("The office is open 09.30 am - 17.30 pm (Sat - Thu).", True),
+    ("Delivery costs 900 DZD ($7.50).", True),
+    ("Delivery costs 900 DZD ($7.5).", True),
+    ("The office is open 8:00 AM to 4:00 PM.", False),
+    ("Delivery costs 250 DZD.", False),
+]
+
+
+@pytest.mark.parametrize("answer,should_match", CITATION_CASES)
+def test_citation_support_recognises_the_same_value_written_differently(
+    answer: str, should_match: bool
+) -> None:
+    """Measured live: an answer writing "9:30 AM" against a record writing
+    "09.30 am" shared no numbers at all, so a correct, retrieved, grounded
+    answer was delivered with no citation attached.
+
+    Citation numbers now come from the grounding validator's notation logic
+    instead of a private regex, so the two layers agree on what "the same
+    figure" means.
+    """
+    from app.response.builder import ResponseBuilder
+
+    builder = ResponseBuilder.__new__(ResponseBuilder)
+    record = (
+        "Forever Algeria. Business Hours Office 09.30 am - 17.30 pm (Sat - Thu). "
+        "Delivery Cost: 900 DZD ($7.5)."
+    )
+
+    shared = builder._numbers(answer) & builder._numbers(record)
+
+    assert bool(shared) is should_match, sorted(shared)
