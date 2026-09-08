@@ -76,6 +76,7 @@ against current `main` and fixed; one was already superseded.
 | `fix/preflight-page-coverage` | One scanned page in a readable PDF was silently dropped |
 | `fix/evidence-contract-coverage` | The contract checked claims-in-answer but not answer-in-claims |
 | `fix/followup-market-continuity` | A market named in a skipped follow-up turn was lost |
+| `fix/out-of-corpus-boundary-answer` | A price question was told to rephrase, which cannot help |
 
 **The review's headline finding was stale.** It scored passage selection 5/10
 citing "8 out of 10" on the Kyrgyzstan question - that is the pre-fix baseline
@@ -87,7 +88,15 @@ after: 0 failures in 30. Its methodological point stands and is why we measured.
 does not run in production. Fixed so it is safer to enable, not because it was
 hurting anyone.
 
-**Two of the four carry operational consequences worth knowing before merge.**
+The last of those was not in the review. It is the 2026-09-07 deploy finding:
+`product-price-out-of-scope-delivered` passed while returning a generic
+insufficient-evidence fallback, so a distributor asking a price was told to
+rephrase a question no rephrasing can fix. The corpus-boundary prompt rule
+never fired because evidence approval rejects first. The boundary is now
+stated on the path that actually executes, and the canary case that passed
+vacuously now asserts the boundary answer and forbids "rephrase".
+
+**Two of these carry operational consequences worth knowing before merge.**
 
 The preflight fix converts silent page loss into a rejected upload.
 `ADMIN_TEXTRACT_OCR_ENABLED` is false in production, so a PDF containing even
