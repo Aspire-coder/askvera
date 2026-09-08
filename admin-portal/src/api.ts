@@ -17,6 +17,7 @@ import type {
   IngestionJob,
   IngestionPreview,
   IngestionPreviewTest,
+  IngestionReview,
   KnowledgeGeneration,
   InteractionPage,
   MarketReadiness,
@@ -177,8 +178,17 @@ export class AdminApi {
       body: JSON.stringify({ message })
     });
   }
-  publishIngestion(jobId: string) {
-    return this.request<{ job: IngestionJob; publishedCount: number }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/publish`, { method: "POST" });
+  ingestionReview(jobId: string) {
+    return this.request<IngestionReview>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/review`);
+  }
+  publishIngestion(jobId: string, reason: string) {
+    // The reason only. Who decided comes from the authenticated session and
+    // which revision from the job, so neither can be asserted from here.
+    return this.request<{ job: IngestionJob; publishedCount: number }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason })
+    });
   }
   deleteIngestion(jobId: string) {
     return this.request<{ job: IngestionJob; message: string }>(`/api/admin/ingestions/${encodeURIComponent(jobId)}`, { method: "DELETE" });

@@ -1425,6 +1425,90 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
     ]
 
 
+def review_details(job_id: str) -> dict[str, Any]:
+    """What a reviewer needs in order to decide, and the record of past decisions.
+
+    Three things the portal cannot work out for itself:
+
+    Whether the assessment ran at all. A NULL review_findings means never
+    assessed, which is not the same as assessed and clean, and a reviewer shown
+    an empty findings list would read it as the second.
+
+    Which pages are affected, so "some pages may be incomplete" becomes a page
+    number someone can open and look at.
+
+    What was decided before, by whom and why - including decisions on earlier
+    revisions, which are the ones that explain why this document is here again.
+    """
+    with get_engine().connect() as connection:
+        stored = connection.execute(
+            text(
+                """
+                SELECT review_revision, review_findings, review_evaluated_at,
+                       publication_state, publication_detail
+                FROM ingestion_jobs WHERE job_id = :job_id
+                """
+            ),
+            {"job_id": job_id},
+        ).mappings().first()
+        decisions = connection.execute(
+            text(
+                """
+                SELECT review_revision, decided_by, decision, reason, decided_at
+                FROM ingestion_review_decisions
+                WHERE job_id = :job_id
+                ORDER BY decided_at DESC
+                """
+            ),
+            {"job_id": job_id},
+        ).mappings().all()
+
+    if stored is None:
+        raise KeyError(job_id)
+    revision = str(stored["review_revision"] or "")
+    raw = stored["review_findings"]
+    assessed = raw is not None
+    payload = raw if isinstance(raw, dict) else (json.loads(raw) if assessed else {})
+    findings = list(payload.get("findings") or [])
+    return {
+        "jobId": job_id,
+        "revision": revision,
+        # The distinction a reviewer must not have to infer.
+        "assessed": assessed,
+        "evaluatedAt": (
+            stored["review_evaluated_at"].isoformat()
+            if stored["review_evaluated_at"]
+            else ""
+        ),
+        "findings": findings,
+        "contradictions": [
+            finding for finding in findings if finding.get("severity") == "contradiction"
+        ],
+        "unresolved": [
+            finding for finding in findings if finding.get("severity") == "unresolved"
+        ],
+        "affectedPages": [int(page) for page in (payload.get("uncertain_pages") or [])],
+        "publicationState": str(stored["publication_state"] or "not_started"),
+        "publicationDetail": str(stored["publication_detail"] or ""),
+        "decisions": [
+            {
+                "revision": str(row["review_revision"] or ""),
+                "decidedBy": str(row["decided_by"] or ""),
+                "decision": str(row["decision"] or ""),
+                "reason": str(row["reason"] or ""),
+                "decidedAt": row["decided_at"].isoformat() if row["decided_at"] else "",
+                # A decision on an earlier revision does not authorise this one,
+                # and the portal must show which is which rather than listing
+                # them as though they were interchangeable.
+                "appliesToCurrentRevision": bool(
+                    revision and str(row["review_revision"] or "") == revision
+                ),
+            }
+            for row in decisions
+        ],
+    }
+
+
 def update_ingestion_malware_status(job_id: str, status: str) -> None:
     """Persist the GuardDuty decision without storing object tags or scan details."""
     normalized = status.lower().strip()

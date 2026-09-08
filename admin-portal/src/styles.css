@@ -1059,3 +1059,98 @@ select, input { width: 100%; border: 1px solid rgba(0,0,0,.1); border-radius: 11
 }
 .saved-view-bar{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr)) auto;gap:12px;align-items:end;padding:18px;margin:14px 0 28px}.saved-view-bar label,.review-workflow label{display:grid;gap:6px}.saved-view-bar label span{font-size:12px;color:var(--muted)}.saved-view-bar input,.saved-view-bar select,.review-workflow input,.review-workflow select,.review-workflow textarea{min-height:42px;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff}.review-workflow{display:grid;gap:12px}.review-workflow textarea{min-height:100px;resize:vertical}@media(max-width:1050px){.saved-view-bar{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.saved-view-bar{grid-template-columns:1fr}}
 .assigned-actions{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}.assigned-actions h3{margin:0 0 8px}.assigned-actions>div{display:grid;grid-template-columns:1fr 2fr minmax(140px,.6fr);gap:12px;padding:9px 0;border-top:1px solid var(--line)}.assigned-actions span,.assigned-actions em{font-size:12px;color:var(--muted)}.assigned-actions em{text-align:right;font-style:normal}
+
+/* Review findings: a contradiction and an unresolved question are different
+   things, and a reviewer who cannot see which is which will treat them alike. */
+.review-findings {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #dbe3e8;
+  border-radius: 10px;
+  background: #fbfcfd;
+  font-size: 13px;
+}
+
+.review-findings > strong {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #697985;
+}
+
+.review-finding {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid;
+}
+
+.review-finding b {
+  text-transform: capitalize;
+}
+
+.review-finding.contradiction {
+  color: #8a1c1c;
+  background: #fdf1f1;
+  border-color: #d94a4a;
+}
+
+.review-finding.contradiction em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.review-finding.unresolved {
+  color: #76500a;
+  background: #fff8e7;
+  border-color: #f1d99b;
+}
+
+.review-decisions {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #e6ecf0;
+  color: #4a5c68;
+}
+
+.review-decisions strong {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #697985;
+}
+
+.review-decisions p {
+  margin: 0;
+}
+
+.review-reason {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.review-reason label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.review-reason textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dbe3e8;
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+
+.review-reason span {
+  color: #697985;
+  font-size: 12px;
+}

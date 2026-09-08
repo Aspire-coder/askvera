@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminApi, demo, withDemoFallback, type AdminCredentials, type DataMode } from "../api";
 import { demoAllowed } from "../auth";
 import { CheckIcon, FileIcon, RefreshIcon, UploadIcon } from "../icons";
-import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest, KnowledgeGeneration } from "../types";
+import type { AdminConfig, IngestionJob, IngestionPreview, IngestionPreviewTest, IngestionReview, KnowledgeGeneration } from "../types";
 
 const readableType = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
@@ -38,6 +38,8 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
   const [testResult, setTestResult] = useState<IngestionPreviewTest | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
+  const [review, setReview] = useState<IngestionReview | null>(null);
+  const [publishReason, setPublishReason] = useState("");
   const [deletingJobId, setDeletingJobId] = useState("");
   const [historyJob, setHistoryJob] = useState<IngestionJob | null>(null);
   const [generations, setGenerations] = useState<KnowledgeGeneration[]>([]);
@@ -155,12 +157,19 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     setSelectedJobId(jobId);
     setPreview(null);
     setTestResult(null);
+    setReview(null);
+    setPublishReason("");
     setPreviewError("");
     if (!jobId || mode !== "live") return;
     setPreviewLoading(true);
     try {
-      const result = await new AdminApi(credentials).ingestionPreview(jobId, 12);
+      const api = new AdminApi(credentials);
+      const result = await api.ingestionPreview(jobId, 12);
       setPreview(result);
+      // Loaded separately so a review that fails to load leaves the reviewer
+      // with no findings shown and the publish button disabled, rather than
+      // with a document that looks clean.
+      setReview(await api.ingestionReview(jobId));
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "The document review could not be loaded.");
     } finally {
@@ -181,13 +190,23 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
     }
   };
 
+  // A contradiction is not something a reviewer can decide their way past, so
+  // the button is not offered. The server refuses it regardless; this is so
+  // nobody writes a justification for something that was never going to publish.
+  const blockedByContradiction = (review?.contradictions.length ?? 0) > 0;
+  const reasonRequired = !review?.assessed || (review?.unresolved.length ?? 0) > 0;
+  const canPublish = Boolean(preview?.can_publish) && !blockedByContradiction
+    && (!reasonRequired || publishReason.trim().length >= 10);
+
   const publishReview = async () => {
-    if (!selectedJobId || !preview?.can_publish) return;
+    if (!selectedJobId || !canPublish) return;
     setPublishLoading(true);
     try {
-      const result = await new AdminApi(credentials).publishIngestion(selectedJobId);
+      const result = await new AdminApi(credentials).publishIngestion(selectedJobId, publishReason.trim());
       setNotice(`${result.publishedCount} chunks were published. The document is now available to approved retrieval.`);
       setPreview(null);
+      setReview(null);
+      setPublishReason("");
       setSelectedJobId("");
       await refresh();
     } catch (error) {
@@ -336,7 +355,17 @@ export function KnowledgeUploader({ credentials }: { credentials: AdminCredentia
             {preview.summary.warnings.length ? <div className="review-warnings"><strong>Review notes</strong>{preview.summary.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : <div className="review-good"><CheckIcon /> No chunk quality warnings in this document.</div>}
             <div className="review-chunk-list">{preview.chunks.map((chunk) => <article className="review-chunk" key={chunk.id}><div className="review-chunk-meta"><strong>{chunk.sectionId || "Content block"}</strong><span>{chunk.title || "Untitled"}</span><span>{chunk.page ? `Page ${chunk.page}${chunk.endPage && chunk.endPage !== chunk.page ? `-${chunk.endPage}` : ""}` : "Page not detected"}</span></div><div className="review-chunk-content">{chunk.content || "No readable text found."}</div></article>)}</div>
             <div className="review-test"><div><strong>Test a question against this document</strong><span>Searches only this staged document.</span></div><div className="review-test-row"><input value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} placeholder="e.g. What are the qualification requirements?" onKeyDown={(event) => { if (event.key === "Enter") void runPreviewTest(); }} /><button className="button secondary" disabled={testLoading || !testQuestion.trim()} onClick={() => void runPreviewTest()}>{testLoading ? "Testing..." : "Test question"}</button></div>{testResult ? <div className="review-results"><strong>{testResult.matchCount} matching chunks</strong>{testResult.matches.map((match) => <div className="review-result" key={`${match.sectionId}-${match.page}`}><b>{match.title || match.sectionId}</b><span>Page {match.page || "-"} · score {Number(match.score || 0).toFixed(2)}</span><p>{match.excerpt}</p></div>)}</div> : null}</div>
-            <div className="review-publish"><span>{preview.can_publish ? "The full staged document is ready." : "The document is not complete enough to publish."}</span><button className="button primary" disabled={!preview.can_publish || publishLoading} onClick={() => void publishReview()}>{publishLoading ? "Publishing..." : "Publish approved document"}</button></div>
+            {review ? <div className="review-findings">
+              <strong>What was found about this document</strong>
+              {!review.assessed ? <p className="review-finding unresolved">This document was uploaded before findings were recorded, so no assessment ran. It has not been checked - that is different from having been checked and found clean.</p> : null}
+              {review.assessed && !review.findings.length && !review.affectedPages.length ? <p className="review-good"><CheckIcon /> Assessed on {review.evaluatedAt.slice(0, 10)}. Nothing was found.</p> : null}
+              {review.contradictions.map((finding) => <p className="review-finding contradiction" key={`c-${finding.field}`}><b>{finding.field.replaceAll("_", " ")}</b> {finding.detail} <em>This cannot be approved. Correct the metadata and re-upload.</em></p>)}
+              {review.unresolved.map((finding) => <p className="review-finding unresolved" key={`u-${finding.field}`}><b>{finding.field.replaceAll("_", " ")}</b> {finding.detail}</p>)}
+              {review.affectedPages.length ? <p className="review-finding unresolved"><b>Pages to check</b> {review.affectedPages.join(", ")} - little text was extracted and an image is present, so content may be missing. Open these pages in the source document before deciding.</p> : null}
+              {review.decisions.length ? <div className="review-decisions"><strong>Decision history</strong>{review.decisions.map((decision) => <p key={`${decision.decidedAt}-${decision.decidedBy}`}><b>{decision.decision}</b> by {decision.decidedBy} on {decision.decidedAt.slice(0, 10)} - {decision.reason} {decision.appliesToCurrentRevision ? "" : <em>(an earlier version of this document)</em>}</p>)}</div> : null}
+            </div> : null}
+            {reasonRequired && !blockedByContradiction ? <div className="review-reason"><label htmlFor="publish-reason">Why is this document safe to publish?</label><textarea id="publish-reason" value={publishReason} onChange={(event) => setPublishReason(event.target.value)} placeholder="e.g. Checked pages 4 and 11 against the signed PDF; both are the letterhead image." rows={3} maxLength={2000} /><span>Recorded against your name and this version of the document. An unexplained approval is indistinguishable from an accidental one when it is read back a year later.</span></div> : null}
+            <div className="review-publish"><span>{blockedByContradiction ? "This document contradicts itself and cannot be published until the metadata is corrected." : !preview.can_publish ? "The document is not complete enough to publish." : reasonRequired && publishReason.trim().length < 10 ? "Record why this is safe to publish." : "The full staged document is ready."}</span><button className="button primary" disabled={!canPublish || publishLoading} onClick={() => void publishReview()}>{publishLoading ? "Publishing..." : "Publish approved document"}</button></div>
           </> : <div className="review-empty">{reviewableJobs.length ? "Select a document to inspect its chunks." : "Upload a document with review enabled to see it here."}</div>}
         </>}
       </section>

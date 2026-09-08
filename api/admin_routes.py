@@ -63,6 +63,7 @@ from services.knowledge_ingestion import (
     process_ingestion_job,
     preview_ingestion_job,
     publish_ingestion_job,
+    review_details,
     rollback_document_generation,
     stage_ingestion_upload,
     test_ingestion_job,
@@ -821,6 +822,21 @@ def ingestion_preview_test(
         result = test_ingestion_job(job_id, body.message, limit=body.limit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _payload(result, request)
+
+
+@admin_router.get("/ingestions/{job_id}/review")
+def ingestion_review(job_id: str, request: Request) -> dict[str, Any]:
+    """What was found about this document, and what has been decided about it."""
+    require_admin_access(request, "knowledge", "view")
+    try:
+        preview = preview_ingestion_job(job_id, limit=1)
+        require_admin_access(
+            request, "knowledge", "view", str(preview["job"].get("country") or "")
+        )
+        result = review_details(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
     return _payload(result, request)
 
 
