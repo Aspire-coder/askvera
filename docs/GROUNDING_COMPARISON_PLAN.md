@@ -90,6 +90,23 @@ those same six turns twice more - 12 further turn executions - not completing
 the full fixture. `--resume` continues the same file; without it the harness
 refuses to write over an existing capture.
 
+## Where the pilot must run
+
+**Not from a developer machine.** The generation pointer is enabled in
+production, so retrieval filters on `knowledge_active_generations`, which lives
+in the VPC. From outside it, the table lookup times out, `active_generation_ids`
+catches the error and returns nothing, and `_generation_filters` restricts
+retrieval to `__no_active_generation__`. Every case then retrieves zero
+documents and abstains - silently, and not for free.
+
+Confirmed on 2026-09-08 from a developer machine: OpenSearch was reachable and
+reported 17,896 active sections, the pointer table timed out, and the filter
+came back as the sentinel. The freeze was refused and nothing was billed.
+
+`--preflight --load-ssm` and `--freeze` both run `check_environment()` first
+and refuse when retrieval cannot reach anything. Run the pilot where the
+application runs.
+
 ## Commands
 
 ```bash

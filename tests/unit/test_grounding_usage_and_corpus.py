@@ -231,3 +231,107 @@ def test_the_signature_reads_the_pointer_table_not_the_index(monkeypatch) -> Non
 
     assert "knowledge_active_generations" in source
     assert "active_ingestion_id <> ''" in source
+
+
+# --- the environment gate -------------------------------------------------
+
+
+def _environment(monkeypatch, *, sections=17896, rows=None, rows_raise=False, pointer=True):
+    from config import settings
+
+    monkeypatch.setattr(
+        settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", pointer, raising=False
+    )
+    monkeypatch.setattr(comparison, "_active_section_total", lambda: sections)
+
+    def _rows():
+        if rows_raise:
+            raise RuntimeError("connection timeout expired")
+        return rows if rows is not None else ["DZ:fr:policy:country:a"]
+
+    monkeypatch.setattr(comparison, "_active_generation_rows", _rows)
+    monkeypatch.setattr(comparison, "_corpus_signature", lambda: "pointer;active=1;slots=1;abc")
+
+    from app.retrieval import opensearch_sections
+
+    filters = (
+        []
+        if not pointer
+        else [{"bool": {"should": [{"term": {"ingestion_id": "ingest-a"}}]}}]
+    )
+    if rows_raise or rows == []:
+        filters = [
+            {"bool": {"should": [{"term": {"ingestion_id": "__no_active_generation__"}}]}}
+        ]
+    monkeypatch.setattr(
+        opensearch_sections, "_generation_filters", lambda *a, **k: filters
+    )
+    return comparison.check_environment()
+
+
+def test_an_unreachable_pointer_table_makes_the_environment_unready(monkeypatch) -> None:
+    """The failure that would have bought six refusals.
+
+    With the pointer enabled and its table unreachable, active_generation_ids
+    catches the error and returns nothing, so retrieval is filtered to
+    __no_active_generation__ and every case abstains. Nothing raises, nothing
+    is free, and no turn reaches numeric repair - so neither rule is asked
+    anything.
+    """
+    report = _environment(monkeypatch, rows_raise=True)
+
+    assert report["ready"] is False
+    assert any("unreachable" in problem for problem in report["problems"])
+    assert any("__no_active_generation__" in problem for problem in report["problems"])
+
+
+def test_the_sentinel_filter_alone_is_enough_to_refuse(monkeypatch) -> None:
+    """Asked of retrieval itself rather than inferred from the database."""
+    report = _environment(monkeypatch, rows=[])
+
+    assert report["ready"] is False
+    assert "__no_active_generation__" in report["retrieval_filter_sample"]
+
+
+def test_a_healthy_environment_is_ready(monkeypatch) -> None:
+    """The gate must not refuse a run that would have worked."""
+    report = _environment(monkeypatch)
+
+    assert report["ready"] is True
+    assert report["problems"] == []
+    assert report["active_sections"] == 17896
+
+
+def test_freeze_refuses_when_the_environment_cannot_retrieve(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """The guard is wired to the paid path, not only to preflight."""
+    import sys
+
+    monkeypatch.setattr(
+        comparison,
+        "check_environment",
+        lambda: {"ready": False, "problems": ["retrieval is filtered to __no_active_generation__"]},
+    )
+    monkeypatch.setattr(
+        comparison, "freeze", lambda *a, **k: pytest.fail("freeze ran in a dead environment")
+    )
+
+    argv = sys.argv
+    sys.argv = [
+        "x",
+        "--freeze",
+        str(tmp_path / "out.json"),
+        "--i-have-approval-for-paid-model-calls",
+        "--max-turns",
+        "6",
+    ]
+    try:
+        assert comparison.main() == 2
+    finally:
+        sys.argv = argv
+
+    output = capsys.readouterr().out
+    assert "refused" in output
+    assert "measure nothing" in output
+    assert not (tmp_path / "out.json").exists()

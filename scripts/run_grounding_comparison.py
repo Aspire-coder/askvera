@@ -245,7 +245,14 @@ def _active_section_total() -> int:
     from scripts.ingestion.load_policy_sections_to_opensearch import _client
 
     client = _client()
-    client.indices.refresh(index=settings.OPENSEARCH_INDEX)
+    try:
+        client.indices.refresh(index=settings.OPENSEARCH_INDEX)
+    except Exception:
+        # OpenSearch Serverless has no _refresh endpoint and answers 404. It
+        # refreshes on its own schedule, so the count is very slightly behind
+        # rather than unavailable - and treating that as fatal made the whole
+        # signature read "unavailable", which refuses every resume.
+        pass
     return int(
         client.count(
             index=settings.OPENSEARCH_INDEX,
@@ -310,6 +317,73 @@ def _indexed_generation_ids() -> list[str]:
         .get("buckets", [])
     )
     return sorted(str(bucket.get("key") or "") for bucket in buckets)
+
+
+def check_environment() -> dict[str, Any]:
+    """Can this machine actually retrieve? Answered before anything is billed.
+
+    The pipeline runs happily with an unreachable database and returns
+    refusals: with the generation pointer enabled, active_generation_ids
+    catches the connection error, returns nothing, and _generation_filters
+    restricts retrieval to the sentinel "__no_active_generation__". Every case
+    then retrieves zero documents and abstains.
+
+    That failure is silent, it is not free, and it is worthless to measure -
+    no turn reaches numeric repair, so neither rule is asked anything. This
+    check is what stops a pilot paying for six refusals.
+    """
+    from config import settings
+
+    report: dict[str, Any] = {"ready": True, "problems": []}
+
+    try:
+        report["active_sections"] = _active_section_total()
+    except Exception as exc:
+        report["active_sections"] = None
+        report["problems"].append(f"OpenSearch unreachable: {type(exc).__name__}")
+
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        try:
+            rows = _active_generation_rows()
+            report["active_generations"] = len(rows)
+            if not rows:
+                report["problems"].append(
+                    "the generation pointer is enabled and names no active "
+                    "generation, so retrieval would return nothing"
+                )
+        except Exception as exc:
+            report["active_generations"] = None
+            report["problems"].append(
+                f"the generation pointer is enabled and its table is unreachable "
+                f"({type(exc).__name__}); retrieval would be filtered to "
+                "__no_active_generation__ and every case would abstain"
+            )
+
+    # The decisive check: ask retrieval itself what filter it would apply.
+    try:
+        from app.retrieval import opensearch_sections
+
+        applied = json.dumps(
+            opensearch_sections._generation_filters("DZ", "fr", "country", document_type="policy")
+        )
+        report["retrieval_filter_sample"] = applied[:200]
+        if "__no_active_generation__" in applied:
+            report["problems"].append(
+                "retrieval is filtered to __no_active_generation__: it would "
+                "match no documents at all"
+            )
+    except Exception as exc:
+        report["problems"].append(f"could not evaluate the retrieval filter: {type(exc).__name__}")
+
+    report["corpus_signature"] = _corpus_signature()
+    if report["corpus_signature"] == "unavailable":
+        report["problems"].append(
+            "the corpus signature is unavailable, so the capture could not be "
+            "tied to a corpus and could not be resumed"
+        )
+
+    report["ready"] = not report["problems"]
+    return report
 
 
 def _select(cases: list[dict[str, Any]], wanted: list[str]) -> list[dict[str, Any]]:
@@ -1196,7 +1270,15 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.preflight:
-        print(json.dumps(preflight(args.fixture, args.repeat, args.arms), indent=2))
+        report = preflight(args.fixture, args.repeat, args.arms)
+        if args.load_ssm:
+            from config import settings as runtime_settings
+            from services.aws_clients import init_aws_clients
+
+            runtime_settings.load_ssm_config()
+            init_aws_clients()
+            report["environment"] = check_environment()
+        print(json.dumps(report, indent=2))
         return 0
 
     if args.freeze:
@@ -1241,9 +1323,31 @@ def main() -> int:
             )
             return 2
         if args.load_ssm:
+            # settings.load_ssm_config() is what populates the endpoints; the
+            # client factory alone leaves OPENSEARCH_ENDPOINT and RDS_HOST
+            # empty, which fails silently into a run against nothing. This is
+            # the order run_benchmark and run_retrieval_canary use.
+            from config import settings as runtime_settings
             from services.aws_clients import init_aws_clients
 
+            runtime_settings.load_ssm_config()
             init_aws_clients()
+        environment = check_environment()
+        if not environment["ready"]:
+            print(
+                json.dumps(
+                    {
+                        "status": "refused",
+                        "reason": (
+                            "this environment cannot retrieve, so a capture would "
+                            "record refusals and measure nothing"
+                        ),
+                        "environment": environment,
+                    },
+                    indent=2,
+                )
+            )
+            return 2
         payload = freeze(
             args.fixture,
             args.repeat,
