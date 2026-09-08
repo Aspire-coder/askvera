@@ -139,6 +139,35 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+# Everything from here is copied to a timestamped file as well as the terminal.
+#
+# Until now a deploy's output existed only in whoever ran it's scrollback, so
+# the retrieval canary's per-case scores, the health timings and any rollback
+# were unrecoverable once that window closed. On 2026-09-07 a question about
+# what grounding repair had removed from a delivered answer could not be
+# answered for exactly this reason.
+#
+# Started after the root check so a non-root run does not create a root-owned
+# log directory as its only effect. `tee` keeps the terminal behaviour
+# identical, and PIPESTATUS is preserved because the redirect happens through
+# process substitution rather than a pipeline, so `set -e` still sees the
+# script's own exit status rather than tee's.
+DEPLOY_LOG_DIR="${DEPLOY_LOG_DIR:-/var/log/askvera}"
+if mkdir -p "${DEPLOY_LOG_DIR}" 2>/dev/null; then
+  DEPLOY_LOG_FILE="${DEPLOY_LOG_DIR}/deploy-$(date -u +%Y%m%dT%H%M%SZ).log"
+  exec > >(tee -a "${DEPLOY_LOG_FILE}") 2>&1
+  echo "[deploy] Recording this deploy to ${DEPLOY_LOG_FILE}"
+  # Keep a bounded history rather than growing without limit. Deploys are
+  # infrequent and these files are small, so the cap is generous.
+  # tail -n +N starts at line N, so keeping N files means starting at N+1.
+  DEPLOY_LOG_KEEP="${DEPLOY_LOG_KEEP:-50}"
+  ls -1t "${DEPLOY_LOG_DIR}"/deploy-*.log 2>/dev/null \
+    | tail -n +"$((DEPLOY_LOG_KEEP + 1))" \
+    | xargs -r rm -f
+else
+  echo "[deploy] Could not write to ${DEPLOY_LOG_DIR}; continuing without a deploy log." >&2
+fi
+
 log "Deploying ASK Vera from ${APP_DIR}"
 cd "${APP_DIR}"
 
