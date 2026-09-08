@@ -968,3 +968,39 @@ def test_an_impossible_clock_reading_is_not_exempted() -> None:
         metadata: dict = {}
 
     assert _hours_flagged("The office is open at 45:99.", _Source())
+
+
+def test_short_figure_is_not_grounded_by_digits_inside_a_phone_number() -> None:
+    """A directory record must not ground an invented figure by coincidence.
+
+    Stripping every separator and asking whether the digits appear anywhere
+    makes a short number trivially groundable: "50" is four digits into
+    "+213 21 50 60 70". The digit-substring path exists for phone reformatting,
+    so it is limited to runs long enough to be a phone number.
+    """
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "The minimum first order is 50 Case Credits.",
+            "Forever Algeria Office Phone +213 21 50 60 70 Fax +213 21 50 60 71",
+            metadata={"directory_section": "office", "access_scope": "global"},
+        ),
+        result,
+    )
+
+    assert result.has_critical()
+
+
+def test_directory_phone_reformatting_is_still_accepted() -> None:
+    """The tightening must not undo what the digit path was added for."""
+    result = ValidationResult()
+    NumericGroundingValidator().validate(
+        _context(
+            "You can reach the office on +52 (55) 3383-6196.",
+            "Admin. 2 Cell# 525533836196",
+            metadata={"directory_section": "staff", "access_scope": "global"},
+        ),
+        result,
+    )
+
+    assert not result.has_critical()
