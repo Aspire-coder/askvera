@@ -259,11 +259,15 @@ def _score_prior_turns(case: dict[str, Any], responses: tuple) -> list[str]:
     Turns without expectations are replayed and not scored, as before.
     """
     failures: list[str] = []
-    language = str(case["language"])
     for position, (turn, response) in enumerate(zip(case.get("conversation") or [], responses), start=1):
         if not isinstance(turn, dict) or not turn.get("expected"):
             continue
         expected = turn["expected"]
+        # A turn may switch language. Refusal copy is per-locale, so scoring a
+        # French turn against English markers would read a correct French
+        # refusal as an answer - the same defect the locale-aware markers fixed
+        # for single-turn cases, reappearing inside a conversation.
+        language = str(turn.get("language") or case["language"])
         answer = (getattr(response, "answer", "") or "")
         folded = " ".join(answer.split()).casefold()
         abstained = bool((getattr(response, "metadata", None) or {}).get("fallback")) or _abstained(

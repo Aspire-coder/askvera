@@ -361,6 +361,31 @@
       "source_evidence": "International-Sponsoring-Directory.pdf sections sponsoring-053-belgium and sponsoring-066-germany. Each turn asserts its own market, so a chain that answers Belgium's rule to a question about Germany fails on the turn that got it wrong rather than only at the end. The final turn says 'there', which resolves to the most recently established market: Germany.",
       "provenance": "Section identifiers observed in deployment canary output on 2026-09-08 (chained-followup-market-continuity, top_section sponsoring-066-germany). The expected minimum-order values are deliberately not asserted: the Belgium and Germany record text has not been dumped, so asserting a figure would be inventing it.",
       "evaluation_set": "development"
+    },
+    {
+      "id": "algeria-existing-fbo-order-minimum-role",
+      "question": "I am already an FBO in Algeria. What is my minimum order now?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "intent_group": "role_distinction",
+      "evaluation_set": "development",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "5"
+        ],
+        "must_not_contain": [
+          "0.200",
+          "0,200"
+        ],
+        "required_sections": [
+          "sponsoring-001-algeria"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Algeria record: 'Minimum order size FBO: 0,200CC as a first order for Preferred Customers, 7 800DZD ($60) and the equivalent of 5 000 DZD ($43) after the first purchase for all FBOs.' One sentence holds two rules separated by role and stage. An existing FBO's ongoing minimum is the 5 000 DZD figure; 0,200CC is the sign-up first order for a Preferred Customer. Answering with the first-order figure is the role confusion this case exists to catch, and both figures are real, so no grounding check can catch it.",
+      "provenance": "Quoted from the section dumped from askvera-policy-sections on 2026-09-08. Expectation derived from the source text, not from any observed answer. AWAITING LIVE VALIDATION: this case has never been run."
     }
   ]
 }

@@ -613,3 +613,56 @@ def test_every_shipped_case_is_currently_development_data():
     cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
     assert cases
     assert {case["evaluation_set"] for case in cases} == {"development"}
+
+
+def test_a_turn_can_switch_language_for_refusal_classification():
+    """Refusal copy is per-locale, so a French turn scored against English
+    markers reads a correct French refusal as an answer.
+
+    That is the same defect the locale-aware markers fixed for single-turn
+    cases, reappearing inside a conversation: the case carries one language and
+    a reader can switch mid-chain.
+    """
+    from app.evidence import configured_conversation_response
+
+    french_refusal, reviewed = configured_conversation_response("insufficient_evidence", "fr")
+    assert reviewed and french_refusal
+
+    case = {
+        **VALID_CASE,
+        "language": "en",
+        "conversation": [
+            {
+                "question": "Quel est le montant minimum de commande ?",
+                "language": "fr",
+                "expected": {"kind": "abstain"},
+            },
+        ],
+    }
+
+    # Correctly recognised as a refusal because the turn declares its language.
+    assert benchmark._score_prior_turns(case, (_Reply(french_refusal),)) == []
+
+    # Without the per-turn language it would be scored against English copy.
+    english_only = {**case, "conversation": [
+        {"question": case["conversation"][0]["question"], "expected": {"kind": "abstain"}}
+    ]}
+    failures = benchmark._score_prior_turns(english_only, (_Reply(french_refusal),))
+    assert failures == ["turn 1: answered a question the documents do not cover"]
+
+
+def test_the_role_case_states_a_source_derived_expectation():
+    """A test needs a justified expectation, not an observed response.
+
+    The Algeria record states two minimums in one sentence, separated by role
+    and stage: 0,200CC as a Preferred Customer's first order, and 5 000 DZD for
+    an existing FBO afterwards. Both figures are real, so no grounding check can
+    catch an answer that quotes the wrong one - only an expectation derived from
+    reading the sentence can.
+    """
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    case = next(c for c in cases if c["id"] == "algeria-existing-fbo-order-minimum-role")
+
+    assert case["intent_group"] == "role_distinction"
+    assert "0.200" in case["expected"]["must_not_contain"]
+    assert "AWAITING LIVE VALIDATION" in case["provenance"]
