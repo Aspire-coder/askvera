@@ -151,9 +151,15 @@ Evidence captured for an interrupted attempt is kept, positioned by its
 moment an earlier turn refuses. Those records are `superseded` and never
 scored: a partial chain is history, not a thing to measure.
 
-**What is still not survivable:** a hard process kill between a turn completing
-and its event being written loses that turn's evidence. The event is written
-immediately, so the window is small, but it is not zero.
+**Each turn's evidence is written with its completion event**, not after the
+conversation returns. Previously the completion event persisted while the
+captured text stayed in memory until the chain finished, so a kill during a
+later turn lost every earlier turn's answer - the event survived and the thing
+it described did not.
+
+**What is still not survivable:** a hard kill *inside* a turn, between the
+model responding and that turn's record being written. That window is one
+function call wide, and it is not zero.
 
 **Resume validates provenance before any model call** - fixture hash, harness
 commit, index, model id, chunk profile, the generation-pointer flag and a
@@ -162,10 +168,21 @@ can match while the code does not.
 
 The pointer flag is included because it changes which documents retrieval can
 see at all. The corpus signature is included because an index *name* is a
-label: the same name can hold different content an hour later, after a
-publication, a rollback or a re-ingestion. The signature is the active section
-count plus a hash of the active generation ids, and a resume where it reads
-`unavailable` is refused - two unknowns are not a match.
+label: the same name can hold different content an hour later.
+
+**The signature fingerprints the authority, not the index.** With the pointer
+enabled that authority is `knowledge_active_generations` - the table
+`_generation_filters` reads - so the signature is that mapping plus the active
+section count. An earlier version aggregated `ingestion_id.keyword` in
+OpenSearch and was wrong twice over: the index maps `ingestion_id` as a
+keyword, so `ingestion_id.keyword` does not exist and the aggregation returned
+nothing *silently*; and even written correctly it covered every indexed
+generation rather than the active ones, so switching the pointer between two
+generations that are both already indexed would have left the signature
+unchanged while changing every answer for that market.
+
+A resume where the signature reads `unavailable` is refused - two unknowns are
+not a match.
 
 **The corpus must be held still for the duration of the experiment.** The
 signature detects a change; it cannot prevent one, and a change between arms
@@ -212,10 +229,17 @@ What the capture now reports under `usage`:
 | Field | Meaning |
 |---|---|
 | `by_model` | calls and tokens per model id, because a rate applies to a model |
-| `application_calls` | how many times the code asked Bedrock for something |
+| `application_calls` | how many times the code asked Bedrock for something, counted **before** the request |
+| `successful_calls` / `failed_calls` | how those calls ended |
 | `http_attempts` | how many requests botocore actually sent |
 | `sdk_retry_attempts` | the difference - retries the SDK made inside one call |
 | `calls_without_reported_tokens` | embeddings, whose usage is not in the response envelope |
+
+Counting the call *after* the request was wrong in the case that matters most:
+a request that exhausted its retries and failed reported zero application calls
+and three HTTP attempts, so the call vanished from the cost and every attempt
+looked like a retry of nothing. A failed call may still have been billed for
+input, so it is counted and reported separately rather than dropped.
 
 **Two things this still cannot price.** Embedding token usage is not returned
 by `invoke_model`, so those calls are counted and their tokens are not - read

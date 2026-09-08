@@ -195,52 +195,121 @@ def _provenance(fixture_hash: str) -> dict[str, Any]:
 
 
 def _corpus_signature() -> str:
-    """What the index actually held, not merely what it is called.
+    """Fingerprint what retrieval can actually reach, from the authority itself.
 
-    An index name is a label. The same name can hold different content an hour
-    later - a publication, a rollback, a re-ingestion - and a resume that only
-    compared names would stitch two corpora together.
+    With ADMIN_INGESTION_GENERATION_POINTER_ENABLED on, that authority is the
+    PostgreSQL table knowledge_active_generations - _generation_filters
+    restricts every retrieval to the ingestion ids it names. So the fingerprint
+    is that mapping: locale, scope, document type and the active generation for
+    each.
 
-    Active section count plus a hash of the active generation ids. Cheap, and
-    it changes whenever a document is published or retired. "unavailable" when
-    the index cannot be reached, which is not a match for anything: resume
-    refuses on it, because two unknowns are not the same corpus.
+    An earlier version aggregated ingestion_id.keyword in OpenSearch, and got
+    two things wrong. The index maps ingestion_id as a keyword field, so
+    ingestion_id.keyword does not exist and the aggregation returned no buckets
+    - silently, because a missing field is not an error. And even correctly
+    written it would have covered every indexed generation rather than the
+    active ones, so switching the pointer between two generations that are both
+    already indexed changed nothing in the signature while changing every
+    answer.
+
+    The active section count is included as well, so a re-ingestion or a delete
+    that leaves the pointer alone is still visible.
+
+    Returns "unavailable" when either source cannot be read. Resume refuses on
+    that: two unknowns are not a match.
     """
     import hashlib
 
-    try:
-        from config import settings
-        from scripts.ingestion.load_policy_sections_to_opensearch import _client
+    from config import settings
 
-        client = _client()
-        client.indices.refresh(index=settings.OPENSEARCH_INDEX)
-        total = int(
-            client.count(
-                index=settings.OPENSEARCH_INDEX,
-                body={"query": {"bool": {"filter": [{"term": {"status": "active"}}]}}},
-            ).get("count", 0)
-        )
-        buckets = (
-            client.search(
-                index=settings.OPENSEARCH_INDEX,
-                body={
-                    "size": 0,
-                    "aggs": {
-                        "generations": {
-                            "terms": {"field": "ingestion_id.keyword", "size": 1000}
-                        }
-                    },
-                },
-            )
-            .get("aggregations", {})
-            .get("generations", {})
-            .get("buckets", [])
-        )
-        ids = sorted(str(bucket.get("key") or "") for bucket in buckets)
-        digest = hashlib.sha256("|".join(ids).encode("utf-8")).hexdigest()[:16]
-        return f"active={total};generations={len(ids)};{digest}"
+    try:
+        active = _active_section_total()
+        if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+            pointers = _active_generation_rows()
+            digest = hashlib.sha256(
+                "|".join(pointers).encode("utf-8")
+            ).hexdigest()[:16]
+            return f"pointer;active={active};slots={len(pointers)};{digest}"
+
+        # No pointer: visibility is the index, so the indexed generations are
+        # the authority. Correct field name this time.
+        generations = _indexed_generation_ids()
+        digest = hashlib.sha256("|".join(generations).encode("utf-8")).hexdigest()[:16]
+        return f"index;active={active};generations={len(generations)};{digest}"
     except Exception:
         return "unavailable"
+
+
+def _active_section_total() -> int:
+    from config import settings
+    from scripts.ingestion.load_policy_sections_to_opensearch import _client
+
+    client = _client()
+    client.indices.refresh(index=settings.OPENSEARCH_INDEX)
+    return int(
+        client.count(
+            index=settings.OPENSEARCH_INDEX,
+            body={"query": {"bool": {"filter": [{"term": {"status": "active"}}]}}},
+        ).get("count", 0)
+    )
+
+
+def _active_generation_rows() -> list[str]:
+    """The pointer table, as sorted strings. This is what retrieval filters on."""
+    from sqlalchemy import text as sql_text
+
+    from services.db import get_engine
+
+    with get_engine().connect() as connection:
+        rows = connection.execute(
+            sql_text(
+                """
+                SELECT country, language, document_type, access_scope,
+                       active_ingestion_id
+                FROM knowledge_active_generations
+                WHERE active_ingestion_id <> ''
+                """
+            )
+        ).mappings().all()
+    return sorted(
+        ":".join(
+            str(row[field] or "")
+            for field in (
+                "country",
+                "language",
+                "document_type",
+                "access_scope",
+                "active_ingestion_id",
+            )
+        )
+        for row in rows
+    )
+
+
+def _indexed_generation_ids() -> list[str]:
+    """Distinct active generations in the index, for the pointer-disabled case.
+
+    ingestion_id is mapped as a keyword, so it is aggregated directly. Asking
+    for ingestion_id.keyword returns nothing and raises nothing.
+    """
+    from config import settings
+    from scripts.ingestion.load_policy_sections_to_opensearch import _client
+
+    buckets = (
+        _client()
+        .search(
+            index=settings.OPENSEARCH_INDEX,
+            body={
+                "size": 0,
+                "query": {"bool": {"filter": [{"term": {"status": "active"}}]}},
+                "aggs": {"generations": {"terms": {"field": "ingestion_id", "size": 5000}}},
+            },
+        )
+        .get("aggregations", {})
+        .get("generations", {})
+        .get("buckets", [])
+    )
+    return sorted(str(bucket.get("key") or "") for bucket in buckets)
 
 
 def _select(cases: list[dict[str, Any]], wanted: list[str]) -> list[dict[str, Any]]:
@@ -340,20 +409,25 @@ class InstrumentationUnavailable(SystemExit):
 
 
 class _UsageMeter:
-    """Counts what was actually invoked, per model, application calls and HTTP attempts.
+    """Counts what was invoked, per model, separating calls from HTTP attempts.
 
-    Three things are counted and they are not the same number:
+    Four things, and they are not the same number:
 
-      application calls - how many times the code asked Bedrock for something
-      http attempts     - how many requests botocore actually sent, so an SDK
-                          retry of one application call shows up as two
+      application calls - how many times the code asked Bedrock for something,
+                          counted BEFORE the request, so a call that fails
+                          after three attempts is one call and not zero
+      http attempts     - how many requests botocore actually sent
+      successes/failures- how those calls ended
       tokens            - per model, because a rate applies to a model and a
                           total across models cannot be priced
 
+    Counting the call afterwards was wrong in the case that matters most: a
+    request that exhausted its retries reported zero application calls and
+    three attempts, so every attempt looked like a retry of nothing.
+
     Both invocation methods are covered. converse carries generation and the
     LLM planner and selector; invoke_model carries embeddings
-    (services/embeddings.py), which the previous version missed entirely - so
-    every retrieval embedding was absent from the totals.
+    (services/embeddings.py), one per turn.
     """
 
     def __init__(self) -> None:
@@ -364,40 +438,70 @@ class _UsageMeter:
     def _bucket(self, model_id: str) -> dict[str, int]:
         return self.by_model.setdefault(
             model_id or "unknown",
-            {"calls": 0, "input_tokens": 0, "output_tokens": 0},
+            {"calls": 0, "succeeded": 0, "failed": 0, "input_tokens": 0, "output_tokens": 0},
         )
 
-    def record(self, model_id: str, usage: dict[str, Any] | None) -> None:
+    def start(self, model_id: str) -> None:
+        """Before the request. A call that never returns is still a call."""
+        self._bucket(model_id)["calls"] += 1
+
+    def succeeded(self, model_id: str, usage: dict[str, Any] | None) -> None:
         bucket = self._bucket(model_id)
-        bucket["calls"] += 1
+        bucket["succeeded"] += 1
         if usage:
             bucket["input_tokens"] += int(usage.get("inputTokens") or 0)
             bucket["output_tokens"] += int(usage.get("outputTokens") or 0)
         else:
             # invoke_model does not report usage in the response envelope, so
-            # its token count is unknown rather than zero. Saying so keeps a
-            # cost estimate honest.
+            # its token count is unknown rather than zero.
             self.unpriced_calls += 1
 
+    def failed(self, model_id: str) -> None:
+        """A failed call still consumed attempts, and may still be billed."""
+        self._bucket(model_id)["failed"] += 1
+
     def snapshot(self) -> dict[str, Any]:
+        calls = sum(counts["calls"] for counts in self.by_model.values())
         return {
             "by_model": {model: dict(counts) for model, counts in self.by_model.items()},
-            "application_calls": sum(counts["calls"] for counts in self.by_model.values()),
+            "application_calls": calls,
+            "successful_calls": sum(counts["succeeded"] for counts in self.by_model.values()),
+            "failed_calls": sum(counts["failed"] for counts in self.by_model.values()),
             "http_attempts": self.http_attempts,
-            "sdk_retry_attempts": max(
-                0,
-                self.http_attempts - sum(counts["calls"] for counts in self.by_model.values()),
-            ),
+            "sdk_retry_attempts": max(0, self.http_attempts - calls),
             "calls_without_reported_tokens": self.unpriced_calls,
             "note": (
-                "application_calls is what the code asked for; http_attempts is "
-                "what botocore sent, so their difference is SDK retries. Tokens "
-                "are per model because a rate applies to a model. Calls without "
-                "reported tokens are embeddings, whose usage Bedrock does not "
-                "return in the response envelope - their cost is not captured "
-                "here and must be read from the console."
+                "application_calls is counted before each request, so a call "
+                "that fails after its retries counts once and its extra HTTP "
+                "attempts show as retries. Tokens are per model because a rate "
+                "applies to a model. Calls without reported tokens are "
+                "embeddings, whose usage Bedrock does not return in the "
+                "response envelope - their cost must be read from the console. "
+                "A failed call may still have been billed for input."
             ),
         }
+
+
+def _metered(meter: "_UsageMeter", original: Any, *, reports_usage: bool) -> Any:
+    """Wrap one Bedrock method so a failed call is still counted as a call.
+
+    The count happens before the request. A call that exhausts its retries and
+    raises used exactly one application call and several HTTP attempts, and
+    counting it afterwards reported zero calls and three retries of nothing.
+    """
+
+    def _call(*args, **kwargs):
+        model_id = str(kwargs.get("modelId") or "")
+        meter.start(model_id)
+        try:
+            response = original(*args, **kwargs)
+        except BaseException:
+            meter.failed(model_id)
+            raise
+        meter.succeeded(model_id, (response or {}).get("usage") if reports_usage else None)
+        return response
+
+    return _call
 
 
 def _instrument_usage() -> tuple[_UsageMeter, Any]:
@@ -423,15 +527,8 @@ def _instrument_usage() -> tuple[_UsageMeter, Any]:
     original_converse = runtime.converse
     original_invoke = runtime.invoke_model
 
-    def _converse(*args, **kwargs):
-        response = original_converse(*args, **kwargs)
-        meter.record(str(kwargs.get("modelId") or ""), (response or {}).get("usage"))
-        return response
-
-    def _invoke(*args, **kwargs):
-        response = original_invoke(*args, **kwargs)
-        meter.record(str(kwargs.get("modelId") or ""), None)
-        return response
+    _converse = _metered(meter, original_converse, reports_usage=True)
+    _invoke = _metered(meter, original_invoke, reports_usage=False)
 
     # Every HTTP attempt, including the ones botocore retries internally. An
     # application call that is retried twice fires this three times.
@@ -468,51 +565,84 @@ def _instrument_usage() -> tuple[_UsageMeter, Any]:
 LOGGER_UNREGISTER_FAILED: list[bool] = []
 
 
-def _reconcile(
-    run: Any,
-    case: dict[str, Any],
+def _turn_record(
+    *,
+    case_id: str,
     attempt: int,
+    turn_index: int,
+    correlation_id: str,
+    language: str,
+    country: str,
+    capture: dict[str, Any] | None,
+    response: Any,
     turns: list[dict[str, Any]],
-    captured: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """One record per turn the runner performed, matched to its capture.
+) -> dict[str, Any]:
+    """One turn, durable the moment it completes.
 
-    The runner is the authority on how many turns there were and which was
-    last. A turn with no capture never reached numeric repair - a refusal, a
-    cache hit, an early return - and is recorded as such rather than dropped.
+    pending_reconciliation says the conversation has not returned yet, so this
+    record does not know whether it was the last turn. Everything else about it
+    is already known and already written.
+    """
+    return {
+        "id": case_id,
+        "attempt": attempt,
+        "turn_index": turn_index,
+        "is_final_turn": False,
+        "pending_reconciliation": True,
+        "correlation_id": correlation_id,
+        "language": language,
+        "country": country,
+        # False means this turn never reached numeric repair - a refusal, a
+        # cache hit, an early return - and it is recorded rather than omitted.
+        "reached_repair": capture is not None,
+        "answer": (capture or {}).get("answer", ""),
+        "documents": (capture or {}).get("documents", []),
+        "final_answer": str(getattr(response, "answer", "") or ""),
+        "abstained": bool((getattr(response, "metadata", None) or {}).get("fallback")),
+        "citations": [
+            {
+                "section": str((citation or {}).get("section") or ""),
+                "country": str((citation or {}).get("country") or ""),
+            }
+            for citation in (getattr(response, "citations", None) or [])
+        ],
+        "expected": (
+            _expectations(turns[turn_index]["expected"]) if turn_index < len(turns) else {}
+        ),
+    }
+
+
+def _reconcile(
+    records: list[dict[str, Any]], run: Any, case: dict[str, Any], attempt: int
+) -> None:
+    """Finish the records this attempt already wrote.
+
+    Only two things are unknown until the conversation returns: which turn was
+    the last, and whether the runner performed the number of turns we saw. Both
+    are settled here; the evidence itself was durable already.
     """
     responses = list(getattr(run, "prior_responses", ()) or []) + [run.response]
-    records: list[dict[str, Any]] = []
-    for index, response in enumerate(responses):
-        correlation_id = str(getattr(response, "correlation_id", "") or "")
-        capture = captured.get(correlation_id)
-        records.append(
-            {
-                "id": case["id"],
-                "attempt": attempt,
-                "turn_index": index,
-                "is_final_turn": index == len(responses) - 1,
-                "correlation_id": correlation_id,
-                "language": case.get("language", ""),
-                "country": case.get("country", ""),
-                "reached_repair": capture is not None,
-                "answer": (capture or {}).get("answer", ""),
-                "documents": (capture or {}).get("documents", []),
-                "final_answer": str(getattr(response, "answer", "") or ""),
-                "abstained": bool((getattr(response, "metadata", None) or {}).get("fallback")),
-                "citations": [
-                    {
-                        "section": str((citation or {}).get("section") or ""),
-                        "country": str((citation or {}).get("country") or ""),
-                    }
-                    for citation in (getattr(response, "citations", None) or [])
-                ],
-                "expected": (
-                    _expectations(turns[index]["expected"]) if index < len(turns) else {}
-                ),
+    mine = [
+        record
+        for record in records
+        if record["id"] == case["id"]
+        and record["attempt"] == attempt
+        and record.get("pending_reconciliation")
+    ]
+    mine.sort(key=lambda record: record["turn_index"])
+    for record in mine:
+        record["pending_reconciliation"] = False
+    if mine:
+        mine[-1]["is_final_turn"] = True
+    if len(mine) != len(responses):
+        # The runner performed a different number of turns than were observed
+        # through handle_chat. Recorded rather than corrected: a count that
+        # disagrees with itself should be visible, not smoothed over.
+        for record in mine:
+            record["turn_count_disagreement"] = {
+                "observed": len(mine),
+                "runner_reported": len(responses),
             }
-        )
-    return records
 
 
 def freeze(
@@ -649,6 +779,23 @@ def freeze(
                     "reached_repair": str(correlation_id) in captured,
                 }
             )
+            # The evidence is written HERE, with the event, not after the
+            # conversation returns. A hard kill during a later turn used to
+            # lose every earlier turn's answer, because the records were built
+            # from the runner's return value and that value did not exist yet.
+            records.append(
+                _turn_record(
+                    case_id=state.get("id", ""),
+                    attempt=int(state.get("attempt", 0)),
+                    turn_index=index,
+                    correlation_id=str(correlation_id),
+                    language=state.get("language", ""),
+                    country=state.get("country", ""),
+                    capture=captured.get(str(correlation_id)),
+                    response=response,
+                    turns=state.get("turns") or [],
+                )
+            )
             _write("in progress")
             return response
 
@@ -672,7 +819,16 @@ def freeze(
                     )
                 captured.clear()
                 state.clear()
-                state.update({"id": case["id"], "attempt": attempt, "turns_started": 0})
+                state.update(
+                    {
+                        "id": case["id"],
+                        "attempt": attempt,
+                        "turns_started": 0,
+                        "language": case.get("language", ""),
+                        "country": case.get("country", ""),
+                        "turns": turns,
+                    }
+                )
                 try:
                     run = canary.run_pipeline_capture(case, sequence * 100 + attempt)
                 except BaseException:
@@ -681,11 +837,11 @@ def freeze(
                     # What is written here is the evidence captured for the
                     # turns that did reach repair, marked superseded because a
                     # partial chain must never be scored as a whole one.
-                    _record_partial(records, case, attempt, turns, captured, turn_events)
+                    _mark_interrupted(records, case["id"], attempt)
                     _write("interrupted")
                     raise
 
-                records.extend(_reconcile(run, case, attempt, turns, captured))
+                _reconcile(records, run, case, attempt)
                 _write("in progress")
     finally:
         chat_orchestrator.pre_repair_capture_hook = original_hook
@@ -699,52 +855,20 @@ def freeze(
     return payload
 
 
-def _record_partial(
-    records: list[dict[str, Any]],
-    case: dict[str, Any],
-    attempt: int,
-    turns: list[dict[str, Any]],
-    captured: dict[str, dict[str, Any]],
-    turn_events: list[dict[str, Any]],
-) -> None:
-    """Keep the evidence from an interrupted attempt, positioned by its event.
+def _mark_interrupted(records: list[dict[str, Any]], case_id: str, attempt: int) -> None:
+    """Mark an attempt's already-written records as history.
 
-    Turn index comes from the started events, which know the real order,
-    rather than from the order captures happen to arrive - those differ the
-    moment an earlier turn refuses. Every record is superseded: a partial chain
-    is history, never a thing to score.
+    Nothing is rebuilt here. Every completed turn wrote its own record when it
+    completed, so an interruption keeps them; what it cannot know is whether
+    the chain finished, and a partial chain must never be scored as a whole
+    one.
     """
-    order = {
-        str(event["correlation_id"]): int(event["turn_index"])
-        for event in turn_events
-        if event.get("event") == "started"
-        and event.get("id") == case["id"]
-        and int(event.get("attempt", -1)) == attempt
-    }
-    for correlation_id, capture in captured.items():
-        index = order.get(correlation_id, -1)
-        records.append(
-            {
-                "id": case["id"],
-                "attempt": attempt,
-                "turn_index": index,
-                "is_final_turn": False,
-                "correlation_id": correlation_id,
-                "language": case.get("language", ""),
-                "country": case.get("country", ""),
-                "reached_repair": True,
-                "answer": capture["answer"],
-                "documents": capture["documents"],
-                "final_answer": "",
-                "abstained": False,
-                "citations": [],
-                "expected": (
-                    _expectations(turns[index]["expected"]) if 0 <= index < len(turns) else {}
-                ),
-                "attempt_interrupted": True,
-                "superseded": True,
-            }
-        )
+    for record in records:
+        if record["id"] == case_id and record["attempt"] == attempt:
+            if record.get("pending_reconciliation"):
+                record["attempt_interrupted"] = True
+                record["superseded"] = True
+                record["pending_reconciliation"] = False
 
 
 def _finish(

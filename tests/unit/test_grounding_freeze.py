@@ -481,10 +481,17 @@ def test_a_turn_that_starts_is_counted_even_if_it_never_returns(
     assert payload["turns_unaccounted"] == 0
 
 
-def test_an_interrupted_attempts_evidence_is_positioned_by_its_turn_event(
-    tmp_path, monkeypatch
-) -> None:
-    """Capture arrival order is not turn order once a turn refuses."""
+def test_every_completed_turn_survives_an_interruption(tmp_path, monkeypatch) -> None:
+    """Evidence is written when a turn completes, not when the chain returns.
+
+    Records used to be built from the runner's return value, so a kill during a
+    later turn lost every earlier turn's answer - the completion event survived
+    and the text it described did not.
+
+    Here turn 0 refuses, turn 1 answers, turn 2 fails. Both completed turns are
+    on disk, including the refusal, which carries no evidence but is still part
+    of the account of what ran.
+    """
     checkpoint = tmp_path / "frozen.json"
     _pipeline(
         monkeypatch,
@@ -496,12 +503,40 @@ def test_an_interrupted_attempts_evidence_is_positioned_by_its_turn_event(
         _freeze(tmp_path, checkpoint=checkpoint, cases_wanted=[CONVERSATION])
 
     runs = json.loads(checkpoint.read_text(encoding="utf-8"))["runs"]
-    kept = [run for run in runs if run.get("attempt_interrupted")]
+    kept = sorted(
+        (run for run in runs if run.get("attempt_interrupted")),
+        key=lambda run: run["turn_index"],
+    )
 
-    assert len(kept) == 1
-    # The captured answer was turn 1, not turn 0: turn 0 refused.
-    assert kept[0]["turn_index"] == 1
-    assert kept[0]["superseded"] is True
+    assert [run["turn_index"] for run in kept] == [0, 1]
+    assert [run["reached_repair"] for run in kept] == [False, True]
+    assert "900 DZD" in kept[1]["answer"]
+    # A partial chain is history, never scored.
+    assert all(run["superseded"] for run in kept)
+    assert not any(run["is_final_turn"] for run in kept)
+
+
+def test_an_earlier_turns_answer_is_on_disk_before_the_next_turn_runs(
+    tmp_path, monkeypatch
+) -> None:
+    """The window that mattered: a kill during turn 2 must not cost turn 1."""
+    checkpoint = tmp_path / "frozen.json"
+    seen: list[int] = []
+
+    _pipeline(monkeypatch, plan={CONVERSATION: ["answer", "answer", "answer"]})
+    original = comparison._turn_record
+
+    def _observing(**kwargs):
+        # Before this turn's record is built, count what is already durable.
+        if checkpoint.exists():
+            seen.append(len(json.loads(checkpoint.read_text(encoding="utf-8"))["runs"]))
+        return original(**kwargs)
+
+    monkeypatch.setattr(comparison, "_turn_record", _observing)
+    _freeze(tmp_path, checkpoint=checkpoint, cases_wanted=[CONVERSATION])
+
+    # Turn 1 saw turn 0 already written; turn 2 saw both.
+    assert seen == [0, 1, 2]
 
 
 # --- selection, provenance and accounting ---------------------------------
