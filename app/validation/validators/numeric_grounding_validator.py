@@ -12,8 +12,14 @@ from utils.redaction import PHONE_RE
 
 # Numbers are universal. The validator deliberately does not enumerate English
 # units such as "months" or document-specific terms such as "Case Credits".
+# A thousands group belongs to the number in front of it. Without this,
+# "7 800DZD" was read as the claim "7", which then matched nothing once the
+# source had been canonicalised to "7800dzd", and the sentence stating
+# Algeria's minimum order was deleted.
+_GROUPED_NUMBER = r"\d+(?:[ \u00a0\u202f]\d{3}(?!\d))*(?:[.,]\d+)?"
 NUMERIC_CLAIM_PATTERN = re.compile(
-    r"(?<![\w.])(?P<number>\d+(?:[.,]\d+)?(?:\s*(?:-|\u2013|\u2014)\s*\d+(?:[.,]\d+)?)?)(?!\w|\.\d)",
+    rf"(?<![\w.])(?P<number>{_GROUPED_NUMBER}"
+    rf"(?:\s*(?:-|\u2013|\u2014)\s*{_GROUPED_NUMBER})?)(?!\d|\.\d)",
     re.UNICODE,
 )
 
@@ -31,11 +37,33 @@ class MeasurableClaim:
     prefix: str
 
 
+# A space between digits followed by exactly three more, and no fourth: a
+# thousands group, so "7 800" becomes "7800" on both the source and the claim.
+#
+# The sponsoring directory writes amounts in space-grouped and continental
+# notation -- Algeria states "7 800DZD" and "0,200CC" -- and a model asked in
+# English writes "7,800" and "0.200". Neither was found in the source, so the
+# sentence stating the minimum order was deleted, and with nothing left the
+# answer fell back to "the approved policy documents do not contain enough
+# information". Observed live on 2026-09-08; four of six natural renderings of
+# that record produced an empty answer.
+#
+# Only a SPACE is stripped, never a comma or a point. A space is never a
+# decimal separator, so "7 800" can only be 7800. A comma or point before
+# three digits is genuinely ambiguous -- "1,000" and "1.000" are one thousand
+# and one, depending on locale -- and this corpus states Case Credit
+# thresholds, where guessing wrong is a 1000x error in a number a distributor
+# acts on. test_numeric_grounding_does_not_treat_thousands_separator_as_decimal
+# holds that line and is right to.
+_DIGIT_GROUP_RE = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
+
+
 def _normalize(text: str) -> str:
     """Normalize text for tolerant, Unicode-safe source matching."""
     normalized = unicodedata.normalize("NFKC", text or "").casefold()
     normalized = re.sub(r"\s+", " ", normalized)
     normalized = re.sub(r"\s*(?:-|\u2013|\u2014)\s*", "-", normalized)
+    normalized = _DIGIT_GROUP_RE.sub("", normalized)
     return normalized.strip()
 
 
@@ -52,6 +80,24 @@ def _number_variants(number: str) -> set[str]:
         variants.add(
             f"{decimal_match.group('whole')}{other_separator}{decimal_match.group('fraction')}"
         )
+
+    # A leading zero settles the ambiguity a three-digit tail otherwise carries.
+    # "0,200" cannot be a thousands group -- that would just be "200" -- so it
+    # is a decimal and "0.200" is the same figure. Algeria's minimum order is
+    # written "0,200CC" and a model asked in English renders it "0.200".
+    # "1,000" against "1.000" stays ambiguous and is deliberately not covered.
+    leading_zero = re.fullmatch(r"0(?P<separator>[.,])(?P<fraction>\d{3,})", normalized)
+    if leading_zero:
+        other_separator = "," if leading_zero.group("separator") == "." else "."
+        variants.add(f"0{other_separator}{leading_zero.group('fraction')}")
+
+    # A grouped thousand also appears ungrouped: a source writing "7 800"
+    # normalises to "7800", and an answer writing "7,800" has to be able to
+    # reach it. Offered as an alternative to try, never as a replacement, so
+    # "1.000" still fails to find "1,000" and the 1000x confusion stays caught.
+    grouped = re.fullmatch(r"(?P<whole>\d{1,3})(?P<separator>[.,])(?P<group>\d{3})", normalized)
+    if grouped and grouped.group("whole") != "0":
+        variants.add(f"{grouped.group('whole')}{grouped.group('group')}")
     return variants
 
 

@@ -273,6 +273,23 @@
       ],
       "blocking": false,
       "non_blocking_reason": "Added 2026-09-08 after the New Zealand delivery-cost question received the corpus-boundary answer, denying the documents cover it. Promote to blocking once a deploy shows it passing."
+    },
+    {
+      "id": "algeria-minimum-order-delivered",
+      "question": "What is the minimum first order size for a new FBO in Algeria?",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "Forever Algeria",
+      "minimum_confidence": 0.35,
+      "evidence_must_be_approved": true,
+      "answer_must_not_contain": [
+        "do not contain enough information"
+      ],
+      "answer_must_cite": true,
+      "answer_must_not_remove_numbers": true,
+      "blocking": false,
+      "non_blocking_reason": "Added 2026-09-08. Retrieval scored Forever Algeria at 9.542 with margin 8.44 and evidence was approved, yet the reader got the insufficient-evidence fallback: the record writes 0,200CC and 7 800DZD, the model writes 0.200 and 7,800, and grounding repair deleted the sentence. Promote to blocking once a deploy shows it passing."
     }
   ]
 }
