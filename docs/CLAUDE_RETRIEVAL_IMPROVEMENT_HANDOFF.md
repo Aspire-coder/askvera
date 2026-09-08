@@ -12,7 +12,7 @@ was created or restarted.**
 | | |
 |---|---|
 | Baseline | `bde45fb` on `main` |
-| Tip | `d365209`, plus this document |
+| Tip | `2ac8e92`, plus this document |
 | `main` | unchanged |
 | Working tree | pre-existing untracked files only, all left alone |
 | Pre-existing unmerged branches | 12, untouched |
@@ -24,15 +24,20 @@ introduced and resolved here.
 ## 2. Verification now
 
 ```
-python -m pytest tests -p no:cacheprovider                 1341 passed, 1 skipped
+python -m pytest tests -p no:cacheprovider                 1443 passed, 9 skipped
 python -m flake8 api app config services utils main.py     exit 0
 bash tests/shell/test_deploy_log_pruning.sh                all checks passed
 python scripts/run_benchmark.py --dry-run                  17 cases, valid
 python scripts/run_retrieval_canary.py --validate-only     valid, 23 cases
 ```
 
-**74 tests added.** `tests/` covers unit, governance, integration and shell; the
-whole directory was run, not a subset.
+**176 tests added.** `tests/` covers unit, governance, integration and shell;
+the whole directory was run, not a subset.
+
+**The 9 skips are not passes.** Eight are the PostgreSQL migration checks in
+`tests/integration/test_review_migration_postgres.py`, which have never been
+executed against any database - that remains a release blocker. The ninth is a
+pre-existing AWS opt-in skip in `test_chat_flow.py`.
 
 **What this does not establish.** No change here has been exercised against the
 live pipeline or the real corpus. Unit-test success is not measured retrieval
@@ -55,6 +60,15 @@ all of them.
 | 8 | `2a00a90` | Two over-claimed statements corrected (docs) |
 | 9 | `6bb6b18` | Unit bound to the governing row, not the document |
 | 10 | `d365209` | Role case and per-turn language switching |
+| 11 | `7dfdd1b` | Metadata conflict detection, no value ever guessed |
+| 12 | `eb6dab1` | Publication gate: contradictions are not waivable |
+| 13 | `36db48a` | Automatic activation forced through the same assessment |
+| 14 | `852f3a2` | Review-storage migration and the document_version fix |
+| 15 | `4b2b0a0` | A test database must be designated disposable twice |
+| 16 | `9933920` | Recoverable publication; assessment stored with the status |
+| 17 | `8da80ee` | Reviewer decision recorded; gate tested at the API boundary |
+| 18 | `3df7f12` | The reviewer's screen: findings, pages, history, a reason |
+| 19 | `2ac8e92` | Chunk-boundary grounding, including two recorded defects |
 
 **Rollback order is the reverse of this list, with tests run after each step.**
 These commits touch overlapping code — 1, 5 and 9 are successive layers of the
@@ -101,8 +115,25 @@ found:
 - A bare figure with no unit in its clause has no attributable currency. The
   validator neither invents one nor rejects a claim it cannot confirm.
 
-Untested against real layouts: page breaks, tables continuing across pages, and
-whether 300 characters suits real records.
+Tables continuing across pages and chunk boundaries are now tested
+(`tests/unit/test_chunk_boundary_grounding.py`), and the tests found two
+defects, both recorded as passing tests marked WRONG BEHAVIOUR:
+
+- A currency stated once at the top of a long table does not survive chunking.
+  The claim is grounded against the whole document and removed against its
+  chunks. This deletes true figures. Widening the lookback does not fix it;
+  carrying the governing heading onto the chunk at ingestion would.
+- A full stop between a heading and its row makes the figure ungoverned, and an
+  ungoverned figure accepts any unit the document mentions anywhere. So a DZD
+  delivery charge can be stated in EUR because a membership table elsewhere is
+  priced in EUR. This is the permissive half, and it lets a wrong answer out.
+
+One reassurance did come out of it, previously unstated anywhere: the chunker's
+450-character overlap exceeds the 300-character unit lookback, so a heading
+close enough to govern a row is always in the same chunk as that row. Both
+constants are now asserted, because tuning either breaks it silently.
+
+Still untested against real layouts: whether 300 characters suits real records.
 
 Layer 3 exists because review supplied a counterexample layer 2 accepted:
 
@@ -134,7 +165,7 @@ a live run.
 | 2. Numeric and formatting discovery | Advanced. 34 generated mutation controls; three-layer unit binding. |
 | 3. Grounding and completeness | Partially advanced. Unit binding closes one class. Short-claim, heading and negation bypasses in the evidence contract remain open and pinned by a test; the contract is dormant (`EVIDENCE_GATED_OUTPUT_ENABLED` false). |
 | 4. Scope and conversation | Partially done. Per-turn machinery, one multi-market chain, one role case, language switching. |
-| 5. Ingestion and extraction | Partially done. Header-over-scan detected and logged. Table continuation, metadata conflicts, chunk boundaries not started. |
+| 5. Ingestion and extraction | Advanced. Header-over-scan, metadata conflict detection, publication gate, recoverable publication, reviewer decisions, the reviewer's screen, table continuation and chunk boundaries. Two grounding defects found and recorded. |
 | 6. Benchmark expansion | Blocked on corpus text for non-English documents. |
 | 7. Automatic quality checks | Substantially covered by task 2. |
 | 8. Resilience | Partially done. Timeout-versus-service-failure distinction, transient-versus-permanent retry, fallback carries no citations, fallback never cached. Injected-failure testing through the running pipeline and recovery timing remain undone. |
@@ -149,18 +180,35 @@ a live run.
   in the record, but the change was prompted by behaviour and should be
   re-checked against the source by someone else.
 - **The role case has never been run.** Its provenance says so.
-- **Extraction warnings reach logs, not the approving reviewer.** See §8.
+- **Two recorded grounding defects**, both in §5: a distant currency heading is
+  lost to chunking (deletes true figures), and a clause boundary makes a figure
+  ungoverned, after which any unit the document mentions is accepted (lets a
+  wrong answer out). Neither is fixed.
+- **The PostgreSQL migrations have never been executed.** Eight skipped checks.
+  Release blocker.
+- **Append-only is enforced in the application only.** No code writes an UPDATE
+  or DELETE against `ingestion_review_decisions`, and there is a test that keeps
+  it that way. Whether the database role holds those grants is an
+  infrastructure question nobody in this repository can answer, and revoking
+  them has not been done.
+- **The conditional publication claim is untested against PostgreSQL.** It is
+  written as a single conditional UPDATE, which is the right shape; whether it
+  actually serialises two live workers is a database property.
 - **`reunion-delivery-cost` still fails** — the index does not fold accents.
 - The unit vocabulary is a fixed currency list; an unlisted lowercase code
   yields no unit, which degrades to pre-existing behaviour.
 
 ## 8. Decisions and permissions needed
 
-1. **Approval-UI surfacing of extraction warnings.** Logging is operational
-   visibility, not informing the person approving an upload. A page-level
-   warning in the approval workflow, with an explicit review-or-recover
-   decision, is outstanding — and *when* an unresolved page should block
-   publication is a policy decision I have deliberately not defaulted.
+1. **Whether publication should require the generation pointer.** With
+   `ADMIN_INGESTION_GENERATION_POINTER_ENABLED` off there is no commit point,
+   so publication has no atomic step and no authority to confirm against. The
+   code records that case as succeeded with detail saying visibility is
+   unverified, which makes the gap visible without choosing. See
+   `docs/RECOVERABLE_PUBLICATION_DESIGN.md`.
+
+   The approval UI itself is now built: findings, affected page numbers,
+   decision history and a required reason.
 2. **Accent folding.** Inspect the active analyser, measure a candidate index
    against the current one on the same questions with and without diacritics,
    and decide per language whether folding merges words that should stay
@@ -229,7 +277,7 @@ untouched.
 **Test results at the freeze:**
 
 ```
-python -m pytest tests -p no:cacheprovider                 1341 passed, 1 skipped
+python -m pytest tests -p no:cacheprovider                 1443 passed, 9 skipped
 python -m flake8 api app config services utils main.py     exit 0
 bash tests/shell/test_deploy_log_pruning.sh                all checks passed
 python scripts/run_benchmark.py --dry-run                  17 cases, valid
@@ -242,3 +290,46 @@ uncommitted user change.
 
 Work continuing after this freeze is additive and recorded in the sections
 below; the freeze point is the commit named above.
+
+---
+
+# 12. Recoverable publication — 2026-09-08
+
+| | |
+|---|---|
+| Tip | `2ac8e92` |
+| `main` | unchanged, `bde45fb` |
+| Tests | 1443 passed, 9 skipped |
+
+**Established by reading the code, not assumed.** With
+`ADMIN_INGESTION_GENERATION_POINTER_ENABLED` on, `_generation_filters` restricts
+every retrieval to `ingestion_id`s drawn from the PostgreSQL table
+`knowledge_active_generations`. The database pointer is the authority on what a
+reader can reach; OpenSearch document status is not. So the pointer update is
+the commit point, everything before it is invisible, and recovery reads the
+pointer rather than reasoning about an exception. No second source of truth was
+introduced. Full design in `docs/RECOVERABLE_PUBLICATION_DESIGN.md`; operator
+notes in `docs/PUBLICATION_ROLLOUT_AND_RECOVERY.md`.
+
+**What now exists.** Publication states with an idempotency key bound to the
+revision. A claim that is one conditional UPDATE. Recovery that asks the
+pointer what happened, so a worker killed after the commit point is not
+republished and one killed before it is safely retried. The assessment written
+in the same statement that marks a job ready for review. Reviewer decisions
+persisted before the gate runs and separately from publication success. The
+gate tested at the API boundary: a submitted approval of a self-contradicting
+document returns 400. The reviewer's screen showing findings, affected page
+numbers, decision history and requiring a written reason.
+
+**What is not established.**
+
+- Neither migration has run against PostgreSQL. Eight skipped checks. **Release
+  blocker.**
+- Whether the conditional claim serialises two live workers. A database
+  property; the test asserts the statement's shape only.
+- Two environment variables reduce accidental database targeting. They cannot
+  prevent someone supplying the wrong values, and the refusal check only
+  recognises the database this application is configured for.
+- Two grounding defects found by the chunk-boundary tests, recorded and unfixed
+  (§5).
+- Nothing here has been exercised against the live pipeline or the real corpus.
