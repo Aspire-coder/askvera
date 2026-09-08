@@ -280,19 +280,52 @@ def _claim_is_supported(
     return False
 
 
+# Shortest national subscriber number in the markets this corpus covers is
+# seven digits, so a shorter run cannot be a contact number and must be matched
+# in context rather than as a digit substring.
+_CONTACT_DIGIT_MINIMUM = 7
+
+
 def _structured_record_number_is_supported(claim: MeasurableClaim, source_text: str) -> bool:
-    """Allow structured-record numbers despite harmless display formatting changes."""
+    """Allow structured-record numbers despite harmless display formatting changes.
+
+    A directory record is a list of field values rather than prose, so the
+    subject-aware matching used for policy text cannot work here: the subject of
+    "Minimum Order 0,200CC" is a column heading, not a phrase in a sentence.
+    This path therefore accepts a number that appears in the record at all --
+    which is why it is reached only for office and staff records, and only after
+    the stricter check has already declined.
+
+    The one thing it will not accept is a short figure that appears solely
+    inside a contact number. A record holding "+213 21 50 60 70" contains the
+    digits of an invented "50 Case Credits" twice over, in the raw text and
+    again once separators are stripped, and grounding it there would deliver a
+    fabricated threshold with a citation attached.
+    """
+    contact_spans = [(match.start(), match.end()) for match in _phone_matches(source_text)]
     for number in _number_variants(claim.number):
-        if _source_windows(source_text, number):
+        claim_digits = "".join(character for character in number if character.isdigit())
+        is_contact_length = len(claim_digits) >= _CONTACT_DIGIT_MINIMUM
+        pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
+        for match in pattern.finditer(source_text):
+            inside_contact = any(
+                start <= match.start() and match.end() <= end for start, end in contact_spans
+            )
+            # A full-length number found inside a contact run IS that contact.
+            if inside_contact and not is_contact_length:
+                continue
             return True
 
         # Office directories often store a phone number as one digit string while
         # an answer formats it with spaces, parentheses, or a country-code prefix.
         # Compare digits only in this structured-record path; policy rules retain
-        # the stricter subject-aware matching above.
-        claim_digits = "".join(character for character in number if character.isdigit())
+        # the stricter subject-aware matching above. Only contact-length runs
+        # qualify: stripping every separator makes a short figure groundable by
+        # coincidence against any long number in the record.
+        if not is_contact_length:
+            continue
         source_digits = "".join(character for character in source_text if character.isdigit())
-        if claim_digits and claim_digits in source_digits:
+        if claim_digits in source_digits:
             return True
     return False
 
