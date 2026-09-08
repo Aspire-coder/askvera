@@ -292,6 +292,80 @@ def _grounded_phone_spans(answer: str, source_texts: list[str]) -> list[tuple[in
     return [(match.start(), match.end()) for match in _phone_matches(answer) if key(match.group()) in approved]
 
 
+# A clock time, written with either separator: 09:00, 09.00, 9:00.
+#
+# The trailing guard rejects a further digit ("1:234") and a further
+# separator-plus-digit ("09.00.30", hours.minutes.seconds), but must allow a
+# sentence period: "The office opens at 09:00." is the ordinary case, and
+# excluding it made this pattern match nothing at all.
+#
+# A decimal such as "1.50" also matches this shape. That is harmless here: the
+# only effect of matching is to spare a figure from deletion when a source
+# states the same figure, which is exactly what should happen anyway.
+_TIME_RE = re.compile(r"(?<![\d:.])(\d{1,2})[:.](\d{2})(?!\d)(?![:.]\d)")
+# "5:00 pm" following the time, allowing "p.m." and a non-breaking space.
+_MERIDIEM_RE = re.compile(r"^[\s ]*([ap])\.?\s?m\.?\b", re.I)
+
+
+def _time_keys(text: str, match: re.Match[str]) -> set[str]:
+    """Return the 24-hour forms one written time could mean.
+
+    Zero-padded so "9:00" and "09.00" compare equal, which is the whole point:
+    the directory writes office hours as 09.00-17.00 and the model writes them
+    as 09:00-17:00, so a literal comparison never matched and every component
+    was reported ungrounded.
+
+    A pm time is also offered in 24-hour form, because a model given
+    "17.00" frequently writes "5:00 pm".
+    """
+    hour, minute = int(match.group(1)), match.group(2)
+    keys = {f"{hour:02d}{minute}"}
+    meridiem = _MERIDIEM_RE.match(text[match.end():])
+    if meridiem and meridiem.group(1).lower() == "p" and hour < 12:
+        keys.add(f"{hour + 12:02d}{minute}")
+    if meridiem and meridiem.group(1).lower() == "a" and hour == 12:
+        keys.add(f"00{minute}")
+    return keys
+
+
+def _grounded_time_spans(answer: str, source_texts: list[str]) -> list[tuple[int, int]]:
+    """Spans holding a clock time that a source states, in either notation.
+
+    Office hours were being deleted from directory contact answers because of a
+    notation mismatch alone. Observed live on 2026-09-08: 09.00-17.00 in the
+    Belgium record, 09:00-17:00 in the answer, and the whole sentence removed.
+    """
+    approved: set[str] = set()
+    for source in source_texts:
+        for match in _TIME_RE.finditer(source):
+            approved |= _time_keys(source, match)
+
+    spans = [
+        (match.start(), match.end())
+        for match in _TIME_RE.finditer(answer)
+        if _time_keys(answer, match) & approved
+    ]
+
+    # Two grounded times joined into a range must become one span. The claim
+    # extractor reads "09:00-17:00" greedily and produces "00-17", a claim that
+    # begins inside the first time and ends inside the second, so it sits in
+    # neither span on its own and would still be reported ungrounded.
+    #
+    # Times are merged only across a short gap containing no digits, which
+    # covers "-", " to ", " bis ", " a " and the meridiem in "9:00 am to
+    # 5:00 pm", without reaching across a sentence or joining a grounded time
+    # to an invented one further along.
+    merged: list[tuple[int, int]] = []
+    for start, end in spans:
+        if merged:
+            gap = answer[merged[-1][1]:start]
+            if len(gap) <= 8 and not any(character.isdigit() for character in gap):
+                merged[-1] = (merged[-1][0], end)
+                continue
+        merged.append((start, end))
+    return merged
+
+
 def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> list[MeasurableClaim]:
     """Return factual numeric claims that no retrieved source supports."""
     source_texts = [
@@ -301,11 +375,11 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
     ]
     if not source_texts:
         return []
-    phone_spans = _grounded_phone_spans(answer, source_texts)
+    grounded_spans = _grounded_phone_spans(answer, source_texts) + _grounded_time_spans(answer, source_texts)
     return [
         claim
         for claim in _extract_claims(answer)
-        if not any(start <= claim.start and claim.end <= end for start, end in phone_spans)
+        if not any(start <= claim.start and claim.end <= end for start, end in grounded_spans)
         if not any(_claim_is_supported(claim, source_text) for source_text in source_texts)
     ]
 

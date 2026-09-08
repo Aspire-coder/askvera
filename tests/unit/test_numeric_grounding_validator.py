@@ -614,3 +614,64 @@ def test_a_colon_does_not_detach_the_subject() -> None:
     result = ValidationResult()
     NumericGroundingValidator().validate(_context(answer, source), result)
     assert result.has_critical()
+
+
+class _HoursSource:
+    """The directory writes office hours with dots: 09.00-17.00."""
+
+    content = "Office hours: Monday to Friday 09.00-17.00. Telephone +32 2 555 1234."
+    title = "International-Sponsoring-Directory.pdf - Forever Belgium"
+    metadata: dict = {}
+
+
+def _hours_flagged(answer: str, source=None) -> list[str]:
+    from app.validation.validators.numeric_grounding_validator import unsupported_numeric_claims
+
+    return [claim.number for claim in unsupported_numeric_claims(answer, [source or _HoursSource()])]
+
+
+def test_office_hours_survive_a_notation_difference() -> None:
+    """Observed live 2026-09-08 on the Belgium and Germany sponsoring records.
+
+    The source writes 09.00-17.00 and the model writes 09:00-17:00, so every
+    component was reported ungrounded and repair deleted the whole sentence.
+    A distributor asking about an office silently lost its opening hours -
+    among the most common practical uses of the directory.
+    """
+    assert _hours_flagged("The office is open Monday to Friday, 09:00-17:00.") == []
+
+
+def test_office_hours_survive_a_twelve_hour_rewrite() -> None:
+    """A model given 17.00 frequently writes 5:00 pm."""
+    assert _hours_flagged("The office is open from 9:00 am to 5:00 pm.") == []
+
+
+def test_a_single_grounded_time_survives() -> None:
+    """A time at the end of a sentence is the ordinary case."""
+    assert _hours_flagged("The office opens at 09:00.") == []
+
+
+def test_invented_office_hours_are_still_removed() -> None:
+    """The check must not become a blanket exemption for anything time-shaped."""
+    assert _hours_flagged("The office is open Monday to Friday, 07:00-22:00.")
+
+
+def test_a_half_invented_range_is_still_removed() -> None:
+    """One real opening time must not launder an invented closing time."""
+    assert _hours_flagged("The office is open 09:00-22:00.")
+
+
+def test_an_invented_non_time_figure_is_still_removed() -> None:
+    assert _hours_flagged("Every FBO receives 47 percent commission on retail orders.")
+
+
+def test_the_hours_sentence_survives_repair() -> None:
+    from app.validation.validators.numeric_grounding_validator import (
+        remove_unsupported_numeric_sentences,
+    )
+
+    answer = "The Belgium office is open Monday to Friday, 09:00-17:00."
+    repaired, removed = remove_unsupported_numeric_sentences(answer, [_HoursSource()])
+
+    assert repaired == answer
+    assert removed == []
