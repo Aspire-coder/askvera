@@ -43,13 +43,22 @@ and it does so by swapping the token — so of two simultaneous recoveries,
 exactly one wins. Every later write is conditioned on the token, so a worker
 that lost its lease updates nothing.
 
-**The residual risk, stated plainly.** A worker that is alive but stuck past
-its lease can be taken over while still running, and both could then reach
-activation. What that cannot corrupt: the pointer update takes a PostgreSQL
-advisory lock and is a single row write, so the outcome is one pointer value,
-not a mixture; and only the current token holder can record an outcome. What it
-does mean is that a stuck worker's activation work may be redone. Raising
-`LEASE_SECONDS` trades recovery latency for a smaller window.
+Every write that decides what a reader sees, or what the portal shows, checks
+ownership **inside its own transaction**, with `SELECT ... FOR UPDATE` on the
+job row:
+
+- the generation pointer update, before it takes the advisory lock;
+- finalization - the document record and the job status - as one transaction.
+
+An advisory lock alone was not enough and the reasoning that it was is the
+defect this closed. It serialises writers. A worker whose lease expired takes
+it perfectly legitimately and then writes stale state.
+
+**The residual risk, stated plainly.** A worker alive but stuck past its lease
+can be taken over while still running, and both could then reach activation. It
+can no longer write anything afterwards - the ownership check refuses it and
+raises `OwnershipLost` - so what remains is that its activation work may be
+redone. Raising `LEASE_SECONDS` trades recovery latency for a smaller window.
 
 ## Order of operations
 
@@ -97,10 +106,13 @@ WHERE logical_document_id = '<slot>';
 ```
 
 This is what retrieval filters on when `ADMIN_INGESTION_GENERATION_POINTER_ENABLED`
-is on. With it off there is no pointer, and visibility is the index itself —
-publication then verifies by counting active sections for the ingestion id and
-comparing to the expected count. Both deployments verify; they verify different
-things.
+is on. With it off there is no pointer, and publishing is a two-step replacement
+rather than a switch: activate the new sections, then delete the old. Counting
+the new sections proves they exist and not that the replacement finished, so
+verification requires both halves — the expected number of new sections
+reachable, and no reachable section of any older generation for the same source
+file. A failure between the two steps is therefore reported rather than
+recorded as success.
 
 Note the lag: `active_generation_ids` caches for 15 seconds per process, so a
 freshly published document can take that long to appear in a given worker.
@@ -119,13 +131,23 @@ does not proceed while another attempt's lease is live. It does not proceed
 after a metadata edit — the revision changed, so the approval no longer
 describes the document, and it returns 409.
 
-## The grounding fixes need re-ingestion
+## The grounding changes reach production by two different routes
 
 Carrying a table's currency heading onto its continuation chunks happens **at
 ingestion**. Documents already in the index keep the chunking they were
-ingested with, so the defect it fixes persists for them until they are
-re-ingested. The other half — rejecting a unit that never precedes the figure —
-is validation and applies immediately to every answer.
+ingested with, so it reaches them only on re-ingestion.
+
+Unit attribution is **validation**, so it applies to every answer from the next
+deploy, over chunks that were never shaped for it — and it is stricter than
+what it replaced. A figure whose unit is neither beside it, nor stated in its
+row, nor given by a heading or footer covering that row, no longer supports a
+claim naming a unit. Expect more removals on documents that state a currency
+far from the figures it governs, until those are re-ingested.
+
+`tests/unit/test_existing_index_units.py` runs verbatim corpus excerpts and
+shows the claims that dominate the real text still ground, because this corpus
+writes the unit beside the figure. That is evidence, not a measurement of live
+answers; the candidate comparison is what would measure it.
 
 ## Still open
 

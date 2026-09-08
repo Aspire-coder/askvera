@@ -392,3 +392,83 @@ emitted by `build_sections` rather than reasoning about two constants.
   outcome, but its activation work may be redone.
 - The heading-carrying fix applies at ingestion, so documents already in the
   index keep the chunking they have until re-ingested.
+
+
+---
+
+# 14. Second review round: fencing, replacement, and unit attribution
+
+| | |
+|---|---|
+| Tip | `78d7c17` |
+| `main` | unchanged, `bde45fb` |
+
+## Test counts, reported separately
+
+They are two disjoint runs, not one number.
+
+**Wider run — 1509 passed, 15 skipped.** No database configured, so the whole
+PostgreSQL file skips.
+
+The 15 skips are:
+
+| Count | What | Why |
+|---:|---|---|
+| 14 | every test in `tests/integration/test_review_migration_postgres.py` | `ASKVERA_TEST_POSTGRES_URL` and `ASKVERA_TEST_POSTGRES_DISPOSABLE` unset |
+| 1 | `tests/integration/test_chat_flow.py` | pre-existing; real AWS integration is opt-in |
+
+**Dedicated PostgreSQL run — 14 passed.** Those same 14, executed against
+`postgres:16-alpine` in a throwaway container with both variables set. Re-run
+after the changes in this round, not carried forward from the earlier one.
+
+So 1523 distinct test executions across the two runs, and no test counted
+twice. Neither run has been independently reproduced by anyone else.
+
+## The three findings
+
+**Ownership was checked before the work, not at the write.** An advisory lock
+serialises writers and does not stop a worker whose lease expired from writing
+stale state - it takes the lock legitimately. The pointer write now verifies
+ownership inside its own transaction with `SELECT ... FOR UPDATE`, so a
+takeover cannot interleave between the check and the write. Finalization was
+two unfenced transactions running ahead of the fenced completion call; it is
+now one transaction behind one ownership check.
+
+**Legacy verification proved existence, not replacement.** Without a generation
+pointer, publishing is activate-then-delete, and between those steps a reader
+matches both versions of the same document. The verifier now requires the
+expected new sections AND no reachable section of an older generation for the
+same source file.
+
+**The unit fallback was a heuristic, not a check.** It accepted a unit that
+merely appeared before the figure, and accepted anything when none did. It is
+replaced with structure: a declaration is a segment naming one unit and
+carrying no figure - a heading or footer - and among those before the figure,
+the one naming the same thing as the row governs it. No declaration means no
+support, and the claim is removed.
+
+"Absence of evidence must not become rejection" is withdrawn as a grounding
+rule. It is right about a claim that states no unit and wrong about one that
+does.
+
+This needed line structure to survive normalization, which had been collapsing
+all whitespace and merging headings into the rows beneath them. A line break
+now ends a unit's scope; the subject window keeps its old boundary and still
+reads across line breaks, because extraction wraps one sentence over several
+lines.
+
+## What is still not established
+
+- Nothing about the production RDS instance.
+- The combined candidate comparison against the live pipeline. Needs paid
+  model calls and separate approval. Not run.
+- The append-only database grant.
+- A worker alive but stuck past its lease can still be taken over. It can no
+  longer write anything after that - every authoritative write is fenced - but
+  its activation work may be redone.
+- The unit rule is stricter than what it replaced, and its effect on real
+  answers is measured only against the corpus excerpts in
+  `tests/unit/test_existing_index_units.py`. The candidate comparison is what
+  would measure it properly.
+- Carrying a heading onto continuation chunks happens at ingestion, so it
+  reaches a document only when that document is re-ingested.
