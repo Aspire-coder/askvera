@@ -48,12 +48,14 @@ def _has_value(field: str) -> dict[str, Any]:
     Ingestion writes these fields as empty strings rather than leaving them
     out, so `exists` is satisfied by a document that carries no date at all.
     """
-    return {
-        "bool": {
-            "must": [{"exists": {"field": field}}],
-            "must_not": [{"term": {field: ""}}],
-        }
-    }
+    # "?*" is one character followed by anything, so it matches any non-empty
+    # value and nothing else. It works whichever way the field is mapped: on a
+    # keyword field it tests the stored term, and on a text field an empty
+    # string produces no tokens to match. A must_not on term "" does neither -
+    # it silently excludes nothing on a text field, which is why the first two
+    # runs of this reported a fully dated corpus we had already disproved by
+    # reading DK-EN's section header.
+    return {"wildcard": {field: {"value": "?*"}}}
 
 
 def _filters(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -75,6 +77,104 @@ def _filters(args: argparse.Namespace) -> list[dict[str, Any]]:
             {"bool": {"must_not": {"exists": {"field": "status"}}}},
         ], "minimum_should_match": 1}})
     return clauses
+
+
+def report_inventory(client, query: dict[str, Any], total: int, index_name: str) -> dict[str, Any]:
+    """Summarise the corpus without writing any sections."""
+    # Sizing the corpus by hand means paging every section; an aggregation
+    # answers it in one request and is what decides where cases are worth
+    # authoring.
+    response = client.search(
+        index=index_name,
+        body={
+            "query": query,
+            "size": 0,
+            "aggs": {
+                "countries": {
+                    "terms": {"field": "country", "size": 100},
+                    "aggs": {"types": {"terms": {"field": "document_type", "size": 20}}},
+                },
+                "documents": {
+                    "terms": {"field": "source_file", "size": 100},
+                    # Date-scope protection keys off effective_date and
+                    # document_version. A document carrying neither answers
+                    # a question about a past year normally, while an
+                    # otherwise identical document that has them refuses it
+                    # as a period not covered. Sizing that needs the counts.
+                    # An exists filter alone is wrong here: these fields are
+                    # written as empty strings rather than omitted, and
+                    # OpenSearch counts an empty string as present. The first
+                    # version of this reported every document dated, including
+                    # DK-EN-Company-Policy.pdf, whose sections were then found
+                    # to carry an empty effective_date.
+                    "aggs": {
+                        "dated": {"filter": _has_value("effective_date")},
+                        "versioned": {"filter": _has_value("document_version")},
+                    },
+                },
+            },
+        },
+    )
+    aggregations = response.get("aggregations") or {}
+    report = {
+        "index": index_name,
+        "matched": total,
+        "by_country": [
+            {
+                "country": bucket["key"],
+                "sections": bucket["doc_count"],
+                "types": {
+                    inner["key"]: inner["doc_count"]
+                    for inner in bucket.get("types", {}).get("buckets", [])
+                },
+            }
+            for bucket in aggregations.get("countries", {}).get("buckets", [])
+        ],
+        "by_document": [
+            {
+                "source_file": bucket["key"],
+                "sections": bucket["doc_count"],
+                "dated_sections": bucket.get("dated", {}).get("doc_count", 0),
+                "versioned_sections": bucket.get("versioned", {}).get("doc_count", 0),
+            }
+            for bucket in aggregations.get("documents", {}).get("buckets", [])
+        ],
+        "undated_documents": sorted(
+            bucket["key"]
+            for bucket in aggregations.get("documents", {}).get("buckets", [])
+            if bucket.get("dated", {}).get("doc_count", 0) == 0
+        ),
+    }
+    # Check the aggregation against an actual section rather than trusting
+    # it. Two earlier versions of this reported every document dated, and
+    # both were believed until a section header was read by hand. An
+    # aggregate that cannot be contradicted by its own output is worth
+    # less than one that carries a sample.
+    sampled = None
+    if report["by_document"]:
+        first = report["by_document"][0]
+        probe = client.search(
+            index=index_name,
+            body={
+                "query": {"term": {"source_file": first["source_file"]}},
+                "size": 1,
+                "_source": ["source_file", "section_id", "effective_date", "document_version"],
+            },
+        )["hits"]["hits"]
+        if probe:
+            found = probe[0].get("_source") or {}
+            sampled = {
+                "source_file": found.get("source_file", ""),
+                "section_id": found.get("section_id", ""),
+                "effective_date": found.get("effective_date", ""),
+                "document_version": found.get("document_version", ""),
+                "reported_dated_sections": first["dated_sections"],
+                "reported_total_sections": first["sections"],
+                "consistent": bool(str(found.get("effective_date") or "").strip())
+                == (first["dated_sections"] > 0),
+            }
+    report["sampled_section"] = sampled
+    return report
 
 
 def main() -> int:
@@ -127,70 +227,10 @@ def main() -> int:
         return 0
 
     if args.inventory:
-        # Sizing the corpus by hand means paging every section; an aggregation
-        # answers it in one request and is what decides where cases are worth
-        # authoring.
-        response = client.search(
-            index=settings.OPENSEARCH_INDEX,
-            body={
-                "query": query,
-                "size": 0,
-                "aggs": {
-                    "countries": {
-                        "terms": {"field": "country", "size": 100},
-                        "aggs": {"types": {"terms": {"field": "document_type", "size": 20}}},
-                    },
-                    "documents": {
-                        "terms": {"field": "source_file", "size": 100},
-                        # Date-scope protection keys off effective_date and
-                        # document_version. A document carrying neither answers
-                        # a question about a past year normally, while an
-                        # otherwise identical document that has them refuses it
-                        # as a period not covered. Sizing that needs the counts.
-                        # An exists filter alone is wrong here: these fields are
-                        # written as empty strings rather than omitted, and
-                        # OpenSearch counts an empty string as present. The first
-                        # version of this reported every document dated, including
-                        # DK-EN-Company-Policy.pdf, whose sections were then found
-                        # to carry an empty effective_date.
-                        "aggs": {
-                            "dated": {"filter": _has_value("effective_date")},
-                            "versioned": {"filter": _has_value("document_version")},
-                        },
-                    },
-                },
-            },
-        )
-        aggregations = response.get("aggregations") or {}
-        print(json.dumps({
-            "index": settings.OPENSEARCH_INDEX,
-            "matched": total,
-            "by_country": [
-                {
-                    "country": bucket["key"],
-                    "sections": bucket["doc_count"],
-                    "types": {
-                        inner["key"]: inner["doc_count"]
-                        for inner in bucket.get("types", {}).get("buckets", [])
-                    },
-                }
-                for bucket in aggregations.get("countries", {}).get("buckets", [])
-            ],
-            "by_document": [
-                {
-                    "source_file": bucket["key"],
-                    "sections": bucket["doc_count"],
-                    "dated_sections": bucket.get("dated", {}).get("doc_count", 0),
-                    "versioned_sections": bucket.get("versioned", {}).get("doc_count", 0),
-                }
-                for bucket in aggregations.get("documents", {}).get("buckets", [])
-            ],
-            "undated_documents": sorted(
-                bucket["key"]
-                for bucket in aggregations.get("documents", {}).get("buckets", [])
-                if bucket.get("dated", {}).get("doc_count", 0) == 0
-            ),
-        }, indent=2, ensure_ascii=False))
+        print(json.dumps(
+            report_inventory(client, query, total, settings.OPENSEARCH_INDEX),
+            indent=2, ensure_ascii=False,
+        ))
         return 0
     if total == 0:
         print("Nothing to dump; loosen the filters.", file=sys.stderr)
