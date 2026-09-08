@@ -19,10 +19,16 @@ class BedrockGuardrailsProvider:
         language: str,
         correlation_id: str,
         allow_claim_topics: bool = False,
+        is_generated_answer: bool = False,
     ) -> GovernanceDecision:
         """Evaluate text using the existing guardrail service."""
         try:
-            check_text(text, correlation_id, allow_claim_topics=allow_claim_topics)
+            check_text(
+                text,
+                correlation_id,
+                allow_claim_topics=allow_claim_topics,
+                is_generated_answer=is_generated_answer,
+            )
         except GuardrailBlockedError as exc:
             return GovernanceDecision(
                 allowed=False,

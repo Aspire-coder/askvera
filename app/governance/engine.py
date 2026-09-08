@@ -36,6 +36,7 @@ class GovernanceEngine:
         correlation_id: str,
         role: str = "new_prospect",
         allow_claim_topics: bool = False,
+        is_generated_answer: bool = False,
     ) -> GovernanceDecision:
         """Evaluate text through risk policies and guardrail provider.
 
@@ -77,6 +78,7 @@ class GovernanceEngine:
                     language=language,
                     correlation_id=correlation_id,
                     allow_claim_topics=allow_claim_topics,
+                    is_generated_answer=is_generated_answer,
                 )
             except Exception as exc:
                 LOGGER.exception(
