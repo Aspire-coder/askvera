@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "description": "Questions for measuring answer quality, run by scripts/run_benchmark.py. This is NOT the retrieval canary and must never be used as a deploy gate. The canary is built from failures we already fixed, so it can only prove we have not gone backwards. These cases exist to say how good the system is, which means they must be written from source documents rather than from what the bot said. Every case states where its expected answer comes from, in 'source_evidence' and 'provenance'; a case that cannot state that does not belong here.",
-  "status": "PILOT plus a first set of source-verified answerable cases. The five scope/refusal cases are verifiable from config/conversation_routes.json. The eight directory cases were authored on 2026-09-08 against section text dumped from the live index, and each names the section that must be retrieved and cited. This is still far too small to characterise a 17,896-section corpus: it can detect systematic failures on the intents it covers, and cannot certify anything. Expand across markets, languages and policy documents before quoting a rate.",
+  "status": "Pilot refusal cases, source-verified directory cases, and a first country-scope pair. The DK/SE pair covers the Benelux and Nordic policy documents, which are 68% of the corpus and had no coverage: the two sections are byte-identical, so a wrong-market answer is invisible in the text and only the cited section reveals it. Fifteen cases against 17,896 sections detects systematic failures on covered intents and certifies nothing. Expand to non-English policy next: 17 of 28 documents are not in English.",
   "cases": [
     {
       "id": "scope-product-price-gb",
@@ -254,6 +254,48 @@
       },
       "source_evidence": "Forever Reunion Island record: 'Delivery cost are at 6 EUR and free for orders exceeding 1CC.' The Reunion record repeats much of the France text, so a France delivery figure (10 EUR / 5 EUR) indicates the wrong record was used.",
       "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text."
+    },
+    {
+      "id": "dk-fbo-support-fee-scope",
+      "question": "What is the FBO Support fee and who pays it?",
+      "country": "DK",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "country_scope",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "3",
+          "Assistant Supervisor"
+        ],
+        "required_sections": [
+          "DK:2-part-1-definition-18"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "'FBO Support fee: A monthly fee of up to EUR 3 deducted from the bonus of all FBOs who reach the level of Assistant Supervisor or higher... This fee is only payable in months when commission is earned.' The text is byte-identical in Denmark and Sweden, so the answer cannot show which market's copy was used and only the cited section can. This is the first test of country scope over the Benelux and Nordic policies, which are 68% of the corpus and previously had no coverage.",
+      "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure."
+    },
+    {
+      "id": "se-fbo-support-fee-scope",
+      "question": "What is the FBO Support fee and who pays it?",
+      "country": "SE",
+      "language": "en",
+      "role": "fbo",
+      "intent_group": "country_scope",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "3",
+          "Assistant Supervisor"
+        ],
+        "required_sections": [
+          "SE:2-part-1-definition-18"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "'FBO Support fee: A monthly fee of up to EUR 3 deducted from the bonus of all FBOs who reach the level of Assistant Supervisor or higher... This fee is only payable in months when commission is earned.' The text is byte-identical in Denmark and Sweden, so the answer cannot show which market's copy was used and only the cited section can. This is the first test of country scope over the Benelux and Nordic policies, which are 68% of the corpus and previously had no coverage.",
+      "provenance": "DK-EN-Company-Policy.pdf and SE-EN-Company-Policy.pdf section 2-part-1-definition-18, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The two sections were compared and are identical: same section ID, same 635 characters, same EUR 3 figure."
     }
   ]
 }
