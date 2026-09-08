@@ -1,4 +1,4 @@
-"""Execute the review migration against a real PostgreSQL, when one exists.
+"""Execute the review and publication migrations against a real PostgreSQL.
 
 The unit tests read the migration as text. Text checks establish shape and
 nothing about whether PostgreSQL accepts the statements, whether they are
@@ -12,12 +12,19 @@ database configuration, and they refuse outright to run against a URL matching
 the configured RDS host or one that looks managed. They create and drop
 schemas, and the drop is scoped to a generated name they created themselves.
 
+Two variables reduce accidental targeting. They do not prevent someone
+supplying the wrong values: both can be set, deliberately, to a database
+somebody believes is disposable and is not. The refusal check narrows it
+further and is not a guarantee either - it recognises the database this
+application is configured for, not every database that matters.
+
     createdb askvera_migration_test
     ASKVERA_TEST_POSTGRES_URL=postgresql://localhost/askvera_migration_test \\
         python -m pytest tests/integration/test_review_migration_postgres.py
 
 Status where this was written: skipped. No psql, no reachable Docker daemon and
-no testing.postgresql, so the migration has never been executed anywhere.
+no testing.postgresql, so neither migration has been executed anywhere. Skipped
+tests are not evidence of safety, and this remains a release blocker.
 """
 
 from __future__ import annotations
@@ -72,11 +79,13 @@ def _refuse_live_database(url: str) -> None:
         )
 
 
-MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "migrations"
-    / "20260908_01_ingestion_review_findings.sql"
-)
+MIGRATIONS = [
+    Path(__file__).resolve().parents[2] / "migrations" / name
+    for name in (
+        "20260908_01_ingestion_review_findings.sql",
+        "20260908_02_publication_attempt.sql",
+    )
+]
 
 # The columns the previous application version selects. If the migration breaks
 # any of them, the running version fails the moment it lands - which is before
@@ -144,14 +153,16 @@ def schema():
 
 
 def _apply(connection, name: str) -> None:
+    """Apply both migrations in filename order, as the deploy does."""
     from sqlalchemy import text
 
     connection.execute(text(f'SET search_path TO "{name}"'))
-    sql = MIGRATION.read_text(encoding="utf-8")
-    stripped = "\n".join(re.sub(r"--.*$", "", line) for line in sql.splitlines())
-    for statement in (s.strip() for s in stripped.split(";")):
-        if statement:
-            connection.execute(text(statement))
+    for migration in MIGRATIONS:
+        sql = migration.read_text(encoding="utf-8")
+        stripped = "\n".join(re.sub(r"--.*$", "", line) for line in sql.splitlines())
+        for statement in (s.strip() for s in stripped.split(";")):
+            if statement:
+                connection.execute(text(statement))
 
 
 def test_the_migration_applies_to_a_legacy_table_holding_rows(schema) -> None:
@@ -287,3 +298,104 @@ def test_two_decisions_for_one_revision_both_survive(schema) -> None:
         ).scalars().all()
 
     assert sorted(rows) == ["publish", "reject"]
+
+
+def test_a_legacy_job_reads_as_never_attempted(schema) -> None:
+    """not_started is right for a job that published before this existed.
+
+    Publication refuses anything that is not ready_for_review, so the default
+    cannot invite a republication of something already out.
+    """
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{name}"'))
+        connection.execute(text(LEGACY_SCHEMA))
+        connection.execute(
+            text("INSERT INTO ingestion_jobs (job_id, status) VALUES ('legacy-3', 'ready')")
+        )
+        _apply(connection, name)
+        row = connection.execute(
+            text(
+                "SELECT publication_state, publication_attempt_key, "
+                "publication_attempted_at FROM ingestion_jobs WHERE job_id = 'legacy-3'"
+            )
+        ).mappings().one()
+
+    assert row["publication_state"] == "not_started"
+    assert row["publication_attempt_key"] == ""
+    assert row["publication_attempted_at"] is None
+
+
+def test_the_conditional_claim_lets_exactly_one_of_two_workers_through(schema) -> None:
+    """The property the whole concurrency design rests on.
+
+    Two sessions issue the same conditional UPDATE against one job. If both
+    report a row, two workers publish the same document at once. This is a
+    database behaviour and cannot be established by a fake store.
+    """
+    from sqlalchemy import text
+
+    engine, name = schema
+    claim = text(
+        """
+        UPDATE ingestion_jobs
+        SET publication_state = 'in_progress', publication_attempt_key = :key
+        WHERE job_id = 'job-1'
+          AND review_revision = 'rev-a'
+          AND publication_state IN ('not_started', 'failed_recoverable')
+        """
+    )
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{name}"'))
+        connection.execute(text(LEGACY_SCHEMA))
+        _apply(connection, name)
+        connection.execute(
+            text(
+                "INSERT INTO ingestion_jobs (job_id, status, review_revision) "
+                "VALUES ('job-1', 'ready_for_review', 'rev-a')"
+            )
+        )
+
+    claimed = []
+    for key in ("first", "second"):
+        with engine.begin() as connection:
+            connection.execute(text(f'SET search_path TO "{name}"'))
+            claimed.append(connection.execute(claim, {"key": key}).rowcount)
+
+    assert claimed == [1, 0]
+
+
+def test_a_findings_document_round_trips_as_jsonb(schema) -> None:
+    """The application writes JSON text with an explicit cast."""
+    from sqlalchemy import text
+
+    engine, name = schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{name}"'))
+        connection.execute(text(LEGACY_SCHEMA))
+        _apply(connection, name)
+        connection.execute(
+            text("INSERT INTO ingestion_jobs (job_id) VALUES ('job-2')")
+        )
+        connection.execute(
+            text(
+                "UPDATE ingestion_jobs SET review_findings = CAST(:findings AS JSONB) "
+                "WHERE job_id = 'job-2'"
+            ),
+            {
+                "findings": (
+                    '{"schema": 1, "findings": [{"field": "expiry_date", '
+                    '"severity": "contradiction", "detail": "x"}], "uncertain_pages": [4]}'
+                )
+            },
+        )
+        stored = connection.execute(
+            text(
+                "SELECT review_findings -> 'uncertain_pages' AS pages "
+                "FROM ingestion_jobs WHERE job_id = 'job-2'"
+            )
+        ).scalar_one()
+
+    assert list(stored) == [4]
