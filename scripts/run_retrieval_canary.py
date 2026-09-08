@@ -85,8 +85,62 @@ def _git_commit() -> str:
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
 
 
-def delivered_answer(case: dict[str, Any], sequence: int) -> tuple[str, int]:
-    """Return the answer a user would actually receive, and its citation count.
+class _RecordingRetriever:
+    """Wrap the retrieval service and remember what it handed the orchestrator.
+
+    The gate used to call `RetrievalService.retrieve` itself and then run the
+    pipeline separately, so the evidence it reported and the answer it checked
+    came from two different executions and could disagree. Recording what the
+    pipeline actually used makes them the same run.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.results = []
+
+    def retrieve(self, *args, **kwargs):
+        result = self._inner.retrieve(*args, **kwargs)
+        self.results.append(result)
+        return result
+
+    @property
+    def last(self):
+        # The final retrieval is the one the delivered answer was built from;
+        # earlier ones would belong to an abandoned branch.
+        return self.results[-1] if self.results else None
+
+
+def _canary_patches() -> dict:
+    """Stubs applied to the orchestrator module for the duration of one run.
+
+    Session and consent are stubbed because a batch gate has no real session.
+
+    The caches are stubbed for a more important reason. `handle_chat` consults
+    the exact cache and then the semantic cache before doing any work, so a
+    repeated case would run the pipeline once and read cache for every run
+    after that -- making `--repeat`, which exists to expose flakiness,
+    partially inert on exactly the delivered-answer cases that matter most.
+    A quality gate has to measure the pipeline, not the cache.
+
+    The writes are stubbed too, so the gate leaves no trace in the production
+    cache. Previously each deploy seeded real cache entries with canary
+    answers.
+    """
+    return {
+        "validate_and_touch_session": lambda *args, **kwargs: None,
+        "has_valid_consent": lambda *args, **kwargs: True,
+        "get_session_history": lambda *args, **kwargs: "",
+        "append_session_turn": lambda *args, **kwargs: None,
+        "get_cache_value": lambda *args, **kwargs: None,
+        "set_cache_value": lambda *args, **kwargs: None,
+        "semantic_cache_active": lambda *args, **kwargs: False,
+        "get_semantic_cache_value": lambda *args, **kwargs: None,
+        "set_semantic_cache_value": lambda *args, **kwargs: None,
+    }
+
+
+def run_pipeline_once(case: dict[str, Any], sequence: int):
+    """Run the real pipeline once and return the retrieval it used and the answer.
 
     Retrieval scoring cannot see what happens after a document is selected. On
     2026-09-07 every defect found after the selector regression lived downstream
@@ -95,24 +149,21 @@ def delivered_answer(case: dict[str, Any], sequence: int) -> tuple[str, int]:
     correct, cited answers were discarded, or delivered with the governing figure
     silently removed.
 
-    Session and consent are stubbed because a batch gate has no real session. The
-    rest of the pipeline runs exactly as it does for a user, including generation,
-    validation, repair and output governance.
+    Everything from retrieval onward runs exactly as it does for a user,
+    including generation, validation, repair and output governance.
     """
     from app.orchestrator import chat_orchestrator
+    from app.retrieval.service import RetrievalService
     from utils.validators import ChatRequest
 
-    patched = {
-        "validate_and_touch_session": lambda *args, **kwargs: None,
-        "has_valid_consent": lambda *args, **kwargs: True,
-        "get_session_history": lambda *args, **kwargs: "",
-        "append_session_turn": lambda *args, **kwargs: None,
-    }
+    patched = _canary_patches()
     originals = {name: getattr(chat_orchestrator, name) for name in patched}
     for name, replacement in patched.items():
         setattr(chat_orchestrator, name, replacement)
+
+    recorder = _RecordingRetriever(RetrievalService())
     try:
-        response = chat_orchestrator.AIOrchestrator().handle_chat(
+        response = chat_orchestrator.AIOrchestrator(retriever=recorder).handle_chat(
             ChatRequest(
                 message=str(case["question"]),
                 sessionId=f"deployment-canary-{sequence}",
@@ -122,7 +173,7 @@ def delivered_answer(case: dict[str, Any], sequence: int) -> tuple[str, int]:
             ),
             f"deployment-canary-answer-{sequence}-{case['id']}",
         )
-        return response.answer or "", len(response.citations or [])
+        return recorder.last, response.answer or "", len(response.citations or [])
     finally:
         for name, original in originals.items():
             setattr(chat_orchestrator, name, original)
@@ -164,32 +215,55 @@ def run_case(case: dict[str, Any], sequence: int, default_repeat: int) -> dict[s
 
 
 def run_case_once(case: dict[str, Any], sequence: int):
+    """Evaluate one case against one execution of the pipeline."""
     from app.evidence import approve_evidence
     from app.retrieval.service import RetrievalService
 
-    service = RetrievalService()
     question = str(case["question"])
-    result = service.retrieve(
-        question,
-        str(case["country"]),
-        str(case["language"]),
-        str(case["role"]),
-        f"deployment-canary-{sequence}-{case['id']}",
-    )
-    decision = approve_evidence(
-        question,
-        result,
-        str(case["country"]),
-        str(case["language"]),
-    )
-    top_title = result.documents[0].title if result.documents else ""
-    top_section = (
-        str(result.documents[0].metadata.get("section_id") or "")
-        if result.documents
-        else ""
-    )
-    confidence = float(result.confidence)
+    answer_required = [str(value) for value in (case.get("answer_must_contain") or [])]
+    answer_forbidden = [str(value) for value in (case.get("answer_must_not_contain") or [])]
+    checks_answer = bool(answer_required or answer_forbidden or case.get("answer_must_cite"))
+
+    answer = ""
+    answer_citations = -1
+    if checks_answer:
+        # One execution supplies both the evidence and the answer, so a case
+        # can never report retrieval from a run that produced a different reply.
+        result, answer, answer_citations = run_pipeline_once(case, sequence)
+    else:
+        # Retrieval-only cases skip generation entirely; it costs a model call
+        # and proves nothing they assert.
+        result = RetrievalService().retrieve(
+            question,
+            str(case["country"]),
+            str(case["language"]),
+            str(case["role"]),
+            f"deployment-canary-{sequence}-{case['id']}",
+        )
+
     failures: list[str] = []
+    if result is None:
+        # The pipeline answered without retrieving - an early conversational
+        # route, a refusal, or a guardrail block. Reported rather than crashed,
+        # because "this question no longer reaches retrieval" is a real
+        # regression and an exception would hide it behind a stack trace.
+        failures.append("pipeline returned an answer without performing retrieval")
+        documents = []
+        confidence = 0.0
+        decision = None
+    else:
+        documents = result.documents
+        confidence = float(result.confidence)
+        decision = approve_evidence(
+            question,
+            result,
+            str(case["country"]),
+            str(case["language"]),
+        )
+
+    top_title = documents[0].title if documents else ""
+    top_section = str(documents[0].metadata.get("section_id") or "") if documents else ""
+
     expected_title = str(case["expected_title_contains"])
     if expected_title and expected_title.casefold() not in top_title.casefold():
         failures.append(f"top title {top_title!r} does not contain {expected_title!r}")
@@ -202,20 +276,13 @@ def run_case_once(case: dict[str, Any], sequence: int):
         failures.append(
             f"confidence {confidence:.3f} is below {float(case['minimum_confidence']):.3f}"
         )
-    if bool(case["evidence_must_be_approved"]) and not decision.approved:
-        failures.append(f"evidence rejected: {decision.reason}")
-    if bool(case.get("evidence_must_be_absent")) and result.documents:
-        failures.append(f"expected no evidence but received {len(result.documents)} documents")
+    if bool(case["evidence_must_be_approved"]) and not (decision and decision.approved):
+        reason = decision.reason if decision else "no retrieval performed"
+        failures.append(f"evidence rejected: {reason}")
+    if bool(case.get("evidence_must_be_absent")) and documents:
+        failures.append(f"expected no evidence but received {len(documents)} documents")
 
-    # Optional second stage: what the user is actually shown. Costs one
-    # generation call, so it is opt-in per case rather than run for all of them.
-    answer_required = [str(value) for value in (case.get("answer_must_contain") or [])]
-    answer_forbidden = [str(value) for value in (case.get("answer_must_not_contain") or [])]
-    answer_extract = ""
-    answer_citations = -1
-    if answer_required or answer_forbidden or case.get("answer_must_cite"):
-        answer, answer_citations = delivered_answer(case, sequence)
-        answer_extract = answer[:200]
+    if checks_answer:
         folded = answer.casefold()
         for required in answer_required:
             if required.casefold() not in folded:
@@ -232,13 +299,13 @@ def run_case_once(case: dict[str, Any], sequence: int):
         "confidence": round(confidence, 3),
         "top_title": top_title,
         "top_section": top_section,
-        "evidence_approved": decision.approved,
+        "evidence_approved": bool(decision and decision.approved),
         "failure_reasons": failures,
-        "typo_ranking_applied": bool(result.metadata.get("typo_ranking_applied")),
-        "ranking_query_used": result.metadata.get("ranking_query_used", ""),
-        "document_scores": [round(float(document.score or 0.0), 3) for document in result.documents],
+        "typo_ranking_applied": bool(result.metadata.get("typo_ranking_applied")) if result else False,
+        "ranking_query_used": result.metadata.get("ranking_query_used", "") if result else "",
+        "document_scores": [round(float(document.score or 0.0), 3) for document in documents],
         "answer_citations": answer_citations,
-        "answer_extract": answer_extract,
+        "answer_extract": answer[:200],
     }
 
 
