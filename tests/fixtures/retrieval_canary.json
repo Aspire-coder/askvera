@@ -220,6 +220,28 @@
       ],
       "blocking": false,
       "non_blocking_reason": "Added 2026-09-07 without a run against the live index, so it is observed rather than blocking. Promote to blocking once a deploy shows it passing; an unverified assertion that fails would roll back a sound deploy."
+    },
+    {
+      "id": "chained-followup-market-continuity",
+      "conversation": [
+        "How do I sponsor someone in Belgium?",
+        "What about Germany?"
+      ],
+      "question": "Tell me more.",
+      "country": "US",
+      "language": "en",
+      "role": "new_prospect",
+      "expected_title_contains": "",
+      "minimum_confidence": 0.0,
+      "evidence_must_be_approved": false,
+      "answer_must_contain": [
+        "Germany"
+      ],
+      "blocking": false,
+      "non_blocking_reason": "Added 2026-09-07 alongside fix/followup-market-continuity and not yet run against the live index. Costs three generation calls per run. Promote to blocking once a deploy shows it passing.",
+      "answer_must_not_contain": [
+        "do not contain enough information"
+      ]
     }
   ]
 }

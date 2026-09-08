@@ -28,6 +28,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 DEFAULT_FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "retrieval_canary.json"
+# A conversation case costs one generation call per prior turn plus one for the
+# question itself, on every deploy. Three is enough to reach a chained
+# follow-up, which is the shape worth gating on.
+MAX_CONVERSATION_TURNS = 3
 REQUIRED_CASE_FIELDS = {
     "id",
     "question",
@@ -59,6 +63,19 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
         minimum_confidence = float(case["minimum_confidence"])
         if not 0.0 <= minimum_confidence <= 1.0:
             raise ValueError(f"Invalid minimum confidence for {identifier}: {minimum_confidence}.")
+        if "conversation" in case:
+            conversation = case["conversation"]
+            if not isinstance(conversation, list) or not conversation:
+                raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+            if any(not isinstance(turn, str) or not turn.strip() for turn in conversation):
+                raise ValueError(f"'conversation' turns must be non-empty strings for {identifier}.")
+            # Each prior turn is a full generation call, so a conversation case
+            # costs len(conversation) + 1 of them. The cap keeps one careless
+            # fixture edit from multiplying every deploy's gate cost.
+            if len(conversation) > MAX_CONVERSATION_TURNS:
+                raise ValueError(
+                    f"'conversation' for {identifier} exceeds {MAX_CONVERSATION_TURNS} turns."
+                )
         if "blocking" in case and not isinstance(case["blocking"], bool):
             raise ValueError(f"'blocking' must be true or false for {identifier}.")
         if "repeat" in case:
@@ -110,10 +127,37 @@ class _RecordingRetriever:
         return self.results[-1] if self.results else None
 
 
-def _canary_patches() -> dict:
+class _CanaryTranscript:
+    """In-memory stand-in for the session store, in its stored format.
+
+    A batch gate has no real session, but a follow-up case has no meaning
+    without one: the orchestrator reads prior turns out of history to work out
+    what a bare "Tell me more" is actually asking about.
+
+    The format matches services.session exactly - two lines per turn, with
+    newlines flattened inside each message. That flattening is not cosmetic: an
+    answer containing a line beginning "user:" would otherwise be read back as
+    a prior turn the reader never sent.
+    """
+
+    def __init__(self) -> None:
+        self._messages: list[str] = []
+
+    def history(self, *args, **kwargs) -> str:
+        return "\n".join(self._messages)
+
+    def append(self, session_id, user_message, vera_response, correlation_id=None) -> None:
+        for line in (f"user: {user_message}", f"vera: {vera_response}"):
+            self._messages.append(" ".join(line.splitlines()))
+
+
+def _canary_patches(transcript: "_CanaryTranscript | None" = None) -> dict:
     """Stubs applied to the orchestrator module for the duration of one run.
 
     Session and consent are stubbed because a batch gate has no real session.
+    When a transcript is supplied, history is served from it instead of being
+    empty, so a multi-turn case can be replayed and a follow-up judged against
+    what actually came before it.
 
     The caches are stubbed for a more important reason. `handle_chat` consults
     the exact cache and then the semantic cache before doing any work, so a
@@ -129,8 +173,12 @@ def _canary_patches() -> dict:
     return {
         "validate_and_touch_session": lambda *args, **kwargs: None,
         "has_valid_consent": lambda *args, **kwargs: True,
-        "get_session_history": lambda *args, **kwargs: "",
-        "append_session_turn": lambda *args, **kwargs: None,
+        "get_session_history": (
+            transcript.history if transcript else (lambda *args, **kwargs: "")
+        ),
+        "append_session_turn": (
+            transcript.append if transcript else (lambda *args, **kwargs: None)
+        ),
         "get_cache_value": lambda *args, **kwargs: None,
         "set_cache_value": lambda *args, **kwargs: None,
         "semantic_cache_active": lambda *args, **kwargs: False,
@@ -156,23 +204,39 @@ def run_pipeline_once(case: dict[str, Any], sequence: int):
     from app.retrieval.service import RetrievalService
     from utils.validators import ChatRequest
 
-    patched = _canary_patches()
+    transcript = _CanaryTranscript()
+    patched = _canary_patches(transcript)
     originals = {name: getattr(chat_orchestrator, name) for name in patched}
     for name, replacement in patched.items():
         setattr(chat_orchestrator, name, replacement)
 
+    session_id = f"deployment-canary-{sequence}"
     recorder = _RecordingRetriever(RetrievalService())
-    try:
-        response = chat_orchestrator.AIOrchestrator(retriever=recorder).handle_chat(
+
+    def ask(message: str, label: str):
+        return chat_orchestrator.AIOrchestrator(retriever=recorder).handle_chat(
             ChatRequest(
-                message=str(case["question"]),
-                sessionId=f"deployment-canary-{sequence}",
+                message=message,
+                sessionId=session_id,
                 country=str(case["country"]),
                 language=str(case["language"]),
                 role=str(case["role"]),
             ),
-            f"deployment-canary-answer-{sequence}-{case['id']}",
+            f"deployment-canary-answer-{sequence}-{case['id']}-{label}",
         )
+
+    try:
+        # Prior turns are replayed through the real pipeline so the follow-up
+        # is judged against history the orchestrator itself produced, rather
+        # than a hand-written transcript that could drift from what the system
+        # actually says. Each one costs a generation call, which is why
+        # conversation cases are opt-in and few.
+        for index, prior_turn in enumerate(case.get("conversation") or []):
+            ask(str(prior_turn), f"turn{index}")
+
+        # Assertions apply to the final question only. The recorder's last
+        # retrieval belongs to it for the same reason.
+        response = ask(str(case["question"]), "final")
         return recorder.last, response.answer or "", len(response.citations or [])
     finally:
         for name, original in originals.items():
@@ -223,10 +287,16 @@ def run_case_once(case: dict[str, Any], sequence: int):
     answer_required = [str(value) for value in (case.get("answer_must_contain") or [])]
     answer_forbidden = [str(value) for value in (case.get("answer_must_not_contain") or [])]
     checks_answer = bool(answer_required or answer_forbidden or case.get("answer_must_cite"))
+    # A conversation case has to go through the pipeline even when it asserts
+    # only on retrieval, because prior turns are replayed there and nowhere
+    # else. Routing it to the retrieval-only path would run the final question
+    # with no history at all and score it as a first turn -- a multi-turn case
+    # that silently stopped being one, which is worse than not having it.
+    uses_pipeline = checks_answer or bool(case.get("conversation"))
 
     answer = ""
     answer_citations = -1
-    if checks_answer:
+    if uses_pipeline:
         # One execution supplies both the evidence and the answer, so a case
         # can never report retrieval from a run that produced a different reply.
         result, answer, answer_citations = run_pipeline_once(case, sequence)
