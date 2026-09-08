@@ -411,3 +411,56 @@ def test_an_unlisted_currency_code_does_not_cause_a_false_rejection() -> None:
     assert _normalize_unit("and") == ""
     assert _normalize_unit("Case Credits") == "cc"
     assert _normalize_unit("$") == "usd"
+
+
+# Adjacency alone leaves holes, all of them raised in review: a bare source
+# figure beside an answer that invents a currency, a unit stated once in a
+# table header rather than next to every figure, and a code no vocabulary
+# lists. A claim's unit must also appear somewhere in the source.
+_ALGERIA_WITH_UNITS = "Forever Algeria. Delivery Cost: 900 DZD. Minimum order size FBO: 0,200CC."
+_ALGERIA_BARE = "Forever Algeria. Delivery Cost: 900. Minimum order size FBO: 0,200CC."
+_ALGERIA_HEADER = "Forever Algeria. All fees are stated in DZD. Delivery Cost: 900. Minimum order 5000."
+_NEW_ZEALAND = "Forever New Zealand. Delivery Cost: $8 +gst ($9.20)."
+
+UNIT_CONTRAST_CASES = [
+    # A source that never states a currency cannot support one.
+    (_ALGERIA_BARE, "The delivery cost for Algeria is 900 EUR.", False),
+    (_ALGERIA_BARE, "The delivery cost for Algeria is 900.", True),
+    # An unlisted code is still a code when the answer capitalises it.
+    (_ALGERIA_WITH_UNITS, "The delivery cost for Algeria is 900 XYZ.", False),
+    # The unit may be stated once, in a header, rather than beside each figure.
+    (_ALGERIA_HEADER, "The delivery cost for Algeria is 900 DZD.", True),
+    (_ALGERIA_HEADER, "The delivery cost for Algeria is 900 EUR.", False),
+    (_ALGERIA_WITH_UNITS, "The delivery cost for Algeria is 900 DZD.", True),
+]
+
+
+@pytest.mark.parametrize("source,answer,should_be_grounded", UNIT_CONTRAST_CASES)
+def test_a_claim_unit_must_exist_in_the_source(source, answer, should_be_grounded):
+    """Raised in review: the first unit check was still permissive.
+
+    It compared units only where the source happened to state one next to the
+    figure, so a bare source number, a header-scoped unit and an unlisted code
+    all passed unchecked.
+    """
+    document = _document(source, "Forever Algeria", "sponsoring-001-algeria")
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+    assert (not unsupported) is should_be_grounded, unsupported
+
+
+def test_a_dollar_answer_against_a_dollar_record_is_grounded():
+    """The control against over-rejection: same currency, different notation."""
+    document = _document(_NEW_ZEALAND, "Forever New Zealand", "sponsoring-048-new-zealand")
+    answer = "The delivery cost for New Zealand is US$8."
+    assert not [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+
+def test_an_unlisted_code_is_a_unit_only_when_the_answer_capitalises_it():
+    """Source text is casefolded before matching, so case is only available on
+    the answer side. A lowercase word must not become a currency."""
+    from app.validation.validators.numeric_grounding_validator import _normalize_unit
+
+    assert _normalize_unit("XYZ", allow_unlisted_code=True) == "xyz"
+    assert _normalize_unit("xyz", allow_unlisted_code=True) == ""
+    assert _normalize_unit("and", allow_unlisted_code=True) == ""
+    assert _normalize_unit("XYZ") == ""

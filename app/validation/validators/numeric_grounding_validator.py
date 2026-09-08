@@ -295,7 +295,14 @@ _UNIT_AFTER_RE = re.compile(
 _UNIT_BEFORE_RE = re.compile(r"(us\$|\$|€|£)\s{0,2}$", re.IGNORECASE)
 
 
-def _normalize_unit(raw: str) -> str:
+# An all-capitals three-letter token in an ANSWER is a currency code, listed
+# or not. The answer keeps its capitalisation, unlike source text, so case can
+# be used on this side - and an unlisted code must not silently become "no
+# unit", which is how "900 XYZ" passed against a record stating "900 DZD".
+_ANSWER_CODE_RE = re.compile(r"[A-Z]{3}")
+
+
+def _normalize_unit(raw: str, allow_unlisted_code: bool = False) -> str:
     """Map a currency symbol or unit token to a comparable name, or empty.
 
     An unrecognised code keeps its own name rather than becoming "no unit".
@@ -308,10 +315,14 @@ def _normalize_unit(raw: str) -> str:
         return ""
     if cleaned in _UNIT_ALIASES:
         return _UNIT_ALIASES[cleaned]
-    return cleaned if cleaned.upper() in _CURRENCY_CODES else ""
+    if cleaned.upper() in _CURRENCY_CODES:
+        return cleaned
+    # An unlisted code counts only when the original was capitalised, which
+    # source text never is by the time it reaches here.
+    return cleaned if allow_unlisted_code and _ANSWER_CODE_RE.fullmatch(raw.strip()) else ""
 
 
-def _unit_beside(text: str, start: int, end: int) -> str:
+def _unit_beside(text: str, start: int, end: int, allow_unlisted_code: bool = False) -> str:
     """The unit attached to the figure at these offsets, or an empty string.
 
     A prefix symbol wins over a following word, because "$60" states its unit
@@ -320,9 +331,9 @@ def _unit_beside(text: str, start: int, end: int) -> str:
     """
     before = _UNIT_BEFORE_RE.search(text[max(0, start - 4):start])
     if before:
-        return _normalize_unit(before.group(1))
+        return _normalize_unit(before.group(1), allow_unlisted_code)
     after = _UNIT_AFTER_RE.match(text[end:end + 16])
-    return _normalize_unit(after.group(1)) if after else ""
+    return _normalize_unit(after.group(1), allow_unlisted_code) if after else ""
 
 
 def _source_windows(
@@ -376,6 +387,22 @@ def _source_windows(
     return windows
 
 
+def _unit_appears_in(source_text: str, unit: str) -> bool:
+    """Whether the source mentions this unit at all, in any position."""
+    spellings = {unit} | {
+        spelling for spelling, name in _UNIT_ALIASES.items() if name == unit
+    }
+    # Letter boundaries, not word boundaries: the corpus writes "0,200CC" and
+    # "150EUR" with the unit glued to the digits, so a \w boundary would never
+    # match the very spellings that matter.
+    return any(
+        re.search(rf"(?<![a-z]){re.escape(spelling)}(?![a-z])", source_text, re.IGNORECASE)
+        if spelling.isalpha()
+        else spelling in source_text
+        for spelling in spellings
+    )
+
+
 def _offsets_in(claim: MeasurableClaim) -> tuple[int, int]:
     """Where the claim's number sits inside its own sentence."""
     index = claim.sentence.find(claim.text)
@@ -389,7 +416,14 @@ def _claim_is_supported(
 ) -> bool:
     """Return true only when the same number is linked to the same named topic."""
     subject_token_sets = _subject_token_sets(claim, document_markets)
-    required_unit = _unit_beside(claim.sentence, *_offsets_in(claim))
+    required_unit = _unit_beside(claim.sentence, *_offsets_in(claim), allow_unlisted_code=True)
+    # A unit the source never mentions anywhere cannot be what this figure is
+    # denominated in. That catches the cases adjacency cannot: a bare source
+    # number beside an answer that invents a currency, a unit stated once in a
+    # table header rather than next to every figure, and a code no vocabulary
+    # lists. Adjacency still applies where the source does state a unit.
+    if required_unit and not _unit_appears_in(source_text, required_unit):
+        return False
     for number in _number_variants(claim.number):
         for window in _source_windows(source_text, number, required_unit=required_unit):
             window_tokens = _word_tokens(window)
