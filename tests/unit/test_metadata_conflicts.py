@@ -55,6 +55,8 @@ def test_a_filename_naming_another_country_is_reported() -> None:
     assert [finding.field for finding in findings] == ["country"]
     assert findings[0].severity == Severity.UNRESOLVED
     assert "DK" in findings[0].detail and "SE" in findings[0].detail
+    # The filename is a clue about the document, never authority over it.
+    assert "never overridden" in findings[0].detail
     # Reported, not corrected: which of the two is wrong cannot be decided here.
     assert blocking_findings(findings) == []
 
@@ -84,9 +86,10 @@ def test_a_missing_effective_date_is_unresolved_and_never_filled_in() -> None:
     """15 of 28 documents in the corpus have no effective date.
 
     That is not automatically wrong, so it must not block. It is also not
-    nothing: date-scope protection does nothing without a date, so a question
-    about an earlier year is answered from this document as though its rules had
-    always applied.
+    nothing: without a date, historical applicability cannot be verified -
+    nothing establishes which period the document governs. What a dated
+    question actually returns depends on the rest of the pipeline and is not
+    asserted here.
     """
     findings = _detect(effective_date="")
 
@@ -95,7 +98,9 @@ def test_a_missing_effective_date_is_unresolved_and_never_filled_in() -> None:
     assert dates[0].severity == Severity.UNRESOLVED
     assert blocking_findings(findings) == []
     # The detail explains the consequence rather than only naming the field.
-    assert "date-scope" in dates[0].detail.lower()
+    # Phrased as a risk about verification, not as a claim about what the
+    # pipeline returns for a dated question - that was not measured.
+    assert "historical applicability cannot be verified" in dates[0].detail.lower()
 
 
 def test_an_expiry_before_its_effective_date_is_a_contradiction() -> None:
@@ -129,9 +134,17 @@ def test_a_date_that_is_not_a_date_is_a_contradiction(value: str) -> None:
 
 
 def test_a_missing_version_is_reported() -> None:
-    """Without a version a replacement cannot be told from what it replaces."""
+    """A missing human-readable version is reported, without overclaiming.
+
+    It does not follow that a replacement is indistinguishable: content hash,
+    ingestion id and generation pointer may still tell two revisions apart.
+    What is lost is a version a reviewer can read and cite.
+    """
     findings = _detect(version="")
     assert [finding.field for finding in findings] == ["version"]
+    # Does not claim replacements are indistinguishable: a content hash,
+    # ingestion id or generation pointer may still tell them apart.
+    assert "content hash" in findings[0].detail
 
 
 def test_several_problems_are_all_reported() -> None:

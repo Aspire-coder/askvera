@@ -6,11 +6,15 @@ country from a filename, or stamping today's date on a policy with no stated
 effective date, would put a fabricated fact into the corpus wearing the
 authority of approved content.
 
-The distinction that matters is between a contradiction and an absence. A
-document whose expiry precedes its effective date cannot be correct under any
-reading, and no reviewer can make it correct by deciding. A document with no
-effective date may be entirely fine - 15 of 28 documents in the corpus have
-none - and needs a decision rather than a rejection.
+The distinction that matters is between a contradiction and an absence.
+
+A document whose expiry precedes its effective date cannot be correct under any
+reading. That is not waivable: publication stays blocked until the metadata is
+corrected and the document revalidated, because there is no decision a reviewer
+could make that renders it true.
+
+A document with no effective date may be entirely fine - 15 of 28 documents in
+the corpus have none - and needs a recorded decision rather than a rejection.
 """
 
 from __future__ import annotations
@@ -31,9 +35,13 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 class Severity:
     """How a finding must be handled before the document is published."""
 
-    # Cannot be correct under any reading. No reviewer decision makes it valid.
+    # Cannot be correct under any reading, and is NOT WAIVABLE. Publication is
+    # blocked until the metadata is corrected and the document revalidated - a
+    # reviewer cannot decide their way past an expiry that precedes its own
+    # effective date, because there is no reading under which it is true.
     CONTRADICTION = "contradiction"
-    # May be correct. Needs someone to look and decide.
+    # May be correct. Requires an explicit reviewer decision, recorded, before
+    # publication. Not a warning to be scrolled past.
     UNRESOLVED = "unresolved"
 
 
@@ -67,8 +75,10 @@ def detect_metadata_conflicts(
             MetadataFinding(
                 "version",
                 Severity.UNRESOLVED,
-                "No document version was supplied, so a later replacement cannot be "
-                "distinguished from this one.",
+                "No human-readable version was supplied. A replacement may still be "
+                "distinguishable by content hash, ingestion id or generation pointer - "
+                "check those before treating this as ambiguous. What is lost is the "
+                "version a reviewer can read and cite.",
             )
         )
     if not str(document_type or "").strip():
@@ -98,8 +108,11 @@ def _filename_findings(filename: str, country: str, language: str) -> list[Metad
             MetadataFinding(
                 "country",
                 Severity.UNRESOLVED,
-                f"The filename says {named_country} and the upload declares {declared_country}. "
-                "One of them is wrong, and which one cannot be decided here.",
+                f"The filename suggests {named_country}; the upload declares "
+                f"{declared_country}. A filename is a clue about a document, not "
+                "metadata about it - it is written by whoever saved the file. Resolve "
+                "against the document's own content. The declared country is never "
+                "overridden from a filename.",
             )
         )
     if declared_language and named_language != declared_language:
@@ -107,7 +120,9 @@ def _filename_findings(filename: str, country: str, language: str) -> list[Metad
             MetadataFinding(
                 "language",
                 Severity.UNRESOLVED,
-                f"The filename says {named_language} and the upload declares {declared_language}.",
+                f"The filename suggests {named_language}; the upload declares "
+                f"{declared_language}. Resolve against the document's own content; the "
+                "filename is a clue and is never adopted automatically.",
             )
         )
     return findings
@@ -135,9 +150,12 @@ def _date_findings(effective_date: str, expiry_date: str, today: date) -> list[M
             MetadataFinding(
                 "effective_date",
                 Severity.UNRESOLVED,
-                "No effective date was supplied. Date-scope protection does nothing without "
-                "one, so a question about an earlier year will be answered from this document "
-                "as though its rules had always applied. The date is not inferred here.",
+                "No effective date was supplied, so historical applicability cannot be "
+                "verified: nothing establishes which period this document governs. "
+                "Date-scope checks key off effective_date and document_version, so they "
+                "have nothing to act on here. What a dated question actually returns "
+                "depends on the rest of the pipeline and is not asserted by this check. "
+                "The date is not inferred.",
             )
         )
     for field, value in (("effective_date", effective), ("expiry_date", expiry)):
@@ -162,8 +180,10 @@ def _date_findings(effective_date: str, expiry_date: str, today: date) -> list[M
             MetadataFinding(
                 "effective_date",
                 Severity.UNRESOLVED,
-                f"Effective {effective} is in the future. Publishing now would answer today's "
-                "questions from rules that do not yet apply.",
+                f"Effective {effective} is in the future. Staging is legitimate; what "
+                "needs deciding is whether this document may answer current-policy "
+                "questions before that date, and what a question about the future period "
+                "should return. Neither behaviour is defined by this check.",
             )
         )
     return findings
