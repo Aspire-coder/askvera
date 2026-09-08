@@ -187,3 +187,55 @@ def test_a_healthy_sample_does_not_breach_a_ratio_alarm() -> None:
     for definition in build_alarm_definitions():
         if definition.metric_name in {"GovernanceHealth", "RetrievalHealth", "ValidationHealth"}:
             assert not healthy < definition.threshold, definition.name
+
+
+def test_alarms_watch_the_dimensions_the_metrics_actually_publish() -> None:
+    """An alarm filtering a dimension nobody publishes can never fire.
+
+    Confirmed live on 2026-09-08, hours after the metrics were verified as
+    arriving in CloudWatch. The alarms filtered Version="1.0.0" from
+    settings.APP_VERSION while the metrics published Version="unknown",
+    because nothing sets an APP_VERSION environment variable on the box. Every
+    application alarm was watching a dimension combination with no data behind
+    it - the same silence as the five alarms that had no producer at all, for a
+    different reason.
+
+    This asserts the two sides agree rather than asserting either value, so
+    changing the version in one place cannot quietly break the other.
+    """
+    from app.metrics.models import RequestMetric, SystemMetric
+    from app.monitoring.alarms import build_alarm_definitions
+
+    published = {
+        SystemMetric(name="delivered_responses", value=1.0, unit="Count").version,
+        RequestMetric(
+            method="POST", path="/api/chat", status_code=200,
+            duration_ms=1.0, success=True, correlation_id="cid",
+        ).version,
+    }
+    assert len(published) == 1, "request and system metrics disagree on Version"
+
+    watched = {
+        definition.dimensions["Version"]
+        for definition in build_alarm_definitions()
+        if "Version" in definition.dimensions
+    }
+    assert watched, "expected application alarms to carry a Version dimension"
+    assert watched == published, (
+        f"alarms watch Version={watched} but metrics publish Version={published}; "
+        "no application alarm could ever see data"
+    )
+
+
+def test_alarms_and_metrics_agree_on_the_environment_dimension() -> None:
+    """The same failure is possible on Environment; check it explicitly."""
+    from app.metrics.models import SystemMetric
+    from app.monitoring.alarms import build_alarm_definitions
+
+    published = SystemMetric(name="delivered_responses", value=1.0, unit="Count").environment
+    watched = {
+        definition.dimensions["Environment"]
+        for definition in build_alarm_definitions()
+        if "Environment" in definition.dimensions
+    }
+    assert watched == {published}
