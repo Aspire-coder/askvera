@@ -369,3 +369,34 @@ def test_repair_results_are_reported_separately_from_answer_quality(tmp_path) ->
     assert "measures neither arm" in characteristics["note"]
     # And it says plainly that this is not the text a reader sees.
     assert "not what a reader sees" in characteristics["note"]
+
+
+def test_a_cited_parent_section_covers_the_required_child() -> None:
+    """The pilot flagged the Danish turn as uncited. The answer was right.
+
+    A citation reports the governing section - "2" - while the required
+    section names the chunk - "2-part-1-definition-18". This harness had its
+    own copy of the comparison with the relationship inverted, which is the bug
+    main's #138 already fixed for the benchmark scorer. It now delegates to that
+    scorer rather than reimplementing it.
+    """
+    assert comparison._is_cited("2-part-1-definition-18", {"2", "DK:2"}) is True
+    # And the separator still matters: "2" must not cover "21.05".
+    assert comparison._is_cited("21.05", {"2"}) is False
+
+
+def test_the_harness_does_not_keep_its_own_citation_rule() -> None:
+    """Two copies of one rule drift, and the drift is silent."""
+    import inspect
+
+    import scripts.run_benchmark as benchmark
+
+    source = inspect.getsource(comparison._is_cited)
+
+    assert "benchmark._is_cited" in source
+    for required, cited in (
+        ("2-part-1-definition-18", {"2"}),
+        ("21.05", {"2"}),
+        ("sponsoring-001-algeria", {"GLOBAL:sponsoring-001-algeria"}),
+    ):
+        assert comparison._is_cited(required, cited) == benchmark._is_cited(required, cited)

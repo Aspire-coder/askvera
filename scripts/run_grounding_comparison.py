@@ -1106,10 +1106,22 @@ def _cited_keys(citations: list[dict[str, Any]]) -> set[str]:
 
 
 def _is_cited(required: str, cited: set[str]) -> bool:
-    if required in cited:
-        return True
-    # A cited descendant satisfies a required ancestor section.
-    return any(key.startswith(f"{required}-") or key.startswith(f"{required}.") for key in cited)
+    """Whether a citation covers the required section. Reused, not reimplemented.
+
+    A citation reports the parent_section_id when there is one - the governing
+    section a reader would look up - so a correct citation for
+    "2-part-1-definition-18" reads "2". This harness had its own copy with the
+    relationship inverted, checking whether a CITED key was a descendant of the
+    REQUIRED one rather than the other way round, and flagged the Danish pilot
+    turn as uncited when the answer had cited exactly the right section.
+
+    That is the bug main's #138 already fixed for the benchmark, reintroduced by
+    copying the idea instead of the function. Delegating means it cannot drift
+    again.
+    """
+    import scripts.run_benchmark as benchmark
+
+    return benchmark._is_cited(required, cited)
 
 
 def score(frozen_path: Path, app_root: Path) -> dict[str, Any]:
