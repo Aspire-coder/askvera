@@ -369,6 +369,14 @@ def _source_windows(
             found_unit = _governing_unit(source_text, match.start(), match.end())
             if found_unit and found_unit != required_unit:
                 continue
+            # Nothing governs this occurrence, because a clause boundary cut
+            # the inheritance. Document-wide presence is not enough on its own:
+            # it accepted a claim naming a currency that belongs to a different
+            # table in the same document.
+            if not found_unit and not _unit_precedes(
+                source_text, match.start(), required_unit
+            ):
+                continue
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
         # lists. Keep those lines attached to the heading that names the rule.
@@ -435,6 +443,45 @@ def _governing_unit(source_text: str, start: int, end: int) -> str:
     for match in _UNIT_TOKEN_RE.finditer(source_text, window_start, start):
         nearest = match
     return _normalize_unit(nearest.group(0)) if nearest else ""
+
+
+def _unit_precedes(source_text: str, start: int, unit: str) -> bool:
+    """Whether this unit is among those stated before the figure, if any are.
+
+    Used only when no unit governs the occurrence, because a clause boundary
+    cut the inheritance. Without this the check fell back to document-wide
+    presence and accepted any unit named anywhere - so a delivery charge in
+    DZD could be stated in EUR because a membership table further down was
+    priced in EUR.
+
+    When nothing at all precedes the figure the answer is true, deliberately.
+    A table whose currency is declared in a footer, or a bare figure with no
+    units in the document before it, must not be rejected on the strength of
+    evidence that does not exist.
+    """
+    window_start = max(0, start - _UNIT_LOOKBACK_CHARACTERS)
+    # Clause boundaries are ignored here on purpose. They decide what GOVERNS a
+    # figure, which must be strict or a correct claim is rejected. This decides
+    # what CONTRADICTS it, and a currency stated two sentences earlier is still
+    # evidence about which currency this row is in.
+    preceding = {
+        _normalize_unit(match.group(0))
+        for match in _UNIT_TOKEN_RE.finditer(source_text, window_start, start)
+    }
+    preceding.discard("")
+    if not preceding:
+        return True
+    return unit in preceding
+
+
+def text_declares_unit(text_value: str) -> bool:
+    """Whether this text states a unit, by the same vocabulary grounding uses.
+
+    Ingestion carries a table's currency heading onto its continuation chunks,
+    and it has to agree with the validator about what counts as one. Two
+    vocabularies would drift, and the failure would be silent.
+    """
+    return bool(_UNIT_TOKEN_RE.search(_normalize(text_value)))
 
 
 def _unit_appears_in(source_text: str, unit: str) -> bool:

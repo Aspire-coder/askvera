@@ -5,10 +5,11 @@ Grounding lets that heading govern a figure up to 300 characters later. But
 retrieval returns chunks, not documents, so where the document was cut changes
 what the validator can see.
 
-Two of these tests record behaviour that is wrong, and are written to pass
-against it. Both are marked. A test that asserts the behaviour we want and
-fails is a broken build; a test that asserts what happens, and says plainly
-that it is wrong, is a record that survives until someone fixes it.
+Two defects were found here and both are now fixed: a currency heading too far
+above its rows was lost to chunking, deleting correct figures, and an
+ungoverned figure accepted any unit the document mentioned anywhere, letting
+wrong ones through. The tests that recorded them assert the corrected
+behaviour, and each keeps the counter-case that stops the fix going too far.
 """
 
 from __future__ import annotations
@@ -21,7 +22,10 @@ from app.validation.validators.numeric_grounding_validator import (
 from services.knowledge_ingestion import (
     CHUNK_OVERLAP_CHARS,
     MAX_CHUNK_CHARS,
+    ExtractedPage,
+    _carry_unit_context,
     _chunk_text,
+    build_sections,
 )
 
 
@@ -90,39 +94,114 @@ def test_a_nearby_heading_survives_a_chunk_boundary_between_it_and_the_row() -> 
     assert _numbers("Standard delivery to the Algiers office costs 900 DZD.", documents) == []
 
 
-def test_a_distant_heading_does_not_survive_chunking() -> None:
-    """WRONG BEHAVIOUR, recorded. A correct figure is removed.
+def test_a_distant_heading_is_carried_onto_the_chunks_that_continue_the_table() -> None:
+    """Fixed. This used to delete a correct figure.
 
     The currency is stated once at the top of a long table and the row is
-    thousands of characters below it. In the whole document the currency is
-    present, so the claim is grounded. Chunked, the row's chunk does not
-    contain the word DZD at all, _unit_appears_in fails, and a correct answer
-    loses the figure.
+    thousands of characters below it, far outside both the lookback and the
+    chunk overlap. The row's chunk contained no currency at all, so a correct
+    claim was rejected - a true statement deleted, which is worse than a
+    doubtful one getting through.
 
-    Nothing here is a fabrication getting through - it is the opposite, a true
-    statement being deleted, which is the failure mode that damages a correct
-    answer rather than letting a wrong one out. It is not fixed by widening the
-    lookback: the fix is either to carry the governing heading onto the chunk
-    at ingestion, or to let a unit named in a sibling chunk of the same
-    document count. Both are changes to make deliberately, not while writing a
-    test that discovered the problem.
+    Ingestion now carries the declaring line onto continuation chunks, so the
+    evidence travels with the rows it explains.
     """
     heading = "Delivery and membership charges are stated in DZD.\n"
     filler = "".join(f"Zone {index} standard handling: {100 + index}\n" for index in range(1, 260))
     row = "Standard delivery to the Algiers office: 900\n"
     document_text = heading + filler + row
 
-    whole = [_document(document_text)]
-    chunks = _chunk_text(document_text, max_chars=1200, overlap_chars=450)
-    assert len(chunks) > 1
-    assert "DZD" not in chunks[-1]
+    raw = _chunk_text(document_text, max_chars=1200, overlap_chars=450)
+    assert len(raw) > 1
+    assert "DZD" not in raw[-1], "the fixture must reproduce the original split"
 
+    carried = _carry_unit_context(raw)
     answer = "Standard delivery to the Algiers office costs 900 DZD."
 
-    assert _numbers(answer, whole) == [], "grounded in the whole document"
-    assert _numbers(answer, [_document(chunk) for chunk in chunks]) == ["900"], (
-        "and removed once the same document is chunked"
+    assert _numbers(answer, [_document(chunk) for chunk in raw]) == ["900"], (
+        "unchanged chunks still lose the figure"
     )
+    assert _numbers(answer, [_document(chunk) for chunk in carried]) == [], (
+        "carrying the heading restores it"
+    )
+
+
+def test_the_carried_heading_does_not_override_a_chunk_that_states_its_own() -> None:
+    """A continuation that declares a different currency keeps it.
+
+    Otherwise the fix for one defect creates the other: a membership table
+    priced in EUR, following a delivery table priced in DZD, would be labelled
+    DZD by the thing meant to help it.
+    """
+    chunks = _carry_unit_context(
+        [
+            "Delivery charges are stated in DZD\nStandard delivery: 900\n",
+            "Membership charges are stated in EUR\nAnnual membership: 20\n",
+            "Replacement card: 5\n",
+        ]
+    )
+
+    assert chunks[1].startswith("Membership charges")
+    assert "DZD" not in chunks[1]
+    # And the third, which states nothing, inherits the nearer heading.
+    assert "EUR" in chunks[2]
+    assert "DZD" not in chunks[2]
+
+    documents = [_document(chunk) for chunk in chunks]
+    assert _numbers("Annual membership costs 20 EUR.", documents) == []
+    assert _numbers("Annual membership costs 20 DZD.", documents) == ["20"]
+
+
+def test_a_single_chunk_document_is_left_exactly_as_it_was() -> None:
+    """Most documents are one chunk. They must not be touched at all."""
+    assert _carry_unit_context(["Charges in DZD\nStandard delivery: 900\n"]) == [
+        "Charges in DZD\nStandard delivery: 900\n"
+    ]
+
+
+def test_a_long_paragraph_mentioning_a_currency_is_not_carried_as_a_heading() -> None:
+    """A heading is short. A paragraph that happens to name a currency is not one,
+    and copying it onto every following chunk would be noise in the retrieved text."""
+    paragraph = (
+        "Distributors should note that all charges described in this policy, "
+        "including delivery, membership and replacement charges, are stated in "
+        "DZD unless the relevant section says otherwise, and that local taxes "
+        "may apply in addition to the amounts shown in the tables below.\n"
+    )
+    chunks = _carry_unit_context([paragraph, "Standard delivery: 900\n"])
+
+    assert chunks[1] == "Standard delivery: 900\n"
+
+
+def test_the_emitted_chunks_of_a_real_ingestion_carry_the_heading() -> None:
+    """The actual ingestion path, not _chunk_text called directly.
+
+    Asserting that the overlap constant exceeds the lookback constant is an
+    argument about two numbers. This runs a document through the function that
+    builds sections and looks at what it emitted.
+    """
+    heading = "All charges in this directory are stated in DZD.\n"
+    filler = "".join(f"Zone {index} standard handling: {100 + index}\n" for index in range(1, 400))
+    row = "Standard delivery to the Algiers office: 900\n"
+
+    sections = build_sections(
+        [ExtractedPage(number=1, text=heading + filler + row)],
+        filename="DZ-FR-Charges.pdf",
+        country="DZ",
+        language="fr",
+        document_type="policy",
+    )
+
+    assert len(sections) > 1, "the fixture must actually be split"
+    row_sections = [s for s in sections if "Algiers office: 900" in s["content"]]
+    assert row_sections, "the row must appear in some emitted section"
+    for section in row_sections:
+        assert "DZD" in section["content"], (
+            "the emitted chunk holding the row does not state its currency"
+        )
+
+    documents = [_document(section["content"]) for section in sections]
+    assert _numbers("Standard delivery to the Algiers office costs 900 DZD.", documents) == []
 
 
 def test_a_wrong_currency_is_rejected_when_the_source_never_names_it() -> None:
@@ -150,39 +229,59 @@ def test_a_table_continuation_header_governs_the_rows_that_follow_it() -> None:
     assert _numbers("Annual membership costs 20 DZD.", documents) == ["20"]
 
 
-def test_a_row_inherits_the_wrong_currency_when_a_full_stop_intervenes() -> None:
-    """WRONG BEHAVIOUR, recorded. A wrong currency is accepted.
+def test_a_row_does_not_take_a_currency_from_a_different_table() -> None:
+    """Fixed. This used to accept the wrong currency.
 
     Two tables, both currencies present. Inheritance is bounded by the clause
-    delimiter, and that bound is doing its job: the full stop after DZD stops
-    it governing the row below. But when nothing governs an occurrence,
-    _source_windows accepts whatever unit the answer states, so far as the
-    document mentions it somewhere - and EUR is mentioned, by the other table.
+    delimiter and that bound is right - it stops DZD governing across a full
+    stop, which is what keeps a correct claim from being rejected. But when
+    nothing governed an occurrence the check fell back to document-wide
+    presence and accepted any unit named anywhere. EUR is named, by the
+    membership table, so a delivery charge in DZD passed as EUR.
 
-    So "Standard delivery costs 900 EUR" passes, and it is wrong. This is the
-    permissive half of unit binding, and it is the one that lets a wrong answer
-    out rather than deleting a right one.
-
-    The same layout without the full stops is rejected correctly, which is what
-    the second half of this test shows: the gap is specifically that a clause
-    boundary turns a governed figure into an ungoverned one.
+    Now an ungoverned figure is checked against the units stated BEFORE it: a
+    unit that never precedes the figure cannot be what it is denominated in.
     """
-    with_stops = [
+    with_stops = (
+        "Delivery charges - DZD.\n"
+        "Standard delivery: 900.\n"
+        "Membership charges - EUR.\n"
+        "Annual membership: 20.\n"
+    )
+    without_stops = with_stops.replace(".\n", "\n")
+
+    for source in (with_stops, without_stops):
+        documents = [_document(source)]
+        assert _numbers("Standard delivery costs 900 EUR.", documents) == ["900"]
+        # And the correct claim still passes, in both layouts. Rejecting the
+        # wrong currency is worth nothing if it costs the right one.
+        assert _numbers("Standard delivery costs 900 DZD.", documents) == []
+
+
+def test_a_currency_two_sentences_back_still_supports_a_correct_claim() -> None:
+    """The false rejection that made inheritance clause-bounded in the first place.
+
+    Nothing governs 900 here either - the intervening sentence ends before it.
+    What saves the claim is that DZD does precede the figure, so it is not
+    contradicted. A rule that simply took the nearest preceding unit would pick
+    EUR and delete a correct figure.
+    """
+    documents = [
         _document(
-            "Delivery charges - DZD.\n"
-            "Standard delivery: 900.\n"
-            "Membership charges - EUR.\n"
-            "Annual membership: 20.\n"
-        )
-    ]
-    without_stops = [
-        _document(
-            "Delivery charges - DZD\n"
+            "Delivery charges - DZD. Membership fees are payable in EUR each year. "
             "Standard delivery: 900\n"
-            "Membership charges - EUR\n"
-            "Annual membership: 20\n"
         )
     ]
 
-    assert _numbers("Standard delivery costs 900 EUR.", with_stops) == [], "wrong, recorded"
-    assert _numbers("Standard delivery costs 900 EUR.", without_stops) == ["900"]
+    assert _numbers("Standard delivery costs 900 DZD.", documents) == []
+
+
+def test_a_unit_stated_only_after_the_figure_is_not_treated_as_contradicted() -> None:
+    """A footer declaring the currency is common, and proves nothing against it.
+
+    With no unit before the figure there is no evidence about which currency it
+    is in, and absence of evidence must not become a rejection.
+    """
+    documents = [_document("Standard delivery: 900\nAll charges are stated in DZD.\n")]
+
+    assert _numbers("Standard delivery costs 900 DZD.", documents) == []

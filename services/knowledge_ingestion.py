@@ -911,10 +911,12 @@ def build_sections(
         blocks = _page_blocks(page.text)
         for block_title, block_text in blocks:
             for part, chunk in enumerate(
-                _chunk_text(
-                    block_text,
-                    max_chars=max_chars,
-                    overlap_chars=overlap_chars,
+                _carry_unit_context(
+                    _chunk_text(
+                        block_text,
+                        max_chars=max_chars,
+                        overlap_chars=overlap_chars,
+                    )
                 ),
                 start=1,
             ):
@@ -973,6 +975,63 @@ def _page_blocks(text_value: str) -> list[tuple[str, str]]:
     if not blocks:
         blocks.append((lines[0][:120], lines))
     return [(title, "\n".join(content)) for title, content in blocks if content]
+
+
+# The longest a carried heading may be. A table's currency line is short; a
+# paragraph that happens to mention a currency is not a heading and copying it
+# onto every following chunk would be noise in the retrieved text.
+_UNIT_HEADER_MAX_CHARS = 200
+
+
+def _unit_declaring_line(text_value: str) -> str:
+    """The last short line in this text that states a unit, if any.
+
+    Searched from the end because a block can state one currency and then
+    another - a delivery table followed by a membership table - and the row
+    that follows inherits the nearer one.
+    """
+    from app.validation.validators.numeric_grounding_validator import text_declares_unit
+
+    for line in reversed(text_value.splitlines()):
+        stripped = line.strip()
+        if stripped and len(stripped) <= _UNIT_HEADER_MAX_CHARS and text_declares_unit(stripped):
+            return stripped
+    return ""
+
+
+def _carry_unit_context(chunks: list[str]) -> list[str]:
+    """Carry a table's currency heading onto the chunks that continue it.
+
+    A table states its currency once and leaves the rows bare. Retrieval
+    returns chunks, so if the table is longer than a chunk the later rows
+    arrive with no currency anywhere in them - and grounding then rejects a
+    correct answer, because the evidence for what "900" means was in a chunk
+    nobody retrieved. That deletes true figures, which is worse than letting a
+    doubtful one through.
+
+    The chunker's 450-character overlap already covers a heading close enough
+    to govern a row directly. This covers the rest of the table: everything
+    below the first 450 characters, which for a long charges table is most of
+    it.
+
+    Only chunks that state no unit at all are given one, so this can never
+    override a currency the chunk declares for itself. The vocabulary is the
+    validator's own, so the two cannot disagree about what a unit is.
+    """
+    if len(chunks) < 2:
+        return list(chunks)
+
+    from app.validation.validators.numeric_grounding_validator import text_declares_unit
+
+    carried = ""
+    carried_chunks: list[str] = []
+    for chunk in chunks:
+        if text_declares_unit(chunk):
+            carried = _unit_declaring_line(chunk) or carried
+            carried_chunks.append(chunk)
+            continue
+        carried_chunks.append(f"{carried}\n{chunk}" if carried else chunk)
+    return carried_chunks
 
 
 def _chunk_text(
