@@ -295,23 +295,59 @@ corpus, and nothing measures that today.
 
 ## Options
 
-1. **Reindex with an asciifolding filter.** The correct fix. The index mapping
-   is not defined in this repository - it was created outside the codebase - so
-   this is an operational change plus a reindex of 17,896 sections, and it needs
-   a staged publish and rollback plan like any other index migration.
-2. **Query-side expansion.** When a market is detected, add its configured
-   alias spellings to the lexical query, so "Reunion" also searches "Réunion".
-   Cheap and reversible, but it only covers market names, not the accented
-   content words that make up most of the affected text. It also risks diluting
-   ranking, and that risk cannot be assessed without measuring retrieval.
+Corrected on review. An earlier version of this section recommended reindexing
+outright. That was too fast: one failing question does not establish that every
+accented-language problem has the same cause or the same fix, and changing an
+index analyser is not reversible in the way a code change is.
 
-Recommended: option 1, and do not attempt option 2 as a substitute. A mitigation
-that fixes the one case we happened to measure, while leaving the general defect
-in place, is worse than leaving it open - it removes the symptom that would
-otherwise keep prompting the real fix.
+**First, inspect rather than change.** Read the active analyser on
+`askvera-policy-sections` and confirm what it does with diacritics on both the
+indexing and the query side. The counts above show a symptom; they do not show
+which analyser stage produces it, and a query-side normaliser could be
+responsible rather than the mapping.
 
-## What to measure once it is fixed
+**Then measure on a candidate, not on the active index.** Build a candidate
+index with an asciifolding filter, replay a fixed set of questions with and
+without diacritics against both, and compare retrieved section IDs. That is a
+metamorphic property - the same question in two spellings should retrieve the
+same sections - and it is what would establish that folding fixes the general
+case rather than this one record.
 
-Recall on the same question with and without diacritics should be equal. That is
-a metamorphic property, cheap to test, and it belongs in the generated suite
-rather than as a one-off case.
+**Preserve distinctions that matter.** Folding is not free in every language.
+Where a diacritic distinguishes two different words, folding merges them, and
+the corpus spans French, Spanish, German, the Nordics, Serbian and Russian.
+Whether that trade is acceptable per language is a decision for someone who
+reads those languages, not a default.
+
+Query-side alias expansion remains a poor substitute for the general fix: it
+would make one benchmark case pass while accented content words stayed
+unmatched. It may still be worth having as a narrow mitigation for market names
+once the analyser question is settled, but not as a way of closing this.
+
+## What to measure once it is settled
+
+Recall on the same question with and without diacritics should be equal, per
+language. That is cheap to test and belongs in the generated suite rather than
+as a one-off case.
+
+---
+
+# Addendum 4: two claims corrected
+
+Both were mine, both were asserted rather than established, and both were
+challenged in review on 2026-09-08.
+
+**"Dynamic translation is right."** I wrote that a reader needs an answer in
+their language either way, and treated that as settling the question. The first
+half is true; the conclusion is a product and governance judgement, not a
+technical finding. Seven locales - Italian, Danish, Finnish, Norwegian,
+Serbian, Swedish, Russian - receive a live model translation of English refusal
+copy, constrained to add no facts, numbers or contacts, but not reviewed and
+not necessarily identical between two requests. Whether that is acceptable for
+copy a reader is told is approved policy communication is a decision for
+whoever owns that wording. It stands as an open quality gap, not a resolved
+design choice.
+
+**"Recommended: reindex."** Corrected in the Options section above. Inspect the
+analyser, measure a candidate index, and decide per language whether folding
+loses a distinction that matters, before changing anything.
