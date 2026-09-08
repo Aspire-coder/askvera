@@ -9,8 +9,9 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 # This canary is a blocking, batch, pre-deploy quality gate, not a live user
 # request - it can afford a couple of retries on a transient Bedrock blip,
@@ -187,7 +188,22 @@ def _canary_patches(transcript: "_CanaryTranscript | None" = None) -> dict:
     }
 
 
-def run_pipeline_once(case: dict[str, Any], sequence: int):
+class _PipelineRun(NamedTuple):
+    """Everything one real run produced, for whichever caller needs it.
+
+    The canary only needs the answer and the figures repair removed. The
+    benchmark also needs token counts and how the answer ended, so it can
+    price a run and tell a refusal apart from a reply. Both read the same
+    execution rather than each having their own.
+    """
+
+    retrieval: Any
+    response: Any
+    removed_numeric_claims: list[str]
+    duration_ms: float
+
+
+def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
     """Run the real pipeline once and return the retrieval it used and the answer.
 
     Retrieval scoring cannot see what happens after a document is selected. On
@@ -225,6 +241,7 @@ def run_pipeline_once(case: dict[str, Any], sequence: int):
             f"deployment-canary-answer-{sequence}-{case['id']}-{label}",
         )
 
+    started = time.perf_counter()
     try:
         # Prior turns are replayed through the real pipeline so the follow-up
         # is judged against history the orchestrator itself produced, rather
@@ -242,11 +259,24 @@ def run_pipeline_once(case: dict[str, Any], sequence: int):
         # Surfacing them lets a case assert that nothing was removed, which is
         # far more robust than guessing how a model will format a time.
         removed = list((response.metadata or {}).get("removed_numeric_claims") or [])
-        return recorder.last, response.answer or "", len(response.citations or []), removed
+        return _PipelineRun(
+            recorder.last, response, removed, round((time.perf_counter() - started) * 1000, 1)
+        )
     finally:
         for name, original in originals.items():
             setattr(chat_orchestrator, name, original)
 
+
+def run_pipeline_once(case: dict[str, Any], sequence: int):
+    """Answer-shaped view of one run, kept as the gate's own entry point."""
+    run = run_pipeline_capture(case, sequence)
+    response = run.response
+    return (
+        run.retrieval,
+        response.answer or "",
+        len(response.citations or []),
+        run.removed_numeric_claims,
+    )
 
 def run_case(case: dict[str, Any], sequence: int, default_repeat: int) -> dict[str, Any]:
     """Run one case repeatedly and require every run to pass.
