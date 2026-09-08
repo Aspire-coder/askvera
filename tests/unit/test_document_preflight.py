@@ -241,3 +241,55 @@ def test_coverage_is_reported_in_the_dict_form(monkeypatch: pytest.MonkeyPatch) 
     assert payload["text_coverage_ratio"] == 0.9
     assert payload["has_unextracted_pages"] is True
     assert payload["scanned_page_numbers"] == (10,)
+
+
+def test_a_page_with_no_content_stream_extracts_as_empty() -> None:
+    """pypdf raises KeyError("/Contents") rather than returning empty text.
+
+    Before this was handled, one such page aborted preflight for the whole
+    document and surfaced to an admin as an unhandled upload error. An empty
+    page is empty, not a failure.
+    """
+
+    class _NoContentPage:
+        def extract_text(self, extraction_mode=None):
+            raise KeyError("/Contents")
+
+    assert extract_pdf_page_text(_NoContentPage()) == ""
+    assert extract_pdf_page_text(_NoContentPage(), preserve_layout=True) == ""
+
+
+def test_a_real_pdf_with_an_image_xobject_is_detected_as_scanned() -> None:
+    """Exercises pypdf itself, not a stub.
+
+    The stubs elsewhere in this file implement .get(); this confirms a real
+    PageObject does too, so the detection cannot silently no-op in production.
+    """
+    io = pytest.importorskip("io")
+    pypdf = pytest.importorskip("pypdf")
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, NumberObject
+
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    page = writer.pages[0]
+    image = DecodedStreamObject()
+    image.set_data(b"\x00")
+    image.update(
+        {
+            NameObject("/Type"): NameObject("/XObject"),
+            NameObject("/Subtype"): NameObject("/Image"),
+            NameObject("/Width"): NumberObject(1),
+            NameObject("/Height"): NumberObject(1),
+            NameObject("/ColorSpace"): NameObject("/DeviceGray"),
+            NameObject("/BitsPerComponent"): NumberObject(8),
+        }
+    )
+    page.get("/Resources")[NameObject("/XObject")] = DictionaryObject(
+        {NameObject("/Im0"): writer._add_object(image)}
+    )
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    buffer.seek(0)
+
+    real_page = pypdf.PdfReader(buffer).pages[0]
+    assert document_preflight._page_has_image(real_page) is True

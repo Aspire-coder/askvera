@@ -58,13 +58,24 @@ class DocumentPreflight:
 
 
 def extract_pdf_page_text(page, *, preserve_layout: bool = False) -> str:
-    """Extract one page, falling back when the installed parser lacks layout mode."""
+    """Extract one page, falling back when the installed parser lacks layout mode.
+
+    A page carrying no content stream raises KeyError("/Contents") rather than
+    returning empty text. That is an empty page, not a failure, and it must not
+    abort preflight for the entire document - which is what happened before,
+    surfacing to an admin as an unhandled upload error with no explanation.
+    """
     if preserve_layout:
         try:
             return page.extract_text(extraction_mode="layout") or ""
         except (TypeError, ValueError):
-            pass
-    return page.extract_text() or ""
+            pass  # Parser lacks layout mode; fall through to plain extraction.
+        except KeyError:
+            return ""
+    try:
+        return page.extract_text() or ""
+    except KeyError:
+        return ""
 
 
 def is_table_like_layout(text: str) -> bool:
