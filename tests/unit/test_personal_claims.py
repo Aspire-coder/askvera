@@ -355,3 +355,121 @@ def test_a_claim_carrying_no_condition_is_still_removed() -> None:
 
     assert removed == ["You are currently a Manager."]
     assert repaired == "The minimum order size is 2 CC."
+
+
+# --- what the reader said may be used, never presented as verified ----------
+
+
+STATED_PURCHASE = "I placed my first order yesterday - what is the minimum for my next one?"
+
+
+def test_a_fact_the_reader_supplied_may_be_used() -> None:
+    """Repeating what someone told you is not inventing it.
+
+    An answer that explains the rule using their own statement is more useful
+    than one that refuses to acknowledge they said anything.
+    """
+    assert (
+        unsupported_personal_claims(
+            "You have already placed your first order, so the minimum is 7 800DZD.",
+            role="active_distributor",
+            user_context=STATED_PURCHASE,
+        )
+        == []
+    )
+
+
+def test_the_same_sentence_without_the_statement_is_invented() -> None:
+    assert unsupported_personal_claims(
+        "You have already placed your first order, so the minimum is 7 800DZD.",
+        role="active_distributor",
+        user_context="What is the minimum order?",
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Our records show you placed your first order yesterday.",
+        "Your account shows you have already ordered.",
+        "According to your records, you placed your first order yesterday.",
+        "I can confirm that you placed your first order yesterday.",
+    ],
+)
+def test_claiming_to_have_verified_it_is_never_supported(answer: str) -> None:
+    """The distinction the reader's statement cannot rescue.
+
+    They told us; nothing checked it. Saying we checked is a different claim
+    and a worse one, so it stays unsupported however precisely it matches what
+    they said.
+    """
+    assert unsupported_personal_claims(
+        answer, role="active_distributor", user_context=STATED_PURCHASE
+    ) == [answer]
+
+
+def test_a_claim_going_beyond_what_was_said_is_still_invented() -> None:
+    """Corroboration covers what they said, not what can be inferred from it."""
+    assert unsupported_personal_claims(
+        "You have already sponsored three people, so you qualify.",
+        role="active_distributor",
+        user_context=STATED_PURCHASE,
+    )
+
+
+# --- a role declared earlier survives the follow-up turn --------------------
+
+
+def test_a_role_declared_in_an_earlier_turn_still_counts() -> None:
+    """The current message alone loses it.
+
+    "I'm a Preferred Customer" then "and the minimum order?" is a conversation
+    where the role was declared once. Reading only the latest message would
+    call the answer's use of that role an assumption the reader never made.
+    """
+    conversation = "I'm a Preferred Customer\nAnd what is the minimum order?"
+
+    assert (
+        unsupported_personal_claims(
+            "As a Preferred Customer, you order 0,200CC as a first order.",
+            role="active_distributor",
+            user_context=conversation,
+        )
+        == []
+    )
+
+
+def test_the_same_follow_up_without_the_earlier_turn_is_an_assumption() -> None:
+    """The control: it is the earlier turn doing the work, not the phrasing."""
+    assert unsupported_personal_claims(
+        "As a Preferred Customer, you order 0,200CC as a first order.",
+        role="active_distributor",
+        user_context="And what is the minimum order?",
+    )
+
+
+def test_the_orchestrator_reads_prior_turns_not_only_this_one() -> None:
+    """Asserted against the orchestrator, because the helper cannot know.
+
+    `_reader_statements` is what carries the earlier turn in, and a validator
+    given only `body.message` would be correct in isolation and wrong in a
+    conversation.
+    """
+    from app.orchestrator.chat_orchestrator import AIOrchestrator
+    from utils.validators import ChatRequest
+
+    orchestrator = AIOrchestrator()
+    body = ChatRequest(
+        message="And what is the minimum order?",
+        sessionId="s",
+        country="US",
+        language="en",
+        role="active_distributor",
+    )
+    history = "user: I'm a Preferred Customer\nassistant: Which market?"
+
+    statements = orchestrator._reader_statements(body, history)
+
+    assert "Preferred Customer" in statements
+    assert "And what is the minimum order?" in statements
+    assert "assistant" not in statements, "only what the reader said"

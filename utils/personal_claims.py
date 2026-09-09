@@ -132,6 +132,32 @@ _RULE_RE = re.compile(
 # "if you have already ordered" claims nothing about whether they have.
 _CONDITIONAL_RE = re.compile(r"\b(?:if|unless|whether|once|provided\s+that)\b", re.IGNORECASE)
 
+# Claiming to have looked something up. Unsupportable in principle - there is
+# nothing to look in - and the one thing the reader's own statement cannot
+# rescue. They can tell us they ordered yesterday; we still have not verified
+# it, and saying we have is a different and worse claim than repeating them.
+_VERIFICATION_CLAIM_RE = re.compile(
+    r"\b(?:our|the)\s+(?:records?|system|database)\b"
+    r"|\byour\s+account\s+(?:shows?|indicates?|confirms?)\b"
+    r"|\bwe\s+(?:can\s+see|have\s+verified|can\s+confirm)\b"
+    r"|\baccording\s+to\s+your\s+(?:account|record|records|history|profile)\b"
+    r"|\bi\s+can\s+(?:see|confirm|verify)\s+that\s+you\b",
+    re.IGNORECASE,
+)
+
+# Words too common to make a claim recognisably the reader's own.
+_CORROBORATION_STOPWORDS = frozenset(
+    {
+        "your", "have", "has", "had", "been", "already", "that", "this", "with",
+        "from", "will",
+        # Connectives that introduce the claim rather than form part of it. A
+        # reader saying "I placed my first order" has not said the word "since",
+        # and requiring it would refuse every corroboration phrased this way.
+        "since", "after", "when", "because", "while", "given", "recently",
+        "previously",
+    }
+)
+
 
 def supported_categories(role: str = "", user_context: str = "") -> set[str]:
     """Categories the session or the reader's own words place them in.
@@ -173,13 +199,66 @@ def _asserted_categories(sentence: str) -> set[str]:
     return {name for name, pattern, _ in _CATEGORY_PATTERNS if pattern.search(sentence)}
 
 
-def _is_unsupported(sentence: str, supported: set[str]) -> bool:
+def _stem(word: str) -> str:
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+
+
+# Where a claim about the reader ends and the policy answer begins. "You have
+# already placed your first order, so the minimum is 7 800DZD" is a claim and a
+# consequence, and only the claim is the reader's to corroborate - testing the
+# whole sentence asks them to have said the figure too, which they never do.
+_CLAIM_CLAUSE_SPLIT_RE = re.compile(
+    r"(?<!\d)[,;](?!\d)|\bso\b|\btherefore\b|\bwhich means\b|\bthen\b", re.IGNORECASE
+)
+
+
+def _claim_clauses(sentence: str) -> list[str]:
+    return [part.strip() for part in _CLAIM_CLAUSE_SPLIT_RE.split(sentence) if part.strip()]
+
+
+def _reader_said(sentence: str, user_context: str) -> bool:
+    """Whether the reader themselves supplied what this sentence claims.
+
+    A reader who says "I placed my first order yesterday" has told us
+    something, and an answer that uses it has invented nothing. Matched on the
+    content words of the clause making the claim, so a restatement counts and
+    an unrelated claim does not.
+
+    This makes the claim a restatement, never a verification. Nothing here
+    checked that the order happened; `_VERIFICATION_CLAIM_RE` is what stops the
+    answer implying otherwise.
+    """
+    if not user_context:
+        return False
+    said = {
+        _stem(word)
+        for word in re.findall(r"[^\W_]+", user_context.casefold(), flags=re.UNICODE)
+    }
+    for clause in _claim_clauses(sentence):
+        if not any(pattern.search(clause) for pattern in _RECORD_CLAIM_RES):
+            continue
+        words = {
+            _stem(word)
+            for word in re.findall(r"[^\W_]+", clause.casefold(), flags=re.UNICODE)
+            if len(word) > 3 and word not in _CORROBORATION_STOPWORDS
+        }
+        if not words or not words <= said:
+            return False
+    return True
+
+
+def _is_unsupported(sentence: str, supported: set[str], user_context: str = "") -> bool:
+    # Claiming to have looked something up is unsupportable whatever the reader
+    # said. They can tell us they ordered yesterday; we still have not verified
+    # it, and saying we have is a different and worse claim than repeating them.
+    if _VERIFICATION_CLAIM_RE.search(sentence):
+        return True
     if _CONDITIONAL_RE.search(sentence):
         return False
     if any(pattern.search(sentence) for pattern in _RECORD_CLAIM_RES) and not _RULE_RE.search(
         sentence
     ):
-        return True
+        return not _reader_said(sentence, user_context)
     asserted = _asserted_categories(sentence)
     if asserted:
         return not (asserted <= supported)
@@ -204,7 +283,7 @@ def unsupported_personal_claims(
     return [
         sentence.strip()
         for sentence in _sentences(answer)
-        if _is_unsupported(sentence, supported)
+        if _is_unsupported(sentence, supported, user_context)
     ]
 
 
@@ -229,7 +308,7 @@ def remove_unsupported_personal_claims(
     kept: list[str] = []
     supported = supported_categories(role, user_context)
     for sentence in _sentences(answer):
-        if _is_unsupported(sentence, supported):
+        if _is_unsupported(sentence, supported, user_context):
             removed.append(sentence.strip())
         else:
             kept.append(sentence)

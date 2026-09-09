@@ -446,6 +446,7 @@ class AIOrchestrator:
             correlation_id,
             model_response=model_response,
             retrieval_result=retrieval_result,
+            history=history,
         )
         governance_decision = self._evaluate_governance(
             chat_response.answer,
@@ -2013,6 +2014,21 @@ class AIOrchestrator:
         )
         return response
 
+    def _reader_statements(self, body: ChatRequest, history: str) -> str:
+        """Everything the reader has said about themselves this conversation.
+
+        The current message alone is not enough. A reader who says "I'm a
+        Preferred Customer" and then asks "and the minimum order?" has declared
+        a role that the follow-up turn does not repeat, and a validator reading
+        only the latest message would treat the answer's use of that role as an
+        assumption the reader never made.
+
+        Prior turns come from session history, so this is what the reader
+        actually sent, never what the assistant inferred.
+        """
+        prior = self._user_messages_from_history(history) if history else []
+        return "\n".join([*prior, body.message or ""]).strip()
+
     def _validate_response(
         self,
         chat_response: ChatResponse,
@@ -2020,8 +2036,10 @@ class AIOrchestrator:
         correlation_id: str,
         model_response: ModelResponse | None = None,
         retrieval_result: RetrievalResult | None = None,
+        history: str = "",
     ) -> ChatResponse:
         """Validate a chat response and return a safe fallback for critical failures."""
+        reader_statements = self._reader_statements(body, history)
         result = self.output_validator.validate(
             ValidationContext(
                 chat_response=chat_response,
@@ -2030,12 +2048,12 @@ class AIOrchestrator:
                 country=body.country,
                 language=body.language,
                 role=body.role,
-                # The reader's own words. A validator asking whether the answer
-                # assumed something about them - that they are an existing FBO,
-                # or a Preferred Customer - needs what they actually said, and
-                # the session role cannot supply it for a category no session
-                # declares.
-                user_context=body.message or "",
+                # The reader's own words, this turn and earlier. A validator
+                # asking whether the answer assumed something about them - that
+                # they are an existing FBO, or a Preferred Customer - needs what
+                # they actually said, and the session role cannot supply it for
+                # a category no session declares.
+                user_context=reader_statements,
                 correlation_id=correlation_id,
             )
         )
@@ -2128,7 +2146,7 @@ class AIOrchestrator:
                     repaired_answer, removed_personal = remove_unsupported_personal_claims(
                         repaired_answer,
                         role=body.role,
-                        user_context=body.message or "",
+                        user_context=reader_statements,
                     )
                 if needs_evidence:
                     repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
@@ -2159,7 +2177,7 @@ class AIOrchestrator:
                             country=body.country,
                             language=body.language,
                             role=body.role,
-                            user_context=body.message or "",
+                            user_context=reader_statements,
                             correlation_id=correlation_id,
                         )
                     )
