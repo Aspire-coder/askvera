@@ -70,13 +70,27 @@ pipeline entry point is the same in both arms without copying anything.
 Chosen with `--case`, not `--limit`: the top of the fixture is scope refusals,
 which carry no figures for any of this to act on.
 
-| Case | Candidate under test | What it can show |
-|---|---|---|
-| `reunion-delivery-cost` | A expansion | whether the accented spelling recovers a match that currently fails |
-| `france-minimum-order` | C completeness | whether the 150EUR / 72-hour condition survives into the answer |
-| `algeria-repeat-order-minimum` | C completeness | whether the first-order / after-first-purchase conditions survive |
-| `algeria-existing-fbo-order-minimum-role` | C, D | whether the figure reaches the right category |
-| `algeria-delivery-cost` | control | a case none of the candidates should change |
+Derived offline before spending anything, `country_name_queries` fires on
+exactly one of these questions - and it was not the one the plan assumed.
+`reunion-delivery-cost` asks about "Reunion Island", which is a configured
+market name, so expansion adds only the plural "Reunion Islands" and never the
+accented spelling. The case would have tested nothing about accents.
+`reunion-delivery-cost-bare-name` was added for that: same section, same source
+evidence, same dump, differing only in writing "Reunion" as a reader would.
+
+| Case | Candidate under test | Expansion fires | What it can show |
+|---|---|---|---|
+| `reunion-delivery-cost-bare-name` | A expansion | **yes** - adds `Réunion`, `Reunión` | whether the accented spelling recovers a match that currently fails |
+| `reunion-delivery-cost` | A expansion | adds `Reunion Islands` only | whether the plural configured name changes retrieval |
+| `france-minimum-order` | C completeness | no | whether the 150EUR / 72-hour condition survives into the answer |
+| `algeria-repeat-order-minimum` | C completeness | no | whether the first-order / after-first-purchase conditions survive |
+| `algeria-existing-fbo-order-minimum-role` | C, D | no | whether the figure reaches the right category, and whether "I am already an FBO" is treated as the reader's own statement |
+| `algeria-delivery-cost` | control | no | a case none of the candidates should change |
+
+Expansion firing on one question of six is a property of the questions, not a
+fault: the other five name their market the way the configuration does. It does
+mean this run tests expansion narrowly, and that a wider expansion test needs
+questions phrased the way readers phrase them.
 
 ## Attribution: a different answer does not say why
 
@@ -130,8 +144,8 @@ turn** if usage is comparable.
 
 | Run | Executions | Haiku, extrapolated |
 |---|---:|---|
-| First comparison, 1 per arm | 10 | **~$0.12** |
-| If later repeated 3x per arm | 30 | ~$0.35 |
+| First comparison, 1 per arm | 12 | **~$0.14** |
+| If later repeated 3x per arm | 36 | ~$0.42 |
 
 Embeddings (`amazon.titan-embed-text-v2:0`) and other AWS usage are additional
 and not in these figures. Per-turn cost varies with retries, planning and
@@ -169,7 +183,7 @@ python scripts/run_benchmark.py --load-ssm --repeat 1 \
 ```
 
 Validate the selection first, free and with no model calls, by adding
-`--dry-run`. Both arms should report 5 cases, 5 runs, 5 generation calls and
+`--dry-run`. Both arms should report 6 cases, 6 runs, 6 generation calls and
 the same fixture hash.
 
 ## What to inspect afterwards
@@ -189,7 +203,7 @@ first, in this order:
    search. Compare warm turns; the first turn of a process pays for cold
    caches and configuration loads.
 
-Review all ten final answers against their sources, including the control that
+Review all twelve final answers against their sources, including the control that
 should not change - a control that moved is as informative as a case that did.
 
 Treat any improvement as preliminary until repeated. One run per arm can show a

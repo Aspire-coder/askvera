@@ -439,6 +439,30 @@
       "source_evidence": "Clarifying a country must not turn a question the reader may not have answered into one they may. A US session cannot receive another market's local company policy; naming that market in reply to a clarification is still naming it. app.evidence.approve_evidence refuses this as cross_market_policy_request.",
       "provenance": "app/evidence.py approve_evidence and its cross_market_policy_request path, read 2026-09-08, with the same boundary asserted directly in tests/unit/test_country_clarification.py. No corpus read required. AWAITING LIVE VALIDATION: never run.",
       "evaluation_set": "development"
+    },
+    {
+      "id": "reunion-delivery-cost-bare-name",
+      "question": "What is the delivery cost for orders in Reunion?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "must_contain": [
+          "6"
+        ],
+        "must_not_contain": [
+          "10€ TTC"
+        ],
+        "required_sections": [
+          "sponsoring-084-r-union-island"
+        ],
+        "must_cite": true
+      },
+      "source_evidence": "Forever Reunion Island record: 'Delivery cost are at 6 EUR and free for orders exceeding 1CC.' The Reunion record repeats much of the France text, so a France delivery figure (10 EUR / 5 EUR) indicates the wrong record was used.",
+      "provenance": "Same section and same dump as reunion-delivery-cost - International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. The question differs only in naming the market as \"Reunion\" rather than \"Reunion Island\": the existing case writes a configured market name, so catalogue expansion adds nothing to it and the accent path it was meant to exercise goes untested. A bare \"Reunion\" is what a reader types and is what the accented record spelling has to be reached from. AWAITING LIVE VALIDATION: never run.",
+      "evaluation_set": "development"
     }
   ]
 }
