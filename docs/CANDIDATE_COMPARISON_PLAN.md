@@ -38,8 +38,9 @@ against a separate baseline and has not been run.
 Neither arm is described as "the tip". Each run records its own
 `summary.arm.revision` from `git rev-parse HEAD`, so the artifact names the
 commit that produced it and a plan written today cannot mislabel a run made
-tomorrow. The candidate revision at the time of writing is
-`10d3b57` or later; the artifact is the authority, not this line.
+tomorrow. The candidate revision this plan was written against is `80dbe27`; the
+artifact's own `summary.arm.revision` is the authority for any given run, not
+this line.
 
 `summary.arm` also records, for each arm: the generation model, the embedding
 model, the index, whether the generation pointer is on, the state of the
