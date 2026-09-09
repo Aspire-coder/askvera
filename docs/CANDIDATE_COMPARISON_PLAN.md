@@ -28,6 +28,14 @@ answers, relative to the state just before them.* It says nothing about how the
 branch as a whole compares with production. That is a separate comparison
 against a separate baseline and has not been run.
 
+## State of this branch
+
+Pushed is not merged and not deployed. As of writing the branch
+`fix/review-persistence-and-version-field` is pushed to `origin`; nothing has
+been merged into `main`, which remains `bde45fb`, and nothing has been
+deployed. The clone instructions below fetch a pushed branch, which is why they
+work; they do not imply the code is live anywhere.
+
 ## The two arms
 
 | | Application revision |
@@ -70,27 +78,33 @@ pipeline entry point is the same in both arms without copying anything.
 Chosen with `--case`, not `--limit`: the top of the fixture is scope refusals,
 which carry no figures for any of this to act on.
 
-Derived offline before spending anything, `country_name_queries` fires on
-exactly one of these questions - and it was not the one the plan assumed.
-`reunion-delivery-cost` asks about "Reunion Island", which is a configured
-market name, so expansion adds only the plural "Reunion Islands" and never the
-accented spelling. The case would have tested nothing about accents.
-`reunion-delivery-cost-bare-name` was added for that: same section, same source
-evidence, same dump, differing only in writing "Reunion" as a reader would.
+Derived offline before spending anything, and the derivation found a defect in
+the candidate rather than in the plan. `reunion-delivery-cost` asks about
+"Reunion Island" - the wording that actually failed - and gained no accented
+query, because the accent match was anchored on the whole phrase and no
+approved name folds to `reunion island` except that phrase itself. The case
+named as the expansion test would have tested nothing about accents. Both the
+anchoring and the catalogue were fixed; both questions are kept.
 
 | Case | Candidate under test | Expansion fires | What it can show |
 |---|---|---|---|
-| `reunion-delivery-cost-bare-name` | A expansion | **yes** - adds `Réunion`, `Reunión` | whether the accented spelling recovers a match that currently fails |
-| `reunion-delivery-cost` | A expansion | adds `Reunion Islands` only | whether the plural configured name changes retrieval |
+| `reunion-delivery-cost` | A expansion | **yes** - adds `Réunion Island`, `Reunion Islands` | whether the accented spelling recovers the match that failed, on the customer's own wording |
+| `reunion-delivery-cost-bare-name` | A expansion | **yes** - adds `Réunion`, `Reunión` | the same, on the shorter wording a reader might use instead |
 | `france-minimum-order` | C completeness | no | whether the 150EUR / 72-hour condition survives into the answer |
 | `algeria-repeat-order-minimum` | C completeness | no | whether the first-order / after-first-purchase conditions survive |
 | `algeria-existing-fbo-order-minimum-role` | C, D | no | whether the figure reaches the right category, and whether "I am already an FBO" is treated as the reader's own statement |
 | `algeria-delivery-cost` | control | no | a case none of the candidates should change |
 
-Expansion firing on one question of six is a property of the questions, not a
-fault: the other five name their market the way the configuration does. It does
-mean this run tests expansion narrowly, and that a wider expansion test needs
-questions phrased the way readers phrase them.
+Expansion firing on two questions of six is a property of the questions, not a
+fault: the other four name their market the way the configuration does. It does
+mean this run tests expansion narrowly, and a wider test needs questions
+phrased the way readers phrase them.
+
+**The derived queries are what the candidate intends to add, not what the
+pipeline executed.** The planner, the glossary and the merge step all sit
+between this function and the searches that run, and any of them can add, drop
+or reorder. `search_query_count` in the artifact is the observed number; this
+table is the intent.
 
 ## Attribution: a different answer does not say why
 
@@ -126,13 +140,14 @@ which is a finding about the candidate rather than about the question.
 - One run per arm shows a difference, not a rate. Two arms differing once is
   not evidence the difference is stable, and generation varies between runs of
   identical code.
-- **Latency is not comparable from this run.** Five different questions, once
-  each, mixes cold and warm: the first turn of a process pays for imports,
-  configuration loads and empty caches, and the five questions differ in
-  retrieval work anyway. `duration_ms` is recorded per run and the first turn
-  of each arm should be read as a cold measurement and excluded from any
-  comparison. A latency comparison needs the same question repeated, which this
-  run does not do.
+- **No latency conclusion from this run.** Six different questions, once each,
+  differ in retrieval work before anything else. The first turn of a process
+  pays for imports and configuration loads, but it is not reliably "cold"
+  either: the embedding cache and the answer cache are shared and may already
+  be warm from other traffic, so neither a first-turn nor a later-turn timing
+  is a clean measurement. `duration_ms` is recorded for both arms and should be
+  read as a record, not a comparison. A latency comparison needs the same
+  question repeated under known cache state, which this run does not do.
 - The scoring rule is a stated standard, not ground truth. Every changed answer
   needs a person to open the section and adjudicate it.
 
@@ -183,8 +198,11 @@ python scripts/run_benchmark.py --load-ssm --repeat 1 \
 ```
 
 Validate the selection first, free and with no model calls, by adding
-`--dry-run`. Both arms should report 6 cases, 6 runs, 6 generation calls and
-the same fixture hash.
+`--dry-run`. Both arms should report 6 cases, 6 runs and the same fixture hash.
+`generation_calls: 6` counts **planned question executions**, one per case at
+`--repeat 1`. Actual model calls are higher: routing, query planning, evidence
+selection, generation, any retries and repair each may call, and expansion adds
+searches rather than generations. Treat it as a floor.
 
 ## What to inspect afterwards
 

@@ -381,3 +381,135 @@ def test_an_ordinary_question_still_uses_the_selected_market() -> None:
 
     assert country_name_queries(question) == []
     assert approve_evidence(question, _result(_document("US", "country")), "US", "en").approved
+
+
+# --- the wording that actually failed ---------------------------------------
+#
+# The pilot's Réunion question said "Reunion Island". Anchoring the accent
+# match on the whole phrase found nothing for it - "Réunion" folds to
+# `reunion`, not to `reunion island` - so the one case this candidate exists
+# for gained no accented query. Anchoring on the approved name inside the
+# phrase is what fixes it.
+
+
+def test_the_original_failing_wording_gains_the_accented_spelling() -> None:
+    """"Reunion Island" is what the customer typed and what returned nothing."""
+    queries = country_name_queries("What is the delivery cost for orders in Reunion Island?")
+
+    assert "What is the delivery cost for orders in Réunion Island?" in queries
+
+
+def test_the_bare_name_still_gains_it_too() -> None:
+    """Both wordings are kept as tests; neither replaces the other."""
+    queries = country_name_queries("What is the delivery cost for orders in Reunion?")
+
+    assert "What is the delivery cost for orders in Réunion?" in queries
+
+
+def test_only_the_name_inside_the_phrase_is_respelled() -> None:
+    """The rest of the phrase survives, so the question is still the question."""
+    for query in country_name_queries("What is the delivery cost for orders in Reunion Island?"):
+        assert query.endswith("Island?") or "Islands?" in query
+        assert query.startswith("What is the delivery cost for orders in ")
+
+
+def test_the_longer_market_name_is_not_respelled_through_its_shorter_neighbour() -> None:
+    """"Equatorial Guinea" must not be reached through the "Guinea" inside it.
+
+    Anchoring inside a phrase is what this change introduced, and this is the
+    failure it could have caused: GQ and GN are different markets.
+    """
+    queries = country_name_queries("What are the office hours in Equatorial Guinea?")
+
+    assert queries == []
+
+
+def test_a_reader_writing_the_configured_name_still_gains_nothing() -> None:
+    """The France guard survives the change, and its cost is stated.
+
+    "Reunion Islands" is the configured name, so it gains nothing even though
+    the record spells it with an accent. That is the price of keeping "Francë"
+    out, and it is asserted rather than left to be discovered.
+    """
+    assert country_name_queries("What is the policy in France?") == []
+    assert country_name_queries("delivery in Reunion Islands") == []
+
+
+def test_every_added_spelling_still_belongs_to_the_named_market() -> None:
+    """Anchoring inside a phrase must not let another market's name in."""
+    from services.market_config import find_market_mentions
+
+    for question in (
+        "What is the delivery cost for orders in Reunion Island?",
+        "What is the delivery cost for orders in Reunion?",
+    ):
+        for query in country_name_queries(question):
+            assert find_market_mentions(query) == {"RE"}
+
+
+def test_an_expanded_query_never_names_a_market_the_question_did_not() -> None:
+    """The guard, and the defect that made it necessary.
+
+    Substituting inside a phrase can change what the phrase resolves to.
+    "Reunion Island" matches whole as a configured name; before the accented
+    spelling was added to the catalogue, "Réunion Island" did not, so the
+    matcher took "Réunion" and read the leftover "Island" as Iceland - its name
+    in German and Danish. The query would have carried an unrelated market into
+    ranking.
+    """
+    from services.market_config import find_market_mentions
+
+    for question in (
+        "What is the delivery cost for orders in Reunion Island?",
+        "What is the delivery cost for orders in Reunion?",
+        "What is the minimum order in DRC?",
+        "How do I sponsor someone in Reunion and DRC?",
+    ):
+        intended = find_market_mentions(question)
+        for query in country_name_queries(question):
+            assert find_market_mentions(query) == intended, query
+
+
+def test_the_accented_directory_spelling_is_an_approved_name() -> None:
+    """Fixed at the source rather than filtered afterwards.
+
+    "Réunion Island" is how the record spells the market, and it was in no
+    catalogue: CLDR carries "Réunion", the directory carries the unaccented
+    "Reunion Island", and nothing carried both together. Adding it to the
+    curated file is a routing fact, and it is what lets the accented phrase
+    resolve to one market instead of two.
+    """
+    import json
+    from pathlib import Path
+
+    from services.market_config import find_market_mentions
+
+    curated = json.loads(
+        Path("config/market_name_aliases_extra.json").read_text(encoding="utf-8")
+    )["names"]
+
+    assert "Réunion Island" in curated["RE"]
+    assert find_market_mentions("orders in Réunion Island") == {"RE"}
+
+
+def test_the_curated_names_belong_to_exactly_one_market_each() -> None:
+    """The file's own rule: a name shared by two markets must not be listed.
+
+    Checked across both files, not only the curated one, because a curated
+    entry colliding with a generated CLDR name is the collision that would not
+    be visible from reading the curated file alone.
+    """
+    import json
+    from pathlib import Path
+
+    from services.market_config import _market_name_index, _normalize_market_text
+
+    curated = json.loads(
+        Path("config/market_name_aliases_extra.json").read_text(encoding="utf-8")
+    )["names"]
+    names, _, _ = _market_name_index()
+
+    for code, entries in curated.items():
+        for entry in entries:
+            resolved = names.get(_normalize_market_text(entry), frozenset())
+            assert resolved == frozenset({code}), f"{entry!r} resolves to {sorted(resolved)}"
