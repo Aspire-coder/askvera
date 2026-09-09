@@ -98,37 +98,105 @@ def _separators(text: str) -> tuple[list[str], str]:
     return [" " if char in _SPACES else char for char in found], text
 
 
-def document_decimal_separator(document_text: str) -> tuple[str | None, str]:
-    """Which separator this document uses for decimals, and how we know.
+def _deciding_separator(written: str) -> str:
+    """The decimal separator a figure proves, or "" if it proves nothing.
 
-    Decided only from figures that cannot be read two ways:
+    Two shapes prove one, and only these two:
 
     - a separator followed by anything other than exactly three digits
-      ("7,5", "$7.50") is a decimal separator, since a thousands group is
-      always three digits;
-    - a separator preceded by a lone zero ("0,200") is a decimal separator,
-      since no thousands group follows a leading zero.
+      ("7,5", "7.50"), since a thousands group is always three digits;
+    - a separator preceded by a lone zero ("0,200"), since no thousands group
+      follows a leading zero.
+    """
+    separators = {char for char in written if char in ".,"}
+    if len(separators) != 1:
+        return ""
+    separator = separators.pop()
+    if written.count(separator) != 1:
+        return ""
+    whole, _, tail = written.partition(separator)
+    if not tail.isdigit():
+        return ""
+    if len(tail) != 3:
+        return separator
+    if whole == "0" or (whole and whole[0] == "0"):
+        return separator
+    return ""
 
-    A document that never writes such a figure returns None, and its ambiguous
-    figures stay ambiguous. Returning a guess here would spread one guess over
-    every figure in the record.
+
+def _deciding_figures(text: str) -> list[tuple[str, str, str]]:
+    """Every figure in `text` that proves a convention: (separator, figure, unit)."""
+    decided: list[tuple[str, str, str]] = []
+    for match in _NUMBER_RE.finditer(text):
+        separator = _deciding_separator(match.group(0))
+        if separator:
+            decided.append(
+                (separator, match.group(0), _unit_for(text, match.start(), match.end()))
+            )
+    return decided
+
+
+def document_decimal_separator(
+    document_text: str, unit: str = ""
+) -> tuple[str | None, str]:
+    """Which separator governs figures of `unit` in this document, and how we know.
+
+    Decided only from figures that cannot be read two ways - see
+    `_deciding_separator` for the two shapes that qualify - and only from
+    figures **carrying the same unit** as the one being read.
+
+    Two assumptions are deliberately not made.
+
+    **That a document is consistent with itself.** Records are assembled from
+    more than one source. A record can write "0,200CC" and "$7.50" in the same
+    paragraph: the first proves a comma decimal, the second a dot decimal, and
+    neither is wrong. Reading one convention out of a document that visibly
+    uses both would spread an arbitrary choice over every ambiguous figure.
+
+    **That evidence carries across units.** This is the weaker assumption and
+    the one that mattered: "$7.50" is a dollar price and follows the dollar's
+    convention whatever language the record is written in. It says nothing
+    about how that record writes a CC figure. So "1,612CC" is resolved by
+    "0,200CC" and is not resolved by "$7.50" or "3.50 EUR" - those decide their
+    own currencies, not this one.
+
+    Either way the answer is the same as for a document that decides nothing:
+    no separator, and the ambiguous figure stays unresolved.
+
+    Unambiguous figures never consult any of this. "7 800DZD" and "$7.50" read
+    correctly in a conflicting document, because they never needed a convention.
     """
     text = _normalize_spaces(document_text or "")
-    for separator in (",", "."):
-        escaped = re.escape(separator)
-        short_group = re.search(rf"\d{escaped}(\d{{1,2}}|\d{{4,}})(?!\d)", text)
-        if short_group:
-            return separator, (
-                f"the document writes {short_group.group(0)!r}, and a thousands "
-                f"group is always three digits, so {separator!r} separates decimals here"
-            )
-        leading_zero = re.search(rf"(?<!\d)0{escaped}\d+", text)
-        if leading_zero:
-            return separator, (
-                f"the document writes {leading_zero.group(0)!r}, and no thousands "
-                f"group follows a leading zero, so {separator!r} separates decimals here"
-            )
-    return None, "the document contains no figure that fixes its decimal separator"
+    wanted = (unit or "").casefold()
+    matching = [
+        (separator, figure)
+        for separator, figure, figure_unit in _deciding_figures(text)
+        if figure_unit.casefold() == wanted
+    ]
+    separators = {separator for separator, _ in matching}
+
+    unit_label = f"figures in {unit}" if unit else "figures with no unit"
+    if len(separators) > 1:
+        examples = ", ".join(
+            f"{figure!r} ({separator!r} decimal)" for separator, figure in matching
+        )
+        return None, (
+            f"the document writes {unit_label} both ways - {examples} - so no "
+            "single convention can be read from it, and an ambiguous figure "
+            "stays unresolved"
+        )
+    if len(separators) == 1:
+        separator = separators.pop()
+        figure = next(value for found, value in matching if found == separator)
+        return separator, (
+            f"the document writes {figure!r}, which can only be read with "
+            f"{separator!r} separating decimals, and it is stated in the same "
+            f"unit"
+        )
+    return None, (
+        f"the document contains no {unit_label} that fixes a decimal separator; "
+        "evidence from another unit decides that unit, not this one"
+    )
 
 
 def _unit_for(text: str, start: int, end: int) -> str:
@@ -161,14 +229,17 @@ def readings_in(text: str, *, document_text: str = "") -> list[NumberReading]:
     "1,612CC" in a record that also says "0,200CC" is not.
     """
     source = _normalize_spaces(text)
-    evidence_separator, separator_evidence = document_decimal_separator(
-        _normalize_spaces(document_text) or source
-    )
+    evidence_text = _normalize_spaces(document_text) or source
 
     readings: list[NumberReading] = []
     for match in _NUMBER_RE.finditer(source):
         written = match.group(0)
         unit = _unit_for(source, match.start(), match.end())
+        # Asked per figure, not once per document: the evidence that decides a
+        # CC figure is a CC figure, and a document can hold both.
+        evidence_separator, separator_evidence = document_decimal_separator(
+            evidence_text, unit
+        )
         value, evidence, resolved = _interpret(
             written, evidence_separator, separator_evidence
         )
@@ -268,7 +339,7 @@ def _interpret(
 
     return (
         None,
-        f"{written!r} could be a decimal or a thousands group, and the document "
-        "contains no figure that decides which - left unresolved rather than guessed",
+        f"{written!r} could be a decimal or a thousands group: {separator_evidence} "
+        "- left unresolved rather than guessed",
         False,
     )

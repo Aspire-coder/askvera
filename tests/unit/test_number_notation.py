@@ -157,24 +157,100 @@ def test_a_comma_decimal_document_resolves_its_own_ambiguous_figures() -> None:
 
 
 def test_a_dot_decimal_document_reads_the_same_figure_as_thousands() -> None:
-    """The opposite reading of the same characters, from the opposite evidence."""
-    document = "Minimum order size FBO: 1,612 CC. The support fee is 3.50 EUR."
+    """The opposite reading of the same characters, from the opposite evidence.
+
+    Same unit on both figures, which is what makes the evidence apply.
+    """
+    document = "Minimum order size FBO: 1,612 CC. The first order is 0.200 CC."
 
     reading = read_number("1,612 CC", document_text=document)
 
     assert reading.resolved is True
     assert reading.value == Decimal("1612")
-    assert "3.50" in reading.evidence
+    assert "0.200" in reading.evidence
+
+
+# --- evidence does not carry across units -----------------------------------
+#
+# The weaker of the two assumptions, and the one that mattered. A dollar price
+# follows the dollar's convention whatever language the record is written in.
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "Minimum order size FBO: 1,612CC. The support fee is 3.50 EUR.",
+        "Minimum order size FBO: 1,612CC as a first order. Equivalent $7.50 per unit.",
+        "Minimum order size FBO: 1,612CC. Delivery costs 7,5 DZD.",
+    ],
+)
+def test_a_figure_in_another_unit_decides_that_unit_and_not_this_one(document: str) -> None:
+    """"3.50 EUR" elsewhere does not establish that "1,612CC" means 1612."""
+    reading = read_number("1,612CC", document_text=document)
+
+    assert reading.resolved is False
+    assert reading.value is None
+    assert "another unit" in reading.evidence
+
+
+def test_same_unit_evidence_still_resolves_inside_a_mixed_document() -> None:
+    """Being strict about units must not stop the case this exists for.
+
+    The Algeria record carries a dollar price beside a CC figure, and the CC
+    figure is still decided - by the other CC figure.
+    """
+    document = (
+        "Minimum order size FBO: 1,612CC as a first order, 0,200CC after the "
+        "first purchase. Equivalent $7.50 per unit."
+    )
+
+    reading = read_number("1,612CC", document_text=document)
+
+    assert reading.resolved is True
+    assert reading.value == Decimal("1.612")
+
+
+# --- a document is not assumed to agree with itself -------------------------
+
+
+def test_a_document_writing_one_unit_both_ways_resolves_nothing() -> None:
+    """Two deciding figures in the same unit pointing opposite ways.
+
+    Nothing is wrong with such a record - it may have been assembled from two
+    sources - but no convention can be read out of it, and picking the first
+    found would spread that choice over every ambiguous figure in it.
+    """
+    document = (
+        "Minimum order size FBO: 1,612CC. First order 0,200CC. Annual target 7.5CC."
+    )
+
+    separator, evidence = document_decimal_separator(document, "CC")
+
+    assert separator is None
+    assert "both ways" in evidence
+    assert read_number("1,612CC", document_text=document).resolved is False
+
+
+def test_an_unambiguous_figure_is_unaffected_by_a_conflict() -> None:
+    """A figure that decides itself never consults the document at all."""
+    document = "First order 0,200CC. Annual target 7.5CC. Delivery 7 800DZD."
+
+    readings = {reading.text: reading for reading in readings_in(document, document_text=document)}
+
+    assert readings["7 800"].resolved is True
+    assert readings["7 800"].value == Decimal("7800")
+    assert readings["0,200"].value == Decimal("0.200")
+    assert readings["7.5"].value == Decimal("7.5")
 
 
 def test_a_document_with_no_deciding_figure_resolves_nothing() -> None:
     """Every figure in it is the ambiguous shape, so no convention is established."""
     document = "Minimum order size FBO: 1,612 CC. The annual target is 12,500 CC."
 
-    separator, evidence = document_decimal_separator(document)
+    separator, evidence = document_decimal_separator(document, "CC")
 
     assert separator is None
-    assert "no figure that fixes" in evidence
+    assert "no figures in CC that fixes" in evidence
     assert read_number("1,612 CC", document_text=document).resolved is False
 
 
