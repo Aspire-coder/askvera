@@ -11,19 +11,21 @@ Two of the five do not.
 
 ## What was run
 
-Each candidate reverted for real against `0832812`, the whole suite and flake8
-run against the result, the tree restored. Nothing committed, nothing pushed.
+Each candidate reverted for real, the whole suite and flake8 run against the
+result, the tree restored. Re-run at `76c4efe` after two later commits landed,
+rather than left as a result about an older tree. Nothing committed, nothing pushed.
 Untracked working-tree files were verified unchanged afterwards.
 
 ## The five candidates
 
 | | Candidate | Commits, newest first | Reverts alone |
 |---|---|---|---|
-| A | Catalogue country-name expansion | `7fb6f5c` | **yes** — 1788 passed, 15 skipped |
+| A | Catalogue country-name expansion | `7fb6f5c` | **yes** — 1790 passed, 15 skipped |
 | B | Locale-aware number reading | `7090de0`, `8cf6f35` | **no** |
 | C | Answer completeness and conditions | `0832812`, `3d08801` | **no** |
-| D | No invented personal history | `c89b18e`, `d0f1a6d` | **yes** — 1784 passed, 15 skipped |
-| E | Clarification scoring and coverage matrix | `83d4089` | **yes** — 1805 passed, 15 skipped |
+| D | No invented personal history | `c89b18e`, `d0f1a6d` | **yes** — 1786 passed, 15 skipped |
+| E | Clarification scoring and coverage matrix | `83d4089` | **yes** — 1807 passed, 15 skipped |
+| F | Preflight honours the case selection | `76c4efe` | **yes** — 1817 passed, 15 skipped |
 
 ## Why B and C do not
 
@@ -48,15 +50,16 @@ Verified cumulatively, the way a rollback actually happens:
 
 | Step | Result |
 |---|---|
-| revert D | clean — 1784 passed, 15 skipped |
+| revert D | clean — 1786 passed, 15 skipped |
 | revert D, then C | clean — 1754 passed, 15 skipped |
 | revert D, then C, then B | clean — 1721 passed, 15 skipped |
-| revert all five | clean — **1680 passed, 15 skipped** |
+| revert all six | clean — **1680 passed, 15 skipped** |
 
 The last line is the baseline this work started from, which is the check that
 the reverts are complete rather than merely applying.
 
-A and E may be reverted at any point, before or after any of the above.
+A, E and F may be reverted at any point, before or after any of the above.
+F touches only the comparison harness and no candidate module imports it.
 
 ## What this does not establish
 
