@@ -2030,6 +2030,12 @@ class AIOrchestrator:
                 country=body.country,
                 language=body.language,
                 role=body.role,
+                # The reader's own words. A validator asking whether the answer
+                # assumed something about them - that they are an existing FBO,
+                # or a Preferred Customer - needs what they actually said, and
+                # the session role cannot supply it for a category no session
+                # declares.
+                user_context=body.message or "",
                 correlation_id=correlation_id,
             )
         )
@@ -2120,7 +2126,9 @@ class AIOrchestrator:
                     # for anybody: the sentence is unsupportable in principle,
                     # not merely unsupported by these documents.
                     repaired_answer, removed_personal = remove_unsupported_personal_claims(
-                        repaired_answer
+                        repaired_answer,
+                        role=body.role,
+                        user_context=body.message or "",
                     )
                 if needs_evidence:
                     repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
@@ -2151,6 +2159,7 @@ class AIOrchestrator:
                             country=body.country,
                             language=body.language,
                             role=body.role,
+                            user_context=body.message or "",
                             correlation_id=correlation_id,
                         )
                     )

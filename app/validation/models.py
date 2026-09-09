@@ -63,6 +63,12 @@ class ValidationContext:
     role: str
     model_response: ModelResponse | None = None
     retrieval_result: RetrievalResult | None = None
+    # What the reader has said about themselves this conversation. A validator
+    # judging whether an answer assumed something about them needs to know what
+    # they already stated; the session role alone cannot say, since no session
+    # declares a Preferred Customer. Defaults to empty, which is the same as
+    # "they told us nothing", so an omitted value can only be conservative.
+    user_context: str = ""
 
 
 def _severity_rank(severity: ValidationSeverity) -> int:

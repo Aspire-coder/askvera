@@ -46,14 +46,83 @@ def test_a_claim_about_this_reader_is_reported(answer: str) -> None:
     assert unsupported_personal_claims(answer) == [answer]
 
 
-def test_an_assumed_category_is_a_claim_about_the_reader() -> None:
-    """The Preferred Customer / existing FBO distinction, which changes the figure.
+# --- a category is an assumption or not, depending on what is known ---------
+#
+# Neither phrase is safe or unsafe by itself. An earlier version decided this
+# from the wording alone and got both of these backwards: it deleted
+# role-specific advice that the session supported, and kept an assumption the
+# session contradicted.
 
-    Algeria's 0,200CC is a Preferred Customer's first order. Telling an
-    existing FBO that it is theirs is the wrong number, and the sentence that
-    does it is an assumption about who they are.
+
+def test_the_session_role_supports_the_category_it_declares() -> None:
+    """An active_distributor session says the reader is an established one.
+
+    So "As an existing FBO" states what is known and is the useful part of the
+    answer. Deleting it takes away role-specific advice.
     """
-    assert unsupported_personal_claims("As an existing FBO, you order 7 800DZD.")
+    assert (
+        unsupported_personal_claims(
+            "As an existing FBO, you order 7 800DZD.", role="active_distributor"
+        )
+        == []
+    )
+
+
+def test_the_same_sentence_is_an_assumption_under_a_different_role() -> None:
+    """The identical wording, and now nothing supports it."""
+    assert unsupported_personal_claims(
+        "As an existing FBO, you order 7 800DZD.", role="new_prospect"
+    )
+
+
+def test_a_category_no_session_declares_is_an_assumption_by_default() -> None:
+    """No session role is a Preferred Customer, so nothing structural says so.
+
+    Algeria's 0,200CC is a Preferred Customer's first order. Handing it to an
+    active distributor under that heading is the wrong figure with a confident
+    label on it.
+    """
+    assert unsupported_personal_claims(
+        "As a Preferred Customer, you order 0,200CC.", role="active_distributor"
+    )
+
+
+def test_the_reader_saying_so_supports_it() -> None:
+    """The context the session cannot supply, supplied by the reader."""
+    assert (
+        unsupported_personal_claims(
+            "As a Preferred Customer, you order 0,200CC.",
+            role="active_distributor",
+            user_context="I am a Preferred Customer - what is the minimum order?",
+        )
+        == []
+    )
+
+
+def test_asking_about_a_category_is_not_being_in_it() -> None:
+    """The near-miss that would make the context check meaningless.
+
+    A question mentioning Preferred Customers is a question about a rule, not a
+    statement about the person asking.
+    """
+    assert unsupported_personal_claims(
+        "As a Preferred Customer, you order 0,200CC.",
+        role="active_distributor",
+        user_context="What is the minimum order for a Preferred Customer?",
+    )
+
+
+def test_no_context_makes_a_purchase_supportable() -> None:
+    """Categories depend on context. Records never do.
+
+    A session declares what someone is, never what they have done, so no role
+    and no statement of their own can support this.
+    """
+    assert unsupported_personal_claims(
+        "You have already placed your first order.",
+        role="active_distributor",
+        user_context="I am an existing FBO who has been ordering for years.",
+    )
 
 
 # --- rules, which are what the answer is for --------------------------------
@@ -66,7 +135,6 @@ def test_an_assumed_category_is_a_claim_about_the_reader() -> None:
         "You can reach Manager by generating case credits.",
         "You have to order within 72 hours to validate the sponsorship.",
         "You may order any products from the price list.",
-        "As a Preferred Customer, you order 0,200CC as a first order.",
         "Preferred Customers must place a first order of 0,200CC.",
         "The minimum order size is 2 CC.",
         "New FBOs have already been assigned a sponsor at registration.",
@@ -93,14 +161,20 @@ def test_a_conditional_claims_nothing_about_the_reader() -> None:
         assert unsupported_personal_claims(answer) == []
 
 
-def test_a_stated_category_is_not_an_assumed_one() -> None:
-    """"As a Preferred Customer" states which rule is being quoted.
+def test_a_rule_stated_of_a_category_is_not_a_claim_about_anyone() -> None:
+    """Quoting a rule for a category is not placing the reader in it.
 
-    "As an existing FBO" asserts which one the reader is. The first is how a
-    policy answer is written; only the second claims something.
+    "Preferred Customers must place a first order of 0,200CC" is how a policy
+    answer covers a category without addressing the reader as one, and it needs
+    no context at all.
     """
-    assert unsupported_personal_claims("As a Preferred Customer, you order 0,200CC.") == []
-    assert unsupported_personal_claims("As an existing FBO, you order 7 800DZD.")
+    assert unsupported_personal_claims(
+        "Preferred Customers must place a first order of 0,200CC.",
+        role="active_distributor",
+    ) == []
+    assert unsupported_personal_claims(
+        "New FBOs order 0,200CC as a first order.", role="active_distributor"
+    ) == []
 
 
 # --- repair keeps the rest of the answer ------------------------------------
@@ -227,3 +301,57 @@ def test_a_non_english_answer_passes_through() -> None:
     french = "Vous avez déjà passé votre première commande."
 
     assert unsupported_personal_claims(french) == []
+
+
+# --- removal must not take the qualification with the assumption ------------
+
+
+def test_a_removal_that_would_strip_a_condition_is_refused() -> None:
+    """The second half of the risk: repair itself can drop a qualification.
+
+    "As a Preferred Customer, you order 0,200CC as a first order" carries both
+    an assumption about the reader and the condition that makes the figure
+    correct. Deleting the sentence leaves the answer with no first-order
+    condition anywhere - a figure with nothing saying when it applies, which is
+    exactly the completeness defect arriving by another route. So the repair is
+    refused and the answer is left for the caller to reject outright.
+    """
+    answer = (
+        "As a Preferred Customer, you order 0,200CC as a first order. "
+        "Payment is by bank transfer."
+    )
+
+    repaired, removed = remove_unsupported_personal_claims(
+        answer, role="active_distributor"
+    )
+
+    assert removed == []
+    assert repaired == answer
+    assert unsupported_personal_claims(answer, role="active_distributor"), (
+        "the claim is still reported, so the answer is refused rather than delivered"
+    )
+
+
+def test_a_removal_is_allowed_when_the_condition_survives_elsewhere() -> None:
+    """The control for the guard above, so it does not simply block every repair."""
+    answer = (
+        "As a Preferred Customer, you order 0,200CC as a first order. "
+        "The first order minimum for a Preferred Customer is 0,200CC."
+    )
+
+    repaired, removed = remove_unsupported_personal_claims(
+        answer, role="active_distributor"
+    )
+
+    assert removed == ["As a Preferred Customer, you order 0,200CC as a first order."]
+    assert "first order minimum for a Preferred Customer is 0,200CC" in repaired
+
+
+def test_a_claim_carrying_no_condition_is_still_removed() -> None:
+    """The guard is about conditions, not about making removal impossible."""
+    answer = "You are currently a Manager. The minimum order size is 2 CC."
+
+    repaired, removed = remove_unsupported_personal_claims(answer)
+
+    assert removed == ["You are currently a Manager."]
+    assert repaired == "The minimum order size is 2 CC."
