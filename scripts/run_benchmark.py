@@ -58,6 +58,37 @@ VALID_KINDS = {"answer", "abstain", "clarify"}
 REQUIRED_EVIDENCE_FIELDS = {"source_evidence", "provenance"}
 
 
+def _revision() -> str:
+    """The exact commit this arm ran, so "current tip" never names a run."""
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+# Named here rather than imported from the orchestrator so both arms record the
+# same list. An arm reading its own application's list would report a different
+# set of flags and the difference would look like behaviour.
+ANSWER_EDIT_FLAGS = (
+    "inline_citations_separated",
+    "directory_contacts_restored",
+    "directory_role_label_corrected",
+    "unrequested_directory_fields_removed",
+    "directory_order_size_restored",
+    "directory_source_contradiction_corrected",
+    "numeric_claim_repair",
+    "response_pii_scrubbed",
+    "contact_placeholder_actions",
+    "unresolved_pii_placeholders_removed",
+    "empty_after_output_cleanup",
+)
+
+
 @lru_cache(maxsize=1)
 def _valid_roles() -> frozenset[str]:
     """Roles ChatRequest accepts, read from the same source it validates against."""
@@ -313,6 +344,7 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
     response = run.response
     turn_failures = _score_prior_turns(case, run.prior_responses)
     metadata = response.metadata or {}
+    retrieval_metadata = (run.retrieval.metadata or {}) if run.retrieval else {}
     usage = metadata.get("token_usage") or {}
     documents = run.retrieval.documents if run.retrieval else []
     answer = response.answer or ""
@@ -341,6 +373,18 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
             for number, present in _presence(run.removed_numeric_claims, documents).items()
             if present
         ],
+        # Attribution support. A different answer does not say why it is
+        # different: expansion adds queries, the model varies on its own, and
+        # the same passages can still produce different wording. These are the
+        # observable signals that separate those, recorded for both arms from
+        # metadata both arms already emit.
+        "search_query_count": int((retrieval_metadata.get("search_query_count") or 0)),
+        "global_documents_searched": bool(retrieval_metadata.get("global_documents_searched")),
+        "answer_edit_flags": [
+            name for name in ANSWER_EDIT_FLAGS if metadata.get(name)
+        ],
+        "personal_history_repair": bool(metadata.get("personal_history_repair")),
+        "removed_personal_claims": list(metadata.get("removed_personal_claims") or []),
         "top_title": documents[0].title if documents else "",
         # Every retrieved section, so a case can require the governing one to
         # be present rather than merely first, and can say which sections the
@@ -687,6 +731,37 @@ def main() -> int:
         "pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
         "fixture_sha256": fixture_hash,
         "repeat": max(1, args.repeat),
+        # What this arm actually was. Two arms are only comparable if these
+        # match except where the change under test is - and a flag read from
+        # the environment rather than the code is exactly the thing that
+        # silently differs between two checkouts.
+        "arm": {
+            "revision": _revision(),
+            "model": settings.BEDROCK_MODEL_ARN,
+            "embedding_model": getattr(settings, "BEDROCK_EMBEDDING_MODEL_ID", ""),
+            "index": settings.OPENSEARCH_INDEX,
+            "generation_pointer_enabled": bool(
+                getattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+            ),
+            # Absent in an arm that predates the candidate, and reported as
+            # "absent" rather than False so the two cases stay distinguishable.
+            "country_name_expansion": (
+                bool(settings.OPENSEARCH_COUNTRY_NAME_EXPANSION_ENABLED)
+                if hasattr(settings, "OPENSEARCH_COUNTRY_NAME_EXPANSION_ENABLED")
+                else "absent"
+            ),
+            "glossary_enabled": bool(getattr(settings, "OPENSEARCH_GLOSSARY_ENABLED", False)),
+            "query_planner_enabled": bool(
+                getattr(settings, "BEDROCK_QUERY_PLANNER_ENABLED", False)
+            ),
+            "semantic_cache_enabled": bool(getattr(settings, "SEMANTIC_CACHE_ENABLED", False)),
+            "semantic_cache_shadow": bool(
+                getattr(settings, "SEMANTIC_CACHE_SHADOW_ENABLED", False)
+            ),
+            "embedding_shared_cache": bool(
+                getattr(settings, "EMBEDDING_SHARED_CACHE_ENABLED", False)
+            ),
+        },
     })
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 

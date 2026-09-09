@@ -16,18 +16,40 @@ those was wrong.
 What is needed is a full pipeline run per arm, and that is `run_benchmark.py`,
 which runs the real pipeline and records the delivered answer.
 
-**"Current" is not `main`.** `main..HEAD` spans the whole unmerged branch -
-publication, ingestion, the earlier numeric grounding work - and comparing
-against it would attribute all of that to these five candidates. The baseline
-is `c5391bb`, the frozen clarification candidate, which is the state
-immediately before this work.
+**"Current" is not `main`, and is not production either.** `c5391bb` is the
+**pre-change candidate baseline**: the frozen clarification candidate, the tip
+immediately before this session's work. It is not what is deployed. `main` is
+`bde45fb`, and the branch between `bde45fb` and `c5391bb` carries publication,
+ingestion and the earlier numeric grounding work, none of which is measured
+here.
+
+So this run answers one question: *do these five candidates change delivered
+answers, relative to the state just before them.* It says nothing about how the
+branch as a whole compares with production. That is a separate comparison
+against a separate baseline and has not been run.
 
 ## The two arms
 
-| | Path | Application code |
-|---|---|---|
-| Current | `../askvera-current` | `c5391bb` |
-| Candidate | `askvera-deploy` | current tip |
+| | Application revision |
+|---|---|
+| Current | `c5391bb7dbffdbba6e005ec871d824b2fa094a50` |
+| Candidate | pinned at run time and recorded in the artifact - see below |
+
+Neither arm is described as "the tip". Each run records its own
+`summary.arm.revision` from `git rev-parse HEAD`, so the artifact names the
+commit that produced it and a plan written today cannot mislabel a run made
+tomorrow. The candidate revision at the time of writing is
+`10d3b57` or later; the artifact is the authority, not this line.
+
+`summary.arm` also records, for each arm: the generation model, the embedding
+model, the index, whether the generation pointer is on, the state of the
+country-name expansion flag, the glossary and query-planner flags, and the
+semantic and embedding cache flags. Two arms are only comparable if these match
+except where the change under test is, and a flag read from the environment
+rather than from the code is exactly what silently differs between two
+checkouts. The expansion flag reports `"absent"` in the Current arm rather than
+`false`, so "the setting does not exist here" stays distinguishable from "the
+setting is off".
 
 Verified in the Current worktree: `country_names.py`, `number_notation.py`,
 `qualifications.py`, `personal_claims.py` and `personal_history_validator.py`
@@ -55,6 +77,30 @@ which carry no figures for any of this to act on.
 | `algeria-existing-fbo-order-minimum-role` | C, D | whether the figure reaches the right category |
 | `algeria-delivery-cost` | control | a case none of the candidates should change |
 
+## Attribution: a different answer does not say why
+
+Different passages can come from expansion or from model variation. Identical
+passages can still produce different wording. Neither direction is readable
+from the answers alone, so each run records the signals that separate them:
+
+| Field | What it separates |
+|---|---|
+| `search_query_count` | whether expansion actually added queries on this turn |
+| `sections`, `cited_sections` | whether different passages were reached, or the same ones worded differently |
+| `answer_edit_flags` | which post-generation edit fired - `directory_order_size_restored` is candidate C acting |
+| `personal_history_repair`, `removed_personal_claims` | candidate D acting, and on which sentence |
+| `removed_numeric_claims`, `removed_but_present_in_source` | repair removing an invented figure against removing a real one |
+| `global_documents_searched` | whether directory scope changed |
+
+The added query **text** is not observable from the Current arm, which has no
+expansion. It is derived offline instead: `country_name_queries(question)` is
+deterministic and free, so the queries the candidate adds for each of the five
+questions can be printed locally and compared against the count difference.
+That is a derivation, not an observation, and should be labelled as one.
+
+**A count that did not change means expansion did not fire on that turn**,
+which is a finding about the candidate rather than about the question.
+
 ## What this run cannot show
 
 - **France's decimal rendering is not tested.** The notation reader is not
@@ -63,7 +109,15 @@ which carry no figures for any of this to act on.
   reader is a separate change and is deliberately not in this run.
 - Five cases in one market group, English only, one session role.
 - One run per arm shows a difference, not a rate. Two arms differing once is
-  not evidence the difference is stable.
+  not evidence the difference is stable, and generation varies between runs of
+  identical code.
+- **Latency is not comparable from this run.** Five different questions, once
+  each, mixes cold and warm: the first turn of a process pays for imports,
+  configuration loads and empty caches, and the five questions differ in
+  retrieval work anyway. `duration_ms` is recorded per run and the first turn
+  of each arm should be read as a cold measurement and excluded from any
+  comparison. A latency comparison needs the same question repeated, which this
+  run does not do.
 - The scoring rule is a stated standard, not ground truth. Every changed answer
   needs a person to open the section and adjudicate it.
 
@@ -81,7 +135,11 @@ turn** if usage is comparable.
 Embeddings (`amazon.titan-embed-text-v2:0`) and other AWS usage are additional
 and not in these figures. Per-turn cost varies with retries, planning and
 repair, so this is an extrapolation from one six-turn run, not a quote.
-Approved ceiling for this work: **US$5**, which the first run is far inside.
+
+**An estimate is not an authorization.** This document does not record one. The
+earlier six-turn authorization was scoped to that pilot and does not carry
+here. Whoever runs the commands below is spending against their own approval
+for this run, and a figure being small is not a reason to skip asking.
 
 ## Commands
 
@@ -130,6 +188,18 @@ first, in this order:
    search. Compare warm turns; the first turn of a process pays for cold
    caches and configuration loads.
 
-Repeat or widen only if this first run is informative. If both arms answer
-identically on all five, the candidates are not reaching these questions and
-more repetitions will not change that.
+Review all ten final answers against their sources, including the control that
+should not change - a control that moved is as informative as a case that did.
+
+Treat any improvement as preliminary until repeated. One run per arm can show a
+difference; it cannot show that the difference is stable, because generation
+varies between runs of identical code.
+
+**Identical answers do not mean the candidates were inactive.** Check whether
+the code path ran before deciding anything: `search_query_count` says whether
+expansion added queries, `answer_edit_flags` says whether restoration fired,
+`personal_history_repair` says whether removal did. A candidate that ran and
+changed nothing, a candidate that never ran, and a candidate that ran and was
+undone downstream are three different findings needing three different next
+steps - and repetition is worth considering in the first and third, not the
+second.
