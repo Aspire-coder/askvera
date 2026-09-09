@@ -163,6 +163,14 @@ def document_decimal_separator(
     Either way the answer is the same as for a document that decides nothing:
     no separator, and the ambiguous figure stays unresolved.
 
+    **This remains an inference, and the unit is a proxy for provenance, not
+    provenance itself.** Matching units narrows the evidence to figures likely
+    written by the same hand; it does not prove they were. A record that quotes
+    a CC figure from one market beside a CC figure from another, written to
+    different conventions, will resolve one from the other and be wrong. The
+    check reduces that exposure and does not remove it, and nothing here can
+    remove it without provenance the corpus does not carry.
+
     Unambiguous figures never consult any of this. "7 800DZD" and "$7.50" read
     correctly in a conflicting document, because they never needed a convention.
     """

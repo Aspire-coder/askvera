@@ -301,3 +301,29 @@ def test_reading_nothing_returns_an_unresolved_reading_not_an_error() -> None:
     assert reading.resolved is False
     assert reading.value is None
     assert readings_in("") == []
+
+
+def test_same_unit_evidence_is_an_inference_not_a_proof() -> None:
+    """The limitation, asserted so it cannot be quietly forgotten.
+
+    Matching units narrows the evidence to figures likely written by the same
+    hand. It does not prove they were. A record carrying two markets' CC
+    figures written to different conventions resolves one from the other and is
+    wrong, and nothing local can tell them apart - the corpus carries no
+    provenance per figure.
+
+    Recorded here rather than in prose alone, with the reading it produces, so
+    the exposure is visible and measurable rather than argued about.
+    """
+    two_markets = (
+        "Algeria minimum order 0,200CC as a first order. "
+        "Partner market annual target 1,612CC."
+    )
+
+    reading = read_number("1,612CC", document_text=two_markets)
+
+    assert reading.resolved is True
+    assert reading.value == Decimal("1.612")
+    assert "0,200" in reading.evidence, (
+        "resolved from the other market's figure - the inference this cannot avoid"
+    )

@@ -582,6 +582,15 @@ def main() -> int:
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Validate the fixture; make no model calls.")
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N cases.")
+    parser.add_argument(
+        "--case",
+        action="append",
+        default=[],
+        help=(
+            "Case id to run. Repeatable. A pilot has to be chosen: --limit takes "
+            "from the top of the file, where the scope refusals are."
+        ),
+    )
     parser.add_argument("--intent-group", action="append", default=[], help="Restrict to these groups.")
     parser.add_argument("--repeat", type=int, default=3, help="Runs per case; stochastic stages need a distribution.")
     parser.add_argument("--artifact", type=Path, default=None, help="Write the full per-run record here.")
@@ -598,6 +607,16 @@ def main() -> int:
         print(f"Benchmark fixture is invalid: {exc}", file=sys.stderr)
         return 2
 
+    if args.case:
+        by_id = {case["id"]: case for case in cases}
+        missing = [identifier for identifier in args.case if identifier not in by_id]
+        if missing:
+            # Refused rather than silently running a smaller set: a typo in a
+            # pilot's case list would otherwise report on questions nobody
+            # chose, under a name that says they did.
+            print(f"--case names not in the fixture: {missing}", file=sys.stderr)
+            return 2
+        cases = [by_id[identifier] for identifier in args.case]
     if args.intent_group:
         wanted = set(args.intent_group)
         cases = [case for case in cases if case["intent_group"] in wanted]
