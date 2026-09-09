@@ -411,3 +411,31 @@ def test_the_harness_does_not_keep_its_own_citation_rule() -> None:
         ("sponsoring-001-algeria", {"GLOBAL:sponsoring-001-algeria"}),
     ):
         assert comparison._is_cited(required, cited) == benchmark._is_cited(required, cited)
+
+
+def test_preflight_estimates_the_run_that_was_asked_for() -> None:
+    """A --case selection has to reach the estimate.
+
+    It did not, so a focused five-case pilot was estimated as the whole
+    fixture. An approval given against the wrong number is not an approval for
+    the run that happens - and the error was in the direction that makes the
+    estimate useless rather than merely wrong.
+    """
+    whole = comparison.preflight(FIXTURE, repeat=3, arms=2)
+    focused = comparison.preflight(
+        FIXTURE, repeat=3, arms=2, wanted=["france-minimum-order", "reunion-delivery-cost"]
+    )
+
+    assert focused["cases"] == 2
+    assert focused["cases"] < whole["cases"]
+    assert focused["turn_executions"] == 2 * 3 * 2
+    assert focused["selected_cases"] == ["france-minimum-order", "reunion-delivery-cost"]
+    assert whole["selected_cases"] == "all"
+
+
+def test_preflight_refuses_a_case_that_is_not_in_the_fixture() -> None:
+    """A typo must not silently estimate a different run."""
+    import pytest
+
+    with pytest.raises(SystemExit):
+        comparison.preflight(FIXTURE, repeat=1, arms=1, wanted=["no-such-case"])

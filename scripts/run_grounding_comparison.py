@@ -124,11 +124,19 @@ def _expectations(expected: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def preflight(fixture: Path, repeat: int, arms: int) -> dict[str, Any]:
-    """What a run would cost, before anyone approves it. Makes no calls."""
+def preflight(
+    fixture: Path, repeat: int, arms: int, wanted: list[str] | None = None
+) -> dict[str, Any]:
+    """What a run would cost, before anyone approves it. Makes no calls.
+
+    `wanted` is the same --case selection the run itself takes. Without it this
+    estimated the whole fixture for a run that would execute five cases, which
+    is the wrong number in the direction that makes an approval meaningless.
+    """
     import scripts.run_benchmark as benchmark
 
     cases, fixture_hash = benchmark.load_fixture(fixture)
+    cases = _select(cases, wanted or [])
     turn_counts = {case["id"]: len(_turns(case)) for case in cases}
     turns = sum(turn_counts.values())
     with_expectations = sum(
@@ -143,6 +151,7 @@ def preflight(fixture: Path, repeat: int, arms: int) -> dict[str, Any]:
     return {
         "fixture": str(fixture),
         "fixture_sha256": fixture_hash,
+        "selected_cases": sorted(wanted) if wanted else "all",
         "cases": len(cases),
         "turns": turns,
         "conversation_cases": {k: v for k, v in turn_counts.items() if v > 1},
@@ -1479,7 +1488,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.preflight:
-        report = preflight(args.fixture, args.repeat, args.arms)
+        report = preflight(args.fixture, args.repeat, args.arms, args.case)
         if args.load_ssm:
             from config import settings as runtime_settings
             from services.aws_clients import init_aws_clients
