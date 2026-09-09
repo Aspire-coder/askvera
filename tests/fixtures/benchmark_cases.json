@@ -386,6 +386,59 @@
       },
       "source_evidence": "Forever Algeria record: 'Minimum order size FBO: 0,200CC as a first order for Preferred Customers, 7 800DZD ($60) and the equivalent of 5 000 DZD ($43) after the first purchase for all FBOs.' One sentence holds two rules separated by role and stage. An existing FBO's ongoing minimum is the 5 000 DZD figure; 0,200CC is the sign-up first order for a Preferred Customer. Answering with the first-order figure is the role confusion this case exists to catch, and both figures are real, so no grounding check can catch it.",
       "provenance": "Quoted from the section dumped from askvera-policy-sections on 2026-09-08. Expectation derived from the source text, not from any observed answer. AWAITING LIVE VALIDATION: this case has never been run."
+    },
+    {
+      "id": "clarify-upper-congo-us",
+      "question": "What is the delivery cost in Upper Congo?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "intent_group": "country_clarification",
+      "expected": {
+        "kind": "clarify",
+        "must_not_contain": [
+          "Republic of Congo"
+        ]
+      },
+      "source_evidence": "\"Upper Congo\" is not a configured market. It contains the configured name \"Congo\", which belongs to a different market from the Democratic Republic of Congo, so resolving it would answer from one of two countries chosen at random. Before this was recognised, no market resolved and the question fell through to the SESSION's market - a US session was answered from US policy.",
+      "provenance": "Repository configuration and code, verified 2026-09-08. config/markets.json and config/global_directory_markets.json contain no market of this name, and services.market_config.find_market_mentions suppresses a configured country name standing behind an unrecognised qualifier rather than resolving it. config/conversation_routes.json carries the reviewed English country_clarification copy. No corpus read required. AWAITING LIVE VALIDATION: never run.",
+      "evaluation_set": "development"
+    },
+    {
+      "id": "clarify-mainland-china-us",
+      "question": "What are the charges in Mainland China?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "intent_group": "country_clarification",
+      "expected": {
+        "kind": "clarify"
+      },
+      "source_evidence": "\"Mainland China\" is not a configured market name. The question names a country-shaped phrase that cannot be resolved, so it must be asked about rather than answered from the session's own market.",
+      "provenance": "Repository configuration and code, verified 2026-09-08. config/markets.json and config/global_directory_markets.json contain no market of this name, and services.market_config.find_market_mentions suppresses a configured country name standing behind an unrecognised qualifier rather than resolving it. config/conversation_routes.json carries the reviewed English country_clarification copy. No corpus read required. AWAITING LIVE VALIDATION: never run.",
+      "evaluation_set": "development"
+    },
+    {
+      "id": "clarified-country-does-not-unlock-foreign-policy-us",
+      "question": "Belgium",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "intent_group": "country_clarification",
+      "conversation": [
+        {
+          "question": "What is the company policy on returns in Upper Congo?",
+          "expected": {
+            "kind": "clarify"
+          }
+        }
+      ],
+      "expected": {
+        "kind": "abstain"
+      },
+      "source_evidence": "Clarifying a country must not turn a question the reader may not have answered into one they may. A US session cannot receive another market's local company policy; naming that market in reply to a clarification is still naming it. app.evidence.approve_evidence refuses this as cross_market_policy_request.",
+      "provenance": "app/evidence.py approve_evidence and its cross_market_policy_request path, read 2026-09-08, with the same boundary asserted directly in tests/unit/test_country_clarification.py. No corpus read required. AWAITING LIVE VALIDATION: never run.",
+      "evaluation_set": "development"
     }
   ]
 }

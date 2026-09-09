@@ -47,7 +47,12 @@ REQUIRED_CASE_FIELDS = {
 # cannot be averaged into one number without the number meaning less than it
 # appears to.
 VALID_EVALUATION_SETS = {"development", "held_out"}
-VALID_KINDS = {"answer", "abstain"}
+# Three outcomes, not two. A clarification - "which country do you mean?" -
+# is neither an answer nor a refusal, and scoring it as an abstain conflates
+# asking with declining. They need opposite fixes: a wrong clarification is a
+# recognition gap, a wrong refusal is a coverage gap. Kept separate everywhere
+# below, including in the summary.
+VALID_KINDS = {"answer", "abstain", "clarify"}
 # Every case has to say why its expectation is believed true. A benchmark whose
 # ground truth is assumed measures the assumption, not the system.
 REQUIRED_EVIDENCE_FIELDS = {"source_evidence", "provenance"}
@@ -316,6 +321,10 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         "answer": answer,
         "citations": len(response.citations or []),
         "abstained": bool(metadata.get("fallback")) or _abstained(answer, str(case["language"])),
+        # Read from the response's own metadata rather than its wording: the
+        # clarification copy is translated per locale, and scoring on text
+        # would make the result depend on the translation.
+        "clarified": str(metadata.get("response_source") or "") == "country_clarification",
         "failure_layer": metadata.get("failure_layer") or "",
         # Why generation stopped. "max_tokens" is Bedrock stating it ran out of
         # room, which is a fact, unlike a heuristic reading of the text.
@@ -361,23 +370,45 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
     }
 
 
+def _score_expected_outcome(
+    expected: dict[str, Any], run: dict[str, Any], folded: str
+) -> list[str]:
+    """Which of the three outcomes came back, against the one the case expects.
+
+    Answer, refusal and clarification are scored against each other rather than
+    collapsed into a pass/fail, so a wrong outcome names what happened instead:
+    a missed clarification that answered anyway is a wrong-country answer, and
+    one that refused is an over-refusal. They need opposite fixes.
+    """
+    failures: list[str] = []
+    if expected["kind"] == "clarify":
+        if not run.get("clarified"):
+            failures.append(
+                "did not ask which country was meant"
+                + (" - refused instead" if run["abstained"] else " - answered instead")
+            )
+        return failures
+    if run.get("clarified"):
+        return ["asked which country was meant on a question that named one"]
+    if expected["kind"] == "abstain":
+        if not run["abstained"]:
+            failures.append("answered a question the documents do not cover")
+        return failures
+    if run["abstained"]:
+        failures.append("abstained on an answerable question")
+    for required in expected.get("must_contain") or []:
+        if str(required).casefold() not in folded:
+            failures.append(f"missing required fact {required!r}")
+    if expected.get("must_cite") and run["citations"] < 1:
+        failures.append("no citation")
+    return failures
+
+
 def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     """Judge one run against the case's stated expectation."""
     expected = case["expected"]
     folded = " ".join(run["answer"].split()).casefold()
-    failures: list[str] = []
-
-    if expected["kind"] == "abstain":
-        if not run["abstained"]:
-            failures.append("answered a question the documents do not cover")
-    else:
-        if run["abstained"]:
-            failures.append("abstained on an answerable question")
-        for required in expected.get("must_contain") or []:
-            if str(required).casefold() not in folded:
-                failures.append(f"missing required fact {required!r}")
-        if expected.get("must_cite") and run["citations"] < 1:
-            failures.append("no citation")
+    failures: list[str] = _score_expected_outcome(expected, run, folded)
 
     for forbidden in expected.get("must_not_contain") or []:
         if str(forbidden).casefold() in folded:
@@ -433,6 +464,9 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
     unanswerable = [
         run for case in results if case["expected_kind"] == "abstain" for run in case["runs"]
     ]
+    needing_clarification = [
+        run for case in results if case["expected_kind"] == "clarify" for run in case["runs"]
+    ]
 
     def rate(numerator: int, denominator: int) -> str:
         return f"{numerator}/{denominator}" + (
@@ -458,6 +492,20 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         ),
         "answered_when_it_should_not": rate(
             sum(1 for run in unanswerable if not run["abstained"]), len(unanswerable)
+        ),
+        # The three outcomes stay three numbers. Rolling a missed clarification
+        # into "false abstention" would say the system refused too much, when
+        # what it did was answer for a country nobody named - a wrong answer
+        # reported as an over-refusal, needing the opposite fix.
+        "missed_clarification": rate(
+            sum(1 for run in needing_clarification if not run.get("clarified")),
+            len(needing_clarification),
+        ),
+        "clarified_when_it_should_not": rate(
+            sum(1 for run in runs if run.get("clarified")) - sum(
+                1 for run in needing_clarification if run.get("clarified")
+            ),
+            len(runs) - len(needing_clarification),
         ),
         # Only cases that named a governing source are counted. Averaging in
         # cases that specified none would inflate the rate with unscored runs.

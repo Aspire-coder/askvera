@@ -151,12 +151,23 @@ def test_a_canary_style_string_conversation_is_also_understood() -> None:
 
 
 def test_preflight_counts_turns_not_cases(capsys) -> None:
-    """17 cases are 19 turns. Reporting cases as calls understates the run."""
+    """A conversation case replays its prior turns, so turns exceed cases.
+
+    Counted from the fixture rather than pinned to a total: the number of cases
+    is a property of the fixture and changes whenever one is added, while the
+    thing being tested - that a turn is not a case - does not.
+    """
+    import json
+
+    cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+    expected_turns = sum(1 + len(case.get("conversation") or []) for case in cases)
+
     result = comparison.preflight(FIXTURE, repeat=3, arms=2)
 
-    assert result["cases"] == 17
-    assert result["turns"] == 19
-    assert result["turn_executions"] == 19 * 3 * 2
+    assert result["cases"] == len(cases)
+    assert result["turns"] == expected_turns
+    assert result["turns"] > result["cases"], "a conversation case replays its prior turns"
+    assert result["turn_executions"] == expected_turns * 3 * 2
     # And it says plainly that a turn is not one paid call.
     assert "lower bound" in result["note"]
 
