@@ -13,6 +13,7 @@ import pytest
 
 from utils.qualifications import (
     answer_keeps_every_condition,
+    misattached_figures,
     missing_qualifications,
     qualifying_clauses,
     value_is_conveyed,
@@ -175,3 +176,79 @@ def test_an_unrecognised_phrasing_is_missed_and_that_is_the_safe_direction() -> 
     value = "2 CC, Preferred Customers excluded from this figure"
 
     assert qualifying_clauses(value) == []
+
+
+# --- the figure must reach the right people ---------------------------------
+#
+# Stating the figure and stating the condition is still not enough. An answer
+# can mention Preferred Customers somewhere, quote 0,200CC, and hand that
+# figure to FBOs: every word present, every word in the wrong place.
+
+
+def test_a_figure_attached_to_the_wrong_category_is_reported() -> None:
+    """The case word coverage cannot see.
+
+    Both conditions are word-for-word present, so `missing_qualifications` is
+    satisfied, and the reader has still been given a number that is not theirs.
+    """
+    answer = (
+        "As an FBO you order 0,200CC as a first order. Preferred Customers are "
+        "covered separately. After the first purchase all FBOs order 7 800DZD."
+    )
+
+    assert missing_qualifications(answer, ALGERIA_VALUE) == []
+    assert misattached_figures(answer, ALGERIA_VALUE) == ["0200"]
+
+
+def test_a_figure_attached_to_the_right_category_is_not_reported() -> None:
+    answer = (
+        "As a Preferred Customer you order 0,200CC as a first order. After the "
+        "first purchase all FBOs order 7 800DZD."
+    )
+
+    assert misattached_figures(answer, ALGERIA_VALUE) == []
+    assert missing_qualifications(answer, ALGERIA_VALUE) == []
+
+
+def test_a_figure_named_without_a_category_is_not_a_mismatch() -> None:
+    """Only a genuine disagreement counts.
+
+    An answer that names no category has dropped the condition, which is the
+    other check's question. Reporting it here too would say the same defect
+    twice and hide the difference between the two.
+    """
+    answer = "The first order minimum is 0,200CC and after that it is 7 800DZD."
+
+    assert misattached_figures(answer, ALGERIA_VALUE) == []
+    assert missing_qualifications(answer, ALGERIA_VALUE)
+
+
+def test_a_decimal_comma_is_not_a_clause_boundary() -> None:
+    """The defect that made this check report exactly backwards.
+
+    Splitting "0,200CC as a first order for Preferred Customers" at the decimal
+    comma attached "200" to the condition and left "0" bare, so a correct
+    answer was flagged and an incorrect one was not.
+    """
+    from utils.qualifications import _segments
+
+    segments = _segments(ALGERIA_VALUE)
+
+    assert any("0,200CC" in segment for segment in segments)
+    assert not any(segment.strip() == "0" for segment in segments)
+
+
+def test_a_sentence_boundary_separates_categories() -> None:
+    """Without it, two sentences naming two categories read as one clause."""
+    from utils.qualifications import _segments
+
+    segments = _segments("As an FBO you order 2 CC. Preferred Customers order 1 CC.")
+
+    assert len(segments) == 2
+
+
+def test_singular_and_plural_are_the_same_condition() -> None:
+    """A source writing "Customers" and an answer writing "Customer" agree."""
+    answer = "As a Preferred Customer, the first order is 2 CC."
+
+    assert missing_qualifications(answer, "2 CC as a first order for Preferred Customers") == []

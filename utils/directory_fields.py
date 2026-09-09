@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from utils.qualifications import missing_qualifications, value_is_conveyed
+from utils.qualifications import (
+    misattached_figures,
+    missing_qualifications,
+    value_is_conveyed,
+)
 
 
 _FIELD_LABEL_RE = re.compile(
@@ -404,7 +408,16 @@ def restore_missing_requested_order_size(
         # second case is the one that reached a reader: the France answer said
         # there is no minimum order, which is true, and is the first half of a
         # sentence whose second half is a 150EUR condition within 72 hours.
-        if value_is_conveyed(corrected, value) and not missing_qualifications(corrected, value):
+        # Three questions, not one. Does the answer state the figures; does it
+        # carry the conditions attached to them; and does it attach them to the
+        # same category the source does. An answer can pass the first two and
+        # fail the third - every word present, the figure handed to the wrong
+        # people - so the third is asked separately.
+        if (
+            value_is_conveyed(corrected, value)
+            and not missing_qualifications(corrected, value)
+            and not misattached_figures(corrected, value)
+        ):
             return corrected, False
         separator = "\n\n" if corrected.strip() else ""
         corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."

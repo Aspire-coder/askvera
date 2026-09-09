@@ -59,9 +59,16 @@ _QUALIFIER_OPENERS = (
     "at least",
 )
 
-# A clause ends at the next clause opener, a comma before another opener, a
-# conjunction that starts a new statement, or the end of the value.
-_CLAUSE_SPLIT_RE = re.compile(r"[,;]|\band\b|\byet\b|\bbut\b", re.IGNORECASE)
+# A clause ends at a comma or semicolon, or at a conjunction starting a new
+# statement.
+#
+# Never inside a figure. "0,200CC as a first order for Preferred Customers"
+# split at the decimal comma into "0" and "200CC as a first order...", which
+# attached the wrong half of the number to the condition - a figure appeared to
+# be governed by a role it was not, and the check that reads this reported
+# exactly backwards. A separator with digits on both sides is part of the
+# number, not a clause boundary.
+_CLAUSE_SPLIT_RE = re.compile(r"(?<!\d)[,;]|[,;](?!\d)|\band\b|\byet\b|\bbut\b", re.IGNORECASE)
 
 _OPENER_RE = re.compile(
     r"(?<!\w)(?:" + "|".join(re.escape(word) for word in _QUALIFIER_OPENERS) + r")(?!\w)",
@@ -103,6 +110,16 @@ def _normalized(value: str) -> str:
     return " ".join(re.findall(r"[^\W_]+", (value or "").casefold(), flags=re.UNICODE))
 
 
+def _stem(word: str) -> str:
+    """Drop a trailing plural so "Customer" and "Customers" are one word.
+
+    A source writing "for Preferred Customers" and an answer writing "As a
+    Preferred Customer" state the same condition, and comparing them letter for
+    letter reported it missing.
+    """
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+
+
 def missing_qualifications(answer: str, value: str) -> list[str]:
     """Conditions the source attached to a figure that the answer does not carry.
 
@@ -115,11 +132,11 @@ def missing_qualifications(answer: str, value: str) -> list[str]:
     if not normalized_answer:
         return qualifying_clauses(value)
 
-    answer_words = set(normalized_answer.split())
+    answer_words = {_stem(word) for word in normalized_answer.split()}
     missing: list[str] = []
     for clause in qualifying_clauses(value):
         words = [
-            word
+            _stem(word)
             for word in _normalized(clause).split()
             if word not in _QUALIFIER_OPENERS and len(word) > 2
         ]
@@ -131,6 +148,72 @@ def missing_qualifications(answer: str, value: str) -> list[str]:
 def answer_keeps_every_condition(answer: str, value: str) -> bool:
     """Whether an answer carries every condition its source attached to a figure."""
     return not missing_qualifications(answer, value)
+
+
+# The categories a figure can be attached to. Normalised to a token, so "all
+# FBOs" and "an FBO" are the same category and "Preferred Customers" is not.
+_ROLE_TOKENS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("preferred_customer", re.compile(r"\bpreferred\s+customers?\b", re.IGNORECASE)),
+    (
+        "distributor",
+        re.compile(r"\bfbos?\b|\bdistributors?\b|\bbusiness\s+owners?\b", re.IGNORECASE),
+    ),
+)
+
+
+# A sentence boundary ends a clause too. Without this, "As an FBO you order
+# 0,200CC. Preferred Customers are covered separately." is one segment naming
+# both categories, and a figure attached to the wrong one looks attached to
+# both. Guarded against digits so a decimal point is not a boundary.
+_SEGMENT_SPLIT_RE = re.compile(
+    r"(?<!\d)[.!?](?!\d)|\n|" + _CLAUSE_SPLIT_RE.pattern, re.IGNORECASE
+)
+
+
+def _segments(text: str) -> list[str]:
+    return [segment.strip() for segment in _SEGMENT_SPLIT_RE.split(text or "") if segment.strip()]
+
+
+def _roles_in(text: str) -> set[str]:
+    return {token for token, pattern in _ROLE_TOKENS if pattern.search(text or "")}
+
+
+def _figures_by_role(text: str) -> dict[str, set[str]]:
+    """Which categories each figure is attached to, clause by clause."""
+    attached: dict[str, set[str]] = {}
+    for segment in _segments(text):
+        roles = _roles_in(segment)
+        if not roles:
+            continue
+        for reading in readings_in(segment, document_text=text):
+            digits = re.sub(r"\D", "", reading.text)
+            if digits:
+                attached.setdefault(digits, set()).update(roles)
+    return attached
+
+
+def misattached_figures(answer: str, value: str) -> list[str]:
+    """Figures the answer attaches to a different category than the source does.
+
+    Stating the figure and stating the condition is not enough on its own. An
+    answer can mention Preferred Customers somewhere, quote 0,200CC, and attach
+    that figure to FBOs - every word present, every word in the wrong place,
+    and the reader given a number that is not theirs.
+
+    Only a genuine disagreement is reported: the figure must be attached to a
+    category in both texts, and the two sets must not overlap. A figure the
+    answer states without naming any category is a separate question, and
+    `missing_qualifications` is what asks it.
+    """
+    source_roles = _figures_by_role(value)
+    if not source_roles:
+        return []
+    answer_roles = _figures_by_role(answer)
+    return [
+        figure
+        for figure, roles in source_roles.items()
+        if figure in answer_roles and roles and answer_roles[figure] and not (roles & answer_roles[figure])
+    ]
 
 
 def value_is_conveyed(answer: str, value: str) -> bool:
