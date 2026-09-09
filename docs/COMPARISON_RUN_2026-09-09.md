@@ -114,17 +114,30 @@ Established locally by reading the code, not by running retrieval:
   `"Réunion Island"` normalises to `"réunion island"` while the filter asks for
   `"reunion island"`.
 
-**Hypothesis, not yet confirmed:** the record's indexed
-`metadata.record_country` carries the accent, the filter does not, and the
-document is excluded before ranking. The section id `sponsoring-084-r-union-island`
-is consistent with an accented title but is not proof of the field's value.
+**Confirmed against the index, 2026-09-09:**
 
-If that holds, it means accent handling *is* the problem and query-text
-expansion could never have fixed it, because the document never reaches
-ranking. It would also mean an accent-folded content index would not have
-fixed it either.
+```
+{'country': 'GLOBAL', 'access_scope': 'global',
+ 'section_id': 'sponsoring-084-r-union-island',
+ 'metadata': {'record_country': 'Réunion Island'}}
+```
 
-**Confirm before changing anything.** One free query, no model calls:
+The record holds the accented spelling; the filter asked for the unaccented
+one; the document was excluded before ranking.
+
+So accent handling *is* the problem, and my earlier conclusion that this run
+had disproved it was wrong. It is at the **filter**, not in the passage text,
+which is why catalogue expansion of the query could never have fixed it - the
+document never entered the candidate set - and why an accent-folded content
+index would not have fixed it either.
+
+**The fix:** `_directory_target_country_names` now returns every approved
+spelling of the market's own name, so the filter carries "Réunion Island"
+alongside "Reunion Island". The lookup is by market code, so it cannot reach
+another market's names, and that is asserted. Unverified against the live
+index: whether the record is now retrieved needs the focused retest.
+
+The probe that confirmed it, for anyone repeating this:
 
 ```
 cd ~/askvera-cmp-20260908 && /opt/askvera/.venv/bin/python - <<'EOF'
@@ -139,7 +152,9 @@ for hit in _client().search(index=settings.OPENSEARCH_INDEX, body=body)["hits"][
 EOF
 ```
 
-Expansion and any index change stay paused until that output is read.
+No index change was made and none is needed for this. Catalogue expansion
+remains paused: this run gave it no supporting evidence, and the failure it was
+built for has a different cause.
 
 ## Confirmation
 

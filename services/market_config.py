@@ -554,3 +554,39 @@ def get_document_country_codes(country_code: str) -> set[str]:
     normalized_code = country_code.upper()
     entry = load_policy_locales().get(normalized_code)
     return set(entry["documentCountries"]) if entry else {normalized_code}
+
+
+def _accent_folded(value: str) -> str:
+    """Case- and diacritic-insensitive form, for comparing spellings only.
+
+    Deliberately not `_normalize_market_text`, which keeps diacritics because
+    the catalogue lists accented and unaccented spellings as separate entries.
+    This is for recognising that two entries are the same name.
+    """
+    decomposed = unicodedata.normalize("NFKD", value or "").casefold()
+    stripped = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return re.sub(r"[^\w]+", " ", stripped, flags=re.UNICODE).strip()
+
+
+def approved_name_spellings(code: str, name: str) -> set[str]:
+    """Every approved spelling of `name` for this market, accents included.
+
+    The configuration writes market names without diacritics - "Reunion
+    Island" - while the approved records write them with: the sponsoring
+    directory's `metadata.record_country` for that market is "Réunion Island".
+    Anything matching one against the other on the configured spelling alone
+    finds nothing, and finds it silently, because a filter that excludes a
+    document is indistinguishable from a document that does not exist.
+
+    Returns the name itself plus the catalogue entries that differ from it only
+    by diacritics. Never another market's names: the lookup is by code.
+    """
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return set()
+    folded = _accent_folded(cleaned)
+    spellings = {cleaned}
+    for candidate in _localized_market_names().get(str(code or "").upper(), []):
+        if _accent_folded(candidate) == folded:
+            spellings.add(candidate)
+    return spellings
