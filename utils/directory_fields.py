@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from utils.qualifications import missing_qualifications, value_is_conveyed
+
 
 _FIELD_LABEL_RE = re.compile(
     r"(?:country|name|address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
@@ -300,10 +302,22 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     return cleaned, replacements > 0
 
 
-# A minimum-order field value is a figure with at most a currency equivalent,
-# such as "0,200CC (7 800DZD)". Anything materially longer is record prose that
-# the capture ran into rather than a value worth restoring.
-_MAX_RESTORED_VALUE_CHARS = 80
+# A backstop against a runaway sentence, not the boundary rule.
+#
+# This was 80 characters, on the theory that a field value is a figure and a
+# currency equivalent, and anything longer is prose the capture ran into. That
+# theory cost the reader the answer. Both records whose minimum order carries a
+# condition state it in one sentence longer than 80 characters - Algeria's "as
+# a first order for Preferred Customers", France's "within 72 hours in order to
+# validate his sponsorship" - so the whole restoration was declined and the
+# reader was left with a bare figure. A rule delivered without the words saying
+# who it applies to is a different rule.
+#
+# What actually prevents the fragment the cap was standing in for is
+# _directory_field_value stopping at a sentence end or the next bullet: it
+# returns one complete sentence, or nothing. This bound only refuses a single
+# sentence long enough to be a paragraph.
+_MAX_RESTORED_VALUE_CHARS = 320
 
 
 # Where a directory field's value ends.
@@ -345,6 +359,23 @@ def _directory_field_value(text: str) -> str:
     return " ".join(text[:end].split()).strip().rstrip(".").strip()
 
 
+def _field_value_ends_at_a_boundary(text: str) -> bool:
+    """Whether the value stopped somewhere, or simply ran out of text.
+
+    `_directory_field_value` returns everything it has when it finds no
+    sentence end and no bullet, and everything it has can be a phrase cut off
+    mid-sentence by extraction: "...placed with the sponsoring office named in
+    the". Appending that ends the answer on the word "the", and the output
+    validator then discards the whole answer as structurally incomplete - which
+    is how a correct Algeria answer became a refusal.
+
+    Length was standing in for this check and is not the same question. A short
+    fragment is still a fragment, and a long sentence that genuinely ends is
+    still a value. This asks the question directly.
+    """
+    return bool(_FIELD_SENTENCE_END_RE.search(text) or _FIELD_BREAK_RE.search(text))
+
+
 def restore_missing_requested_order_size(
     answer: str,
     source_texts: Iterable[str],
@@ -362,20 +393,22 @@ def restore_missing_requested_order_size(
         )
         if not match:
             continue
-        value = _directory_field_value(match.group("value"))
-        # The capture runs to the next period or newline, so in a record whose
-        # minimum-order line continues into prose it swallows that prose too.
-        # Appending it as a sentence then ends the answer mid-phrase - which is
-        # how the Algeria answer came to end on the word "the", and be discarded
-        # whole by the output validator as structurally incomplete. A field
-        # value is short; a paragraph is not this function's to append.
+        captured = match.group("value")
+        value = _directory_field_value(captured)
+        if not value or not _field_value_ends_at_a_boundary(captured):
+            return corrected, False
         if len(value) > _MAX_RESTORED_VALUE_CHARS:
             return corrected, False
-        if value and _normalize_for_comparison(value) not in _normalize_for_comparison(corrected):
-            separator = "\n\n" if corrected.strip() else ""
-            corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
-            return corrected, True
-        return corrected, False
+        # Restore when the answer is missing the value, and also when it states
+        # the figure but not the conditions the source attached to it. The
+        # second case is the one that reached a reader: the France answer said
+        # there is no minimum order, which is true, and is the first half of a
+        # sentence whose second half is a 150EUR condition within 72 hours.
+        if value_is_conveyed(corrected, value) and not missing_qualifications(corrected, value):
+            return corrected, False
+        separator = "\n\n" if corrected.strip() else ""
+        corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
+        return corrected, True
     return corrected, False
 
 
