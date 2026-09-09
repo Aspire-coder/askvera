@@ -7,16 +7,17 @@ later one calling a function that no longer exists. `git revert` will not tell
 you, because the patch applies cleanly.
 
 **A previous statement that "each reverts alone" was wrong and is withdrawn.**
-Two of the five do not.
+Two of the six do not.
 
 ## What was run
 
 Each candidate reverted for real, the whole suite and flake8 run against the
-result, the tree restored. Re-run at `76c4efe` after two later commits landed,
-rather than left as a result about an older tree. Nothing committed, nothing pushed.
+result, the tree restored. Every number here was re-measured at `76c4efe`
+after two later commits landed, rather than left as a result about an older
+tree. Nothing committed, nothing pushed.
 Untracked working-tree files were verified unchanged afterwards.
 
-## The five candidates
+## The six candidates
 
 | | Candidate | Commits, newest first | Reverts alone |
 |---|---|---|---|
@@ -51,8 +52,8 @@ Verified cumulatively, the way a rollback actually happens:
 | Step | Result |
 |---|---|
 | revert D | clean — 1786 passed, 15 skipped |
-| revert D, then C | clean — 1754 passed, 15 skipped |
-| revert D, then C, then B | clean — 1721 passed, 15 skipped |
+| revert D, then C | clean — 1756 passed, 15 skipped |
+| revert D, then C, then B | clean — 1723 passed, 15 skipped |
 | revert all six | clean — **1680 passed, 15 skipped** |
 
 The last line is the baseline this work started from, which is the check that
