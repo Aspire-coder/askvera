@@ -44,10 +44,12 @@ from __future__ import annotations
 
 import re
 
-from utils.qualifications import qualifying_clauses
+from utils.qualifications import qualifying_clauses, readings_in, sentences
 
-# Sentence splitting that keeps a decimal, an abbreviation and a bullet intact.
-_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|\n|$)")
+# Sentences come from utils.qualifications, which guards the decimal point.
+# This module had its own splitter without that guard and cut "0.200 CC" into
+# "0." and "200 CC", so a claim was reported as a fragment and a repair would
+# have left the stray "200 CC" behind in the answer.
 
 # Claims nothing in this system can support, whatever the session says. A
 # session declares what someone is, never what they have done.
@@ -66,8 +68,17 @@ _RECORD_CLAIM_RES = (
     ),
     # "since you ordered", "after you placed", "when you purchased"
     re.compile(r"\b(?:since|after|when|because)\s+you\s+\w+ed\b", re.IGNORECASE),
-    # "your first order was", "your previous orders", "your purchase history"
+    # "your first order was", "your previous orders".
+    #
+    # Not when a temporal preposition introduces it. "After your first
+    # purchase, the minimum order size is 5 000 DZD" names the stage a rule
+    # applies at and asserts nothing about whether this reader has reached it -
+    # which is how the records phrase the rule and how an answer should repeat
+    # it. "Your first order was 0.200 CC" is the same words making a claim.
+    # The preposition is what separates a condition from a record.
     re.compile(
+        r"(?<!\bafter\s)(?<!\bbefore\s)(?<!\bonce\s)(?<!\bupon\s)"
+        r"(?<!\bfollowing\s)(?<!\buntil\s)(?<!\bfrom\s)(?<!\bfor\s)"
         r"\byour\s+(?:previous|last|recent|first|current|existing)\s+"
         r"(?:order|orders|purchase|purchases|rank|level|position|status)\b",
         re.IGNORECASE,
@@ -185,11 +196,7 @@ def supported_categories(role: str = "", user_context: str = "") -> set[str]:
 
 
 def _sentences(answer: str) -> list[str]:
-    return [
-        match.group(0)
-        for match in _SENTENCE_RE.finditer(answer or "")
-        if match.group(0).strip()
-    ]
+    return sentences(answer)
 
 
 def _asserted_categories(sentence: str) -> set[str]:
@@ -316,21 +323,45 @@ def remove_unsupported_personal_claims(
         return answer or "", []
 
     repaired = re.sub(r"\n{3,}", "\n\n", "".join(kept)).strip()
-    if _would_lose_a_condition(removed, repaired):
+    if _repair_leaves_a_worse_answer(removed, repaired, answer or ""):
         return answer or "", []
     return repaired, removed
 
 
-def _would_lose_a_condition(removed: list[str], repaired: str) -> bool:
-    """Whether the removed text carried a condition the rest does not."""
-    kept_words = set(re.findall(r"[^\W_]+", repaired.casefold(), flags=re.UNICODE))
+def _figures(text: str) -> set[str]:
+    return {
+        re.sub(r"\D", "", reading.text)
+        for reading in readings_in(text or "", document_text=text or "")
+        if re.sub(r"\D", "", reading.text)
+    }
+
+
+def _repair_leaves_a_worse_answer(removed: list[str], repaired: str, original: str) -> bool:
+    """Whether what survives removal is worse than refusing outright.
+
+    Removing a figure together with the condition that qualifies it is fine:
+    the pair leaves, and nothing is left dangling. That is the Algeria case -
+    "your first order as a Preferred Customer requires 0.200 CC" takes both the
+    claim and the 0.200 CC figure with it, and the answer's own rule, 5 000 DZD
+    after the first purchase, is untouched and still answers the question.
+
+    Two outcomes are worse than a refusal, and only these two:
+
+    - **An orphaned condition.** A condition leaves while the figure it
+      qualifies stays, so a figure is left in the answer with nothing saying
+      who or when it applies to. That is the completeness defect, reached
+      through repair instead of through generation.
+    - **A gutted answer.** Every figure the answer had is gone. What remains
+      cannot answer a question about an amount, and presenting it as an answer
+      is worse than saying the documents were not enough.
+
+    An earlier version asked only whether any condition disappeared, which
+    refused the Algeria repair and discarded a correct answer to protect a
+    condition that was leaving anyway.
+    """
+    kept_figures = _figures(repaired)
     for sentence in removed:
         for clause in qualifying_clauses(sentence):
-            words = [
-                word
-                for word in re.findall(r"[^\W_]+", clause.casefold(), flags=re.UNICODE)
-                if len(word) > 3
-            ]
-            if words and not set(words) <= kept_words:
+            if _figures(clause) & kept_figures:
                 return True
-    return False
+    return bool(_figures(original)) and not kept_figures

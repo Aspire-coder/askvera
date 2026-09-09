@@ -306,15 +306,12 @@ def test_a_non_english_answer_passes_through() -> None:
 # --- removal must not take the qualification with the assumption ------------
 
 
-def test_a_removal_that_would_strip_a_condition_is_refused() -> None:
-    """The second half of the risk: repair itself can drop a qualification.
+def test_a_removal_that_would_gut_the_answer_is_refused() -> None:
+    """Repair must not leave something worse than a refusal.
 
-    "As a Preferred Customer, you order 0,200CC as a first order" carries both
-    an assumption about the reader and the condition that makes the figure
-    correct. Deleting the sentence leaves the answer with no first-order
-    condition anywhere - a figure with nothing saying when it applies, which is
-    exactly the completeness defect arriving by another route. So the repair is
-    refused and the answer is left for the caller to reject outright.
+    Removing the only sentence carrying a figure leaves "Payment is by bank
+    transfer", which cannot answer a question about an amount. Presenting that
+    as the answer is worse than saying the documents were not enough.
     """
     answer = (
         "As a Preferred Customer, you order 0,200CC as a first order. "
@@ -473,3 +470,148 @@ def test_the_orchestrator_reads_prior_turns_not_only_this_one() -> None:
     assert "Preferred Customer" in statements
     assert "And what is the minimum order?" in statements
     assert "assistant" not in statements, "only what the reader said"
+
+
+# --- what the paid comparison found -----------------------------------------
+#
+# Run 2026-09-09 against c5391bb and 40932ce on six cases. The candidate turned
+# two working Algeria answers into refusals, and the answers it refused really
+# did contain invented claims. The detection was right; three things about the
+# response were wrong. These are the exact captured answers.
+
+
+ALGERIA_REPEAT_Q = "In Algeria, what is the minimum order size after my first purchase?"
+ALGERIA_REPEAT_A = (
+    "# Minimum Order Size After First Purchase in Algeria After your first purchase as an "
+    "FBO in Algeria, the FBO minimum order size is **5,000 DZD ($43)**. This applies to all "
+    "FBOs following their initial order. For context, your first order as a Preferred "
+    "Customer requires 0.200 CC (equivalent to 7,800 DZD or $60)."
+)
+ALGERIA_ROLE_Q = "I am already an FBO in Algeria. What is my minimum order now?"
+ALGERIA_ROLE_A = (
+    "As an active FBO in Algeria, your minimum order is the equivalent of 5,000 DZD ($43) "
+    "after your first purchase. Your first order as a Preferred Customer was 0.200 CC "
+    "(7,800 DZD / $60). Once you have completed that initial order, subsequent orders "
+    "follow the lower minimum of 5,000 DZD ($43)."
+)
+
+
+def test_a_decimal_does_not_end_a_sentence() -> None:
+    """The first defect: "0.200 CC" was split into "0." and "200 CC".
+
+    A claim was reported as a fragment, and a repair would have left the stray
+    "200 CC (equivalent to 7,800 DZD or $60)." behind in the answer. The
+    splitter now comes from utils.qualifications, which guards the decimal.
+    """
+    from utils.personal_claims import _sentences
+
+    for answer in (
+        "The first order is 0.200 CC. The next is 5,000 DZD.",
+        "The first order is 0,200CC. The next is 7 800DZD.",
+    ):
+        parts = _sentences(answer)
+        assert len(parts) == 2
+        assert not any(part.strip() in {"0.", "0,"} for part in parts)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "After your first purchase, the FBO minimum order size is 5,000 DZD.",
+        "Following your first order, the lower minimum applies.",
+        "Once you have placed your first order, the lower minimum applies.",
+    ],
+)
+def test_a_stage_a_rule_applies_at_is_not_a_claim_about_the_reader(answer: str) -> None:
+    """The second defect: a condition read as a personal claim.
+
+    "After your first purchase, the minimum is..." names the stage a rule
+    applies at and asserts nothing about whether this reader has reached it.
+    That is how the records phrase the rule and how an answer should repeat it.
+    """
+    assert unsupported_personal_claims(answer, role="active_distributor") == []
+
+
+def test_the_same_words_without_the_preposition_are_a_claim() -> None:
+    """The control: it is the preposition doing the work, not the noun."""
+    assert unsupported_personal_claims(
+        "Your first order was 0.200 CC.", role="active_distributor"
+    )
+
+
+def test_a_figure_leaving_with_its_condition_is_not_a_reason_to_refuse() -> None:
+    """The third defect, and the one that cost the reader the whole answer.
+
+    The removed sentence takes both the claim and the 0.200 CC figure it
+    qualifies. Nothing is left dangling, and the answer's own rule - 5,000 DZD
+    after the first purchase - is untouched and still answers the question. The
+    earlier guard refused this repair to protect a condition that was leaving
+    anyway, and the reader got a refusal instead of a correct answer.
+    """
+    repaired, removed = remove_unsupported_personal_claims(
+        ALGERIA_REPEAT_A, role="active_distributor", user_context=ALGERIA_REPEAT_Q
+    )
+
+    assert removed == [
+        "For context, your first order as a Preferred Customer requires 0.200 CC "
+        "(equivalent to 7,800 DZD or $60)."
+    ]
+    assert "0.200" not in repaired
+    assert "5,000 DZD ($43)" in repaired
+    assert "after your first purchase" in repaired.casefold()
+
+
+def test_the_role_case_loses_the_figure_its_expectation_forbids() -> None:
+    """The other captured answer, whose fixture forbids 0.200 for this reader.
+
+    An existing FBO is being told a Preferred Customer's first-order figure.
+    Repair removes exactly that sentence and leaves the rule that applies.
+    """
+    repaired, removed = remove_unsupported_personal_claims(
+        ALGERIA_ROLE_A, role="active_distributor", user_context=ALGERIA_ROLE_Q
+    )
+
+    assert removed == ["Your first order as a Preferred Customer was 0.200 CC (7,800 DZD / $60)."]
+    assert "0.200" not in repaired
+    assert "5,000 DZD ($43)" in repaired
+
+
+@pytest.mark.parametrize(
+    ("question", "answer"),
+    [
+        (
+            "What is the delivery cost for orders in Algeria?",
+            "The delivery cost for orders in Algeria is **900 DZD ($7.50)**.",
+        ),
+        (
+            "What is the minimum order size for an FBO in France?",
+            "For an FBO in France, there is **no minimum order size requirement**. However, a "
+            "newly sponsored Preferred Customer must order a minimum of **150 EUR worth of "
+            "products within 72 hours** to validate their sponsorship.",
+        ),
+    ],
+)
+def test_the_answers_that_were_already_correct_are_untouched(question: str, answer: str) -> None:
+    """The controls from the same run, including the delivery-cost control."""
+    assert (
+        remove_unsupported_personal_claims(
+            answer, role="active_distributor", user_context=question
+        )
+        == (answer, [])
+    )
+
+
+def test_an_orphaned_condition_still_refuses_the_repair() -> None:
+    """The case the guard exists for, kept working.
+
+    Here the condition leaves and the figure it qualifies stays, so the answer
+    would be left stating 2 CC with nothing saying who it applies to.
+    """
+    answer = (
+        "The minimum order size is 2 CC. Your first order as a Preferred Customer was 2 CC."
+    )
+
+    repaired, removed = remove_unsupported_personal_claims(answer, role="active_distributor")
+
+    assert removed == []
+    assert repaired == answer

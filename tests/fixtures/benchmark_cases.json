@@ -96,7 +96,16 @@
       "expected": {
         "kind": "answer",
         "must_contain": [
-          "900"
+          "900",
+          "DZD"
+        ],
+        "must_not_contain": [
+          "your first order as a preferred customer",
+          "your first order was",
+          "your previous order",
+          "you have already placed",
+          "our records show",
+          "your account shows"
         ],
         "required_sections": [
           "sponsoring-001-algeria"
@@ -143,14 +152,27 @@
       "expected": {
         "kind": "answer",
         "must_contain": [
-          "5"
+          "000 DZD",
+          "43",
+          "FBO",
+          "first purchase"
+        ],
+        "must_not_contain": [
+          "your first order as a preferred customer",
+          "your first order was",
+          "your previous order",
+          "you have already placed",
+          "our records show",
+          "your account shows",
+          "0.200",
+          "0,200"
         ],
         "required_sections": [
           "sponsoring-001-algeria"
         ],
         "must_cite": true
       },
-      "source_evidence": "Forever Algeria record: 'the equivalent of 5 000 DZD ($43) after the first purchase for all FBOs'. Distinct from the 0,200CC first order, which is the trap in this question.",
+      "source_evidence": "Forever Algeria record: 'the equivalent of 5 000 DZD ($43) after the first purchase for all FBOs'. Distinct from the 0,200CC first order, which is the trap in this question. The expectation now covers the amount, the currency, the role the rule applies to and the stage it applies at - must_contain ['5'] passed on any answer containing a five. It also forbids the 0,200CC figure, which belongs to a Preferred Customer's first order and not to this reader, and forbids the phrasings that assert what this reader has done.",
       "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
       "evaluation_set": "development"
     },
@@ -209,12 +231,21 @@
       "expected": {
         "kind": "answer",
         "must_contain": [
-          "150"
+          "150",
+          "72 hours"
         ],
         "required_sections": [
           "sponsoring-063-france"
         ],
-        "must_cite": true
+        "must_cite": true,
+        "must_not_contain": [
+          "your first order as a preferred customer",
+          "your first order was",
+          "your previous order",
+          "you have already placed",
+          "our records show",
+          "your account shows"
+        ]
       },
       "source_evidence": "Forever France record: 'We do not have a minimum order in France, yet a newly sponsored Preferred Customer will have to order 150 EUR minimum of products within 72 hours in order to validate his sponsorship.' Both halves matter: no FBO minimum, but a sponsorship-validation requirement.",
       "provenance": "International-Sponsoring-Directory.pdf, dumped from askvera-policy-sections on 2026-09-08 with scripts/dump_corpus_sections.py. Quoted from the section text.",
@@ -373,9 +404,17 @@
       "expected": {
         "kind": "answer",
         "must_contain": [
-          "5"
+          "000 DZD",
+          "43",
+          "FBO"
         ],
         "must_not_contain": [
+          "your first order as a preferred customer",
+          "your first order was",
+          "your previous order",
+          "you have already placed",
+          "our records show",
+          "your account shows",
           "0.200",
           "0,200"
         ],

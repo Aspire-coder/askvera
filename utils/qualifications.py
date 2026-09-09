@@ -170,6 +170,33 @@ _SEGMENT_SPLIT_RE = re.compile(
 )
 
 
+# A sentence boundary that a decimal cannot be mistaken for. Shared, because
+# `personal_claims` had its own splitter without the digit guard and cut
+# "0.200 CC" into "0." and "200 CC" - so a claim was reported as a fragment and
+# a repair would have left the stray "200 CC" in the answer. One rule for what
+# ends a sentence, used by everything that needs one.
+_SENTENCE_END_RE = re.compile(r"(?<!\d)[.!?]+(?!\d)(?=\s|$)|\n+")
+
+
+def sentences(text: str) -> list[str]:
+    """Split into sentences without breaking a decimal figure.
+
+    Boundaries are kept on the sentence they end, so joining the result
+    reproduces the original text apart from the whitespace between sentences.
+    """
+    parts: list[str] = []
+    position = 0
+    for match in _SENTENCE_END_RE.finditer(text or ""):
+        chunk = (text or "")[position:match.end()]
+        if chunk.strip():
+            parts.append(chunk)
+        position = match.end()
+    tail = (text or "")[position:]
+    if tail.strip():
+        parts.append(tail)
+    return parts
+
+
 def _segments(text: str) -> list[str]:
     return [segment.strip() for segment in _SEGMENT_SPLIT_RE.split(text or "") if segment.strip()]
 
