@@ -16,6 +16,7 @@ from .validators import (
     MetadataValidator,
     NumericGroundingValidator,
     OutputIntegrityValidator,
+    PersonalHistoryValidator,
 )
 
 
@@ -62,6 +63,7 @@ def default_validators() -> list[ResponseValidator]:
         MetadataValidator(),
         LengthValidator(),
         NumericGroundingValidator(),
+        PersonalHistoryValidator(),
     ]
 
 

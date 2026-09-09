@@ -81,6 +81,7 @@ from utils.directory_fields import (
     restore_missing_requested_directory_fields,
     restore_missing_requested_order_size,
 )
+from utils.personal_claims import remove_unsupported_personal_claims
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 
@@ -2098,16 +2099,34 @@ class AIOrchestrator:
                 for issue in result.issues
                 if issue.severity.value.upper() == "CRITICAL"
             }
-            if (
-                critical_codes
-                and all(code == "NUMERIC_CLAIM_UNGROUNDED" for code in critical_codes)
-                and retrieval_result is not None
-                and retrieval_result.documents
+            # Both of these findings name particular sentences, so both can be
+            # answered by removing those sentences and revalidating rather than
+            # discarding an otherwise good answer. A critical finding that is
+            # not in this set still refuses the whole answer.
+            repairable = critical_codes and critical_codes <= {
+                "NUMERIC_CLAIM_UNGROUNDED",
+                "PERSONAL_HISTORY_UNSUPPORTED",
+            }
+            needs_evidence = "NUMERIC_CLAIM_UNGROUNDED" in critical_codes
+            if repairable and (
+                not needs_evidence
+                or (retrieval_result is not None and retrieval_result.documents)
             ):
-                repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
-                    chat_response.answer,
-                    retrieval_result.documents,
-                )
+                repaired_answer = chat_response.answer
+                removed_numbers: list[str] = []
+                removed_personal: list[str] = []
+                if "PERSONAL_HISTORY_UNSUPPORTED" in critical_codes:
+                    # No evidence is needed to know we hold no purchase history
+                    # for anybody: the sentence is unsupportable in principle,
+                    # not merely unsupported by these documents.
+                    repaired_answer, removed_personal = remove_unsupported_personal_claims(
+                        repaired_answer
+                    )
+                if needs_evidence:
+                    repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
+                        repaired_answer,
+                        retrieval_result.documents,
+                    )
                 if repaired_answer and repaired_answer != chat_response.answer:
                     repaired_response = ChatResponse(
                         answer=repaired_answer,
@@ -2117,8 +2136,10 @@ class AIOrchestrator:
                         confidence=chat_response.confidence,
                         metadata={
                             **(chat_response.metadata or {}),
-                            "numeric_claim_repair": True,
+                            "numeric_claim_repair": bool(removed_numbers),
                             "removed_numeric_claims": removed_numbers,
+                            "personal_history_repair": bool(removed_personal),
+                            "removed_personal_claims": removed_personal,
                         },
                         correlation_id=chat_response.correlation_id,
                     )

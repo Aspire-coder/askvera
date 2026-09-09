@@ -8,6 +8,7 @@ from .length_validator import LengthValidator
 from .metadata_validator import MetadataValidator
 from .numeric_grounding_validator import NumericGroundingValidator
 from .output_integrity_validator import OutputIntegrityValidator
+from .personal_history_validator import PersonalHistoryValidator
 
 __all__ = [
     "AnswerValidator",
@@ -18,4 +19,5 @@ __all__ = [
     "MetadataValidator",
     "NumericGroundingValidator",
     "OutputIntegrityValidator",
+    "PersonalHistoryValidator",
 ]
