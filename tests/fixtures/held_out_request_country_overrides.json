@@ -8,5 +8,8 @@
     "ho-slp-05-benin-accented-fbo-minimum-order-fr": "US",
     "ho-slp-20-poland-first-order-and-delivery-cost-en": "US",
     "ho-slp-21-poland-unregistered-fbo-annual-bonus-payout-en": "US"
+  },
+  "abstention_request_countries": {
+    "ho-slp-23-portugal-must-not-get-italy-premium-customer-commission-en": "US"
   }
 }

@@ -66,6 +66,23 @@ def _valid_countries() -> frozenset[str]:
     )
 
 
+def _chat_request_countries() -> frozenset[str]:
+    """The request countries the chat API accepts, from the same source it uses.
+
+    Not ``_valid_countries()``. That set is every enabled market in
+    config/markets.json - 139 codes. ``ChatRequest`` accepts only enabled
+    markets that are also in the published policy-locale catalog, through
+    ``services.market_config.get_country_codes`` - 16 codes. Portugal is in the
+    first and not the second, so a request checked against the broader set
+    passed locally and was refused in production preflight as
+    "Unsupported country". Imported here rather than at module load so the
+    runner stays importable without application configuration.
+    """
+    from services.market_config import get_country_codes
+
+    return frozenset(code.upper() for code in get_country_codes())
+
+
 def _validate_patterns(identifier: str, expected: dict[str, Any], field: str) -> None:
     """Reject malformed regex expectations before a paid benchmark run."""
     patterns = expected.get(field, [])
@@ -172,11 +189,20 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:  # noqa: C901
 def load_transport_overrides(
     path: Path | None, cases: list[dict[str, Any]], fixture_hash: str
 ) -> tuple[dict[str, str], str | None]:
-    """Load a hash-bound request-country overlay for global directory cases.
+    """Load a hash-bound request-country overlay for held-out execution.
 
-    The source country remains the benchmark's ground truth. This only selects
-    a supported chat session for a globally scoped directory record whose own
-    market is not currently enabled as an interactive AskVera market.
+    The source country remains the benchmark's ground truth. The overlay only
+    selects a supported chat session and never changes a case's expectation.
+    It has two mappings, kept separate so neither weakens the other:
+
+    * ``request_countries`` - a globally scoped directory case whose own market
+      is not enabled as an interactive AskVera market;
+    * ``abstention_request_countries`` - a cross-market *refusal* case whose
+      frozen session country is not a published market. Every condition it
+      must meet is listed on ``_abstention_request_country``.
+
+    One mapping is returned for execution: which mapping admitted a case does
+    not matter once it has been validated.
     """
     if path is None:
         return {}, None
@@ -190,6 +216,9 @@ def load_transport_overrides(
     requested = payload.get("request_countries")
     if not isinstance(requested, dict):
         raise ValueError("Transport overrides need a request_countries object.")
+    abstentions = payload.get("abstention_request_countries", {})
+    if not isinstance(abstentions, dict):
+        raise ValueError("Transport overrides' abstention_request_countries must be an object.")
 
     cases_by_id = {str(case["id"]): case for case in cases}
     overrides: dict[str, str] = {}
@@ -209,7 +238,82 @@ def load_transport_overrides(
             )
         overrides[identifier] = country
 
+    for identifier, request_country in abstentions.items():
+        overrides[identifier] = _abstention_request_country(
+            identifier, request_country, cases_by_id, overrides
+        )
+
     return overrides, hashlib.sha256(raw).hexdigest()
+
+
+def _abstention_request_country(
+    identifier: object,
+    request_country: object,
+    cases_by_id: dict[str, dict[str, Any]],
+    global_overrides: dict[str, str],
+) -> str:
+    """Admit one cross-market refusal to a supported session, or refuse loudly.
+
+    Written for held-out case 23. A Portugal session asking for Italy's
+    Cliente Premium commission must be refused, but ``PT`` is not a published
+    market, so the request cannot be sent as frozen. Sending it from ``US``
+    keeps it a cross-market question. Each condition exists so this exception
+    cannot be used to change what a case measures:
+
+    1. the case exists in the frozen fixture;
+    2. it is not already transported by ``request_countries``;
+    3. it has a local-policy source, not GLOBAL directory content, which has
+       its own mapping;
+    4. it expects a refusal - an answer case could be flipped into passing;
+    5. it is cross-market: its source market differs from its frozen session;
+    6. its frozen session is not a published market - a case that can run as
+       frozen must run as frozen;
+    7. the request country is a published market;
+    8. the request country is not the source market. Asking for Italy's policy
+       from an Italian session makes it an in-market question, which is
+       exactly the claim that Portugal inherits Italian policy.
+    """
+    if not isinstance(identifier, str) or identifier not in cases_by_id:
+        raise ValueError(f"Transport override names an unknown case: {identifier!r}.")
+    if identifier in global_overrides:
+        raise ValueError(
+            f"Abstention transport for {identifier} is forbidden: it already has a "
+            "request_countries transport."
+        )
+    case = cases_by_id[identifier]
+    source = case.get("source")
+    source_country = str(source.get("country", "")).upper() if isinstance(source, dict) else ""
+    if not source_country:
+        raise ValueError(f"Abstention transport for {identifier} is forbidden: the case names no source market.")
+    if source_country == "GLOBAL":
+        raise ValueError(
+            f"Abstention transport for {identifier} is forbidden: GLOBAL source cases use request_countries."
+        )
+    expected = case.get("expected")
+    if not isinstance(expected, dict) or expected.get("kind") != "abstain":
+        raise ValueError(
+            f"Abstention transport for {identifier} is forbidden: only abstention cases may use it."
+        )
+    session_country = str(case.get("country", "")).upper()
+    if source_country == session_country:
+        raise ValueError(f"Abstention transport for {identifier} is forbidden: it is not a cross-market case.")
+    supported = _chat_request_countries()
+    if session_country in supported:
+        raise ValueError(
+            f"Abstention transport for {identifier} is forbidden: its frozen request country "
+            f"{session_country!r} is already supported."
+        )
+    country = str(request_country).strip().upper()
+    if country not in supported:
+        raise ValueError(
+            f"Transport override for {identifier} uses unsupported request country {country!r}."
+        )
+    if country == source_country:
+        raise ValueError(
+            f"Abstention transport for {identifier} is forbidden: requesting from the source market "
+            f"{country!r} would make it an in-market question."
+        )
+    return country
 
 
 def execution_case_for_request(
@@ -552,7 +656,10 @@ def main() -> int:
         "--transport-overrides",
         type=Path,
         default=None,
-        help="Hash-bound request-country overlay, allowed only for GLOBAL source cases.",
+        help=(
+            "Hash-bound request-country overlay: request_countries for GLOBAL source "
+            "cases, abstention_request_countries for cross-market refusal cases."
+        ),
     )
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Validate the fixture; make no model calls.")
@@ -586,6 +693,14 @@ def main() -> int:
         return 2
 
     model_calls = sum((1 + len(case.get("conversation") or [])) for case in cases) * max(1, args.repeat)
+    # A request country the chat API does not accept is found here, for free,
+    # rather than by a paid run failing on it. Production preflight blocked on
+    # exactly this for held-out case 23, which a dry run reported as valid.
+    # Reported, not enforced: other fixtures are not transport-bound.
+    unsupported_request_countries = sorted(
+        str(case["id"]) for case in cases
+        if execution_case_for_request(case, transport_overrides)[1] not in _chat_request_countries()
+    )
     if args.dry_run:
         print(json.dumps({
             "status": "valid",
@@ -595,6 +710,7 @@ def main() -> int:
             "fixture_sha256": fixture_hash,
             "transport_override_cases": len(transport_overrides),
             "transport_overrides_sha256": overrides_hash,
+            "unsupported_request_countries": unsupported_request_countries,
             "note": "No model calls were made.",
         }, indent=2))
         return 0

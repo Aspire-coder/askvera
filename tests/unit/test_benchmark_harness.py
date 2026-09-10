@@ -535,3 +535,238 @@ def test_the_scope_pair_passes_when_each_market_cites_its_own_parent():
         cited_sections=benchmark._section_keys([("2", "SE")]),
     ))
     assert not wrong_market["passed"]
+
+
+# --- abstention transport: HELDOUT-LOCAL-REFUSAL-TRANSPORT-01 -------------
+
+FROZEN_PACK = PROJECT_ROOT / "tests" / "fixtures" / "held_out_source_linked_pack.json"
+TRANSPORT_OVERLAY = PROJECT_ROOT / "tests" / "fixtures" / "held_out_request_country_overrides.json"
+FROZEN_PACK_SHA256 = "5eb49a410c37a4f87ef3b60c922bd06dede92007b48e021d6f28fb77ee1ff208"
+CASE_23 = "ho-slp-23-portugal-must-not-get-italy-premium-customer-commission-en"
+ITALY_PREMIUM_RATE = r"\b25\s?%"
+GLOBAL_TRANSPORTS = {
+    "ho-slp-01-ghana-preferred-customer-signup-order-en": "US",
+    "ho-slp-02-ghana-prospect-fbo-first-order-conditions-en": "US",
+    "ho-slp-04-tanzania-foreign-then-local-bonus-follow-up-en": "US",
+    "ho-slp-05-benin-accented-fbo-minimum-order-fr": "US",
+    "ho-slp-20-poland-first-order-and-delivery-cost-en": "US",
+    "ho-slp-21-poland-unregistered-fbo-annual-bonus-payout-en": "US",
+}
+
+GLOBAL_ANSWER_CASE = {**VALID_CASE, "id": "global-answer", "country": "GH", "source": {"country": "GLOBAL"}}
+CROSS_MARKET_REFUSAL = {
+    **VALID_CASE,
+    "id": "pt-italy-refusal",
+    "country": "PT",
+    "source": {"country": "IT"},
+    "expected": {"kind": "abstain", "forbidden_patterns": [ITALY_PREMIUM_RATE]},
+}
+LOCAL_POLICY_ANSWER = {**VALID_CASE, "id": "it-local-answer", "country": "IT", "source": {"country": "IT"}}
+
+
+def _abstention_overlay(tmp_path: Path, abstentions, request_countries=None, fixture_sha256="right") -> Path:
+    return _transport_override(tmp_path, {
+        "schema_version": 1,
+        "fixture_sha256": fixture_sha256,
+        "request_countries": request_countries or {},
+        "abstention_request_countries": abstentions,
+    })
+
+
+def test_abstention_transport_admits_a_cross_market_refusal(tmp_path):
+    path = _abstention_overlay(tmp_path, {"pt-italy-refusal": "US"}, {"global-answer": "US"})
+
+    overrides, digest = benchmark.load_transport_overrides(
+        path, [GLOBAL_ANSWER_CASE, CROSS_MARKET_REFUSAL], "right")
+
+    assert overrides == {"global-answer": "US", "pt-italy-refusal": "US"}
+    assert len(digest) == 64
+    execution_case, request_country = benchmark.execution_case_for_request(CROSS_MARKET_REFUSAL, overrides)
+    assert request_country == "US"
+    assert execution_case["country"] == "US"
+    # The frozen case is untouched: its session and expectation are the truth.
+    assert CROSS_MARKET_REFUSAL["country"] == "PT"
+    assert execution_case["expected"] == CROSS_MARKET_REFUSAL["expected"]
+
+
+def test_abstention_transport_refuses_a_wrong_fixture_hash(tmp_path):
+    path = _abstention_overlay(tmp_path, {"pt-italy-refusal": "US"}, fixture_sha256="wrong")
+
+    with pytest.raises(ValueError, match="frozen fixture hash"):
+        benchmark.load_transport_overrides(path, [CROSS_MARKET_REFUSAL], "right")
+
+
+def test_abstention_transport_refuses_an_unknown_case(tmp_path):
+    path = _abstention_overlay(tmp_path, {"missing": "US"})
+
+    with pytest.raises(ValueError, match="unknown case"):
+        benchmark.load_transport_overrides(path, [CROSS_MARKET_REFUSAL], "right")
+
+
+def test_abstention_transport_refuses_an_unsupported_request_country(tmp_path):
+    path = _abstention_overlay(tmp_path, {"pt-italy-refusal": "ZZ"})
+
+    with pytest.raises(ValueError, match="unsupported request country"):
+        benchmark.load_transport_overrides(path, [CROSS_MARKET_REFUSAL], "right")
+
+
+@pytest.mark.parametrize("case", [
+    LOCAL_POLICY_ANSWER,
+    {**CROSS_MARKET_REFUSAL, "id": "pt-italy-answer", "expected": {"kind": "answer", "must_contain": ["25%"]}},
+], ids=["local-policy-answer", "cross-market-answer"])
+def test_abstention_transport_refuses_a_non_abstention_case(tmp_path, case):
+    """A normal local-policy answer, or any answer case, cannot use this path."""
+    path = _abstention_overlay(tmp_path, {case["id"]: "US"})
+
+    with pytest.raises(ValueError, match="only abstention cases"):
+        benchmark.load_transport_overrides(path, [case], "right")
+
+
+@pytest.mark.parametrize("kind", ["answer", "abstain"])
+def test_abstention_transport_refuses_a_global_source_case(tmp_path, kind):
+    """GLOBAL cases already have request_countries; the new path is not a second door."""
+    case = {**GLOBAL_ANSWER_CASE, "expected": {"kind": kind, "must_contain": ["x"]}}
+    path = _abstention_overlay(tmp_path, {case["id"]: "US"})
+
+    with pytest.raises(ValueError, match="GLOBAL source cases use request_countries"):
+        benchmark.load_transport_overrides(path, [case], "right")
+
+
+def test_abstention_transport_refuses_a_case_already_in_request_countries(tmp_path):
+    path = _abstention_overlay(tmp_path, {"global-answer": "US"}, {"global-answer": "US"})
+
+    with pytest.raises(ValueError, match="already has a request_countries transport"):
+        benchmark.load_transport_overrides(path, [GLOBAL_ANSWER_CASE], "right")
+
+
+def test_abstention_transport_refuses_a_case_that_can_run_as_frozen(tmp_path):
+    """An Austria session is published, so that refusal must run from Austria."""
+    case = {**CROSS_MARKET_REFUSAL, "id": "at-italy-refusal", "country": "AT"}
+    path = _abstention_overlay(tmp_path, {case["id"]: "US"})
+
+    with pytest.raises(ValueError, match="already supported"):
+        benchmark.load_transport_overrides(path, [case], "right")
+
+
+def test_abstention_transport_refuses_a_same_market_refusal(tmp_path):
+    case = {**CROSS_MARKET_REFUSAL, "id": "pt-pt-refusal", "source": {"country": "PT"}}
+    path = _abstention_overlay(tmp_path, {case["id"]: "US"})
+
+    with pytest.raises(ValueError, match="not a cross-market case"):
+        benchmark.load_transport_overrides(path, [case], "right")
+
+
+def test_abstention_transport_refuses_the_source_market_as_request_country(tmp_path):
+    """Sending Italy's policy question from Italy would make Italy's rule answerable."""
+    path = _abstention_overlay(tmp_path, {"pt-italy-refusal": "IT"})
+
+    with pytest.raises(ValueError, match="in-market question"):
+        benchmark.load_transport_overrides(path, [CROSS_MARKET_REFUSAL], "right")
+
+
+def test_abstention_transport_refuses_a_malformed_mapping(tmp_path):
+    path = _abstention_overlay(tmp_path, ["pt-italy-refusal"])
+
+    with pytest.raises(ValueError, match="must be an object"):
+        benchmark.load_transport_overrides(path, [CROSS_MARKET_REFUSAL], "right")
+
+
+def test_the_transport_cannot_turn_the_refusal_into_italian_policy(tmp_path):
+    """Portugal must not inherit Italy's Cliente Premium commission.
+
+    The transport changes only the session. The case is still scored against
+    its frozen expectation, so an answer quoting Italy's 25% fails however it
+    was requested, and only a refusal passes.
+    """
+    path = _abstention_overlay(tmp_path, {"pt-italy-refusal": "US"})
+    overrides, _ = benchmark.load_transport_overrides(path, [CROSS_MARKET_REFUSAL], "right")
+    execution_case, _ = benchmark.execution_case_for_request(CROSS_MARKET_REFUSAL, overrides)
+
+    inherited = benchmark.score_run(CROSS_MARKET_REFUSAL, _run(
+        answer="Forever Italy pays an FBO a 25% commission on Cliente Premium orders.",
+        abstained=False))
+    refused = benchmark.score_run(CROSS_MARKET_REFUSAL, _run(
+        answer="That local company policy is only available to readers in that market.",
+        abstained=True, citations=0, cited_sections=[]))
+
+    assert execution_case["expected"]["kind"] == "abstain"
+    assert execution_case["expected"]["forbidden_patterns"] == [ITALY_PREMIUM_RATE]
+    assert inherited["passed"] is False
+    assert "answered a question the documents do not cover" in inherited["failures"]
+    assert any("forbidden pattern" in failure for failure in inherited["failures"])
+    assert refused["passed"] is True
+
+
+def test_the_frozen_pack_hash_is_unchanged():
+    import hashlib
+
+    assert hashlib.sha256(FROZEN_PACK.read_bytes()).hexdigest() == FROZEN_PACK_SHA256
+
+
+def test_the_real_overlay_admits_case_23_and_keeps_the_global_entries():
+    cases, fixture_hash = benchmark.load_fixture(FROZEN_PACK)
+    overrides, _ = benchmark.load_transport_overrides(TRANSPORT_OVERLAY, cases, fixture_hash)
+    payload = json.loads(TRANSPORT_OVERLAY.read_text(encoding="utf-8"))
+    case_23 = next(case for case in cases if case["id"] == CASE_23)
+    execution_case, request_country = benchmark.execution_case_for_request(case_23, overrides)
+
+    assert fixture_hash == FROZEN_PACK_SHA256
+    assert payload["fixture_sha256"] == FROZEN_PACK_SHA256
+    assert payload["request_countries"] == GLOBAL_TRANSPORTS
+    assert payload["abstention_request_countries"] == {CASE_23: "US"}
+    # The execution record names all three: source PT, request US, abstain.
+    assert (str(case_23["country"]).upper(), request_country, case_23["expected"]["kind"]) == (
+        "PT", "US", "abstain")
+    assert execution_case["expected"] == case_23["expected"]
+
+
+def test_every_frozen_case_now_has_a_supported_request_country():
+    cases, fixture_hash = benchmark.load_fixture(FROZEN_PACK)
+    overrides, _ = benchmark.load_transport_overrides(TRANSPORT_OVERLAY, cases, fixture_hash)
+    supported = benchmark._chat_request_countries()
+
+    unsupported = [
+        case["id"] for case in cases
+        if benchmark.execution_case_for_request(case, overrides)[1] not in supported
+    ]
+
+    assert len(cases) == 24
+    assert unsupported == []
+
+
+@pytest.mark.parametrize("with_overlay", [True, False])
+def test_the_dry_run_names_requests_the_chat_api_would_refuse(monkeypatch, capsys, with_overlay):
+    """The no-model check that production preflight needed and the dry run lacked."""
+    import sys
+
+    argv = ["run_benchmark.py", "--fixture", str(FROZEN_PACK), "--dry-run", "--repeat", "1"]
+    if with_overlay:
+        argv += ["--transport-overrides", str(TRANSPORT_OVERLAY)]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    exit_code = benchmark.main()
+    report = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert report["fixture_sha256"] == FROZEN_PACK_SHA256
+    assert report["note"] == "No model calls were made."
+    if with_overlay:
+        assert report["unsupported_request_countries"] == []
+        assert report["transport_override_cases"] == 7
+    else:
+        assert CASE_23 in report["unsupported_request_countries"]
+
+
+def test_the_chat_request_countries_are_narrower_than_the_market_catalog():
+    """Why the abstention transport cannot use ``_valid_countries()``.
+
+    Portugal is an enabled market in the catalog but not a country the chat API
+    accepts. Checking against the catalog is what let a request production
+    refused pass locally.
+    """
+    catalog = benchmark._valid_countries()
+    chat = benchmark._chat_request_countries()
+
+    assert chat < catalog
+    assert "PT" in catalog and "PT" not in chat
+    assert {"US", "AT", "IT"} <= chat
