@@ -17,6 +17,7 @@ from app.evidence import (
     assistant_meta_response,
     approve_evidence,
     classify_intent,
+    configured_conversation_response,
     is_planner_trusted_low_risk_subtype,
     localized_conversation_response,
     mentions_out_of_corpus_topic,
@@ -189,6 +190,14 @@ DIRECTORY_FIELD_TERMS: dict[str, re.Pattern[str]] = {
 # falls back to the request's own selected country.
 OFFICE_CONTACT_LOOKUP_QUERY = "What is the office phone number, email address, and website for this country?"
 OFFICE_CONTACT_FIELD_RE = re.compile(r"phone|telephone|email|e-mail", re.IGNORECASE)
+
+
+CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
+    "Local company policy for another market is only available to readers in "
+    "that market, so I'm not able to share it here. I can help with the "
+    "policies that apply to your own market, and Forever Living support or "
+    "your upline can point you to the right contact for the other market."
+)
 
 
 class ConsentRequiredError(Exception):
@@ -1359,6 +1368,17 @@ class AIOrchestrator:
             ),
         )
 
+    def _cross_market_scope_message(self, language: str = "en", user_message: str = "") -> str:
+        """Explain a cross-market local-policy refusal without disclosing policy."""
+        copy, reviewed_for_locale = configured_conversation_response(
+            "cross_market_policy_scope", language
+        )
+        if copy and reviewed_for_locale:
+            return copy
+        if (language or "en").split("-", 1)[0].lower() == "en":
+            return CROSS_MARKET_POLICY_SCOPE_RESPONSE
+        return self._insufficient_evidence_message(language, user_message)
+
     def _candidate_narrowing_response(
         self,
         body: ChatRequest,
@@ -1803,7 +1823,14 @@ class AIOrchestrator:
             narrowing_response = self._candidate_narrowing_response(body, correlation_id, history)
             if narrowing_response:
                 return narrowing_response, approved_result, evidence_decision
-        fallback_message = self._insufficient_evidence_message(body.language, body.message)
+        if evidence_decision.reason == "cross_market_policy_request":
+            fallback_message = self._cross_market_scope_message(
+                body.language, body.message
+            )
+        else:
+            fallback_message = self._insufficient_evidence_message(
+                body.language, body.message
+            )
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:
             fallback_message = f"{fallback_message}\n\n{office_contact_addendum}"

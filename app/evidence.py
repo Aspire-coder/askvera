@@ -135,6 +135,17 @@ def localized_conversation_response(key: str, language: str = "") -> str | None:
     return localize_reviewed_copy(source, locale, key) or source
 
 
+def configured_conversation_response(key: str, language: str = "") -> tuple[str | None, bool]:
+    """Return configured copy and whether it is reviewed for this locale."""
+    locale = _locale_key(language)
+    routes = _conversation_routes()
+    localized = (routes.get(locale, {}).get("responses", {}) or {}).get(key)
+    if localized:
+        return str(localized).strip(), True
+    english = (routes.get("en", {}).get("responses", {}) or {}).get(key)
+    return (str(english).strip() if english else None), locale == "en"
+
+
 def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str, language: str) -> EvidenceDecision:
     """Approve approved, current-locale evidence before model generation."""
     intent = classify_intent(query, language)

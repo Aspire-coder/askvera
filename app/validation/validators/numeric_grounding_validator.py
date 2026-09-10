@@ -728,11 +728,13 @@ def _drop_orphaned_lead_ins(text: str) -> str:
                 (candidate for candidate in lines[index + 1:] if candidate.strip()),
                 "",
             )
-            # A list or an indented block is what a lead-in introduces. Ordinary
-            # prose beneath it is a new statement, not the promised content.
+            # A list, an indented block, or a heading is what a lead-in
+            # introduces. Ordinary prose beneath it is a new statement, not
+            # the promised content.
             introduces_content = bool(
                 re.match(r"\s*(?:[-*•]|\d+[.)]|[a-z][.)])\s", following)
                 or (following[:1].isspace() if following else False)
+                or re.match(r"\s*(?:#{1,6}\s|\*\*\S)", following)
             )
             if not introduces_content:
                 continue
