@@ -74,6 +74,68 @@ def test_fixture_loads_and_reports_a_content_hash(tmp_path):
     assert len(digest) == 64
 
 
+def _transport_override(tmp_path: Path, payload: dict) -> Path:
+    path = tmp_path / "transport-overrides.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_transport_override_is_hash_bound_and_global_only(tmp_path):
+    case = {**VALID_CASE, "country": "GH", "source": {"country": "GLOBAL"}}
+    path = _transport_override(tmp_path, {
+        "schema_version": 1,
+        "fixture_sha256": "f" * 64,
+        "request_countries": {"case-1": "US"},
+    })
+
+    overrides, digest = benchmark.load_transport_overrides(path, [case], "f" * 64)
+
+    assert overrides == {"case-1": "US"}
+    assert len(digest) == 64
+    execution_case, request_country = benchmark.execution_case_for_request(case, overrides)
+    assert request_country == "US"
+    assert execution_case["country"] == "US"
+    assert case["country"] == "GH"
+
+
+def test_transport_override_refuses_hash_mismatch_or_local_source(tmp_path):
+    path = _transport_override(tmp_path, {
+        "schema_version": 1,
+        "fixture_sha256": "wrong",
+        "request_countries": {"case-1": "US"},
+    })
+    global_case = {**VALID_CASE, "source": {"country": "GLOBAL"}}
+    with pytest.raises(ValueError, match="frozen fixture hash"):
+        benchmark.load_transport_overrides(path, [global_case], "right")
+
+    path = _transport_override(tmp_path, {
+        "schema_version": 1,
+        "fixture_sha256": "right",
+        "request_countries": {"case-1": "US"},
+    })
+    with pytest.raises(ValueError, match="only GLOBAL"):
+        benchmark.load_transport_overrides(path, [VALID_CASE], "right")
+
+
+def test_transport_override_refuses_unknown_case_or_request_country(tmp_path):
+    global_case = {**VALID_CASE, "source": {"country": "GLOBAL"}}
+    path = _transport_override(tmp_path, {
+        "schema_version": 1,
+        "fixture_sha256": "right",
+        "request_countries": {"missing": "US"},
+    })
+    with pytest.raises(ValueError, match="unknown case"):
+        benchmark.load_transport_overrides(path, [global_case], "right")
+
+    path = _transport_override(tmp_path, {
+        "schema_version": 1,
+        "fixture_sha256": "right",
+        "request_countries": {"case-1": "ZZ"},
+    })
+    with pytest.raises(ValueError, match="unsupported request country"):
+        benchmark.load_transport_overrides(path, [global_case], "right")
+
+
 def test_case_without_provenance_is_refused(tmp_path):
     case = copy.deepcopy(VALID_CASE)
     case["provenance"] = "   "

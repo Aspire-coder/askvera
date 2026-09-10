@@ -18,6 +18,7 @@ whole fixture without a single model call.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -92,8 +93,6 @@ def _validate_held_out_readiness(payload: dict[str, Any], cases: list[Any]) -> N
 
 def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:  # noqa: C901
     """Load and validate benchmark cases, refusing anything unverifiable."""
-    import hashlib
-
     raw = path.read_bytes()
     payload = json.loads(raw)
     if payload.get("schema_version") != 1 or not isinstance(payload.get("cases"), list):
@@ -168,6 +167,57 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:  # noqa: C901
                 raise ValueError(f"Conversation turns for {identifier} need a non-empty question.")
 
     return cases, hashlib.sha256(raw).hexdigest()
+
+
+def load_transport_overrides(
+    path: Path | None, cases: list[dict[str, Any]], fixture_hash: str
+) -> tuple[dict[str, str], str | None]:
+    """Load a hash-bound request-country overlay for global directory cases.
+
+    The source country remains the benchmark's ground truth. This only selects
+    a supported chat session for a globally scoped directory record whose own
+    market is not currently enabled as an interactive AskVera market.
+    """
+    if path is None:
+        return {}, None
+
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    if payload.get("schema_version") != 1:
+        raise ValueError("Transport overrides must use schema_version 1.")
+    if payload.get("fixture_sha256") != fixture_hash:
+        raise ValueError("Transport overrides do not match the frozen fixture hash.")
+    requested = payload.get("request_countries")
+    if not isinstance(requested, dict):
+        raise ValueError("Transport overrides need a request_countries object.")
+
+    cases_by_id = {str(case["id"]): case for case in cases}
+    overrides: dict[str, str] = {}
+    for identifier, request_country in requested.items():
+        if not isinstance(identifier, str) or identifier not in cases_by_id:
+            raise ValueError(f"Transport override names an unknown case: {identifier!r}.")
+        case = cases_by_id[identifier]
+        source = case.get("source")
+        if not isinstance(source, dict) or str(source.get("country", "")).upper() != "GLOBAL":
+            raise ValueError(
+                f"Transport override for {identifier} is forbidden: only GLOBAL source cases may use one."
+            )
+        country = str(request_country).strip().upper()
+        if country not in _valid_countries():
+            raise ValueError(
+                f"Transport override for {identifier} uses unsupported request country {country!r}."
+            )
+        overrides[identifier] = country
+
+    return overrides, hashlib.sha256(raw).hexdigest()
+
+
+def execution_case_for_request(
+    case: dict[str, Any], transport_overrides: dict[str, str]
+) -> tuple[dict[str, Any], str]:
+    """Return a request-only copy without changing the source-bound case."""
+    request_country = transport_overrides.get(str(case["id"]), str(case["country"]).upper())
+    return {**case, "country": request_country}, request_country
 
 
 # A refusal is only recognisable against the copy the system actually uses, and
@@ -498,6 +548,12 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
+    parser.add_argument(
+        "--transport-overrides",
+        type=Path,
+        default=None,
+        help="Hash-bound request-country overlay, allowed only for GLOBAL source cases.",
+    )
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Validate the fixture; make no model calls.")
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N cases.")
@@ -513,6 +569,9 @@ def main() -> int:
 
     try:
         cases, fixture_hash = load_fixture(args.fixture)
+        transport_overrides, overrides_hash = load_transport_overrides(
+            args.transport_overrides, cases, fixture_hash
+        )
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Benchmark fixture is invalid: {exc}", file=sys.stderr)
         return 2
@@ -534,6 +593,8 @@ def main() -> int:
             "runs": len(cases) * max(1, args.repeat),
             "generation_calls": model_calls,
             "fixture_sha256": fixture_hash,
+            "transport_override_cases": len(transport_overrides),
+            "transport_overrides_sha256": overrides_hash,
             "note": "No model calls were made.",
         }, indent=2))
         return 0
@@ -558,14 +619,17 @@ def main() -> int:
 
     results = []
     for index, case in enumerate(cases, start=1):
+        request_case, request_country = execution_case_for_request(case, transport_overrides)
         runs = []
         for attempt in range(max(1, args.repeat)):
-            raw = run_case_once(canary, case, index * 1000 + attempt)
+            raw = run_case_once(canary, request_case, index * 1000 + attempt)
             runs.append(score_run(case, raw))
         passed_runs = sum(1 for run in runs if run["passed"])
         results.append({
             "id": case["id"],
             "question": case["question"],
+            "source_country": str(case["country"]).upper(),
+            "request_country": request_country,
             "evaluation_set": case.get("evaluation_set", "development"),
             "intent_group": case["intent_group"],
             "expected_kind": case["expected"]["kind"],
@@ -585,6 +649,8 @@ def main() -> int:
         "index": settings.OPENSEARCH_INDEX,
         "pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
         "fixture_sha256": fixture_hash,
+        "transport_override_cases": len(transport_overrides),
+        "transport_overrides_sha256": overrides_hash,
         "repeat": max(1, args.repeat),
     })
     print(json.dumps(summary, indent=2, ensure_ascii=False))
