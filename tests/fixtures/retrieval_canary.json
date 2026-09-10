@@ -285,7 +285,9 @@
         "do not contain enough information"
       ],
       "answer_must_cite": true,
-      "answer_must_not_remove_numbers": true,
+      "answer_allowed_removed_numbers": [
+        "50"
+      ],
       "blocking": true,
       "repeat": 3
     }

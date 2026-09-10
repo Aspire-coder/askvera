@@ -45,6 +45,26 @@ REQUIRED_CASE_FIELDS = {
 }
 
 
+def _validate_allowed_removed_numbers(case: dict[str, Any], identifier: str) -> None:
+    if "answer_allowed_removed_numbers" not in case:
+        return
+
+    allowed_numbers = case["answer_allowed_removed_numbers"]
+    if (
+        not isinstance(allowed_numbers, list)
+        or not allowed_numbers
+        or any(not isinstance(number, str) or not number.strip() for number in allowed_numbers)
+    ):
+        raise ValueError(
+            f"'answer_allowed_removed_numbers' must be a non-empty list of strings "
+            f"for {identifier}."
+        )
+    if case.get("answer_must_not_remove_numbers"):
+        raise ValueError(
+            f"{identifier} cannot both forbid and allow numeric-claim removal."
+        )
+
+
 def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
     raw = path.read_bytes()
     payload = json.loads(raw)
@@ -79,6 +99,7 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
                 )
         if "blocking" in case and not isinstance(case["blocking"], bool):
             raise ValueError(f"'blocking' must be true or false for {identifier}.")
+        _validate_allowed_removed_numbers(case, identifier)
         if "repeat" in case:
             repeat = case["repeat"]
             if not isinstance(repeat, int) or isinstance(repeat, bool) or repeat < 1:
@@ -90,6 +111,20 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
                 f"Case {identifier} is non-blocking and must set 'non_blocking_reason'."
             )
     return cases, hashlib.sha256(raw).hexdigest()
+
+
+def _numeric_removal_failures(case: dict[str, Any], removed_numbers: list[str]) -> list[str]:
+    if bool(case.get("answer_must_not_remove_numbers")) and removed_numbers:
+        return [f"grounding repair removed {removed_numbers} from the delivered answer"]
+
+    allowed_numbers = set(case.get("answer_allowed_removed_numbers") or [])
+    unexpected_numbers = sorted(set(removed_numbers) - allowed_numbers)
+    if unexpected_numbers:
+        return [
+            "grounding repair removed unexpected numbers "
+            f"{unexpected_numbers} from the delivered answer"
+        ]
+    return []
 
 
 def _git_commit() -> str:
@@ -332,6 +367,7 @@ def run_case_once(case: dict[str, Any], sequence: int):
         checks_answer
         or bool(case.get("conversation"))
         or bool(case.get("answer_must_not_remove_numbers"))
+        or "answer_allowed_removed_numbers" in case
     )
 
     answer = ""
@@ -409,8 +445,7 @@ def run_case_once(case: dict[str, Any], sequence: int):
     # directory answers over a notation difference, and no assertion about the
     # answer's text could catch that reliably, because the figures are simply
     # gone rather than wrong.
-    if bool(case.get("answer_must_not_remove_numbers")) and removed_numbers:
-        failures.append(f"grounding repair removed {removed_numbers} from the delivered answer")
+    failures.extend(_numeric_removal_failures(case, removed_numbers))
 
     return {
         "id": case["id"],
