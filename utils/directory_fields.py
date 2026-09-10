@@ -247,6 +247,56 @@ def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> 
     return corrected, replacements > 0
 
 
+_DANGLING_LEAD_END = re.compile(
+    r"(?:,\s*)?\b(?:the|a|an|and|or|with|for|to|at|in|of|from|that)\s*$",
+    re.IGNORECASE,
+)
+_SCAFFOLDING_LEAD = re.compile(
+    r"\s*(?:"
+    r"(?:if|when)\s+you(?:\s*'re|\s+are)?\s+order(?:ing)?\s+online"
+    r"|(?:for|with)\s+online\s+orders?"
+    r"|when\s+ordering\s+online"
+    r"|(?:please\s+)?keep\s+in\s+mind(?:\s+that)?"
+    r")\s*,?\s*(?:the|a|an)?\s*",
+    re.IGNORECASE,
+)
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+
+
+def _remove_field_sentences(answer: str, pattern: re.Pattern) -> tuple[str, int]:
+    """Remove an unrequested field without leaving a broken lead-in behind."""
+    spans: list[tuple[int, int, str]] = []
+    boundaries = [match.end() for match in _SENTENCE_END.finditer(answer)]
+    for match in pattern.finditer(answer):
+        start, end = match.start(), match.end()
+        lead_start = max((boundary for boundary in boundaries if boundary <= start), default=0)
+        lead = answer[lead_start:start]
+        if lead.strip() and _DANGLING_LEAD_END.search(lead):
+            if _SCAFFOLDING_LEAD.fullmatch(lead):
+                spans.append((lead_start, end, " " if lead[:1].isspace() else ""))
+                continue
+            trimmed = lead
+            while True:
+                shorter = _DANGLING_LEAD_END.sub("", trimmed).rstrip()
+                if shorter == trimmed.rstrip():
+                    break
+                trimmed = shorter
+            trimmed = trimmed.rstrip()
+            if trimmed and not trimmed.endswith((".", "!", "?")):
+                trimmed += "."
+            spans.append((lead_start, end, trimmed + " "))
+            continue
+        spans.append((start, end, ""))
+
+    if not spans:
+        return answer, 0
+    repaired = answer
+    for start, end, replacement in reversed(spans):
+        repaired = repaired[:start] + replacement + repaired[end:]
+    repaired = re.sub(r"[ \t]{2,}", " ", repaired)
+    return re.sub(r"\n{3,}", "\n\n", repaired), len(spans)
+
+
 def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str, bool]:
     """Remove extra labelled directory fields when one field was requested."""
     question_text = (question or "").casefold()
@@ -274,12 +324,13 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     elif re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
         allowed = r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?"
     elif re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
-        cleaned, replacements = re.subn(
-            r"(?:payment\s+methods?\s+accepted|delivery\s+cost|delivery\s+charge|"
-            r"average\s+lead\s+time|business\s+hours?)[^.!?]*(?:[.!?]|$)\s*",
-            "",
+        cleaned, replacements = _remove_field_sentences(
             answer or "",
-            flags=re.IGNORECASE,
+            re.compile(
+                r"(?:payment\s+methods?\s+accepted|delivery\s+cost|delivery\s+charge|"
+                r"average\s+lead\s+time|business\s+hours?)[^.!?]*(?:[.!?]|$)\s*",
+                re.IGNORECASE,
+            ),
         )
         return cleaned.strip(), replacements > 0
     else:
