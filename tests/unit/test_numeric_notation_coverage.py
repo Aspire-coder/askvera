@@ -279,3 +279,321 @@ def test_citation_support_recognises_the_same_value_written_differently(
     shared = builder._numbers(answer) & builder._numbers(record)
 
     assert bool(shared) is should_match, sorted(shared)
+
+
+# ---------------------------------------------------------------------------
+# Negative controls.
+#
+# Everything above asserts that a value written differently is still
+# recognised. On its own that is a machine for teaching a validator to accept
+# anything: every test passes if grounding simply says yes. These generate the
+# opposite - the same sentence with the value actually changed - and require
+# rejection.
+#
+# A mutation is only a valid control if the new value is genuinely absent from
+# the record. The Algeria record holds 900, 7 800, 60, 5 000, 43, 48 and 96,
+# so a mutation that lands on one of those would be correctly grounded and
+# would fail this test for the right reason. Those are skipped rather than
+# asserted.
+# ---------------------------------------------------------------------------
+
+
+def _mutations(number: str) -> set[str]:
+    """Values that differ from the original, in the ways a model gets it wrong."""
+    digits = number.replace(" ", "")
+    changed: set[str] = set()
+
+    trailing = re.fullmatch(r"(?P<head>.*?)(?P<last>\d)", digits)
+    if trailing:
+        head, last = trailing.group("head", "last")
+        changed.add(f"{head}{(int(last) + 1) % 10}")
+
+    # An order-of-magnitude slip: the failure that matters most in a Case
+    # Credit threshold or a currency amount.
+    if re.fullmatch(r"\d+", digits):
+        changed.add(digits + "0")
+    decimal = re.fullmatch(r"(\d+)([.,])(\d+)", digits)
+    if decimal:
+        whole, separator, fraction = decimal.groups()
+        changed.add(f"{whole}{separator}{fraction[:-1]}{(int(fraction[-1]) + 5) % 10}")
+        # Moving the separator changes the value by a factor of ten.
+        if len(whole) > 1:
+            changed.add(f"{whole[:-1]}{separator}{whole[-1]}{fraction}")
+
+    return {value for value in changed if value and value != digits}
+
+
+def _mutation_cases() -> list[tuple[str, str, str]]:
+    collected: list[tuple[str, str, str]] = []
+    for name, (text, _title, _section) in RECORDS.items():
+        normalized_source = " ".join(text.split())
+        for number in _figures(text):
+            for mutated in sorted(_mutations(number)):
+                # Skip a mutation that happens to be another real figure in the
+                # same record: grounding is right to accept it.
+                if re.search(rf"(?<![\d.,]){re.escape(mutated)}(?![\d])", normalized_source):
+                    continue
+                collected.append((name, number, mutated))
+    return collected
+
+
+MUTATION_CASES = _mutation_cases()
+
+
+def test_the_mutation_generator_produced_controls() -> None:
+    """A silent zero-case run would make the rejection assertions vacuous."""
+    assert len(MUTATION_CASES) > 15, len(MUTATION_CASES)
+
+
+@pytest.mark.parametrize("record,number,mutated", MUTATION_CASES, ids=lambda value: str(value))
+def test_a_changed_value_is_rejected(record: str, number: str, mutated: str) -> None:
+    """The contrast case for every equivalence above.
+
+    Positive-only generated tests risk proving that the validator accepts
+    everything. Each of these takes a sentence the record supports and changes
+    the figure in it, so grounding has to refuse a claim the source does not
+    make.
+    """
+    text, title, section_id = RECORDS[record]
+    answer = _clause_for(text, number).replace(number, mutated)
+    document = _document(text, title, section_id)
+
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+    assert unsupported, (
+        f"{record}: the record writes {number!r} and an answer writing {mutated!r} "
+        "was accepted as grounded"
+    )
+
+
+# The same figure with a different unit is a different fact. Grounding checked
+# the number and the subject and never what the number was denominated in.
+UNIT_CASES = [
+    ("The delivery cost for orders in Algeria is 900 DZD.", True),
+    ("The delivery cost for orders in Algeria is 900 EUR.", False),
+    ("The minimum first order is 0,200 DZD.", False),
+    ("The minimum first order is 0.200 Case Credits.", True),
+    ("The minimum first order is 0.200 CC.", True),
+    ("The minimum first order is about $60.", True),
+    ("The minimum first order is about 60 EUR.", False),
+]
+
+
+@pytest.mark.parametrize("answer,should_be_grounded", UNIT_CASES)
+def test_a_figure_is_bound_to_its_unit(answer: str, should_be_grounded: bool) -> None:
+    """900 DZD and 900 EUR are not the same delivery cost.
+
+    Both were accepted before this: the number matched, the subject matched,
+    and nothing compared what the figure was denominated in. "0,200CC" being
+    reported as "0,200 DZD" is the same defect on a Case Credit threshold,
+    which is the kind of number a distributor acts on.
+    """
+    text, title, section_id = RECORDS["algeria"]
+    document = _document(text, title, section_id)
+
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+    assert (not unsupported) is should_be_grounded, unsupported
+
+
+def test_an_unlisted_currency_code_does_not_cause_a_false_rejection() -> None:
+    """An omission from the currency vocabulary must degrade to no check.
+
+    The source is casefolded before matching, so the unit rule cannot key off
+    capitalisation and needs an explicit vocabulary. A code nobody listed
+    therefore yields no unit at all, which is exactly the behaviour that
+    existed before the check - safe, rather than silently rejecting.
+    """
+    from app.validation.validators.numeric_grounding_validator import _normalize_unit
+
+    assert _normalize_unit("DZD") == "dzd"
+    assert _normalize_unit("XYZ") == ""
+    assert _normalize_unit("and") == ""
+    assert _normalize_unit("Case Credits") == "cc"
+    assert _normalize_unit("$") == "usd"
+
+
+# Adjacency alone leaves holes, all of them raised in review: a bare source
+# figure beside an answer that invents a currency, a unit stated once in a
+# table header rather than next to every figure, and a code no vocabulary
+# lists. A claim's unit must also appear somewhere in the source.
+_ALGERIA_WITH_UNITS = "Forever Algeria. Delivery Cost: 900 DZD. Minimum order size FBO: 0,200CC."
+_ALGERIA_BARE = "Forever Algeria. Delivery Cost: 900. Minimum order size FBO: 0,200CC."
+_ALGERIA_HEADER = "Forever Algeria. All fees are stated in DZD. Delivery Cost: 900. Minimum order 5000."
+_NEW_ZEALAND = "Forever New Zealand. Delivery Cost: $8 +gst ($9.20)."
+
+UNIT_CONTRAST_CASES = [
+    # A source that never states a currency cannot support one.
+    (_ALGERIA_BARE, "The delivery cost for Algeria is 900 EUR.", False),
+    (_ALGERIA_BARE, "The delivery cost for Algeria is 900.", True),
+    # An unlisted code is still a code when the answer capitalises it.
+    (_ALGERIA_WITH_UNITS, "The delivery cost for Algeria is 900 XYZ.", False),
+    # The unit may be stated once, in a header, rather than beside each figure.
+    (_ALGERIA_HEADER, "The delivery cost for Algeria is 900 DZD.", True),
+    (_ALGERIA_HEADER, "The delivery cost for Algeria is 900 EUR.", False),
+    (_ALGERIA_WITH_UNITS, "The delivery cost for Algeria is 900 DZD.", True),
+]
+
+
+@pytest.mark.parametrize("source,answer,should_be_grounded", UNIT_CONTRAST_CASES)
+def test_a_claim_unit_must_exist_in_the_source(source, answer, should_be_grounded):
+    """Raised in review: the first unit check was still permissive.
+
+    It compared units only where the source happened to state one next to the
+    figure, so a bare source number, a header-scoped unit and an unlisted code
+    all passed unchecked.
+    """
+    document = _document(source, "Forever Algeria", "sponsoring-001-algeria")
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+    assert (not unsupported) is should_be_grounded, unsupported
+
+
+def test_a_dollar_answer_against_a_dollar_record_is_grounded():
+    """The control against over-rejection: same currency, different notation."""
+    document = _document(_NEW_ZEALAND, "Forever New Zealand", "sponsoring-048-new-zealand")
+    answer = "The delivery cost for New Zealand is US$8."
+    assert not [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+
+def test_an_unlisted_code_is_a_unit_only_when_the_answer_capitalises_it():
+    """Source text is casefolded before matching, so case is only available on
+    the answer side. A lowercase word must not become a currency."""
+    from app.validation.validators.numeric_grounding_validator import _normalize_unit
+
+    assert _normalize_unit("XYZ", allow_unlisted_code=True) == "xyz"
+    assert _normalize_unit("xyz", allow_unlisted_code=True) == ""
+    assert _normalize_unit("and", allow_unlisted_code=True) == ""
+    assert _normalize_unit("XYZ") == ""
+
+
+# A unit appearing somewhere in the document is necessary, not sufficient.
+# Raised in review with this counterexample: both DZD and EUR appear, so a
+# document-wide check accepts either currency for either row.
+_MIXED_UNIT_RECORD = (
+    "Forever Algeria.\n"
+    "Delivery charges - DZD\n"
+    "Standard delivery: 900\n"
+    "Membership charges - EUR\n"
+    "Annual membership: 20"
+)
+
+MIXED_UNIT_CASES = [
+    ("Standard delivery costs 900 EUR.", False),
+    ("Standard delivery costs 900 DZD.", True),
+    ("Annual membership costs 20 EUR.", True),
+    ("Annual membership costs 20 DZD.", False),
+]
+
+
+@pytest.mark.parametrize("answer,should_be_grounded", MIXED_UNIT_CASES)
+def test_a_figure_takes_the_unit_of_its_own_row(answer: str, should_be_grounded: bool) -> None:
+    """The unit governing a figure is the nearest one before it, not any in the
+    document.
+
+    Both rows here are bare numbers under their own currency heading, which is
+    how a table states a unit once. A document-wide check cannot tell them
+    apart, and the number and the field name both match in every case, so
+    nothing else in the validator can either.
+    """
+    document = _document(_MIXED_UNIT_RECORD, "Forever Algeria", "sponsoring-001-algeria")
+    unsupported = [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+    assert (not unsupported) is should_be_grounded, unsupported
+
+
+def test_an_adjacent_unit_beats_an_inherited_one() -> None:
+    """A heading governs only the figures that do not state their own unit."""
+    record = "Charges - DZD\nStandard delivery: 900\nExpress delivery: 40 EUR"
+    document = _document(record, "Forever Algeria", "sponsoring-001-algeria")
+
+    assert not [c.number for c in unsupported_numeric_claims("Express delivery costs 40 EUR.", [document])]
+    assert [c.number for c in unsupported_numeric_claims("Express delivery costs 40 DZD.", [document])]
+
+
+def test_a_heading_does_not_govern_across_a_long_gap() -> None:
+    """Inheritance is bounded, so a distant heading cannot claim an unrelated figure."""
+    from app.validation.validators.numeric_grounding_validator import (
+        _UNIT_LOOKBACK_CHARACTERS,
+        _governing_unit,
+        _normalize,
+    )
+
+    filler = "some unrelated sentence about ordering. " * 12
+    record = _normalize(f"Charges - DZD {filler} Standard delivery: 900")
+    index = record.rfind("900")
+
+    assert len(filler) > _UNIT_LOOKBACK_CHARACTERS
+    assert _governing_unit(record, index, index + 3) == ""
+
+
+# Boundary behaviour of unit inheritance, requested in review. "Nearest
+# preceding unit within 300 characters" is a heuristic, not table-row
+# understanding, and these fix its edges in place so the limits are visible.
+_UNRELATED_SENTENCE_APART = (
+    "Delivery charges - DZD\n"
+    "Membership fees are payable in EUR each year.\n"
+    "Standard delivery: 900"
+)
+_UNRELATED_SAME_SENTENCE = "Delivery charges - DZD and membership in EUR, standard delivery: 900"
+
+
+def test_a_currency_in_a_finished_sentence_does_not_govern_the_next_one() -> None:
+    """The dangerous direction: a false rejection destroys a correct answer.
+
+    Before inheritance was bounded at a clause boundary, EUR in the preceding
+    sentence became the nearest preceding unit and a correct claim of 900 DZD
+    was rejected.
+    """
+    document = _document(_UNRELATED_SENTENCE_APART, "Forever Algeria", "sponsoring-001-algeria")
+    assert not [
+        claim.number
+        for claim in unsupported_numeric_claims("Standard delivery costs 900 DZD.", [document])
+    ]
+
+
+def test_a_currency_in_the_same_sentence_still_wins_and_that_is_a_known_limit() -> None:
+    """Documented limitation, asserted so it cannot change unnoticed.
+
+    Where two currencies sit in one sentence with no delimiter between them,
+    the nearer one governs, and here that is the wrong one: a correct claim of
+    900 DZD is rejected. The heuristic cannot see that "membership in EUR" is a
+    different subject, because it has no notion of a row.
+
+    Rejecting is the conservative direction - the validator declines rather
+    than asserting a currency it cannot attribute - but it costs a correct
+    answer, and closing it needs structural parsing rather than a wider or
+    narrower window.
+    """
+    document = _document(_UNRELATED_SAME_SENTENCE, "Forever Algeria", "sponsoring-001-algeria")
+    assert [
+        claim.number
+        for claim in unsupported_numeric_claims("Standard delivery costs 900 DZD.", [document])
+    ] == ["900"]
+
+
+def test_a_bare_figure_with_no_governing_unit_is_not_rejected() -> None:
+    """Permissive where nothing can be established, by design.
+
+    A figure with no unit beside it and none in its clause has no attributable
+    currency. The validator does not invent one, and does not reject a claim
+    for a unit it simply cannot confirm - many corpus figures are bare.
+    """
+    record = "Delivery charges - DZD. Membership section follows. Annual membership: 20"
+    document = _document(record, "Forever Algeria", "sponsoring-001-algeria")
+
+    assert not [
+        claim.number
+        for claim in unsupported_numeric_claims("Annual membership costs 20 DZD.", [document])
+    ]
+
+
+def test_the_reviewers_counterexample_holds_in_all_four_directions() -> None:
+    """Guarded directly, so a later change to the window cannot quietly undo it."""
+    document = _document(_MIXED_UNIT_RECORD, "Forever Algeria", "sponsoring-001-algeria")
+
+    def flagged(answer: str) -> list[str]:
+        return [claim.number for claim in unsupported_numeric_claims(answer, [document])]
+
+    assert flagged("Standard delivery costs 900 EUR.") == ["900"]
+    assert flagged("Standard delivery costs 900 DZD.") == []
+    assert flagged("Annual membership costs 20 EUR.") == []
+    assert flagged("Annual membership costs 20 DZD.") == ["20"]

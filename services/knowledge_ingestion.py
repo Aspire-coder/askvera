@@ -30,11 +30,11 @@ from scripts.ingestion.load_policy_sections_to_opensearch import (
     _actions,
     _client,
     _index_body,
-    _older_source_actions,
 )
 from services.aws_clients import get_aws_clients
 from services.document_preflight import analyze_pdf_with_timeout, extract_pdf_page_text
 from services.db import get_engine
+from services import publication_attempt
 from services.knowledge_generations import (
     build_logical_document_id,
     clear_active_generation_cache,
@@ -459,6 +459,144 @@ def _extract_directory_sections(
     )
 
 
+def _report_low_text_image_pages(preflight, job_id: str, filename: str) -> None:
+    """Surface pages holding a readable heading above something unreadable.
+
+    Reported, never blocking. A page carrying an image is not by itself
+    evidence of missing content - policy pages carry letterheads on every page
+    - so this cannot decide publication on its own. Without the log it was a
+    detection that reached nobody and therefore changed nothing.
+
+    Whether an unresolved page should hold publication is a policy decision,
+    and deliberately not defaulted here.
+    """
+    if not preflight.low_text_image_page_numbers:
+        return
+    LOGGER.warning(
+        "preflight_low_text_image_pages",
+        correlation_id=job_id,
+        filename=filename,
+        pages=list(preflight.low_text_image_page_numbers),
+        page_count=preflight.page_count,
+        requires_ocr=preflight.requires_ocr,
+    )
+
+
+def _assess_document(
+    *,
+    job_id: str,
+    filename: str,
+    country: str,
+    language: str,
+    document_type: str,
+    access_scope: str,
+    version: str,
+    effective_date: str,
+    expiry_date: str,
+    content_hash: str,
+    low_text_image_pages: list[int],
+) -> dict[str, Any]:
+    """Assess a document, returning the findings, its revision, and the routing.
+
+    The assessment is returned rather than acted on here so it can be stored in
+    the same statement that marks the job ready for review. A job that is
+    reviewable but carries no record of what was found would show a reviewer an
+    empty findings list and let them approve on the strength of an assessment
+    whose result was lost.
+
+    Whether this document must go to a reviewer rather than activating.
+
+    review_before_publish arrives as a form field and defaults to true, but a
+    caller holding publish permission can submit false, and both activation
+    calls are gated on it. Permission to publish is not the same as having
+    looked at what is being published: without this, a document whose expiry
+    precedes its own effective date, or one with a page nobody could read, went
+    straight into the index.
+
+    Returning true routes the job to ready_for_review. The upload is kept and
+    the reasons are logged; nothing is discarded.
+    """
+    from services.metadata_conflicts import detect_metadata_conflicts
+    from services.publication_gate import revision_fingerprint
+
+    findings = detect_metadata_conflicts(
+        filename=filename,
+        country=country,
+        language=language,
+        document_type=document_type,
+        version=version,
+        effective_date=effective_date,
+        expiry_date=expiry_date,
+    )
+    revision = revision_fingerprint(
+        content_hash=content_hash,
+        metadata={
+            "filename": filename,
+            "country": country,
+            "language": language,
+            "document_type": document_type,
+            "access_scope": access_scope,
+            "version": version,
+            "effective_date": effective_date,
+            "expiry_date": expiry_date,
+        },
+    )
+    assessment = {
+        "requires_review": bool(findings or low_text_image_pages),
+        "revision": revision,
+        "findings": findings,
+        "payload": json.dumps(
+            {
+                "schema": 1,
+                "findings": [
+                    {
+                        "field": finding.field,
+                        "severity": finding.severity,
+                        "detail": finding.detail,
+                    }
+                    for finding in findings
+                ],
+                "uncertain_pages": [int(page) for page in low_text_image_pages],
+            },
+            sort_keys=True,
+        ),
+    }
+    if assessment["requires_review"]:
+        LOGGER.warning(
+            "automatic_publication_withheld_pending_review",
+            correlation_id=job_id,
+            filename=filename,
+            findings=[f"{finding.field}:{finding.severity}" for finding in findings],
+            uncertain_pages=list(low_text_image_pages),
+        )
+    return assessment
+
+
+def _automatic_publication_is_unsafe(job_id: str) -> bool:
+    """Whether skipping review would take the destructive replacement path.
+
+    Without the generation pointer, activating a document also deletes every
+    section for that source carrying a different ingestion id - and a worker
+    resuming late deletes whatever is live now. Reviewed publication refuses
+    that mode outright. This is the same refusal for the automatic path, and it
+    withholds ACTIVATION rather than ingestion: the document is still uploaded,
+    extracted, indexed as staging and queued for review. Nothing is lost.
+
+    Operational impact, stated plainly: with
+    ADMIN_INGESTION_GENERATION_POINTER_ENABLED off, no document reaches readers
+    by any route - uploads work, review works, publication is refused. Enabling
+    the pointer restores publication on both paths and is the intended fix.
+    """
+    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        return False
+    LOGGER.warning(
+        "automatic_publication_withheld_unsafe_replacement_mode",
+        correlation_id=job_id,
+        reason="ADMIN_INGESTION_GENERATION_POINTER_ENABLED is off",
+    )
+    return True
+
+
 def process_ingestion_job(
     job_id: str,
     local_path: str,
@@ -490,6 +628,10 @@ def process_ingestion_job(
         # policy PDF does in that case.
         use_directory_extractor = document_type == "office_directory"
         normalized_pages = None
+        # Carried out of the preflight branch so the publication decision below
+        # can see it. Empty when preflight did not run, which is the same
+        # position as before preflight existed.
+        low_text_image_pages: list[int] = []
         if path.suffix.lower() == ".pdf" and settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
             preflight = analyze_pdf_with_timeout(
                 path,
@@ -497,6 +639,8 @@ def process_ingestion_job(
                 max_pages=settings.ADMIN_INGESTION_MAX_PDF_PAGES,
                 max_extracted_characters=settings.ADMIN_INGESTION_MAX_EXTRACTED_TEXT_CHARS,
             )
+            _report_low_text_image_pages(preflight, job_id, filename)
+            low_text_image_pages = list(preflight.low_text_image_page_numbers)
             if preflight.requires_ocr:
                 if not settings.ADMIN_TEXTRACT_OCR_ENABLED or not upload_uri:
                     # Named precisely, because this now fires for a mostly
@@ -591,6 +735,28 @@ def process_ingestion_job(
             access_scope=access_scope,
             source_file=str(sections[0]["source_file"]),
         )
+        # Both activation paths are gated on this flag, so deciding it here
+        # covers automatic publication as well as the reviewed route. A document
+        # carrying findings is routed to review rather than refused: the upload
+        # is not lost, it just cannot reach the index without someone looking.
+        assessment = _assess_document(
+            job_id=job_id,
+            filename=filename,
+            country=country,
+            language=language,
+            document_type=document_type,
+            access_scope=access_scope,
+            version=version,
+            effective_date=effective_date,
+            expiry_date=expiry_date,
+            content_hash=document_hash,
+            low_text_image_pages=low_text_image_pages,
+        )
+        review_before_publish = (
+            review_before_publish
+            or bool(assessment["requires_review"])
+            or _automatic_publication_is_unsafe(job_id)
+        )
         indexed = _index_sections(
             sections,
             source_uri=source_uri,
@@ -621,6 +787,9 @@ def process_ingestion_job(
                 expiry_date=expiry_date,
                 malware_scan_status="clean" if settings.ADMIN_INGESTION_MALWARE_SCAN_REQUIRED else "not_required",
             )
+        # One statement. The assessment and the status that exposes the job to
+        # a reviewer are written together, so there is no moment at which a job
+        # is reviewable with no record of what was found about it.
         _update_job(
             job_id,
             status="ready_for_review" if review_before_publish else "ready",
@@ -630,6 +799,9 @@ def process_ingestion_job(
             lease_owner="",
             lease_expires_at=None,
             completed_at=datetime.now(UTC),
+            review_revision=str(assessment["revision"]),
+            review_findings=str(assessment["payload"]),
+            review_evaluated_at=datetime.now(UTC),
         )
         return True
     except ValueError as exc:
@@ -767,10 +939,12 @@ def build_sections(
         blocks = _page_blocks(page.text)
         for block_title, block_text in blocks:
             for part, chunk in enumerate(
-                _chunk_text(
-                    block_text,
-                    max_chars=max_chars,
-                    overlap_chars=overlap_chars,
+                _carry_unit_context(
+                    _chunk_text(
+                        block_text,
+                        max_chars=max_chars,
+                        overlap_chars=overlap_chars,
+                    )
                 ),
                 start=1,
             ):
@@ -829,6 +1003,63 @@ def _page_blocks(text_value: str) -> list[tuple[str, str]]:
     if not blocks:
         blocks.append((lines[0][:120], lines))
     return [(title, "\n".join(content)) for title, content in blocks if content]
+
+
+# The longest a carried heading may be. A table's currency line is short; a
+# paragraph that happens to mention a currency is not a heading and copying it
+# onto every following chunk would be noise in the retrieved text.
+_UNIT_HEADER_MAX_CHARS = 200
+
+
+def _unit_declaring_line(text_value: str) -> str:
+    """The last short line in this text that states a unit, if any.
+
+    Searched from the end because a block can state one currency and then
+    another - a delivery table followed by a membership table - and the row
+    that follows inherits the nearer one.
+    """
+    from app.validation.validators.numeric_grounding_validator import text_declares_unit
+
+    for line in reversed(text_value.splitlines()):
+        stripped = line.strip()
+        if stripped and len(stripped) <= _UNIT_HEADER_MAX_CHARS and text_declares_unit(stripped):
+            return stripped
+    return ""
+
+
+def _carry_unit_context(chunks: list[str]) -> list[str]:
+    """Carry a table's currency heading onto the chunks that continue it.
+
+    A table states its currency once and leaves the rows bare. Retrieval
+    returns chunks, so if the table is longer than a chunk the later rows
+    arrive with no currency anywhere in them - and grounding then rejects a
+    correct answer, because the evidence for what "900" means was in a chunk
+    nobody retrieved. That deletes true figures, which is worse than letting a
+    doubtful one through.
+
+    The chunker's 450-character overlap already covers a heading close enough
+    to govern a row directly. This covers the rest of the table: everything
+    below the first 450 characters, which for a long charges table is most of
+    it.
+
+    Only chunks that state no unit at all are given one, so this can never
+    override a currency the chunk declares for itself. The vocabulary is the
+    validator's own, so the two cannot disagree about what a unit is.
+    """
+    if len(chunks) < 2:
+        return list(chunks)
+
+    from app.validation.validators.numeric_grounding_validator import text_declares_unit
+
+    carried = ""
+    carried_chunks: list[str] = []
+    for chunk in chunks:
+        if text_declares_unit(chunk):
+            carried = _unit_declaring_line(chunk) or carried
+            carried_chunks.append(chunk)
+            continue
+        carried_chunks.append(f"{carried}\n{chunk}" if carried else chunk)
+    return carried_chunks
 
 
 def _chunk_text(
@@ -956,19 +1187,53 @@ def _index_sections(
             access_scope=access_scope,
             activated_by=activated_by,
         )
-    identity = (sections[0]["country"], sections[0]["language"], sections[0]["source_file"])
     if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED and not review_before_publish:
-        delete_actions = _older_source_actions(
-            client,
-            index=index,
-            country=str(identity[0]),
-            language=str(identity[1]),
-            source_file=str(identity[2]),
-            ingestion_id=ingestion_id,
+        # Unreachable: _automatic_publication_is_unsafe forces review first.
+        # This is where the legacy replacement used to run - delete every
+        # section for this source with a different ingestion id, which is
+        # exactly what a newer generation is. Kept as a hard stop so
+        # reintroducing it fails loudly instead of deleting a live document.
+        raise RuntimeError(
+            "Automatic publication without the generation pointer is refused: "
+            "the replacement it performs can delete a newer generation."
         )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
     return int(success)
+
+
+def _assert_publication_owner(connection: Any, *, job_id: str, owner: Any) -> None:
+    """Refuse to write unless this attempt still owns the job, in THIS transaction.
+
+    An advisory lock serialises writers. It does not stop a worker whose lease
+    expired from writing stale state after a takeover, because it holds the
+    lock perfectly legitimately - it is simply out of date. Ownership has to be
+    checked at the write, inside the same transaction as the write, or the
+    check describes a moment that has passed by the time the row changes.
+
+    FOR UPDATE is what makes it hold: a concurrent takeover blocks on this row
+    until this transaction ends, and a takeover that already happened leaves no
+    row matching this token, so the write is abandoned before it touches
+    anything.
+    """
+    if owner is None:
+        return
+    from services.publication_attempt import OwnershipLost
+
+    row = connection.execute(
+        text(
+            """
+            SELECT 1 FROM ingestion_jobs
+            WHERE job_id = :job_id
+              AND review_revision = :revision
+              AND publication_attempt_key = :token
+            FOR UPDATE
+            """
+        ),
+        {"job_id": job_id, "revision": owner.revision, "token": owner.token},
+    ).first()
+    if row is None:
+        raise OwnershipLost(
+            "This publication attempt no longer owns the job, so its writes were abandoned."
+        )
 
 
 def _activate_generation_pointer(
@@ -981,9 +1246,16 @@ def _activate_generation_pointer(
     document_type: str,
     access_scope: str,
     activated_by: str,
+    owner: Any = None,
 ) -> None:
-    """Atomically switch the stable document slot to a verified generation."""
+    """Atomically switch the stable document slot to a verified generation.
+
+    owner is the publication attempt's claim. This is the authoritative write -
+    it is what decides what a reader can see - so ownership is verified here,
+    in the same transaction, and not only before the work began.
+    """
     with get_engine().begin() as connection:
+        _assert_publication_owner(connection, job_id=ingestion_id, owner=owner)
         # Serialize publication for this logical document even when its pointer
         # row does not exist yet. SELECT FOR UPDATE alone cannot lock a missing row.
         connection.execute(
@@ -1103,6 +1375,17 @@ def _activate_generation_pointer(
     clear_active_generation_cache()
 
 
+# _active_section_count, _superseded_section_count and _visibility_verifier
+# lived here. They verified the outcome of a publication without a generation
+# pointer: the expected new sections reachable, and no remnant of an older one.
+#
+# They are gone because that mode is no longer supported. Reviewed publication
+# refuses it - see _require_supported_publication_mode - and verification of an
+# unsupported mode is worse than nothing: it reads as though the mode were
+# safe. Detecting a bad outcome was never the same as preventing it, and the
+# outcome in question was a stale worker deleting a live generation.
+
+
 def _activate_staged_sections(
     client: Any,
     *,
@@ -1184,11 +1467,19 @@ def _update_job(job_id: str, **values: Any) -> None:
         "accepted_by",
         "review_before_publish",
         "malware_scan_status",
+        "review_revision",
+        "review_findings",
+        "review_evaluated_at",
     }
     updates = {key: value for key, value in values.items() if key in allowed}
     if not updates:
         return
-    assignments = ", ".join(f"{key} = :{key}" for key in updates)
+    # review_findings is JSONB and arrives as a JSON string; a bound text
+    # parameter needs the cast, the rest do not.
+    assignments = ", ".join(
+        f"{key} = CAST(:{key} AS JSONB)" if key == "review_findings" else f"{key} = :{key}"
+        for key in updates
+    )
     try:
         with get_engine().begin() as connection:
             connection.execute(
@@ -1199,9 +1490,22 @@ def _update_job(job_id: str, **values: Any) -> None:
         LOGGER.exception("ingestion_job_update_failed", job_id=job_id)
 
 
-def _record_document(**values: Any) -> None:
-    with get_engine().begin() as connection:
-        connection.execute(
+def _record_document(connection: Any = None, **values: Any) -> None:
+    """Upsert the document row, optionally inside a transaction the caller owns.
+
+    Publication passes its connection so the row lands in the same transaction
+    as the ownership check, rather than in one of its own where a worker that
+    has already lost its lease could still write it.
+    """
+    if connection is not None:
+        _record_document_statement(connection, values)
+        return
+    with get_engine().begin() as owned:
+        _record_document_statement(owned, values)
+
+
+def _record_document_statement(connection: Any, values: dict[str, Any]) -> None:
+    connection.execute(
             text(
                 """
                 INSERT INTO knowledge_documents (
@@ -1271,6 +1575,90 @@ def list_ingestion_jobs(limit: int = 50) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def review_details(job_id: str) -> dict[str, Any]:
+    """What a reviewer needs in order to decide, and the record of past decisions.
+
+    Three things the portal cannot work out for itself:
+
+    Whether the assessment ran at all. A NULL review_findings means never
+    assessed, which is not the same as assessed and clean, and a reviewer shown
+    an empty findings list would read it as the second.
+
+    Which pages are affected, so "some pages may be incomplete" becomes a page
+    number someone can open and look at.
+
+    What was decided before, by whom and why - including decisions on earlier
+    revisions, which are the ones that explain why this document is here again.
+    """
+    with get_engine().connect() as connection:
+        stored = connection.execute(
+            text(
+                """
+                SELECT review_revision, review_findings, review_evaluated_at,
+                       publication_state, publication_detail
+                FROM ingestion_jobs WHERE job_id = :job_id
+                """
+            ),
+            {"job_id": job_id},
+        ).mappings().first()
+        decisions = connection.execute(
+            text(
+                """
+                SELECT review_revision, decided_by, decision, reason, decided_at
+                FROM ingestion_review_decisions
+                WHERE job_id = :job_id
+                ORDER BY decided_at DESC
+                """
+            ),
+            {"job_id": job_id},
+        ).mappings().all()
+
+    if stored is None:
+        raise KeyError(job_id)
+    revision = str(stored["review_revision"] or "")
+    raw = stored["review_findings"]
+    assessed = raw is not None
+    payload = raw if isinstance(raw, dict) else (json.loads(raw) if assessed else {})
+    findings = list(payload.get("findings") or [])
+    return {
+        "jobId": job_id,
+        "revision": revision,
+        # The distinction a reviewer must not have to infer.
+        "assessed": assessed,
+        "evaluatedAt": (
+            stored["review_evaluated_at"].isoformat()
+            if stored["review_evaluated_at"]
+            else ""
+        ),
+        "findings": findings,
+        "contradictions": [
+            finding for finding in findings if finding.get("severity") == "contradiction"
+        ],
+        "unresolved": [
+            finding for finding in findings if finding.get("severity") == "unresolved"
+        ],
+        "affectedPages": [int(page) for page in (payload.get("uncertain_pages") or [])],
+        "publicationState": str(stored["publication_state"] or "not_started"),
+        "publicationDetail": str(stored["publication_detail"] or ""),
+        "decisions": [
+            {
+                "revision": str(row["review_revision"] or ""),
+                "decidedBy": str(row["decided_by"] or ""),
+                "decision": str(row["decision"] or ""),
+                "reason": str(row["reason"] or ""),
+                "decidedAt": row["decided_at"].isoformat() if row["decided_at"] else "",
+                # A decision on an earlier revision does not authorise this one,
+                # and the portal must show which is which rather than listing
+                # them as though they were interchangeable.
+                "appliesToCurrentRevision": bool(
+                    revision and str(row["review_revision"] or "") == revision
+                ),
+            }
+            for row in decisions
+        ],
+    }
 
 
 def update_ingestion_malware_status(job_id: str, status: str) -> None:
@@ -1575,23 +1963,228 @@ def test_ingestion_job(job_id: str, message: str, *, limit: int = 5) -> dict[str
     return {"job": job, "message": message, "matches": matches, "matchCount": len(matches)}
 
 
-def publish_ingestion_job(job_id: str, *, accepted_by: str) -> dict[str, Any]:
+def publication_revision(job: dict[str, Any]) -> str:
+    """The fingerprint a decision and a publication attempt both bind to.
+
+    Derived from the job on the server. A client cannot supply it, so an
+    approval cannot be presented for a revision other than the one being
+    published.
+    """
+    from services.publication_gate import revision_fingerprint
+
+    return revision_fingerprint(
+        content_hash=str(job.get("content_hash") or ""), metadata=_gate_metadata(job)
+    )
+
+
+def _gate_metadata(job: dict[str, Any]) -> dict[str, str]:
+    return {
+        "filename": str(job.get("filename") or ""),
+        "country": str(job.get("country") or ""),
+        "language": str(job.get("language") or ""),
+        "document_type": str(job.get("document_type") or ""),
+        "access_scope": str(job.get("access_scope") or ""),
+        # The loader selects document_version; "version" is the name used when a
+        # job is created. Reading only "version" made every loaded job look
+        # unversioned - an unresolved finding on every publication - and, worse,
+        # kept a version change out of the revision fingerprint, so an approval
+        # survived the very change it should have invalidated.
+        "version": str(job.get("document_version") or job.get("version") or ""),
+        "effective_date": str(job.get("effective_date") or ""),
+        "expiry_date": str(job.get("expiry_date") or ""),
+    }
+
+
+def _enforce_publication_gate(job: dict[str, Any], resolution: Any) -> str:
+    """Refuse publication when metadata or extraction findings are unresolved.
+
+    Returns the revision fingerprint the publication attempt binds to, so the
+    content that passed the gate is the content the attempt is authorised for.
+
+    Raises ValueError, which the admin route already turns into a 400 carrying
+    the reasons, so a caller is told what to fix rather than that something
+    went wrong.
+    """
+    from services.metadata_conflicts import detect_metadata_conflicts
+    from services.publication_gate import PublicationBlocked, evaluate_publication
+
+    metadata = _gate_metadata(job)
+    # access_scope changes what publishing means, so it belongs in the revision
+    # fingerprint, but it is not something detect_metadata_conflicts inspects.
+    findings = detect_metadata_conflicts(
+        **{key: value for key, value in metadata.items() if key != "access_scope"}
+    )
+    revision = publication_revision(job)
+    try:
+        evaluate_publication(
+            findings=findings,
+            # Confirmed-unreadable pages already block earlier, during
+            # processing, so a job reaching review has none. Passed explicitly
+            # so the gate's contract is complete rather than implied.
+            extraction_blocking_pages=[],
+            extraction_uncertain_pages=[
+                int(page) for page in (job.get("low_text_image_pages") or [])
+            ],
+            revision=revision,
+            resolution=resolution,
+        )
+    except PublicationBlocked as blocked:
+        LOGGER.warning(
+            "publication_blocked",
+            correlation_id=str(job.get("job_id") or ""),
+            filename=metadata["filename"],
+            reason_count=len(blocked.reasons),
+            revision=revision,
+        )
+        raise ValueError(" ".join(blocked.reasons)) from blocked
+    return revision
+
+
+def record_review_decision(
+    *, job_id: str, revision: str, decided_by: str, decision: str, reason: str
+) -> Any:
+    """Persist a reviewer's decision, before and regardless of publication.
+
+    Separate from publication success on purpose. A decision is a record of
+    what a named person concluded about a specific revision; whether the
+    publication that followed then succeeded, failed, or was retried three
+    times is a different fact, and conflating them loses the first one every
+    time the second goes wrong.
+
+    decided_by comes from the authenticated principal at the route. It is never
+    read from a request body.
+    """
+    from services.publication_gate import record_resolution
+
+    resolution = record_resolution(
+        revision=revision, decided_by=decided_by, decision=decision, reason=reason
+    )
+    try:
+        with get_engine().begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO ingestion_review_decisions (
+                        decision_id, job_id, review_revision, decided_by,
+                        decision, reason
+                    ) VALUES (
+                        :decision_id, :job_id, :review_revision, :decided_by,
+                        :decision, :reason
+                    )
+                    """
+                ),
+                {
+                    "decision_id": uuid.uuid4().hex,
+                    "job_id": job_id,
+                    "review_revision": revision,
+                    "decided_by": resolution.decided_by,
+                    "decision": resolution.decision,
+                    "reason": resolution.reason,
+                },
+            )
+    except SQLAlchemyError as exc:
+        # An unrecorded decision must not authorise a publication: the audit
+        # trail is the point, and proceeding would publish on a decision
+        # nobody can later find.
+        LOGGER.exception("review_decision_not_recorded", correlation_id=job_id)
+        raise ValueError(
+            "The decision could not be recorded, so publication was not attempted."
+        ) from exc
+    LOGGER.info(
+        "review_decision_recorded",
+        correlation_id=job_id,
+        decision=resolution.decision,
+        revision=revision,
+    )
+    return resolution
+
+
+def _require_supported_publication_mode() -> None:
+    """Reviewed publication requires the generation pointer. One supported mode.
+
+    Without it, publishing is activate-then-delete against OpenSearch: flip the
+    new sections to active, then delete every section for that source carrying
+    a different ingestion id. Both writes are reader-visible immediately, and
+    neither can be made part of the ownership transaction, because OpenSearch
+    is a second system and no check spanning the two is atomic.
+
+    That is not a small window. A worker paused before those writes, whose
+    lease then expires and whose job is republished by someone else, resumes
+    and deletes the newer generation - "a different ingestion id" is exactly
+    what the newer one is - before reinstating its own. Verification would then
+    report the failure, after readers had already lost the current document.
+
+    Detecting a bad outcome is not preventing it. An ownership check before
+    each write narrows the window and cannot close it, so this refuses the mode
+    instead of claiming a protection it does not have.
+
+    The automatic path in process_ingestion_job still performs that legacy
+    replacement when review_before_publish is false. That is pre-existing
+    behaviour with the same exposure and it is recorded in the rollout notes;
+    restricting it here would block all automatic ingestion in the default
+    configuration, which is a decision for whoever owns the deployment.
+    """
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        raise ValueError(
+            "Publication is disabled because ADMIN_INGESTION_GENERATION_POINTER_ENABLED "
+            "is off. Without the generation pointer, publishing replaces content "
+            "directly in the index and a stale worker can delete a newer version. "
+            "Enable the pointer to publish."
+        )
+
+
+def publish_ingestion_job(
+    job_id: str,
+    *,
+    accepted_by: str,
+    resolution: Any = None,
+    review_reason: str = "",
+    store: Any = None,
+) -> dict[str, Any]:
+    """Publish a reviewed document.
+
+    resolution is a services.publication_gate.ReviewerResolution recording who
+    decided what, and why, about this exact revision. It is required whenever
+    the document carries unresolved findings, and it is ignored for findings no
+    decision can waive.
+
+    review_reason is the portal's route to the same thing: the resolution is
+    built here, against the revision derived from the job, and attributed to
+    accepted_by - the authenticated principal. A caller cannot name a different
+    reviewer or a different revision.
+    """
     job = _ingestion_job(job_id)
     if job.get("status") != "ready_for_review":
         raise ValueError("Only documents marked ready for review can be published.")
+    if resolution is None and str(review_reason or "").strip():
+        # Recorded before the gate runs, so a decision survives even when the
+        # publication it accompanied is then refused. That is the honest
+        # record: someone did decide this, and it was not enough.
+        resolution = record_review_decision(
+            job_id=job_id,
+            revision=publication_revision(job),
+            decided_by=accepted_by,
+            decision="publish",
+            reason=review_reason,
+        )
+    # Enforced here rather than in the route, so the API endpoint, a retry and
+    # any future caller hit the same check - a disabled button in the portal is
+    # not enforcement. This is not the only path that can activate an index
+    # generation: process_ingestion_job activates directly when
+    # review_before_publish is false. That path is covered by _assess_document
+    # forcing the flag true whenever there is anything to find, not by this
+    # check, and the two together are what close it.
+    revision = _enforce_publication_gate(job, resolution)
+    # After the gate, deliberately. A contradiction is a fact about the
+    # document and a reviewer should be told about it whatever the deployment
+    # is configured to allow; the mode is a fact about the deployment. Both
+    # refuse publication, and reporting the document problem first is more
+    # use to the person holding it.
+    _require_supported_publication_mode()
     count, documents = _staging_documents(job_id, limit=10000)
     expected = int(job.get("section_count") or 0)
     if count != expected or not documents:
         raise ValueError(f"Staged publication verification failed: expected {expected}, found {count}.")
-    client = _client()
-    actions = [{"_id": document["id"]} for document in documents]
-    _activate_staged_sections(
-        client,
-        index=settings.OPENSEARCH_INDEX,
-        actions=actions,
-        expected_count=expected,
-        ingestion_id=job_id,
-    )
     first = documents[0]
     logical_document_id = str(job.get("logical_document_id") or build_logical_document_id(
         logical_document_id="",
@@ -1601,47 +2194,184 @@ def publish_ingestion_job(job_id: str, *, accepted_by: str) -> dict[str, Any]:
         access_scope=str(job.get("access_scope") or "country"),
         source_file=str(first.get("sourceFile") or job.get("filename") or ""),
     ))
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
-        _activate_generation_pointer(
-            logical_document_id=logical_document_id,
-            ingestion_id=job_id,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            document_type=str(job.get("document_type") or "policy"),
-            access_scope=str(job.get("access_scope") or "country"),
-            activated_by=accepted_by,
-        )
-    else:
-        delete_actions = _older_source_actions(
-            client,
-            index=settings.OPENSEARCH_INDEX,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            ingestion_id=job_id,
-        )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
-    _record_document(
+
+    # From here on the attempt is owned, so a worker that dies leaves something
+    # a retry can interpret - and a retry cannot proceed while the owner's lease
+    # is still live. begin() returns None only when this revision is fully
+    # published, finalization included.
+    attempt_store = store or publication_attempt.PostgresAttemptStore()
+    claim = publication_attempt.begin(
+        attempt_store,
         job_id=job_id,
-        filename=str(job.get("filename") or "document"),
-        source_uri=str(job.get("source_uri") or ""),
-        country=str(job.get("country") or ""),
-        language=str(job.get("language") or ""),
-        document_type=str(job.get("document_type") or "policy"),
-        access_scope=str(job.get("access_scope") or "country"),
-        version=str(job.get("document_version") or ""),
-        section_count=count,
-        content_hash=str(job.get("content_hash") or ""),
-        accepted_by=accepted_by,
+        revision=revision,
         logical_document_id=logical_document_id,
-        document_owner=str(job.get("document_owner") or ""),
-        approval_reference=str(job.get("approval_reference") or ""),
-        effective_date=str(job.get("effective_date") or ""),
-        expiry_date=str(job.get("expiry_date") or ""),
-        malware_scan_status=str(job.get("malware_scan_status") or "not_required"),
     )
-    _update_job(job_id, status="ready", accepted_by=accepted_by, review_before_publish=False)
+    if claim is None:
+        return {"job": _ingestion_job(job_id), "publishedCount": count}
+
+    try:
+        # already_active means a previous attempt got the generation live and
+        # died before finishing. Re-activating would be harmless but pointless;
+        # what is missing is everything after it.
+        if not claim.already_active:
+            _publish_activated_generation(
+                job=job,
+                job_id=job_id,
+                first=first,
+                expected=expected,
+                documents=documents,
+                logical_document_id=logical_document_id,
+                accepted_by=accepted_by,
+                owner=claim,
+            )
+            publication_attempt.confirm_visible(
+                attempt_store,
+                job_id=job_id,
+                claim=claim,
+                logical_document_id=logical_document_id,
+            )
+
+        # Finalization, and it runs on the recovery path too. An active pointer
+        # establishes visibility and nothing else: without these the portal
+        # shows a document that is live and still marked awaiting review. Both
+        # writes are idempotent - _record_document upserts on document_id, and
+        # the job update is a plain assignment - so repeating them after a
+        # failure is safe.
+        _finalize_publication(
+            job=job,
+            job_id=job_id,
+            count=count,
+            accepted_by=accepted_by,
+            logical_document_id=logical_document_id,
+            owner=claim,
+        )
+    except publication_attempt.OwnershipLost:
+        raise
+    except Exception as exc:
+        # Recoverable, not "did not happen". Which one it was is decided by the
+        # next attempt, after it takes ownership - never inferred here from the
+        # fact that an exception was raised.
+        publication_attempt.fail(attempt_store, job_id=job_id, claim=claim, detail=str(exc))
+        raise
+
+    # Succeeded means finished, not activated. Written last, so a retry that
+    # sees it can safely do nothing.
+    publication_attempt.complete(
+        attempt_store,
+        job_id=job_id,
+        claim=claim,
+        detail="verified visible and finalized",
+    )
     clear_active_generation_cache()
     return {"job": _ingestion_job(job_id), "publishedCount": count}
+
+
+def _finalize_publication(
+    *,
+    job: dict[str, Any],
+    job_id: str,
+    count: int,
+    accepted_by: str,
+    logical_document_id: str,
+    owner: Any,
+) -> None:
+    """The bookkeeping after activation, in one transaction this attempt owns.
+
+    Both writes together, behind one ownership check, because separately they
+    are two windows in which a worker that has already lost its lease can write
+    over a newer attempt's state. Idempotent, so the recovery path repeats them
+    safely: the document row upserts on document_id and the job update is a
+    plain assignment.
+    """
+    with get_engine().begin() as connection:
+        _assert_publication_owner(connection, job_id=job_id, owner=owner)
+        _record_document(
+            connection,
+            job_id=job_id,
+            filename=str(job.get("filename") or "document"),
+            source_uri=str(job.get("source_uri") or ""),
+            country=str(job.get("country") or ""),
+            language=str(job.get("language") or ""),
+            document_type=str(job.get("document_type") or "policy"),
+            access_scope=str(job.get("access_scope") or "country"),
+            version=str(job.get("document_version") or ""),
+            section_count=count,
+            content_hash=str(job.get("content_hash") or ""),
+            accepted_by=accepted_by,
+            logical_document_id=logical_document_id,
+            document_owner=str(job.get("document_owner") or ""),
+            approval_reference=str(job.get("approval_reference") or ""),
+            effective_date=str(job.get("effective_date") or ""),
+            expiry_date=str(job.get("expiry_date") or ""),
+            malware_scan_status=str(job.get("malware_scan_status") or "not_required"),
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE ingestion_jobs
+                SET status = 'ready', accepted_by = :accepted_by,
+                    review_before_publish = FALSE, updated_at = now()
+                WHERE job_id = :job_id
+                """
+            ),
+            {"job_id": job_id, "accepted_by": accepted_by},
+        )
+
+
+def _publish_activated_generation(
+    *,
+    job: dict[str, Any],
+    job_id: str,
+    first: dict[str, Any],
+    expected: int,
+    documents: list[dict[str, Any]],
+    logical_document_id: str,
+    accepted_by: str,
+    owner: Any = None,
+) -> None:
+    """Activate the staged sections, then move the pointer that makes them visible.
+
+    Order matters and is the reason this is recoverable: activated sections are
+    invisible until the pointer names them, so a failure between the two steps
+    leaves nothing a reader can reach. The pointer update is the commit point,
+    it is a single row write, and it is fenced on the attempt token.
+
+    There is no branch here for a deployment without the pointer. See
+    publish_ingestion_job for why that mode is refused rather than supported.
+    """
+    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        # Unreachable: publish_ingestion_job refuses first. Kept as a hard stop
+        # rather than a comment, because the branch it replaces deleted a live
+        # generation, and the next person to reintroduce it should hit this.
+        raise RuntimeError(
+            "Reviewed publication requires ADMIN_INGESTION_GENERATION_POINTER_ENABLED."
+        )
+
+    client = _client()
+    # Checked before the index is touched. It cannot make the index write
+    # transactional - OpenSearch is a second system and no check spanning the
+    # two is atomic - but it means a worker that has already lost the job stops
+    # here rather than after activating sections. With the pointer enabled
+    # those sections are invisible until the pointer moves, and the pointer
+    # write is genuinely fenced, so the remaining window changes nothing a
+    # reader can reach.
+    with get_engine().begin() as connection:
+        _assert_publication_owner(connection, job_id=job_id, owner=owner)
+    _activate_staged_sections(
+        client,
+        index=settings.OPENSEARCH_INDEX,
+        actions=[{"_id": document["id"]} for document in documents],
+        expected_count=expected,
+        ingestion_id=job_id,
+    )
+    _activate_generation_pointer(
+        logical_document_id=logical_document_id,
+        ingestion_id=job_id,
+        country=str(job.get("country") or first.get("country") or ""),
+        language=str(job.get("language") or first.get("language") or ""),
+        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
+        document_type=str(job.get("document_type") or "policy"),
+        access_scope=str(job.get("access_scope") or "country"),
+        activated_by=accepted_by,
+        owner=owner,
+    )

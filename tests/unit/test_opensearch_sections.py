@@ -880,9 +880,26 @@ def test_directory_query_hard_filters_explicit_target_country() -> None:
 
 
 def test_directory_target_country_recovers_close_typo() -> None:
-    assert _directory_target_country_names(
+    """The typo still resolves to Mexico, and now to its accented spelling too.
+
+    **Expected outcome changed here, deliberately.** This pinned the set to
+    {"Mexico"}. The filter built from it normalises case but not diacritics, so
+    a record whose `metadata.record_country` carries an accent was excluded
+    before ranking - confirmed against the index on 2026-09-09, where Réunion's
+    record holds "Réunion Island" while the configuration writes "Reunion
+    Island". Every approved spelling of the market's own name is now included.
+
+    The property that matters is unchanged and asserted directly: the
+    configured name is there, and nothing belongs to another market.
+    """
+    from services.market_config import approved_name_spellings
+
+    names = _directory_target_country_names(
         "How can I join Mexcio through international sponsoring?", "US"
-    ) == {"Mexico"}
+    )
+
+    assert "Mexico" in names
+    assert names == approved_name_spellings("MX", "Mexico")
 
 
 def test_outline_query_is_locale_isolated_and_outline_only() -> None:
@@ -935,3 +952,37 @@ def test_explicit_unknown_directory_country_beats_selected_market() -> None:
     assert _directory_record_country_score(
         "What is Gambia's telephone number?", gambia, {"United States"}
     ) == 6.0
+
+
+def test_the_directory_filter_carries_the_records_own_spelling() -> None:
+    """The Réunion defect, confirmed against the index on 2026-09-09.
+
+    The configuration writes "Reunion Island". The record's
+    `metadata.record_country` holds "Réunion Island". `_record_country_filter`
+    normalises case but not diacritics, so the filter asked for a spelling the
+    document does not have and excluded it before ranking - both Réunion
+    questions in the comparison run refused with the record never retrieved, in
+    both arms, and catalogue expansion of the query text could not reach it
+    because the document never entered the candidate set.
+
+    A filter that excludes a document looks exactly like a document that does
+    not exist, which is why this went unnoticed.
+    """
+    names = _directory_target_country_names(
+        "What is the delivery cost for orders in Reunion Island?", "US"
+    )
+
+    assert "Réunion Island" in names
+    assert "Reunion Island" in names
+
+
+def test_the_directory_filter_never_reaches_another_market() -> None:
+    """Widening to every approved spelling must stay inside the named market."""
+    from services.market_config import find_market_mentions
+
+    names = _directory_target_country_names(
+        "What is the delivery cost for orders in Reunion Island?", "US"
+    )
+
+    for name in names:
+        assert find_market_mentions(name) <= {"RE"}, name

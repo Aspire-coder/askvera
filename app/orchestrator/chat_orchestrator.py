@@ -17,6 +17,7 @@ from app.evidence import (
     assistant_meta_response,
     approve_evidence,
     classify_intent,
+    configured_conversation_response,
     is_planner_trusted_low_risk_subtype,
     localized_conversation_response,
     mentions_out_of_corpus_topic,
@@ -60,7 +61,12 @@ from services.semantic_cache import (
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
 from services.guardrails import is_policy_safety_question
-from services.market_config import find_market_mentions, find_probable_market_typo, market_display_name
+from services.market_config import (
+    find_market_mentions,
+    find_probable_market_typo,
+    find_unresolved_market_mentions,
+    market_display_name,
+)
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -76,6 +82,7 @@ from utils.directory_fields import (
     restore_missing_requested_directory_fields,
     restore_missing_requested_order_size,
 )
+from utils.personal_claims import remove_unsupported_personal_claims
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 
@@ -189,6 +196,22 @@ DIRECTORY_FIELD_TERMS: dict[str, re.Pattern[str]] = {
 # falls back to the request's own selected country.
 OFFICE_CONTACT_LOOKUP_QUERY = "What is the office phone number, email address, and website for this country?"
 OFFICE_CONTACT_FIELD_RE = re.compile(r"phone|telephone|email|e-mail", re.IGNORECASE)
+
+
+# Set only by scripts/run_grounding_comparison.py, in its own process, to
+# record what numeric repair was given. Left as None everywhere else, checked
+# with `is not None` so no import or configuration can switch it on by
+# accident, and wrapped in try/except at the call site so a measurement
+# harness can never affect a served answer.
+pre_repair_capture_hook = None
+
+
+CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
+    "Local company policy for another market is only available to readers in "
+    "that market, so I'm not able to share it here. I can help with the "
+    "policies that apply to your own market, and Forever Living support or "
+    "your upline can point you to the right contact for the other market."
+)
 
 
 class ConsentRequiredError(Exception):
@@ -432,6 +455,7 @@ class AIOrchestrator:
             correlation_id,
             model_response=model_response,
             retrieval_result=retrieval_result,
+            history=history,
         )
         governance_decision = self._evaluate_governance(
             chat_response.answer,
@@ -1043,7 +1067,38 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
-        return word_count <= 14 and self._contains_follow_up_marker(normalized)
+        if word_count <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        # A short reply that is just a country name, and is not itself a
+        # question, is answering something the assistant asked - "Which country
+        # do you mean?" - and carries no question of its own. Without this the
+        # reader has to retype their whole question after being asked to
+        # clarify.
+        #
+        # Gated on a clarification actually being pending. Anchoring on any
+        # history would let a bare country name revive an unrelated question
+        # from earlier in the session: "How do I sponsor someone?" ... "DRC"
+        # would be answered as sponsoring in the DRC, which the reader never
+        # asked. The signal is the PREVIOUS USER MESSAGE carrying a country
+        # phrase that could not be resolved, which is what prompted the
+        # question - not the wording of the assistant's reply, which is
+        # translated per locale and would make this depend on copy.
+        #
+        # A follow-up that IS a question keeps its existing handling: "And in
+        # Uganda?" is deliberately left to the follow-up markers, so this does
+        # not quietly widen when history is inherited.
+        if user_message.strip().endswith("?"):
+            return False
+        if not (word_count <= 6 and find_market_mentions(normalized)):
+            return False
+        return self._clarification_is_pending(history)
+
+    def _clarification_is_pending(self, history: str) -> bool:
+        """Whether the last thing the reader said needed a country clarified."""
+        user_messages = self._user_messages_from_history(history)
+        if not user_messages:
+            return False
+        return bool(find_unresolved_market_mentions(user_messages[-1]))
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
@@ -1359,6 +1414,17 @@ class AIOrchestrator:
             ),
         )
 
+    def _cross_market_scope_message(self, language: str = "en", user_message: str = "") -> str:
+        """Explain a cross-market local-policy refusal without disclosing policy."""
+        copy, reviewed_for_locale = configured_conversation_response(
+            "cross_market_policy_scope", language
+        )
+        if copy and reviewed_for_locale:
+            return copy
+        if (language or "en").split("-", 1)[0].lower() == "en":
+            return CROSS_MARKET_POLICY_SCOPE_RESPONSE
+        return self._insufficient_evidence_message(language, user_message)
+
     def _candidate_narrowing_response(
         self,
         body: ChatRequest,
@@ -1576,6 +1642,21 @@ class AIOrchestrator:
         if intent == "assistant_meta":
             return self._static_assistant_response(body, correlation_id, candidate_flags)
         if intent == "policy_fact" and not find_market_mentions(scrubbed_input):
+            # A country-shaped phrase that could not be resolved is asked
+            # about, never answered. Without this the message resolved to no
+            # market and fell through to retrieval on the SESSION's country -
+            # so "Upper Congo delivery?" from a US session was answered from US
+            # policy. That is the wrong-country answer the matcher's guard
+            # exists to prevent, arriving by a different route.
+            #
+            # Placed here, before the exact and semantic caches and before
+            # retrieval, so no country-specific answer is produced or served
+            # from cache for a question whose country is unknown.
+            unresolved = find_unresolved_market_mentions(scrubbed_input)
+            if unresolved:
+                return self._country_clarification_response(
+                    sorted(unresolved)[0], body, correlation_id
+                )
             # A named market takes the normal retrieval path; this only fires
             # when no market was recognized at all, so a likely typo (e.g.
             # "Nigar" for "Niger", TRB-19189) doesn't fall straight through to
@@ -1584,6 +1665,33 @@ class AIOrchestrator:
             if probable_country:
                 return self._market_typo_confirmation_response(probable_country, body, correlation_id)
         return None
+
+    def _country_clarification_response(
+        self,
+        mention: str,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> ChatResponse:
+        """Ask which country a country-shaped phrase meant.
+
+        Never substitutes: not the country whose name is inside the phrase -
+        "Upper Congo" contains "Congo" and may mean either Congo - and not the
+        session's own market, which is what happened before this existed.
+        """
+        template = localized_conversation_response("country_clarification", body.language) or (
+            'Which country do you mean by "{mention}"? Please reply with the country '
+            "name and I will answer your question for that market."
+        )
+        answer = template.replace("{mention}", mention)
+        return self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "fallback": False,
+                "response_source": "country_clarification",
+                "unresolved_market_mention": mention,
+            },
+        )
 
     def _market_typo_confirmation_response(
         self,
@@ -1803,7 +1911,14 @@ class AIOrchestrator:
             narrowing_response = self._candidate_narrowing_response(body, correlation_id, history)
             if narrowing_response:
                 return narrowing_response, approved_result, evidence_decision
-        fallback_message = self._insufficient_evidence_message(body.language, body.message)
+        if evidence_decision.reason == "cross_market_policy_request":
+            fallback_message = self._cross_market_scope_message(
+                body.language, body.message
+            )
+        else:
+            fallback_message = self._insufficient_evidence_message(
+                body.language, body.message
+            )
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:
             fallback_message = f"{fallback_message}\n\n{office_contact_addendum}"
@@ -1926,6 +2041,21 @@ class AIOrchestrator:
         )
         return response
 
+    def _reader_statements(self, body: ChatRequest, history: str) -> str:
+        """Everything the reader has said about themselves this conversation.
+
+        The current message alone is not enough. A reader who says "I'm a
+        Preferred Customer" and then asks "and the minimum order?" has declared
+        a role that the follow-up turn does not repeat, and a validator reading
+        only the latest message would treat the answer's use of that role as an
+        assumption the reader never made.
+
+        Prior turns come from session history, so this is what the reader
+        actually sent, never what the assistant inferred.
+        """
+        prior = self._user_messages_from_history(history) if history else []
+        return "\n".join([*prior, body.message or ""]).strip()
+
     def _validate_response(
         self,
         chat_response: ChatResponse,
@@ -1933,8 +2063,10 @@ class AIOrchestrator:
         correlation_id: str,
         model_response: ModelResponse | None = None,
         retrieval_result: RetrievalResult | None = None,
+        history: str = "",
     ) -> ChatResponse:
         """Validate a chat response and return a safe fallback for critical failures."""
+        reader_statements = self._reader_statements(body, history)
         result = self.output_validator.validate(
             ValidationContext(
                 chat_response=chat_response,
@@ -1943,6 +2075,12 @@ class AIOrchestrator:
                 country=body.country,
                 language=body.language,
                 role=body.role,
+                # The reader's own words, this turn and earlier. A validator
+                # asking whether the answer assumed something about them - that
+                # they are an existing FBO, or a Preferred Customer - needs what
+                # they actually said, and the session role cannot supply it for
+                # a category no session declares.
+                user_context=reader_statements,
                 correlation_id=correlation_id,
             )
         )
@@ -1987,22 +2125,61 @@ class AIOrchestrator:
         # Recorded before any repair attempt, so ValidationHealth reflects what
         # the model produced rather than what repair rescued.
         record_validation_outcome(has_critical=result.has_critical())
+        # The boundary a repair-only comparison has to sample: the exact text
+        # and evidence that numeric repair is about to see. Nine steps run
+        # between generation and here and several of them delete text, so the
+        # final response is not this string, and neither is the model's raw
+        # output. Comparing two repair rules needs THIS one.
+        #
+        # None in every normal process. Only an isolated measurement process
+        # sets it, it cannot change the answer - the return value is discarded
+        # and every later safeguard runs unchanged - and a failure inside it is
+        # logged rather than raised.
+        if pre_repair_capture_hook is not None:
+            try:
+                pre_repair_capture_hook(
+                    chat_response.answer or "",
+                    (retrieval_result.documents if retrieval_result else []),
+                    correlation_id,
+                )
+            except Exception:
+                LOGGER.exception("pre_repair_capture_hook_failed", correlation_id=correlation_id)
         if result.has_critical():
             critical_codes = {
                 str(issue.code).upper()
                 for issue in result.issues
                 if issue.severity.value.upper() == "CRITICAL"
             }
-            if (
-                critical_codes
-                and all(code == "NUMERIC_CLAIM_UNGROUNDED" for code in critical_codes)
-                and retrieval_result is not None
-                and retrieval_result.documents
+            # Both of these findings name particular sentences, so both can be
+            # answered by removing those sentences and revalidating rather than
+            # discarding an otherwise good answer. A critical finding that is
+            # not in this set still refuses the whole answer.
+            repairable = critical_codes and critical_codes <= {
+                "NUMERIC_CLAIM_UNGROUNDED",
+                "PERSONAL_HISTORY_UNSUPPORTED",
+            }
+            needs_evidence = "NUMERIC_CLAIM_UNGROUNDED" in critical_codes
+            if repairable and (
+                not needs_evidence
+                or (retrieval_result is not None and retrieval_result.documents)
             ):
-                repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
-                    chat_response.answer,
-                    retrieval_result.documents,
-                )
+                repaired_answer = chat_response.answer
+                removed_numbers: list[str] = []
+                removed_personal: list[str] = []
+                if "PERSONAL_HISTORY_UNSUPPORTED" in critical_codes:
+                    # No evidence is needed to know we hold no purchase history
+                    # for anybody: the sentence is unsupportable in principle,
+                    # not merely unsupported by these documents.
+                    repaired_answer, removed_personal = remove_unsupported_personal_claims(
+                        repaired_answer,
+                        role=body.role,
+                        user_context=reader_statements,
+                    )
+                if needs_evidence:
+                    repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
+                        repaired_answer,
+                        retrieval_result.documents,
+                    )
                 if repaired_answer and repaired_answer != chat_response.answer:
                     repaired_response = ChatResponse(
                         answer=repaired_answer,
@@ -2012,8 +2189,10 @@ class AIOrchestrator:
                         confidence=chat_response.confidence,
                         metadata={
                             **(chat_response.metadata or {}),
-                            "numeric_claim_repair": True,
+                            "numeric_claim_repair": bool(removed_numbers),
                             "removed_numeric_claims": removed_numbers,
+                            "personal_history_repair": bool(removed_personal),
+                            "removed_personal_claims": removed_personal,
                         },
                         correlation_id=chat_response.correlation_id,
                     )
@@ -2025,6 +2204,7 @@ class AIOrchestrator:
                             country=body.country,
                             language=body.language,
                             role=body.role,
+                            user_context=reader_statements,
                             correlation_id=correlation_id,
                         )
                     )

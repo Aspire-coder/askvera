@@ -17,6 +17,7 @@ from services.market_config import find_market_mentions
 from services.guardrails import is_policy_safety_question
 from utils.logging import get_logger
 
+from .country_names import country_name_queries
 from .glossary import approved_joined_term_queries, glossary_queries
 from .models import RetrievedDocument, RetrievalResult
 
@@ -514,10 +515,15 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(base_queries, include_global_documents=False)
     joined_term_queries = approved_joined_term_queries(message, country, language)
     glossary = glossary_queries(message, country, language)
+    # Approved spellings of the markets the question names - the accented form
+    # the documents use, or the configured name behind an abbreviation. Placed
+    # after the original queries so the reader's own wording keeps the leading
+    # weight the provider gives the first query.
+    country_names = country_name_queries(message)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
         # Preserve directory availability when the planner is intentionally off.
         return RetrievalQueryPlan(
-            [*base_queries, *joined_term_queries, *glossary],
+            [*base_queries, *joined_term_queries, *glossary, *country_names],
             include_global_documents=True,
         )
 
@@ -594,7 +600,7 @@ def _planned_retrieval_plan(
         # unavailable. The original query remains first, and all normal locale
         # and document-scope filters still apply downstream.
         return RetrievalQueryPlan(
-            [*base_queries, *joined_term_queries, *glossary],
+            [*base_queries, *joined_term_queries, *glossary, *country_names],
             include_global_documents=True,
         )
 
@@ -651,7 +657,14 @@ def _planned_retrieval_plan(
         intent_confidence = 0.0
 
     merged: list[str] = []
-    for query in [message, *joined_term_queries, *planned_queries, *base_queries[1:], *glossary]:
+    for query in [
+        message,
+        *joined_term_queries,
+        *planned_queries,
+        *base_queries[1:],
+        *glossary,
+        *country_names,
+    ]:
         cleaned = re.sub(r"\s+", " ", query).strip()
         if cleaned and cleaned not in merged:
             merged.append(cleaned)
@@ -661,6 +674,7 @@ def _planned_retrieval_plan(
         planned_query_count=len(planned_queries),
         joined_term_query_count=len(joined_term_queries),
         glossary_query_count=len(glossary),
+        country_name_query_count=len(country_names),
         named_market_count=len(find_market_mentions(message)),
         query_count=len(merged),
         include_global_documents=include_global_documents,

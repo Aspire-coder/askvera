@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from utils.qualifications import (
+    misattached_figures,
+    missing_qualifications,
+    value_is_conveyed,
+)
+
 
 _FIELD_LABEL_RE = re.compile(
     r"(?:country|name|address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
@@ -247,6 +253,56 @@ def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> 
     return corrected, replacements > 0
 
 
+_DANGLING_LEAD_END = re.compile(
+    r"(?:,\s*)?\b(?:the|a|an|and|or|with|for|to|at|in|of|from|that)\s*$",
+    re.IGNORECASE,
+)
+_SCAFFOLDING_LEAD = re.compile(
+    r"\s*(?:"
+    r"(?:if|when)\s+you(?:\s*'re|\s+are)?\s+order(?:ing)?\s+online"
+    r"|(?:for|with)\s+online\s+orders?"
+    r"|when\s+ordering\s+online"
+    r"|(?:please\s+)?keep\s+in\s+mind(?:\s+that)?"
+    r")\s*,?\s*(?:the|a|an)?\s*",
+    re.IGNORECASE,
+)
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+
+
+def _remove_field_sentences(answer: str, pattern: re.Pattern) -> tuple[str, int]:
+    """Remove an unrequested field without leaving a broken lead-in behind."""
+    spans: list[tuple[int, int, str]] = []
+    boundaries = [match.end() for match in _SENTENCE_END.finditer(answer)]
+    for match in pattern.finditer(answer):
+        start, end = match.start(), match.end()
+        lead_start = max((boundary for boundary in boundaries if boundary <= start), default=0)
+        lead = answer[lead_start:start]
+        if lead.strip() and _DANGLING_LEAD_END.search(lead):
+            if _SCAFFOLDING_LEAD.fullmatch(lead):
+                spans.append((lead_start, end, " " if lead[:1].isspace() else ""))
+                continue
+            trimmed = lead
+            while True:
+                shorter = _DANGLING_LEAD_END.sub("", trimmed).rstrip()
+                if shorter == trimmed.rstrip():
+                    break
+                trimmed = shorter
+            trimmed = trimmed.rstrip()
+            if trimmed and not trimmed.endswith((".", "!", "?")):
+                trimmed += "."
+            spans.append((lead_start, end, trimmed + " "))
+            continue
+        spans.append((start, end, ""))
+
+    if not spans:
+        return answer, 0
+    repaired = answer
+    for start, end, replacement in reversed(spans):
+        repaired = repaired[:start] + replacement + repaired[end:]
+    repaired = re.sub(r"[ \t]{2,}", " ", repaired)
+    return re.sub(r"\n{3,}", "\n\n", repaired), len(spans)
+
+
 def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str, bool]:
     """Remove extra labelled directory fields when one field was requested."""
     question_text = (question or "").casefold()
@@ -274,12 +330,13 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     elif re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
         allowed = r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?"
     elif re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
-        cleaned, replacements = re.subn(
-            r"(?:payment\s+methods?\s+accepted|delivery\s+cost|delivery\s+charge|"
-            r"average\s+lead\s+time|business\s+hours?)[^.!?]*(?:[.!?]|$)\s*",
-            "",
+        cleaned, replacements = _remove_field_sentences(
             answer or "",
-            flags=re.IGNORECASE,
+            re.compile(
+                r"(?:payment\s+methods?\s+accepted|delivery\s+cost|delivery\s+charge|"
+                r"average\s+lead\s+time|business\s+hours?)[^.!?]*(?:[.!?]|$)\s*",
+                re.IGNORECASE,
+            ),
         )
         return cleaned.strip(), replacements > 0
     else:
@@ -300,10 +357,78 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     return cleaned, replacements > 0
 
 
-# A minimum-order field value is a figure with at most a currency equivalent,
-# such as "0,200CC (7 800DZD)". Anything materially longer is record prose that
-# the capture ran into rather than a value worth restoring.
-_MAX_RESTORED_VALUE_CHARS = 80
+# A backstop against a runaway sentence, not the boundary rule.
+#
+# This was 80 characters, on the theory that a field value is a figure and a
+# currency equivalent, and anything longer is prose the capture ran into. That
+# theory cost the reader the answer. Both records whose minimum order carries a
+# condition state it in one sentence longer than 80 characters - Algeria's "as
+# a first order for Preferred Customers", France's "within 72 hours in order to
+# validate his sponsorship" - so the whole restoration was declined and the
+# reader was left with a bare figure. A rule delivered without the words saying
+# who it applies to is a different rule.
+#
+# What actually prevents the fragment the cap was standing in for is
+# _directory_field_value stopping at a sentence end or the next bullet: it
+# returns one complete sentence, or nothing. This bound only refuses a single
+# sentence long enough to be a paragraph.
+_MAX_RESTORED_VALUE_CHARS = 320
+
+
+# Where a directory field's value ends.
+#
+# A period ends it only when it is not inside a number and what follows starts
+# something new - an uppercase word, the next bullet, or the end of the text.
+# Requiring that is what keeps "1.612CC" and "(Ref. 830)" intact: the first
+# period sits between digits, the second is followed by a digit, and neither
+# ends a sentence.
+_FIELD_SENTENCE_END_RE = re.compile(r"(?<!\d)\.(?=\s*(?:[A-Z\u2022]|$))")
+
+# The bullet that separates directory fields in this corpus. A value must never
+# run into the next field: "2 CC" followed by "Grouped order possible?: No" is
+# two fields, not one long one.
+_FIELD_BREAK_RE = re.compile(r"\u2022")
+
+
+def _directory_field_value(text: str) -> str:
+    """The value of a directory field, to the end of its sentence.
+
+    Across line breaks, because the PDF wraps mid-field and stopping at the
+    newline delivered "...yet a newly sponsored." to a reader. Not across a
+    sentence boundary or a bullet, because that is the next field.
+
+    Fixed for the tested cases, not solved in general. Capitalization and
+    punctuation are heuristics: an abbreviation followed by a capitalised word
+    ("Ref. Number 830") still ends the field early, a sentence that begins in
+    lower case does not end it, and languages that punctuate differently are
+    untested. Those are known limits, recorded rather than papered over; the
+    length guard is what keeps the damage to "declined" rather than "truncated".
+    """
+    end = len(text)
+    sentence = _FIELD_SENTENCE_END_RE.search(text)
+    if sentence:
+        end = sentence.end()
+    bullet = _FIELD_BREAK_RE.search(text)
+    if bullet and bullet.start() < end:
+        end = bullet.start()
+    return " ".join(text[:end].split()).strip().rstrip(".").strip()
+
+
+def _field_value_ends_at_a_boundary(text: str) -> bool:
+    """Whether the value stopped somewhere, or simply ran out of text.
+
+    `_directory_field_value` returns everything it has when it finds no
+    sentence end and no bullet, and everything it has can be a phrase cut off
+    mid-sentence by extraction: "...placed with the sponsoring office named in
+    the". Appending that ends the answer on the word "the", and the output
+    validator then discards the whole answer as structurally incomplete - which
+    is how a correct Algeria answer became a refusal.
+
+    Length was standing in for this check and is not the same question. A short
+    fragment is still a fragment, and a long sentence that genuinely ends is
+    still a value. This asks the question directly.
+    """
+    return bool(_FIELD_SENTENCE_END_RE.search(text) or _FIELD_BREAK_RE.search(text))
 
 
 def restore_missing_requested_order_size(
@@ -317,26 +442,37 @@ def restore_missing_requested_order_size(
     corrected = answer or ""
     for source in source_texts:
         match = re.search(
-            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.\n]+)",
+            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[\s\S]+)",
             source or "",
             re.IGNORECASE,
         )
         if not match:
             continue
-        value = " ".join(match.group("value").split()).strip()
-        # The capture runs to the next period or newline, so in a record whose
-        # minimum-order line continues into prose it swallows that prose too.
-        # Appending it as a sentence then ends the answer mid-phrase - which is
-        # how the Algeria answer came to end on the word "the", and be discarded
-        # whole by the output validator as structurally incomplete. A field
-        # value is short; a paragraph is not this function's to append.
+        captured = match.group("value")
+        value = _directory_field_value(captured)
+        if not value or not _field_value_ends_at_a_boundary(captured):
+            return corrected, False
         if len(value) > _MAX_RESTORED_VALUE_CHARS:
             return corrected, False
-        if value and _normalize_for_comparison(value) not in _normalize_for_comparison(corrected):
-            separator = "\n\n" if corrected.strip() else ""
-            corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
-            return corrected, True
-        return corrected, False
+        # Restore when the answer is missing the value, and also when it states
+        # the figure but not the conditions the source attached to it. The
+        # second case is the one that reached a reader: the France answer said
+        # there is no minimum order, which is true, and is the first half of a
+        # sentence whose second half is a 150EUR condition within 72 hours.
+        # Three questions, not one. Does the answer state the figures; does it
+        # carry the conditions attached to them; and does it attach them to the
+        # same category the source does. An answer can pass the first two and
+        # fail the third - every word present, the figure handed to the wrong
+        # people - so the third is asked separately.
+        if (
+            value_is_conveyed(corrected, value)
+            and not missing_qualifications(corrected, value)
+            and not misattached_figures(corrected, value)
+        ):
+            return corrected, False
+        separator = "\n\n" if corrected.strip() else ""
+        corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
+        return corrected, True
     return corrected, False
 
 

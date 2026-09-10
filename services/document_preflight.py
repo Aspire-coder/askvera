@@ -40,6 +40,12 @@ class DocumentPreflight:
     # and "we could not look" support opposite decisions, and only one of them
     # is safe to publish unread.
     undetermined_page_numbers: tuple[int, ...] = ()
+    # Page numbers carrying an image and only a little text: a readable heading
+    # above a body this parser could not read. Reported rather than treated as
+    # scanned, because a page with an image is not by itself evidence of
+    # missing content - policy pages carry letterheads - and forcing OCR on
+    # every one of them would hold documents that are entirely fine.
+    low_text_image_page_numbers: tuple[int, ...] = ()
 
     @property
     def text_coverage_ratio(self) -> float:
@@ -162,6 +168,13 @@ def _xobject_image_state(xobjects, depth: int) -> str:
     return state
 
 
+# A full page of policy text runs to thousands of characters. A page holding
+# only a heading sits far below that, so text between the 40-character "has any
+# text" bar and this one, alongside an image, is the shape of a readable header
+# over an unreadable body.
+LOW_TEXT_PAGE_CHARACTERS = 250
+
+
 def _page_has_image(page) -> bool:
     """True when a page embeds an image, directly or inside a form."""
     return _page_image_state(page) == _IMAGE_PRESENT
@@ -198,6 +211,7 @@ def analyze_pdf(
     scanned_pages: list[int] = []
     blank_pages: list[int] = []
     undetermined_pages: list[int] = []
+    low_text_image_pages: list[int] = []
     for number, page in enumerate(reader.pages, start=1):
         plain = extract_pdf_page_text(page)
         layout = extract_pdf_page_text(page, preserve_layout=True)
@@ -208,6 +222,12 @@ def analyze_pdf(
             raise DocumentPreflightError("PDF extracted text exceeds the safety limit.")
         if visible_chars >= 40:
             text_pages += 1
+            # A page is only checked for images when it has almost no text, so
+            # a readable heading above a scanned table counted as fully
+            # extracted and nothing recorded that its body was never read.
+            # This does not decide anything; it makes the case visible.
+            if visible_chars < LOW_TEXT_PAGE_CHARACTERS and _page_image_state(page) == _IMAGE_PRESENT:
+                low_text_image_pages.append(number)
         else:
             empty_pages += 1
             # Separating scanned pages from blank ones is the whole point. A
@@ -252,6 +272,7 @@ def analyze_pdf(
         scanned_page_numbers=tuple(scanned_pages),
         blank_page_numbers=tuple(blank_pages),
         undetermined_page_numbers=tuple(undetermined_pages),
+        low_text_image_page_numbers=tuple(low_text_image_pages),
     )
 
 

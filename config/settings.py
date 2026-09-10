@@ -388,6 +388,13 @@ OPENSEARCH_CANDIDATE_COUNT = _env_int("OPENSEARCH_CANDIDATE_COUNT", 30)
 # against the retrieval canary before promoting further.
 OPENSEARCH_VECTOR_WEIGHT = _env_float("OPENSEARCH_VECTOR_WEIGHT", 1.5)
 OPENSEARCH_GLOSSARY_ENABLED = _env_bool("OPENSEARCH_GLOSSARY_ENABLED", True)
+# Adds approved spellings of the markets a question names - the accented form
+# the documents use, or the configured name behind an abbreviation. Matching
+# only: locale searches filter on the session country and global directory
+# targeting reads the original message, so neither consults these queries.
+OPENSEARCH_COUNTRY_NAME_EXPANSION_ENABLED = _env_bool(
+    "OPENSEARCH_COUNTRY_NAME_EXPANSION_ENABLED", True
+)
 # Bedrock reranking on the live opensearch_section provider, defaulted OFF: a
 # live-index canary run (2026-09-01) showed this environment already had a
 # reranker model ARN configured from a prior (now-retired) shadow experiment,

@@ -120,6 +120,29 @@ def assistant_meta_response(
     return str(response).strip() if response else None
 
 
+def configured_conversation_response(key: str, language: str = "") -> tuple[str | None, bool]:
+    """Return reviewed copy for a locale without translating anything.
+
+    localized_conversation_response falls back to a live model translation when
+    a locale has no reviewed copy for a key. That is right for a reader, who
+    needs an answer in their language either way, and wrong for anything trying
+    to decide what the approved wording is: it costs a model call and returns
+    text that can differ between requests.
+
+    The second value says whether the copy returned is reviewed for the
+    requested locale. False means the English wording came back instead, so a
+    caller comparing delivered text against it is comparing against something
+    the reader will not have seen.
+    """
+    locale = _locale_key(language)
+    routes = _conversation_routes()
+    localized = (routes.get(locale, {}).get("responses", {}) or {}).get(key)
+    if localized:
+        return str(localized).strip(), True
+    english = (routes.get("en", {}).get("responses", {}) or {}).get(key)
+    return (str(english).strip() if english else None), locale == "en"
+
+
 def localized_conversation_response(key: str, language: str = "") -> str | None:
     """Return controlled locale copy for a fallback or conversational response."""
     locale = _locale_key(language)

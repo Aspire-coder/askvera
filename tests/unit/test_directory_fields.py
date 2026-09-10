@@ -373,3 +373,243 @@ def test_a_question_asking_for_hours_and_an_address_still_restores() -> None:
     )
 
     assert restored
+
+
+# --- the France pilot defect, reproduced from the real record ---------------
+
+
+FRANCE_RECORD_WRAP = (
+    "Minimum order size FBO: We do not have a minimum order in France, yet a newly sponsored\n"
+    "Preferred Customer will have to order 150\u20ac minimum of products within 72 hours in order "
+    "to validate his\nsponsorship.\n"
+)
+
+ORDER_QUESTION = "What is the minimum order size for an FBO in France?"
+
+
+def test_a_field_that_wraps_mid_sentence_is_restored_whole_not_as_a_fragment() -> None:
+    """The defect a reader actually received, on 2026-09-08, and its second half.
+
+    The capture stopped at the newline where the PDF wraps, so the answer was
+    given "...yet a newly sponsored" with a period bolted on and delivered it.
+    Running the value to the end of the sentence fixed the fragment, and the
+    80-character guard then declined the whole restoration - which fixed the
+    fragment by delivering nothing.
+
+    **Expected outcome changed here, deliberately.** This asserted
+    `changed is False`. Declining was never right: the reader was told there is
+    no minimum order in France, which is true and is the first half of a
+    sentence whose second half is a 150EUR condition inside 72 hours. Dropping
+    that is not a shorter answer, it is a different rule. The value is one
+    complete sentence ending at a real boundary, so it is restored whole.
+
+    The assertion that mattered - the fragment must never appear - is kept.
+    """
+    answer = "For an FBO in France, there is no minimum order requirement."
+
+    restored, changed = restore_missing_requested_order_size(
+        answer, [FRANCE_RECORD_WRAP], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert "yet a newly sponsored." not in restored
+    assert restored.endswith(
+        "Minimum order size FBO: We do not have a minimum order in France, yet a newly "
+        "sponsored Preferred Customer will have to order 150€ minimum of products "
+        "within 72 hours in order to validate his sponsorship."
+    )
+
+
+def test_the_old_truncation_point_is_no_longer_reachable() -> None:
+    """Pinned to the exact fragment, so a regression is unmistakable."""
+    restored, _ = restore_missing_requested_order_size(
+        "An answer.", [FRANCE_RECORD_WRAP], ORDER_QUESTION
+    )
+
+    assert not restored.rstrip().endswith("yet a newly sponsored.")
+
+
+def test_a_short_field_that_wraps_is_restored_whole() -> None:
+    """Preserving the field across line breaks, not merely refusing more often.
+
+    A wrapped value that is genuinely a value still gets restored, joined into
+    one line.
+    """
+    wrapped = "Minimum order size FBO: 2 CC per\norder for all FBOs."
+
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", [wrapped], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert restored.endswith("Minimum order size FBO: 2 CC per order for all FBOs.")
+
+
+def test_a_short_single_line_field_still_restores() -> None:
+    """The behaviour this function exists for must survive the fix."""
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", ["Minimum order size FBO: 0,200CC (7 800DZD)."], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert restored.endswith("Minimum order size FBO: 0,200CC (7 800DZD).")
+
+
+def test_a_field_stating_its_conditions_is_restored_with_them() -> None:
+    """Algeria writes this field as a sentence too, and gets the same treatment.
+
+    **Expected outcome changed here, deliberately.** This asserted
+    `changed is False`, on the same length rule as the France case. Algeria's
+    minimum order is three figures with a role condition and a timing condition
+    attached - "as a first order for Preferred Customers", "after the first
+    purchase for all FBOs". A Preferred Customer's first-order figure told to an
+    existing FBO is the wrong number, and there is nothing in the shortened
+    answer to reveal that.
+    """
+    algeria = (
+        "Minimum order size FBO: 0,200CC as a first order for Preferred Customers, "
+        "7 800DZD ($60) and the equivalent of 5 000 DZD ($43) after the first purchase "
+        "for all FBOs.\n"
+    )
+
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", [algeria], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert "as a first order for Preferred Customers" in restored
+    assert "after the first purchase for all FBOs" in restored
+
+
+# --- where a field value ends ----------------------------------------------
+#
+# "Stop at the sentence end" is only safe if it knows what a sentence end is.
+# A first attempt stopped at the first period of any kind, which truncated
+# inside the number it was restoring - worse than the newline bug it replaced.
+
+
+def _restored_tail(source: str) -> str:
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", [source], ORDER_QUESTION
+    )
+    assert changed is True
+    return restored[len("An answer."):].strip()
+
+
+def test_a_decimal_point_does_not_end_the_field() -> None:
+    """The regression this check exists for: truncating inside 1.612."""
+    assert _restored_tail("Minimum order size FBO: 1.612CC per order.").endswith(
+        "Minimum order size FBO: 1.612CC per order."
+    )
+
+
+def test_an_abbreviation_does_not_end_the_field() -> None:
+    assert _restored_tail("Minimum order size FBO: 2 CC (Ref. 830) per order.").endswith(
+        "Minimum order size FBO: 2 CC (Ref. 830) per order."
+    )
+
+
+def test_the_next_field_heading_ends_the_field() -> None:
+    """A value must never run into the next bullet - that is a different field."""
+    tail = _restored_tail("Minimum order size FBO: 2 CC\n\u2022 Grouped order possible?: No.")
+
+    assert tail.endswith("Minimum order size FBO: 2 CC.")
+    assert "Grouped order" not in tail
+
+
+def test_a_sentence_end_ends_the_field() -> None:
+    source = "Minimum order size FBO: 2 CC per order. The Preferred may order any products."
+
+    tail = _restored_tail(source)
+
+    assert tail.endswith("Minimum order size FBO: 2 CC per order.")
+    assert "Preferred may order" not in tail
+
+
+def test_a_thousands_separator_survives() -> None:
+    assert _restored_tail("Minimum order size FBO: 1,612CC per order.").endswith("1,612CC per order.")
+
+
+def test_the_field_value_helper_is_directly_exercised() -> None:
+    """The boundary rule itself, without the surrounding restoration."""
+    from utils.directory_fields import _directory_field_value
+
+    assert _directory_field_value("1.612CC per order.") == "1.612CC per order"
+    assert _directory_field_value("2 CC\n\u2022 Grouped order?: No.") == "2 CC"
+    assert _directory_field_value("2 CC per\norder. Next sentence.") == "2 CC per order"
+    assert _directory_field_value("2 CC (Ref. 830).") == "2 CC (Ref. 830)"
+
+
+# --- both directions of the completeness guard ------------------------------
+#
+# Truncated restoration and silent loss of a condition are the same defect seen
+# from two sides, and a fix for one is a natural way to cause the other. These
+# hold both at once.
+
+
+def test_a_capture_with_no_boundary_is_still_declined() -> None:
+    """The guard the length cap was standing in for, asked directly.
+
+    Extraction can end a field mid-sentence. Length does not distinguish that
+    from a value: a short fragment is still a fragment. What decides it is
+    whether the capture stopped somewhere or simply ran out.
+    """
+    from utils.directory_fields import _field_value_ends_at_a_boundary
+
+    ran_out = "0,200CC and all first orders must be placed with the office named in the"
+
+    assert _field_value_ends_at_a_boundary(ran_out) is False
+
+    restored, changed = restore_missing_requested_order_size(
+        "An answer.", [f"Minimum order size FBO: {ran_out}"], ORDER_QUESTION
+    )
+
+    assert changed is False
+    assert not restored.rstrip().endswith("the.")
+
+
+def test_a_condition_is_restored_even_when_the_figure_is_already_there() -> None:
+    """The silent-loss half.
+
+    An answer that states the figure looked complete to a whole-value substring
+    check, so nothing fired and the condition stayed lost.
+    """
+    source = (
+        "Minimum order size FBO: 2 CC as a first order for Preferred Customers.\n"
+    )
+    answer = "The minimum order size is 2 CC."
+
+    restored, changed = restore_missing_requested_order_size(
+        answer, [source], ORDER_QUESTION
+    )
+
+    assert changed is True
+    assert "for Preferred Customers" in restored
+
+
+def test_an_answer_that_already_carries_every_condition_is_left_alone() -> None:
+    """The control: completeness must not mean appending to a complete answer."""
+    source = "Minimum order size FBO: 2 CC as a first order for Preferred Customers.\n"
+    answer = "As a first order for Preferred Customers the minimum order size is 2 CC."
+
+    restored, changed = restore_missing_requested_order_size(
+        answer, [source], ORDER_QUESTION
+    )
+
+    assert changed is False
+    assert restored == answer
+
+
+def test_a_value_with_no_conditions_does_not_gain_any() -> None:
+    """Nothing is invented: a bare figure stays a bare figure."""
+    from utils.qualifications import qualifying_clauses
+
+    assert qualifying_clauses("0,200CC (7 800DZD)") == []
+
+    restored, changed = restore_missing_requested_order_size(
+        "The minimum order size is 0,200CC (7 800DZD).",
+        ["Minimum order size FBO: 0,200CC (7 800DZD).\n"],
+        ORDER_QUESTION,
+    )
+
+    assert changed is False

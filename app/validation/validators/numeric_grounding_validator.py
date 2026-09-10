@@ -62,7 +62,13 @@ _DIGIT_GROUP_RE = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
 def _normalize(text: str) -> str:
     """Normalize text for tolerant, Unicode-safe source matching."""
     normalized = unicodedata.normalize("NFKC", text or "").casefold()
-    normalized = re.sub(r"\s+", " ", normalized)
+    # Horizontal whitespace collapses; line breaks survive. A table's
+    # structure is carried by its lines, and a heading stating a currency
+    # once for the rows beneath it is only distinguishable from a row by
+    # standing on its own line. Collapsing everything to spaces threw that
+    # away and left unit inheritance guessing from proximity.
+    normalized = re.sub(r"[^\S\n]+", " ", normalized)
+    normalized = re.sub(r" ?\n ?", "\n", normalized)
     normalized = re.sub(r"\s*(?:-|\u2013|\u2014)\s*", "-", normalized)
     normalized = _DIGIT_GROUP_RE.sub("", normalized)
     return normalized.strip()
@@ -261,8 +267,93 @@ def _subject_token_sets(
 _CLAUSE_DELIMITER_RE = re.compile(r"(?<!\d)[.;](?!\d)")
 
 
-def _source_windows(source_text: str, number: str, radius: int = 260) -> list[str]:
-    """Return clause-bounded source windows around the same number."""
+# A currency or unit written beside a figure. Same value, different unit, is a
+# different fact: "900 DZD" and "900 EUR" are not the same delivery cost, and
+# "0,200CC" is not "0,200 DZD". Grounding checked the number and the subject
+# and never the unit, so both of those were accepted.
+_UNIT_ALIASES = {
+    "$": "usd", "us$": "usd", "usd": "usd",
+    "€": "eur", "eur": "eur",
+    "£": "gbp", "gbp": "gbp",
+    "cc": "cc", "case credit": "cc", "case credits": "cc",
+    "%": "pct", "percent": "pct",
+}
+# A unit is a currency symbol, an all-capitals currency code, Case Credits, or
+# a percent sign. Ordinary lowercase words are deliberately excluded: matching
+# any two-to-four letter token treated the "and" in "48 and 96 hours" as a
+# unit, and every bare figure in the corpus stopped being groundable.
+# Currency codes this corpus can plausibly state. An explicit vocabulary is
+# used rather than "any three letters" because the source text is casefolded
+# before matching, so a case-based rule cannot work on both sides, and matching
+# any short token treated the "and" in "48 and 96 hours" as a unit. A code that
+# is not listed simply yields no unit, which is the behaviour that existed
+# before this check, so an omission cannot cause a false rejection.
+_CURRENCY_CODES = frozenset("""
+AED ARS AUD BDT BOB BRL CAD CHF CLP CNY COP CRC CZK DKK DOP DZD EGP EUR GBP
+GHS GTQ HKD HUF IDR ILS INR JPY KES KGS KRW KZT LKR MAD MXN MYR NGN NOK NZD
+PAB PEN PHP PKR PLN PYG RON RSD RUB SAR SEK SGD THB TND TRY TWD TZS UAH UGX
+USD UYU VND ZAR
+""".split())
+
+_UNIT_AFTER_RE = re.compile(
+    r"\s{0,2}(case\s+credits?|cc|[a-z]{3}|%|€|£|\$)", re.IGNORECASE
+)
+_UNIT_BEFORE_RE = re.compile(r"(us\$|\$|€|£)\s{0,2}$", re.IGNORECASE)
+
+
+# An all-capitals three-letter token in an ANSWER is a currency code, listed
+# or not. The answer keeps its capitalisation, unlike source text, so case can
+# be used on this side - and an unlisted code must not silently become "no
+# unit", which is how "900 XYZ" passed against a record stating "900 DZD".
+_ANSWER_CODE_RE = re.compile(r"[A-Z]{3}")
+
+
+def _normalize_unit(raw: str, allow_unlisted_code: bool = False) -> str:
+    """Map a currency symbol or unit token to a comparable name, or empty.
+
+    An unrecognised code keeps its own name rather than becoming "no unit".
+    DZD is not in the alias table and normalising it to an empty string meant
+    "900 EUR" was accepted against a record stating "900 DZD" - the unit check
+    silently did nothing for every currency the table did not happen to list.
+    """
+    cleaned = " ".join((raw or "").strip().lower().split())
+    if not cleaned:
+        return ""
+    if cleaned in _UNIT_ALIASES:
+        return _UNIT_ALIASES[cleaned]
+    if cleaned.upper() in _CURRENCY_CODES:
+        return cleaned
+    # An unlisted code counts only when the original was capitalised, which
+    # source text never is by the time it reaches here.
+    return cleaned if allow_unlisted_code and _ANSWER_CODE_RE.fullmatch(raw.strip()) else ""
+
+
+def _unit_beside(text: str, start: int, end: int, allow_unlisted_code: bool = False) -> str:
+    """The unit attached to the figure at these offsets, or an empty string.
+
+    A prefix symbol wins over a following word, because "$60" states its unit
+    in front and whatever follows belongs to the sentence rather than to the
+    figure.
+    """
+    before = _UNIT_BEFORE_RE.search(text[max(0, start - 4):start])
+    if before:
+        return _normalize_unit(before.group(1), allow_unlisted_code)
+    after = _UNIT_AFTER_RE.match(text[end:end + 16])
+    return _normalize_unit(after.group(1), allow_unlisted_code) if after else ""
+
+
+def _source_windows(
+    source_text: str, number: str, radius: int = 260, required_unit: str = ""
+) -> list[str]:
+    """Return clause-bounded source windows around the same number.
+
+    When the claim carries a unit, an occurrence written with a different unit
+    is not support for it. The record states a delivery cost of "900 DZD"; an
+    answer saying "900 EUR" matched the number, matched the subject, and was
+    accepted. Occurrences whose own unit disagrees are skipped, while an
+    occurrence with no unit at all still counts - plenty of figures in the
+    corpus are bare.
+    """
     windows: list[str] = []
     pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
     # A range is a pair of figures, and the source rarely writes it the way an
@@ -278,6 +369,22 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
             rf"{re.escape(high)}(?!\d|\.\d)"
         )
     for match in pattern.finditer(source_text):
+        if required_unit:
+            # The unit governing THIS occurrence, which may be inherited from a
+            # heading rather than written beside the figure.
+            found_unit = _governing_unit(source_text, match.start(), match.end())
+            if found_unit and found_unit != required_unit:
+                continue
+            # Nothing governs this occurrence, because a clause boundary cut
+            # the inheritance. A declaration - a heading or footer stating the
+            # unit and carrying no figures - is the only thing that may supply
+            # one. Where no declaration covers the figure there is no support
+            # for any unit, and an unsupported unit is not accepted merely
+            # because the document mentions it somewhere else.
+            if not found_unit and required_unit != _inherited_unit(
+                source_text, match.start(), _row_topic(source_text, match.start())
+            ):
+                continue
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
         # lists. Keep those lines attached to the heading that names the rule.
@@ -298,13 +405,200 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
     return windows
 
 
+# Any unit token, wherever it stands - not only beside a figure. Used to find
+# the unit that governs a bare number, such as a column heading stating the
+# currency once for the rows beneath it.
+_UNIT_TOKEN_RE = re.compile(
+    r"(?<![a-z])(?:case\s+credits?|cc|"
+    + "|".join(sorted(code.lower() for code in _CURRENCY_CODES))
+    + r")(?![a-z])|[%€£$]",
+    re.IGNORECASE,
+)
+# How far back a heading may govern a figure. Far enough to reach the label at
+# the top of a short block, short enough not to reach across a record into an
+# unrelated one.
+_UNIT_LOOKBACK_CHARACTERS = 300
+
+# Where a unit stops governing. Wider than the clause delimiter, because a line
+# break ends a table row: without this the currency written beside one row's
+# figure became the "nearest preceding unit" for the next row's bare figure, so
+# "Annual membership: 20 EUR / Standard delivery: 900" made 900 EUR.
+#
+# This is NOT the same boundary as the subject window's. That one deliberately
+# reads across line breaks, because PDF extraction wraps a single sentence over
+# several lines and the subject qualifying a figure is usually on the line
+# above it.
+_UNIT_SCOPE_RE = re.compile(r"(?<!\d)[.;](?!\d)|\n")
+
+
+def _governing_unit(source_text: str, start: int, end: int) -> str:
+    """The unit this figure is denominated in, adjacent or inherited.
+
+    A unit written beside the number wins. Otherwise the nearest unit token
+    BEFORE it governs, which is how a table states its currency once in a
+    heading and leaves the rows bare.
+
+    Document-wide presence is not enough, and treating it as enough was wrong.
+    In a record reading "Delivery charges - DZD / Standard delivery: 900 /
+    Membership charges - EUR / Annual membership: 20", both DZD and EUR appear,
+    so an answer saying "Standard delivery costs 900 EUR" satisfied a
+    document-wide check while stating the wrong currency for that row.
+    """
+    adjacent = _unit_beside(source_text, start, end)
+    if adjacent:
+        return adjacent
+
+    # Inheritance stops at the last clause boundary, so a currency mentioned in
+    # a finished sentence cannot govern a figure in the next one. Without this,
+    # "Delivery charges - DZD. Membership fees are payable in EUR each year.
+    # Standard delivery: 900" made EUR the nearest preceding unit and rejected a
+    # correct claim of 900 DZD - a false rejection, which destroys a correct
+    # answer rather than merely letting a wrong one through.
+    window_start = max(0, start - _UNIT_LOOKBACK_CHARACTERS)
+    for delimiter in _UNIT_SCOPE_RE.finditer(source_text, window_start, start):
+        window_start = delimiter.end()
+
+    nearest = None
+    for match in _UNIT_TOKEN_RE.finditer(source_text, window_start, start):
+        nearest = match
+    return _normalize_unit(nearest.group(0)) if nearest else ""
+
+
+# A declaration is a heading or a footer: it names a unit and carries no
+# figures of its own. "Delivery charges - DZD" declares; "Standard delivery:
+# 900 DZD" is a row, and its unit is adjacent rather than inherited. Segments
+# are split on line breaks and sentence ends, because extraction gives tables
+# as lines and prose as sentences and both carry declarations.
+_SEGMENT_SPLIT_RE = re.compile(r"\n|(?<!\d)\.(?!\d)|;")
+_DIGIT_RE = re.compile(r"\d")
+
+
+@dataclass(frozen=True)
+class _UnitDeclaration:
+    """A heading or footer stating the unit for the rows it covers."""
+
+    end: int
+    unit: str
+    topic: frozenset[str]
+
+
+def _unit_declarations(source_text: str) -> list[_UnitDeclaration]:
+    """Every segment that states a unit and no figure, in document order."""
+    declarations: list[_UnitDeclaration] = []
+    position = 0
+    for segment in _SEGMENT_SPLIT_RE.split(source_text):
+        start = position
+        position += len(segment) + 1
+        if _DIGIT_RE.search(segment):
+            continue
+        units = {
+            _normalize_unit(match.group(0)) for match in _UNIT_TOKEN_RE.finditer(segment)
+        }
+        units.discard("")
+        # A segment naming two currencies declares neither. "Prices in DZD or
+        # EUR" cannot govern a row, and picking one would be a guess.
+        if len(units) != 1:
+            continue
+        declarations.append(
+            _UnitDeclaration(
+                end=start + len(segment),
+                unit=units.pop(),
+                topic=frozenset(_word_tokens(segment)),
+            )
+        )
+    return declarations
+
+
+def _inherited_unit(source_text: str, start: int, row_topic: frozenset[str]) -> str:
+    """The unit a declaration gives this figure, or "" if none does.
+
+    Structure, not proximity. The earlier version asked only whether the
+    claimed unit appeared somewhere before the figure, which is not evidence
+    about this row - and it accepted any unit at all when nothing preceded,
+    so a missing header licensed an invented currency. Absence of evidence is
+    now absence of support.
+
+    Among the declarations before the figure, one naming the same thing as the
+    row wins: in "Delivery charges - DZD. Membership fees are payable in EUR
+    each year. Standard delivery: 900", the delivery heading governs the
+    delivery row even though the membership sentence is nearer. Without a topic
+    match the nearest preceding declaration governs, which is how a plain table
+    header works.
+
+    A declaration after the figure counts only when the document declares one
+    unit and no other - the footer case, "All charges are stated in DZD".
+    """
+    preceding = [
+        declaration for declaration in _unit_declarations(source_text)
+        if declaration.end <= start
+    ]
+    if preceding:
+        on_topic = [
+            declaration for declaration in preceding if declaration.topic & row_topic
+        ]
+        return (on_topic or preceding)[-1].unit
+
+    units = {declaration.unit for declaration in _unit_declarations(source_text)}
+    return units.pop() if len(units) == 1 else ""
+
+
+def _row_topic(source_text: str, start: int) -> frozenset[str]:
+    """The words of the segment the figure sits in - its row, in a table."""
+    boundaries = [0] + [
+        match.end() for match in _SEGMENT_SPLIT_RE.finditer(source_text, 0, start)
+    ]
+    return frozenset(_word_tokens(source_text[boundaries[-1]:start]))
+
+
+def text_declares_unit(text_value: str) -> bool:
+    """Whether this text states a unit, by the same vocabulary grounding uses.
+
+    Ingestion carries a table's currency heading onto its continuation chunks,
+    and it has to agree with the validator about what counts as one. Two
+    vocabularies would drift, and the failure would be silent.
+    """
+    return bool(_UNIT_TOKEN_RE.search(_normalize(text_value)))
+
+
+def _unit_appears_in(source_text: str, unit: str) -> bool:
+    """Whether the source mentions this unit at all, in any position."""
+    spellings = {unit} | {
+        spelling for spelling, name in _UNIT_ALIASES.items() if name == unit
+    }
+    # Letter boundaries, not word boundaries: the corpus writes "0,200CC" and
+    # "150EUR" with the unit glued to the digits, so a \w boundary would never
+    # match the very spellings that matter.
+    return any(
+        re.search(rf"(?<![a-z]){re.escape(spelling)}(?![a-z])", source_text, re.IGNORECASE)
+        if spelling.isalpha()
+        else spelling in source_text
+        for spelling in spellings
+    )
+
+
+def _offsets_in(claim: MeasurableClaim) -> tuple[int, int]:
+    """Where the claim's number sits inside its own sentence."""
+    index = claim.sentence.find(claim.text)
+    if index == -1:
+        return (0, 0)
+    return (index, index + len(claim.text))
+
+
 def _claim_is_supported(
     claim: MeasurableClaim, source_text: str, document_markets: frozenset[str] = frozenset()
 ) -> bool:
     """Return true only when the same number is linked to the same named topic."""
     subject_token_sets = _subject_token_sets(claim, document_markets)
+    required_unit = _unit_beside(claim.sentence, *_offsets_in(claim), allow_unlisted_code=True)
+    # A unit the source never mentions anywhere cannot be what this figure is
+    # denominated in. That catches the cases adjacency cannot: a bare source
+    # number beside an answer that invents a currency, a unit stated once in a
+    # table header rather than next to every figure, and a code no vocabulary
+    # lists. Adjacency still applies where the source does state a unit.
+    if required_unit and not _unit_appears_in(source_text, required_unit):
+        return False
     for number in _number_variants(claim.number):
-        for window in _source_windows(source_text, number):
+        for window in _source_windows(source_text, number, required_unit=required_unit):
             window_tokens = _word_tokens(window)
             if subject_token_sets and any(
                 _subject_matches_window(subject_tokens, window_tokens) for subject_tokens in subject_token_sets
@@ -728,11 +1022,13 @@ def _drop_orphaned_lead_ins(text: str) -> str:
                 (candidate for candidate in lines[index + 1:] if candidate.strip()),
                 "",
             )
-            # A list or an indented block is what a lead-in introduces. Ordinary
-            # prose beneath it is a new statement, not the promised content.
+            # A list, an indented block, or a heading is what a lead-in
+            # introduces. Ordinary prose beneath it is a new statement, not
+            # the promised content.
             introduces_content = bool(
                 re.match(r"\s*(?:[-*•]|\d+[.)]|[a-z][.)])\s", following)
                 or (following[:1].isspace() if following else False)
+                or re.match(r"\s*(?:#{1,6}\s|\*\*\S)", following)
             )
             if not introduces_content:
                 continue

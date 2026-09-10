@@ -21,6 +21,7 @@ from services.embeddings import embed_text
 from services.guardrails import is_policy_safety_question
 from services.knowledge_generations import active_generation_ids
 from services.market_config import (
+    approved_name_spellings,
     find_market_mentions,
     get_document_country_codes,
     load_global_directory_markets,
@@ -432,10 +433,24 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
     if not mentioned_codes and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or ""):
         return set()
     target_codes = mentioned_codes or {str(selected_country or "").upper()}
+    # Every approved spelling, not only the configured one.
+    #
+    # The configuration writes "Reunion Island". The record writes "Réunion
+    # Island", and that is what `metadata.record_country` holds - confirmed
+    # against the index on 2026-09-09. `_record_country_filter` normalises
+    # case but not diacritics, so the filter asked for a spelling the document
+    # does not have and excluded it before ranking. Both Réunion questions in
+    # the comparison run refused with the record never retrieved, in both arms.
+    #
+    # A filter that excludes a document looks exactly like a document that does
+    # not exist, which is why this survived so long.
     return {
-        str(country.get("name") or "")
+        spelling
         for country in catalog
         if str(country.get("code") or "").upper() in target_codes
+        for spelling in approved_name_spellings(
+            str(country.get("code") or ""), str(country.get("name") or "")
+        )
     }
 
 

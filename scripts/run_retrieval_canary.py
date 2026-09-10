@@ -201,6 +201,12 @@ class _PipelineRun(NamedTuple):
     response: Any
     removed_numeric_claims: list[str]
     duration_ms: float
+    # Every prior turn's response, in order. A conversation case that asserts
+    # only its final answer cannot tell a chain that stayed on topic from one
+    # that lost the thread and recovered, and the intermediate turns are where
+    # scope and market carry-forward actually go wrong. Defaulted so existing
+    # callers and their stubs are unaffected.
+    prior_responses: tuple = ()
 
 
 def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
@@ -248,8 +254,10 @@ def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
         # than a hand-written transcript that could drift from what the system
         # actually says. Each one costs a generation call, which is why
         # conversation cases are opt-in and few.
+        prior_responses = []
         for index, prior_turn in enumerate(case.get("conversation") or []):
-            ask(str(prior_turn), f"turn{index}")
+            question = prior_turn.get("question") if isinstance(prior_turn, dict) else prior_turn
+            prior_responses.append(ask(str(question), f"turn{index}"))
 
         # Assertions apply to the final question only. The recorder's last
         # retrieval belongs to it for the same reason.
@@ -260,7 +268,11 @@ def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
         # far more robust than guessing how a model will format a time.
         removed = list((response.metadata or {}).get("removed_numeric_claims") or [])
         return _PipelineRun(
-            recorder.last, response, removed, round((time.perf_counter() - started) * 1000, 1)
+            recorder.last,
+            response,
+            removed,
+            round((time.perf_counter() - started) * 1000, 1),
+            tuple(prior_responses),
         )
     finally:
         for name, original in originals.items():

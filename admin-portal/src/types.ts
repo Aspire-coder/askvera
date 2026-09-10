@@ -338,3 +338,33 @@ export type InteractionPage = {
   totalPages: number;
 };
 
+
+export type ReviewFinding = {
+  field: string;
+  severity: string;
+  detail: string;
+};
+
+export type ReviewDecision = {
+  revision: string;
+  decidedBy: string;
+  decision: string;
+  reason: string;
+  decidedAt: string;
+  appliesToCurrentRevision: boolean;
+};
+
+export type IngestionReview = {
+  jobId: string;
+  revision: string;
+  /** false means the assessment never ran - not that it found nothing. */
+  assessed: boolean;
+  evaluatedAt: string;
+  findings: ReviewFinding[];
+  contradictions: ReviewFinding[];
+  unresolved: ReviewFinding[];
+  affectedPages: number[];
+  publicationState: string;
+  publicationDetail: string;
+  decisions: ReviewDecision[];
+};

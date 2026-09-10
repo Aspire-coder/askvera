@@ -38,11 +38,55 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 DEFAULT_FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json"
-REQUIRED_CASE_FIELDS = {"id", "question", "country", "language", "role", "intent_group", "expected"}
-VALID_KINDS = {"answer", "abstain"}
+REQUIRED_CASE_FIELDS = {
+    "id", "question", "country", "language", "role", "intent_group", "expected",
+    "evaluation_set",
+}
+# A case used to diagnose or fix something measures whether that fix holds,
+# not how the system behaves on questions it was never tuned against. The two
+# cannot be averaged into one number without the number meaning less than it
+# appears to.
+VALID_EVALUATION_SETS = {"development", "held_out"}
+# Three outcomes, not two. A clarification - "which country do you mean?" -
+# is neither an answer nor a refusal, and scoring it as an abstain conflates
+# asking with declining. They need opposite fixes: a wrong clarification is a
+# recognition gap, a wrong refusal is a coverage gap. Kept separate everywhere
+# below, including in the summary.
+VALID_KINDS = {"answer", "abstain", "clarify"}
 # Every case has to say why its expectation is believed true. A benchmark whose
 # ground truth is assumed measures the assumption, not the system.
 REQUIRED_EVIDENCE_FIELDS = {"source_evidence", "provenance"}
+
+
+def _revision() -> str:
+    """The exact commit this arm ran, so "current tip" never names a run."""
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+# Named here rather than imported from the orchestrator so both arms record the
+# same list. An arm reading its own application's list would report a different
+# set of flags and the difference would look like behaviour.
+ANSWER_EDIT_FLAGS = (
+    "inline_citations_separated",
+    "directory_contacts_restored",
+    "directory_role_label_corrected",
+    "unrequested_directory_fields_removed",
+    "directory_order_size_restored",
+    "directory_source_contradiction_corrected",
+    "numeric_claim_repair",
+    "response_pii_scrubbed",
+    "contact_placeholder_actions",
+    "unresolved_pii_placeholders_removed",
+    "empty_after_output_cleanup",
+)
 
 
 @lru_cache(maxsize=1)
@@ -61,6 +105,30 @@ def _valid_countries() -> frozenset[str]:
     return frozenset(
         str(market.get("code", "")).upper() for market in markets if market.get("enabled", True)
     )
+
+
+def _validate_conversation(identifier: str, turns: object) -> None:
+    """Check a case's prior turns, each of which may carry its own expectations.
+
+    A turn is either a bare question, as before, or a question with the facts
+    it must produce. Asserting only the final answer cannot tell a chain that
+    held its scope throughout from one that lost it and recovered.
+    """
+    if turns is None:
+        return
+    if not isinstance(turns, list) or not turns:
+        raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+    for position, turn in enumerate(turns, start=1):
+        if isinstance(turn, dict):
+            if not str(turn.get("question") or "").strip():
+                raise ValueError(f"Turn {position} of {identifier} has no question.")
+            kind = (turn.get("expected") or {}).get("kind", "answer")
+            if kind not in VALID_KINDS:
+                raise ValueError(
+                    f"Turn {position} of {identifier} needs expected.kind of {sorted(VALID_KINDS)}."
+                )
+        elif not str(turn).strip():
+            raise ValueError(f"Turn {position} of {identifier} is empty.")
 
 
 def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
@@ -84,6 +152,11 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
         if not identifier or identifier in identifiers:
             raise ValueError(f"Benchmark case IDs must be non-empty and unique: {identifier!r}.")
         identifiers.add(identifier)
+
+        if case["evaluation_set"] not in VALID_EVALUATION_SETS:
+            raise ValueError(
+                f"Case {identifier} needs evaluation_set of {sorted(VALID_EVALUATION_SETS)}."
+            )
 
         for field in REQUIRED_EVIDENCE_FIELDS:
             if not str(case.get(field) or "").strip():
@@ -109,10 +182,7 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
                 f"Case {identifier} expects an answer but asserts nothing it must contain, "
                 "so it would pass on any reply at all."
             )
-        if "conversation" in case and (
-            not isinstance(case["conversation"], list) or not case["conversation"]
-        ):
-            raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+        _validate_conversation(identifier, case.get("conversation"))
 
     return cases, hashlib.sha256(raw).hexdigest()
 
@@ -131,24 +201,38 @@ _REFUSAL_KEYS = (
 )
 
 
-def _refusal_markers(language: str) -> list[str]:
-    """Opening clauses of every approved way of declining, in one locale."""
-    from app.evidence import localized_conversation_response
+def _refusal_markers(language: str) -> tuple[list[str], bool]:
+    """Opening clauses of every approved way of declining, in one locale.
 
-    markers = []
+    Reviewed copy only. localized_conversation_response would translate a
+    missing key with a live model call, which costs money to build a marker and
+    returns wording that can differ between requests - so the marker would not
+    reliably match the refusal the reader actually saw.
+
+    The flag says whether every marker is reviewed for this locale. Seven of
+    the twelve configured locales have no reviewed insufficient_evidence copy,
+    which is the commonest refusal of all, so classification there is weaker
+    than in English and the summary says so rather than quietly scoring it.
+    """
+    from app.evidence import configured_conversation_response
+
+    markers: list[str] = []
+    complete = True
     for key in _REFUSAL_KEYS:
-        copy = localized_conversation_response(key, language) or ""
+        copy, reviewed = configured_conversation_response(key, language)
+        complete = complete and reviewed
         if copy:
             # The opening clause is the stable part; the tail names a contact
             # route that varies by market.
             markers.append(" ".join(copy.split())[:60].casefold())
-    return markers
+    return markers, complete
 
 
 def _abstained(answer: str, language: str) -> bool:
     """Whether the delivered text declines rather than answers, in its own locale."""
     folded = " ".join((answer or "").split()).casefold()
-    return any(marker and marker in folded for marker in _refusal_markers(language))
+    markers, _complete = _refusal_markers(language)
+    return any(marker and marker in folded for marker in markers)
 
 
 def _is_cited(required: str, cited: set[str]) -> bool:
@@ -199,6 +283,56 @@ def _presence(numbers: list[str], documents: list[Any]) -> dict[str, bool]:
     return numbers_present_in_sources(numbers, documents) if numbers else {}
 
 
+def _score_prior_turns(case: dict[str, Any], responses: tuple) -> list[str]:
+    """Check each earlier turn that states what it expects.
+
+    A conversation case that asserts only its last answer can pass while an
+    earlier turn answered the wrong market entirely, because the final turn is
+    often a follow-up whose subject was already established. Scope and market
+    carry-forward go wrong in the middle of a chain, which is exactly the part
+    that was never checked.
+
+    Turns without expectations are replayed and not scored, as before.
+    """
+    failures: list[str] = []
+    for position, (turn, response) in enumerate(zip(case.get("conversation") or [], responses), start=1):
+        if not isinstance(turn, dict) or not turn.get("expected"):
+            continue
+        expected = turn["expected"]
+        # A turn may switch language. Refusal copy is per-locale, so scoring a
+        # French turn against English markers would read a correct French
+        # refusal as an answer - the same defect the locale-aware markers fixed
+        # for single-turn cases, reappearing inside a conversation.
+        language = str(turn.get("language") or case["language"])
+        answer = (getattr(response, "answer", "") or "")
+        folded = " ".join(answer.split()).casefold()
+        abstained = bool((getattr(response, "metadata", None) or {}).get("fallback")) or _abstained(
+            answer, language
+        )
+
+        if expected.get("kind", "answer") == "abstain":
+            if not abstained:
+                failures.append(f"turn {position}: answered a question the documents do not cover")
+        elif abstained:
+            failures.append(f"turn {position}: abstained on an answerable question")
+
+        for required in expected.get("must_contain") or []:
+            if str(required).casefold() not in folded:
+                failures.append(f"turn {position}: missing required fact {required!r}")
+        for forbidden in expected.get("must_not_contain") or []:
+            if str(forbidden).casefold() in folded:
+                failures.append(f"turn {position}: contains {forbidden!r}")
+
+        cited = _section_keys([
+            (str((citation or {}).get("section") or ""), str((citation or {}).get("country") or ""))
+            for citation in (getattr(response, "citations", None) or [])
+        ])
+        for section in expected.get("required_sections") or []:
+            if not _is_cited(str(section), set(cited)):
+                failures.append(f"turn {position}: did not cite {section}")
+    return failures
+
+
 def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]:
     """Run one question through the real pipeline and record what came back.
 
@@ -208,7 +342,9 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
     """
     run = canary.run_pipeline_capture(case, sequence)
     response = run.response
+    turn_failures = _score_prior_turns(case, run.prior_responses)
     metadata = response.metadata or {}
+    retrieval_metadata = (run.retrieval.metadata or {}) if run.retrieval else {}
     usage = metadata.get("token_usage") or {}
     documents = run.retrieval.documents if run.retrieval else []
     answer = response.answer or ""
@@ -217,6 +353,10 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         "answer": answer,
         "citations": len(response.citations or []),
         "abstained": bool(metadata.get("fallback")) or _abstained(answer, str(case["language"])),
+        # Read from the response's own metadata rather than its wording: the
+        # clarification copy is translated per locale, and scoring on text
+        # would make the result depend on the translation.
+        "clarified": str(metadata.get("response_source") or "") == "country_clarification",
         "failure_layer": metadata.get("failure_layer") or "",
         # Why generation stopped. "max_tokens" is Bedrock stating it ran out of
         # room, which is a fact, unlike a heuristic reading of the text.
@@ -233,6 +373,18 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
             for number, present in _presence(run.removed_numeric_claims, documents).items()
             if present
         ],
+        # Attribution support. A different answer does not say why it is
+        # different: expansion adds queries, the model varies on its own, and
+        # the same passages can still produce different wording. These are the
+        # observable signals that separate those, recorded for both arms from
+        # metadata both arms already emit.
+        "search_query_count": int((retrieval_metadata.get("search_query_count") or 0)),
+        "global_documents_searched": bool(retrieval_metadata.get("global_documents_searched")),
+        "answer_edit_flags": [
+            name for name in ANSWER_EDIT_FLAGS if metadata.get(name)
+        ],
+        "personal_history_repair": bool(metadata.get("personal_history_repair")),
+        "removed_personal_claims": list(metadata.get("removed_personal_claims") or []),
         "top_title": documents[0].title if documents else "",
         # Every retrieved section, so a case can require the governing one to
         # be present rather than merely first, and can say which sections the
@@ -258,26 +410,49 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
         "generation_input_tokens": int(usage.get("inputTokens") or 0),
         "generation_output_tokens": int(usage.get("outputTokens") or 0),
         "duration_ms": run.duration_ms,
+        "turn_failures": turn_failures,
     }
+
+
+def _score_expected_outcome(
+    expected: dict[str, Any], run: dict[str, Any], folded: str
+) -> list[str]:
+    """Which of the three outcomes came back, against the one the case expects.
+
+    Answer, refusal and clarification are scored against each other rather than
+    collapsed into a pass/fail, so a wrong outcome names what happened instead:
+    a missed clarification that answered anyway is a wrong-country answer, and
+    one that refused is an over-refusal. They need opposite fixes.
+    """
+    failures: list[str] = []
+    if expected["kind"] == "clarify":
+        if not run.get("clarified"):
+            failures.append(
+                "did not ask which country was meant"
+                + (" - refused instead" if run["abstained"] else " - answered instead")
+            )
+        return failures
+    if run.get("clarified"):
+        return ["asked which country was meant on a question that named one"]
+    if expected["kind"] == "abstain":
+        if not run["abstained"]:
+            failures.append("answered a question the documents do not cover")
+        return failures
+    if run["abstained"]:
+        failures.append("abstained on an answerable question")
+    for required in expected.get("must_contain") or []:
+        if str(required).casefold() not in folded:
+            failures.append(f"missing required fact {required!r}")
+    if expected.get("must_cite") and run["citations"] < 1:
+        failures.append("no citation")
+    return failures
 
 
 def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     """Judge one run against the case's stated expectation."""
     expected = case["expected"]
     folded = " ".join(run["answer"].split()).casefold()
-    failures: list[str] = []
-
-    if expected["kind"] == "abstain":
-        if not run["abstained"]:
-            failures.append("answered a question the documents do not cover")
-    else:
-        if run["abstained"]:
-            failures.append("abstained on an answerable question")
-        for required in expected.get("must_contain") or []:
-            if str(required).casefold() not in folded:
-                failures.append(f"missing required fact {required!r}")
-        if expected.get("must_cite") and run["citations"] < 1:
-            failures.append("no citation")
+    failures: list[str] = _score_expected_outcome(expected, run, folded)
 
     for forbidden in expected.get("must_not_contain") or []:
         if str(forbidden).casefold() in folded:
@@ -311,6 +486,8 @@ def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         else:
             retrieval_hit = None
 
+    failures.extend(run.get("turn_failures") or [])
+
     return {
         **run,
         "passed": not failures,
@@ -331,6 +508,9 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
     unanswerable = [
         run for case in results if case["expected_kind"] == "abstain" for run in case["runs"]
     ]
+    needing_clarification = [
+        run for case in results if case["expected_kind"] == "clarify" for run in case["runs"]
+    ]
 
     def rate(numerator: int, denominator: int) -> str:
         return f"{numerator}/{denominator}" + (
@@ -338,8 +518,10 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         )
 
     by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_set: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for case in results:
         by_group[case["intent_group"]].extend(case["runs"])
+        by_set[case.get("evaluation_set", "development")].extend(case["runs"])
 
     generation_input = sum(run["generation_input_tokens"] for run in runs)
     generation_output = sum(run["generation_output_tokens"] for run in runs)
@@ -354,6 +536,20 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
         ),
         "answered_when_it_should_not": rate(
             sum(1 for run in unanswerable if not run["abstained"]), len(unanswerable)
+        ),
+        # The three outcomes stay three numbers. Rolling a missed clarification
+        # into "false abstention" would say the system refused too much, when
+        # what it did was answer for a country nobody named - a wrong answer
+        # reported as an over-refusal, needing the opposite fix.
+        "missed_clarification": rate(
+            sum(1 for run in needing_clarification if not run.get("clarified")),
+            len(needing_clarification),
+        ),
+        "clarified_when_it_should_not": rate(
+            sum(1 for run in runs if run.get("clarified")) - sum(
+                1 for run in needing_clarification if run.get("clarified")
+            ),
+            len(runs) - len(needing_clarification),
         ),
         # Only cases that named a governing source are counted. Averaging in
         # cases that specified none would inflate the rate with unscored runs.
@@ -375,10 +571,33 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
             ),
             len(runs),
         ),
+        # Reported apart, never averaged. A development case passing says a
+        # known defect stays fixed; a held-out case passing is the only evidence
+        # about questions the system was not tuned against.
+        "by_evaluation_set": {
+            name: rate(
+                sum(1 for run in group_runs if run["passed"]), len(group_runs)
+            )
+            for name, group_runs in sorted(by_set.items())
+        },
+        "held_out_cases": sum(
+            1 for case in results if case.get("evaluation_set") == "held_out"
+        ),
         "by_intent_group": {
             group: rate(sum(1 for run in group_runs if run["passed"]), len(group_runs))
             for group, group_runs in sorted(by_group.items())
         },
+        # Locales whose refusal classification rests on English wording, because
+        # the locale has no reviewed copy for some refusal. A case in one of
+        # these is scored, but an abstention judgement there is weaker than in
+        # English and should not be read as equivalent evidence.
+        "languages_with_unreviewed_refusal_copy": sorted(
+            {
+                case.get("language", "en")
+                for case in results
+                if not _refusal_markers(case.get("language", "en"))[1]
+            }
+        ),
         "latency_ms_p50": round(statistics.median(run["duration_ms"] for run in runs), 1) if runs else 0,
         "latency_ms_max": round(max((run["duration_ms"] for run in runs), default=0), 1),
         "generation_input_tokens": generation_input,
@@ -407,6 +626,15 @@ def main() -> int:
     parser.add_argument("--load-ssm", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Validate the fixture; make no model calls.")
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N cases.")
+    parser.add_argument(
+        "--case",
+        action="append",
+        default=[],
+        help=(
+            "Case id to run. Repeatable. A pilot has to be chosen: --limit takes "
+            "from the top of the file, where the scope refusals are."
+        ),
+    )
     parser.add_argument("--intent-group", action="append", default=[], help="Restrict to these groups.")
     parser.add_argument("--repeat", type=int, default=3, help="Runs per case; stochastic stages need a distribution.")
     parser.add_argument("--artifact", type=Path, default=None, help="Write the full per-run record here.")
@@ -423,6 +651,16 @@ def main() -> int:
         print(f"Benchmark fixture is invalid: {exc}", file=sys.stderr)
         return 2
 
+    if args.case:
+        by_id = {case["id"]: case for case in cases}
+        missing = [identifier for identifier in args.case if identifier not in by_id]
+        if missing:
+            # Refused rather than silently running a smaller set: a typo in a
+            # pilot's case list would otherwise report on questions nobody
+            # chose, under a name that says they did.
+            print(f"--case names not in the fixture: {missing}", file=sys.stderr)
+            return 2
+        cases = [by_id[identifier] for identifier in args.case]
     if args.intent_group:
         wanted = set(args.intent_group)
         cases = [case for case in cases if case["intent_group"] in wanted]
@@ -472,6 +710,8 @@ def main() -> int:
         results.append({
             "id": case["id"],
             "question": case["question"],
+            "language": case["language"],
+            "evaluation_set": case["evaluation_set"],
             "intent_group": case["intent_group"],
             "expected_kind": case["expected"]["kind"],
             "provenance": case["provenance"],
@@ -491,6 +731,37 @@ def main() -> int:
         "pipeline_version": settings.RETRIEVAL_PIPELINE_VERSION,
         "fixture_sha256": fixture_hash,
         "repeat": max(1, args.repeat),
+        # What this arm actually was. Two arms are only comparable if these
+        # match except where the change under test is - and a flag read from
+        # the environment rather than the code is exactly the thing that
+        # silently differs between two checkouts.
+        "arm": {
+            "revision": _revision(),
+            "model": settings.BEDROCK_MODEL_ARN,
+            "embedding_model": getattr(settings, "BEDROCK_EMBEDDING_MODEL_ID", ""),
+            "index": settings.OPENSEARCH_INDEX,
+            "generation_pointer_enabled": bool(
+                getattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+            ),
+            # Absent in an arm that predates the candidate, and reported as
+            # "absent" rather than False so the two cases stay distinguishable.
+            "country_name_expansion": (
+                bool(settings.OPENSEARCH_COUNTRY_NAME_EXPANSION_ENABLED)
+                if hasattr(settings, "OPENSEARCH_COUNTRY_NAME_EXPANSION_ENABLED")
+                else "absent"
+            ),
+            "glossary_enabled": bool(getattr(settings, "OPENSEARCH_GLOSSARY_ENABLED", False)),
+            "query_planner_enabled": bool(
+                getattr(settings, "BEDROCK_QUERY_PLANNER_ENABLED", False)
+            ),
+            "semantic_cache_enabled": bool(getattr(settings, "SEMANTIC_CACHE_ENABLED", False)),
+            "semantic_cache_shadow": bool(
+                getattr(settings, "SEMANTIC_CACHE_SHADOW_ENABLED", False)
+            ),
+            "embedding_shared_cache": bool(
+                getattr(settings, "EMBEDDING_SHARED_CACHE_ENABLED", False)
+            ),
+        },
     })
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 

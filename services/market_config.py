@@ -287,8 +287,125 @@ def get_widget_country_codes() -> set[str]:
 
 @lru_cache(maxsize=1)
 def _localized_market_names() -> dict[str, list[str]]:
+    """Localised market names, generated plus curated.
+
+    market_name_aliases.json is generated from Unicode CLDR by
+    scripts/generate-market-name-aliases.mjs, which reads nothing but the
+    market codes - so anything hand-added there disappears the next time it
+    runs. Everyday abbreviations CLDR does not carry live in a separate
+    curated file and are merged here, which keeps the generated file
+    generated and makes the provenance of every alias legible.
+    """
     path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json")
-    return json.loads(path.read_text(encoding="utf-8"))["names"]
+    names: dict[str, list[str]] = json.loads(path.read_text(encoding="utf-8"))["names"]
+
+    extra_path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases_extra.json")
+    if extra_path.exists():
+        curated: dict[str, list[str]] = json.loads(
+            extra_path.read_text(encoding="utf-8")
+        ).get("names", {})
+        merged = {code: list(values) for code, values in names.items()}
+        for code, values in curated.items():
+            merged.setdefault(code, [])
+            merged[code].extend(value for value in values if value not in merged[code])
+        return merged
+    return names
+
+
+# Words that can sit in front of a country name without qualifying it.
+# Anything else in that position may be turning one country's name into
+# another's - "DR Congo" is "Congo" with a qualifier - and a qualifier we do not
+# recognise is a reason to ask, not to pick.
+_MARKET_NAME_NEUTRAL_PREFIXES = frozenset(
+    {
+        "in", "for", "to", "from", "at", "on", "of", "and", "or", "with", "into",
+        "a", "an", "my", "our", "your", "their", "its", "this", "that",
+        "i", "we", "you", "they", "is", "are", "was", "were", "do", "does",
+        "what", "how", "when", "where", "which", "who", "about", "regarding",
+        "here", "there", "within", "across", "between", "customers", "orders",
+    }
+)
+
+
+def _qualifier_before(padded_message: str, name: str) -> str:
+    """The word immediately before this name in the message, if any."""
+    index = padded_message.find(f" {name} ")
+    if index <= 0:
+        return ""
+    preceding = padded_message[:index].split()
+    return preceding[-1] if preceding else ""
+
+
+@lru_cache(maxsize=1)
+def _market_name_index() -> tuple[
+    dict[str, frozenset[str]], frozenset[str], dict[str, frozenset[str]]
+]:
+    """Configured names, the ones that sit inside another market's name, and
+    each name's own vocabulary.
+
+    Built once. The shared-stem calculation compares every name against every
+    other, which is 3,216 names and about ten million comparisons - measured at
+    913ms when it ran per call, on a function every request uses. Cached the
+    way the rest of this module caches its configuration.
+    """
+    markets = [
+        market for market in load_market_config()["markets"] if market.get("enabled", True)
+    ]
+    markets.extend(load_global_directory_markets())
+    localized = _localized_market_names()
+
+    collected: dict[str, set[str]] = {}
+    for market in markets:
+        code = str(market["code"]).upper()
+        for name in [market["name"], *localized.get(code, [])]:
+            normalized_name = _normalize_market_text(name)
+            if normalized_name:
+                collected.setdefault(normalized_name, set()).add(code)
+
+    names = {name: frozenset(codes) for name, codes in collected.items()}
+
+    # Group by the codes a name maps to, so containment is compared between
+    # different markets only, and each name's own vocabulary is available
+    # without rescanning.
+    by_codes: dict[frozenset[str], set[str]] = {}
+    for name, codes in names.items():
+        by_codes.setdefault(codes, set()).add(name)
+
+    stems: set[str] = set()
+    for name, codes in names.items():
+        padded = f" {name} "
+        for other, other_codes in names.items():
+            if other_codes == codes:
+                continue
+            if padded in f" {other} ":
+                stems.add(name)
+                break
+
+    own_words = {
+        name: frozenset(word for sibling in by_codes[codes] for word in sibling.split())
+        for name, codes in names.items()
+    }
+    return names, frozenset(stems), own_words
+
+
+def find_unresolved_market_mentions(message: str) -> set[str]:
+    """Phrases that looked like a country and were deliberately not resolved.
+
+    "Upper Congo" contains a configured country name behind a qualifier nobody
+    configured, so resolving it would answer from the Republic of Congo. The
+    matcher suppresses it - and suppression is indistinguishable from "no
+    country was mentioned" if all a caller sees is an empty set.
+
+    That difference matters: a question naming no market can reasonably use the
+    session's own market, while a question naming something country-shaped that
+    could not be resolved should be asked about rather than answered. This
+    returns the suppressed phrases so a caller can tell the two apart.
+
+    Nothing in the pipeline consumes this yet - wiring it into the
+    clarification path is a change to how requests are answered, and belongs
+    with its own end-to-end test.
+    """
+    return _match_markets(message)[1]
 
 
 def find_market_mentions(message: str) -> set[str]:
@@ -304,29 +421,39 @@ def find_market_mentions(message: str) -> set[str]:
     such as ``it`` and ``us`` would otherwise create false global-directory
     searches.
     """
+    return _match_markets(message)[0]
+
+
+def _match_markets(message: str) -> tuple[set[str], set[str]]:
+    """Resolved market codes, and the phrases suppressed as ambiguous."""
     normalized_message = _normalize_market_text(message)
     if not normalized_message:
-        return set()
+        return set(), set()
 
-    markets = [market for market in load_market_config()["markets"] if market.get("enabled", True)]
-    markets.extend(load_global_directory_markets())
-    names: dict[str, set[str]] = {}
-    localized = _localized_market_names()
-    for market in markets:
-        code = str(market["code"]).upper()
-        for name in [market["name"], *localized.get(code, [])]:
-            normalized_name = _normalize_market_text(name)
-            if normalized_name:
-                names.setdefault(normalized_name, set()).add(code)
+    names, stems, own_words = _market_name_index()
     # Match longer names first so "Equatorial Guinea" does not also select
     # Guinea. Unambiguous full names only; never infer access from an alias.
     padded_message = f" {normalized_message} "
     matches: set[str] = set()
+    suppressed: set[str] = set()
     for name in sorted(names, key=len, reverse=True):
-        if len(names[name]) == 1 and f" {name} " in padded_message:
-            matches.update(names[name])
-            padded_message = padded_message.replace(f" {name} ", " ")
-    return matches
+        if len(names[name]) != 1 or f" {name} " not in padded_message:
+            continue
+        # A name that also sits inside another country's name is only safe on
+        # its own. "Congo" preceded by a word we do not recognise may be
+        # naming the other Congo - which is what "DR Congo" did, answering a
+        # reader from the wrong country's policy. Returning nothing lets the
+        # caller ask which country is meant; guessing does not.
+        if name in stems:
+            qualifier = _qualifier_before(padded_message, name)
+            if qualifier and qualifier not in _MARKET_NAME_NEUTRAL_PREFIXES:
+                if qualifier not in own_words[name]:
+                    suppressed.add(f"{qualifier} {name}")
+                    padded_message = padded_message.replace(f" {name} ", " ")
+                    continue
+        matches.update(names[name])
+        padded_message = padded_message.replace(f" {name} ", " ")
+    return matches, suppressed
 
 
 def find_probable_market_typo(message: str) -> str | None:
@@ -366,10 +493,27 @@ def find_probable_market_typo(message: str) -> str | None:
     return None
 
 
+# Filler words that a reader may include and a catalogue entry does not.
+# "Democratic Republic of the Congo" is how the country is usually written;
+# the configured name is "Democratic Republic of Congo". That one word made the
+# full name fail to match, so matching fell through to the substring "Congo" -
+# which belongs to the REPUBLIC of Congo - and routed a reader asking about one
+# country to another country's policy.
+#
+# Removed from both configured names and user wording, so the comparison stays
+# symmetric. No configured name contains a standalone "the", so nothing in the
+# catalogue changes meaning and no new ambiguity is introduced; both were
+# checked against the live configuration before this was added.
+_MARKET_NAME_FILLER_WORDS = frozenset({"the"})
+
+
 def _normalize_market_text(value: str) -> str:
     """Normalize configured names and user wording for whole-name matching."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()
-    return re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE).strip()
+    collapsed = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE).strip()
+    return " ".join(
+        word for word in collapsed.split() if word not in _MARKET_NAME_FILLER_WORDS
+    )
 
 
 def get_language_codes_for_country(country_code: str) -> set[str]:
@@ -410,3 +554,39 @@ def get_document_country_codes(country_code: str) -> set[str]:
     normalized_code = country_code.upper()
     entry = load_policy_locales().get(normalized_code)
     return set(entry["documentCountries"]) if entry else {normalized_code}
+
+
+def _accent_folded(value: str) -> str:
+    """Case- and diacritic-insensitive form, for comparing spellings only.
+
+    Deliberately not `_normalize_market_text`, which keeps diacritics because
+    the catalogue lists accented and unaccented spellings as separate entries.
+    This is for recognising that two entries are the same name.
+    """
+    decomposed = unicodedata.normalize("NFKD", value or "").casefold()
+    stripped = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return re.sub(r"[^\w]+", " ", stripped, flags=re.UNICODE).strip()
+
+
+def approved_name_spellings(code: str, name: str) -> set[str]:
+    """Every approved spelling of `name` for this market, accents included.
+
+    The configuration writes market names without diacritics - "Reunion
+    Island" - while the approved records write them with: the sponsoring
+    directory's `metadata.record_country` for that market is "Réunion Island".
+    Anything matching one against the other on the configured spelling alone
+    finds nothing, and finds it silently, because a filter that excludes a
+    document is indistinguishable from a document that does not exist.
+
+    Returns the name itself plus the catalogue entries that differ from it only
+    by diacritics. Never another market's names: the lookup is by code.
+    """
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return set()
+    folded = _accent_folded(cleaned)
+    spellings = {cleaned}
+    for candidate in _localized_market_names().get(str(code or "").upper(), []):
+        if _accent_folded(candidate) == folded:
+            spellings.add(candidate)
+    return spellings

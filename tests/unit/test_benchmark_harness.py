@@ -33,6 +33,7 @@ VALID_CASE = {
     "language": "en",
     "role": "active_distributor",
     "intent_group": "directory",
+    "evaluation_set": "development",
     "expected": {"kind": "answer", "must_contain": ["2 Case Credits"]},
     "source_evidence": "Policy section 4.2 states the minimum.",
     "provenance": "Dumped from the index on 2026-09-07.",
@@ -442,3 +443,226 @@ def test_the_scope_pair_passes_when_each_market_cites_its_own_parent():
         cited_sections=benchmark._section_keys([("2", "SE")]),
     ))
     assert not wrong_market["passed"]
+
+
+def test_refusal_markers_use_reviewed_copy_and_make_no_model_call():
+    """Markers must not be built by translating at request time.
+
+    localized_conversation_response falls back to a live model translation when
+    a locale lacks reviewed copy. Building a marker that way costs a model call
+    and returns wording that can differ between requests, so it would not
+    reliably match the refusal the reader actually saw.
+    """
+    import app.evidence as evidence
+
+    called = []
+    original = evidence.localize_reviewed_copy
+    evidence.localize_reviewed_copy = lambda *a, **k: called.append(a) or "translated"
+    try:
+        for language in ("en", "fr", "fi", "sv", "ru"):
+            markers, _complete = benchmark._refusal_markers(language)
+            assert markers, language
+    finally:
+        evidence.localize_reviewed_copy = original
+
+    assert called == [], "building refusal markers triggered a translation call"
+
+
+def test_locales_without_reviewed_refusal_copy_are_reported():
+    """Seven of twelve locales have no reviewed insufficient_evidence copy.
+
+    That is the commonest refusal in the corpus, and those markets - Italian,
+    Danish, Finnish, Norwegian, Serbian, Swedish, Russian - hold most of it.
+    A reader there receives a live translation of the English wording, which is
+    constrained but not approved copy, and refusal classification against it is
+    correspondingly weaker. The flag exists so a summary cannot present those
+    cases as equivalent evidence to the English ones.
+    """
+    assert benchmark._refusal_markers("en")[1] is True
+    for language in ("it", "da", "fi", "no", "sr", "sv", "ru"):
+        assert benchmark._refusal_markers(language)[1] is False, language
+
+
+def test_the_summary_names_languages_with_weaker_classification():
+    results = [{
+        "id": "a", "intent_group": "g", "expected_kind": "abstain", "language": "fi",
+        "runs_count": 1, "passed_runs": 1,
+        "runs": [_run() | {"passed": True, "retrieval_hit": None,
+                           "repair_removed_anything": False, "repair_damaged": False}],
+    }]
+    summary = benchmark.summarise(results, None)
+    assert summary["languages_with_unreviewed_refusal_copy"] == ["fi"]
+
+
+class _Reply:
+    """Minimal stand-in for a ChatResponse in a replayed turn."""
+
+    def __init__(self, answer: str, citations=None, fallback: bool = False) -> None:
+        self.answer = answer
+        self.citations = citations or []
+        self.metadata = {"fallback": fallback}
+
+
+def test_a_wrong_answer_in_an_earlier_turn_fails_the_case():
+    """The failure a final-turn-only assertion cannot see.
+
+    A chain's last question is usually a follow-up whose subject was
+    established earlier, so a case can pass while turn one answered the wrong
+    market entirely. Scope and market carry-forward go wrong in the middle.
+    """
+    case = {
+        **VALID_CASE,
+        "conversation": [
+            {
+                "question": "What is the minimum order size in Belgium?",
+                "expected": {"kind": "answer", "must_contain": ["Belgium"],
+                             "must_not_contain": ["Netherlands"]},
+            },
+        ],
+    }
+
+    good = benchmark._score_prior_turns(case, (_Reply("The Belgium minimum order is 1 CC."),))
+    assert good == []
+
+    wrong_market = benchmark._score_prior_turns(
+        case, (_Reply("The Netherlands minimum order is 1 CC."),)
+    )
+    assert any("missing required fact" in failure for failure in wrong_market)
+    assert any("contains" in failure for failure in wrong_market)
+    assert all(failure.startswith("turn 1:") for failure in wrong_market)
+
+
+def test_a_turn_can_require_a_refusal_and_a_citation():
+    case = {
+        **VALID_CASE,
+        "conversation": [
+            {"question": "Will I earn 5000 a month?", "expected": {"kind": "abstain"}},
+            {
+                "question": "What is the FBO Support fee?",
+                "expected": {"kind": "answer", "required_sections": ["DK:2-part-1-definition-18"]},
+            },
+        ],
+    }
+    responses = (
+        _Reply("Here is what you will earn.", fallback=False),
+        _Reply("The fee is 3 EUR.", citations=[{"section": "2", "country": "SE"}]),
+    )
+
+    failures = benchmark._score_prior_turns(case, responses)
+
+    assert any("turn 1: answered a question the documents do not cover" == f for f in failures)
+    # Cited the right section from the wrong market.
+    assert any("turn 2: did not cite DK:2-part-1-definition-18" == f for f in failures)
+
+
+def test_turns_without_expectations_are_replayed_but_not_scored():
+    """Bare-string turns keep working exactly as before."""
+    case = {**VALID_CASE, "conversation": ["How do I sponsor someone in Belgium?"]}
+    assert benchmark._score_prior_turns(case, (_Reply("Anything at all."),)) == []
+
+
+def test_a_conversation_turn_missing_its_question_is_refused(tmp_path):
+    case = copy.deepcopy(VALID_CASE)
+    case["conversation"] = [{"expected": {"kind": "answer"}}]
+    with pytest.raises(ValueError, match="no question"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_a_case_without_an_evaluation_set_is_refused(tmp_path):
+    """A case that does not say whether it was used to fix something cannot be
+    scored honestly, because the two kinds of case mean different things."""
+    case = copy.deepcopy(VALID_CASE)
+    case.pop("evaluation_set")
+    with pytest.raises(ValueError, match="evaluation_set"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+    case["evaluation_set"] = "whatever"
+    with pytest.raises(ValueError, match="evaluation_set"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_the_summary_reports_the_two_sets_apart():
+    """Averaging them would hide that a headline rests on tuned cases."""
+    def case(identifier, evaluation_set, passed):
+        return {
+            "id": identifier, "intent_group": "g", "expected_kind": "answer",
+            "language": "en", "evaluation_set": evaluation_set,
+            "runs_count": 1, "passed_runs": int(passed),
+            "runs": [_run() | {"passed": passed, "retrieval_hit": None,
+                               "repair_removed_anything": False, "repair_damaged": False}],
+        }
+
+    summary = benchmark.summarise(
+        [case("a", "development", True), case("b", "development", True), case("c", "held_out", False)],
+        None,
+    )
+
+    assert summary["by_evaluation_set"]["development"] == "2/2 (100.0%)"
+    assert summary["by_evaluation_set"]["held_out"] == "0/1 (0.0%)"
+    assert summary["held_out_cases"] == 1
+
+
+def test_every_shipped_case_is_currently_development_data():
+    """The honest label for this fixture today.
+
+    Every case was authored or had its assertions adjusted while fixing the
+    system, so the held-out set is empty. This test will need changing when a
+    genuinely untouched case is added - which is the point: moving a case into
+    development is one-way, and that should take a deliberate edit.
+    """
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    assert cases
+    assert {case["evaluation_set"] for case in cases} == {"development"}
+
+
+def test_a_turn_can_switch_language_for_refusal_classification():
+    """Refusal copy is per-locale, so a French turn scored against English
+    markers reads a correct French refusal as an answer.
+
+    That is the same defect the locale-aware markers fixed for single-turn
+    cases, reappearing inside a conversation: the case carries one language and
+    a reader can switch mid-chain.
+    """
+    from app.evidence import configured_conversation_response
+
+    french_refusal, reviewed = configured_conversation_response("insufficient_evidence", "fr")
+    assert reviewed and french_refusal
+
+    case = {
+        **VALID_CASE,
+        "language": "en",
+        "conversation": [
+            {
+                "question": "Quel est le montant minimum de commande ?",
+                "language": "fr",
+                "expected": {"kind": "abstain"},
+            },
+        ],
+    }
+
+    # Correctly recognised as a refusal because the turn declares its language.
+    assert benchmark._score_prior_turns(case, (_Reply(french_refusal),)) == []
+
+    # Without the per-turn language it would be scored against English copy.
+    english_only = {**case, "conversation": [
+        {"question": case["conversation"][0]["question"], "expected": {"kind": "abstain"}}
+    ]}
+    failures = benchmark._score_prior_turns(english_only, (_Reply(french_refusal),))
+    assert failures == ["turn 1: answered a question the documents do not cover"]
+
+
+def test_the_role_case_states_a_source_derived_expectation():
+    """A test needs a justified expectation, not an observed response.
+
+    The Algeria record states two minimums in one sentence, separated by role
+    and stage: 0,200CC as a Preferred Customer's first order, and 5 000 DZD for
+    an existing FBO afterwards. Both figures are real, so no grounding check can
+    catch an answer that quotes the wrong one - only an expectation derived from
+    reading the sentence can.
+    """
+    cases, _ = benchmark.load_fixture(PROJECT_ROOT / "tests" / "fixtures" / "benchmark_cases.json")
+    case = next(c for c in cases if c["id"] == "algeria-existing-fbo-order-minimum-role")
+
+    assert case["intent_group"] == "role_distinction"
+    assert "0.200" in case["expected"]["must_not_contain"]
+    assert "AWAITING LIVE VALIDATION" in case["provenance"]

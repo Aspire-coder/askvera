@@ -372,3 +372,134 @@ def test_a_genuine_blank_separator_is_still_blank(monkeypatch: pytest.MonkeyPatc
     assert report.blank_page_numbers == (2,)
     assert report.undetermined_page_numbers == ()
     assert report.requires_ocr is False
+
+
+class _HeaderOverScanPage:
+    """A readable heading above a body this parser cannot read.
+
+    The heading alone clears the 40-character bar, so the page counted as fully
+    extracted and its image was never inspected. A scanned fee table under a
+    printed section title has exactly this shape.
+    """
+
+    def extract_text(self, extraction_mode=None):
+        # Long enough to clear the 40-character "has text" bar, which is the
+        # whole point: a shorter heading would be classified as a scanned page
+        # and caught already.
+        return "Section 4.07 Pricing and Discount Structure for Preferred Customers"
+
+    def get(self, key, default=None):
+        if key == "/Resources":
+            return {"/XObject": {"/Im0": {"/Subtype": "/Image"}}}
+        return default
+
+
+def test_a_readable_heading_over_a_scanned_body_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reported, not treated as scanned.
+
+    A page carrying an image is not by itself evidence of missing content -
+    policy pages carry letterheads - so forcing OCR on every one of them would
+    hold documents that are entirely fine. The number is surfaced instead, so a
+    reviewer can look.
+    """
+    monkeypatch.setattr(
+        document_preflight, "PdfReader", _reader_for([_TextPage(), _HeaderOverScanPage()])
+    )
+
+    report = analyze_pdf(Path("header-over-scan.pdf"))
+
+    assert report.low_text_image_page_numbers == (2,)
+    assert report.text_page_count == 2
+    assert report.scanned_page_numbers == ()
+    # Deliberately does not force OCR on its own.
+    assert report.requires_ocr is False
+
+
+def test_a_full_page_of_text_with_a_letterhead_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The control: an ordinary page with an image must not be flagged."""
+
+    class _FullPageWithLetterhead:
+        def extract_text(self, extraction_mode=None):
+            return "Section 4.07 Pricing. " + ("The Company sets prices for all products. " * 20)
+
+        def get(self, key, default=None):
+            if key == "/Resources":
+                return {"/XObject": {"/Im0": {"/Subtype": "/Image"}}}
+            return default
+
+    monkeypatch.setattr(
+        document_preflight, "PdfReader", _reader_for([_TextPage(), _FullPageWithLetterhead()])
+    )
+
+    report = analyze_pdf(Path("letterhead.pdf"))
+
+    assert report.low_text_image_page_numbers == ()
+    assert report.requires_ocr is False
+
+
+def test_a_heading_only_page_without_an_image_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A short page is only interesting when something unreadable sits on it."""
+
+    class _HeadingOnly:
+        def extract_text(self, extraction_mode=None):
+            return "Section 4.07 Pricing and Discount Structure for Preferred Customers"
+
+        def get(self, key, default=None):
+            if key == "/Resources":
+                return {"/Font": {"/F1": {}}}
+            return default
+
+    monkeypatch.setattr(document_preflight, "PdfReader", _reader_for([_TextPage(), _HeadingOnly()]))
+
+    assert analyze_pdf(Path("heading.pdf")).low_text_image_page_numbers == ()
+
+
+def test_low_text_image_pages_are_reported_at_ingestion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detection that reaches nobody changes nothing.
+
+    The field was computed and read by no caller, so a readable heading above a
+    scanned body was recorded in an object and then discarded. It is now logged
+    during ingestion, with the page numbers and the filename, so a reviewer can
+    act on it.
+
+    It still does not block: whether an unresolved page should hold publication
+    is a policy decision rather than a default.
+    """
+    from services import knowledge_ingestion
+
+    logged: list[tuple] = []
+    monkeypatch.setattr(
+        knowledge_ingestion.LOGGER, "warning", lambda event, **fields: logged.append((event, fields))
+    )
+
+    class _Preflight:
+        low_text_image_page_numbers = (7, 9)
+        page_count = 12
+        requires_ocr = False
+
+    knowledge_ingestion._report_low_text_image_pages(_Preflight(), "job-1", "UK-EN-Policy.pdf")
+
+    assert logged, "a low-text image page was found and nothing was logged"
+    event, fields = logged[0]
+    assert event == "preflight_low_text_image_pages"
+    assert fields["pages"] == [7, 9]
+    assert fields["filename"] == "UK-EN-Policy.pdf"
+
+
+def test_nothing_is_logged_when_no_such_page_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ordinary document must not produce a warning on every ingestion."""
+    from services import knowledge_ingestion
+
+    logged: list[tuple] = []
+    monkeypatch.setattr(
+        knowledge_ingestion.LOGGER, "warning", lambda event, **fields: logged.append((event, fields))
+    )
+
+    class _Clean:
+        low_text_image_page_numbers = ()
+        page_count = 12
+        requires_ocr = False
+
+    knowledge_ingestion._report_low_text_image_pages(_Clean(), "job-2", "UK-EN-Policy.pdf")
+
+    assert logged == []
