@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "5eb49a410c37a4f87ef3b60c922bd06dede92007b48e021d6f28fb77ee1ff208",
+  "request_countries": {
+    "ho-slp-01-ghana-preferred-customer-signup-order-en": "US",
+    "ho-slp-02-ghana-prospect-fbo-first-order-conditions-en": "US",
+    "ho-slp-04-tanzania-foreign-then-local-bonus-follow-up-en": "US",
+    "ho-slp-05-benin-accented-fbo-minimum-order-fr": "US",
+    "ho-slp-20-poland-first-order-and-delivery-cost-en": "US",
+    "ho-slp-21-poland-unregistered-fbo-annual-bonus-payout-en": "US"
+  }
+}
