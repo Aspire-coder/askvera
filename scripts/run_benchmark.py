@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import statistics
 import sys
 from functools import lru_cache
@@ -43,6 +44,7 @@ VALID_KINDS = {"answer", "abstain"}
 # Every case has to say why its expectation is believed true. A benchmark whose
 # ground truth is assumed measures the assumption, not the system.
 REQUIRED_EVIDENCE_FIELDS = {"source_evidence", "provenance"}
+VALID_EVALUATION_SETS = {"development", "held_out"}
 
 
 @lru_cache(maxsize=1)
@@ -63,7 +65,32 @@ def _valid_countries() -> frozenset[str]:
     )
 
 
-def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
+def _validate_patterns(identifier: str, expected: dict[str, Any], field: str) -> None:
+    """Reject malformed regex expectations before a paid benchmark run."""
+    patterns = expected.get(field, [])
+    if not isinstance(patterns, list):
+        raise ValueError(f"Case {identifier}: {field} must be a list.")
+    for pattern in patterns:
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError(f"Case {identifier}: {field} entries must be non-empty strings.")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"Case {identifier}: invalid {field} regex: {exc}") from exc
+
+
+def _validate_held_out_readiness(payload: dict[str, Any], cases: list[Any]) -> None:
+    """Do not run a draft held-out pack as though it were release evidence."""
+    if not any(isinstance(case, dict) and case.get("evaluation_set") == "held_out" for case in cases):
+        return
+    from scripts.validate_held_out_release import validate
+
+    errors = validate(payload)
+    if errors:
+        raise ValueError("Held-out fixture is not release-ready: " + "; ".join(errors))
+
+
+def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:  # noqa: C901
     """Load and validate benchmark cases, refusing anything unverifiable."""
     import hashlib
 
@@ -74,6 +101,7 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
     cases = payload["cases"]
     if not cases:
         raise ValueError("Benchmark fixture must contain at least one case.")
+    _validate_held_out_readiness(payload, cases)
 
     identifiers: set[str] = set()
     for index, case in enumerate(cases, start=1):
@@ -84,6 +112,12 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
         if not identifier or identifier in identifiers:
             raise ValueError(f"Benchmark case IDs must be non-empty and unique: {identifier!r}.")
         identifiers.add(identifier)
+
+        evaluation_set = case.get("evaluation_set", "development")
+        if evaluation_set not in VALID_EVALUATION_SETS:
+            raise ValueError(
+                f"Case {identifier} needs evaluation_set of {sorted(VALID_EVALUATION_SETS)}."
+            )
 
         for field in REQUIRED_EVIDENCE_FIELDS:
             if not str(case.get(field) or "").strip():
@@ -104,15 +138,34 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
         expected = case["expected"]
         if not isinstance(expected, dict) or expected.get("kind") not in VALID_KINDS:
             raise ValueError(f"Case {identifier} needs expected.kind of {sorted(VALID_KINDS)}.")
-        if expected["kind"] == "answer" and not expected.get("must_contain"):
+        if (
+            expected["kind"] == "answer"
+            and not expected.get("must_contain")
+            and not expected.get("required_patterns")
+        ):
             raise ValueError(
                 f"Case {identifier} expects an answer but asserts nothing it must contain, "
                 "so it would pass on any reply at all."
             )
-        if "conversation" in case and (
-            not isinstance(case["conversation"], list) or not case["conversation"]
-        ):
-            raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+        _validate_patterns(identifier, expected, "required_patterns")
+        _validate_patterns(identifier, expected, "forbidden_patterns")
+        if "conversation" in case:
+            turns = case["conversation"]
+            if not isinstance(turns, list) or not turns:
+                raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
+            if len(turns) > 3:
+                raise ValueError(f"Conversation for {identifier} exceeds three prior turns.")
+            for turn in turns:
+                if isinstance(turn, str) and turn.strip():
+                    continue
+                if isinstance(turn, dict) and str(turn.get("question") or "").strip():
+                    turn_expected = turn.get("expected") or {}
+                    if not isinstance(turn_expected, dict):
+                        raise ValueError(f"Conversation expectation for {identifier} must be an object.")
+                    _validate_patterns(identifier, turn_expected, "required_patterns")
+                    _validate_patterns(identifier, turn_expected, "forbidden_patterns")
+                    continue
+                raise ValueError(f"Conversation turns for {identifier} need a non-empty question.")
 
     return cases, hashlib.sha256(raw).hexdigest()
 
@@ -149,6 +202,41 @@ def _abstained(answer: str, language: str) -> bool:
     """Whether the delivered text declines rather than answers, in its own locale."""
     folded = " ".join((answer or "").split()).casefold()
     return any(marker and marker in folded for marker in _refusal_markers(language))
+
+
+def _pattern_failures(expected: dict[str, Any], answer: str) -> list[str]:
+    return [
+        f"missing required pattern {pattern!r}"
+        for pattern in expected.get("required_patterns") or []
+        if re.search(pattern, answer, re.IGNORECASE) is None
+    ]
+
+
+def _prior_turn_failures(case: dict[str, Any], responses: tuple[Any, ...]) -> list[str]:
+    """Score each structured follow-up turn the fixture explicitly evaluates."""
+    failures: list[str] = []
+    for number, (turn, response) in enumerate(zip(case.get("conversation") or [], responses), 1):
+        if not isinstance(turn, dict) or not isinstance(turn.get("expected"), dict):
+            continue
+        expected = turn["expected"]
+        answer = str(getattr(response, "answer", "") or "")
+        abstained = bool((getattr(response, "metadata", None) or {}).get("fallback")) or _abstained(
+            answer, str(turn.get("language") or case["language"])
+        )
+        if expected.get("kind", "answer") == "abstain":
+            if not abstained:
+                failures.append(f"turn {number}: answered a question the documents do not cover")
+            continue
+        if abstained:
+            failures.append(f"turn {number}: abstained on an answerable question")
+        for required in expected.get("must_contain") or []:
+            if str(required).casefold() not in answer.casefold():
+                failures.append(f"turn {number}: missing required fact {required!r}")
+        failures.extend(f"turn {number}: {failure}" for failure in _pattern_failures(expected, answer))
+        for pattern in expected.get("forbidden_patterns") or []:
+            if re.search(pattern, answer, re.IGNORECASE):
+                failures.append(f"turn {number}: contains forbidden pattern {pattern!r}")
+    return failures
 
 
 def _is_cited(required: str, cited: set[str]) -> bool:
@@ -215,6 +303,7 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
 
     return {
         "answer": answer,
+        "turn_failures": _prior_turn_failures(case, run.prior_responses),
         "citations": len(response.citations or []),
         "abstained": bool(metadata.get("fallback")) or _abstained(answer, str(case["language"])),
         "failure_layer": metadata.get("failure_layer") or "",
@@ -261,11 +350,12 @@ def run_case_once(canary, case: dict[str, Any], sequence: int) -> dict[str, Any]
     }
 
 
-def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
+def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
     """Judge one run against the case's stated expectation."""
     expected = case["expected"]
     folded = " ".join(run["answer"].split()).casefold()
     failures: list[str] = []
+    failures.extend(run.get("turn_failures") or [])
 
     if expected["kind"] == "abstain":
         if not run["abstained"]:
@@ -276,12 +366,16 @@ def score_run(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
         for required in expected.get("must_contain") or []:
             if str(required).casefold() not in folded:
                 failures.append(f"missing required fact {required!r}")
+        failures.extend(_pattern_failures(expected, run["answer"]))
         if expected.get("must_cite") and run["citations"] < 1:
             failures.append("no citation")
 
     for forbidden in expected.get("must_not_contain") or []:
         if str(forbidden).casefold() in folded:
             failures.append(f"contains {forbidden!r}")
+    for pattern in expected.get("forbidden_patterns") or []:
+        if re.search(pattern, run["answer"], re.IGNORECASE):
+            failures.append(f"contains forbidden pattern {pattern!r}")
 
     # Retrieval is scored against section IDs when the case names them. A
     # title match is not evidence that the governing passage was found: the
@@ -472,6 +566,7 @@ def main() -> int:
         results.append({
             "id": case["id"],
             "question": case["question"],
+            "evaluation_set": case.get("evaluation_set", "development"),
             "intent_group": case["intent_group"],
             "expected_kind": case["expected"]["kind"],
             "provenance": case["provenance"],

@@ -333,6 +333,19 @@ def test_conversation_turns_must_be_non_empty_strings():
         _validate(_case(conversation=["a"] * (canary.MAX_CONVERSATION_TURNS + 1)))
 
 
+def test_structured_conversation_turns_are_accepted():
+    import json as _json
+    import tempfile
+    from pathlib import Path as _Path
+
+    payload = {"schema_version": 1, "cases": [_case(conversation=[{"question": "What is the minimum?"}])]}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        _json.dump(payload, handle)
+        path = _Path(handle.name)
+    cases, _ = canary.load_fixture(path)
+    assert cases[0]["conversation"][0]["question"] == "What is the minimum?"
+
+
 def test_allowed_numeric_removals_must_be_an_unambiguous_non_empty_list():
     import json as _json
     import tempfile
