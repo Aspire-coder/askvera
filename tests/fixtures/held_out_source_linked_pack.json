@@ -1,0 +1,1225 @@
+{
+  "schema_version": 1,
+  "pack_id": "HELDOUT-SOURCE-LINKED-PACK-01",
+  "status": "approved_and_frozen",
+  "frozen_on": "2026-09-10",
+  "revision": "HELDOUT-SOURCE-LINKED-PACK-RELEASE-READINESS-02",
+  "target_case_count": 24,
+  "description": "Held-out, source-linked evaluation pack. Twenty-four customer questions (cases 01-12 from the first revision, 13-24 added in release-readiness revision 02), each bound to one passage in a named local extraction, with a stated expected outcome. Companion review document: docs/HELD_OUT_SOURCE_LINKED_PACK.md, which records this file's SHA-256. Do not edit an expectation after observing an answer; record the answer as a failure or create a separate development case.",
+  "missing_source_policy": "fail: every extraction named in source_extractions must be present locally with the recorded SHA-256. A missing extraction fails this pack's validation; it is never skipped.",
+  "held_out_basis": "Every case was selected from source before any model run and was not used to diagnose or fix runtime behaviour. No question, market field or section here is asked by an existing development, canary, probe or deployment case; each case's not_copied_from names the nearest existing material and how this case differs.",
+  "review_attestation": "On 2026-09-10, KRISH, acting as the independent content owner, reviewed every expectation against the approved own-market source (or the International Sponsoring Directory), approved prospect access to factual FBO eligibility and purchase-policy facts for cases 02, 16 and 24, and ratified the Tunisia, Tanzania, Ghana and Hong Kong interpretation decisions. Claude Code authored the original questions. The external content-review record is HELD_OUT_PACK_CONTENT_REVIEW_LOG_v2.md.",
+  "source_extractions": [
+    {
+      "document": "International_Sponsoring_Directory.pdf",
+      "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+      "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970"
+    },
+    {
+      "document": "CA-EN-Company-Policy.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/CA/en/CA-EN-Company-Policy.sections.jsonl",
+      "extraction_sha256": "12eaa7f63278adb200ff1709d13597741455eb0d7c9f9195d42667b8c46ee37f"
+    },
+    {
+      "document": "CA-FR-Company-Policy.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/CA/fr/CA-FR-Company-Policy.sections.jsonl",
+      "extraction_sha256": "986054c6cb904ef8bd0c08870a232aa166b88ed66ab7268d4fa6f1db61027e96"
+    },
+    {
+      "document": "COMPANY_POLICY_IT_IT.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/IT/it/COMPANY_POLICY_IT_IT.sections.jsonl",
+      "extraction_sha256": "dfb48b2f75c8a502161402dff497cd755d1653d907c65e3465d9493d1b750c91"
+    },
+    {
+      "document": "Company_Policy_Finland - suomi.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/FI/fi/Company_Policy_Finland - suomi.sections.jsonl",
+      "extraction_sha256": "7df953664a6468f8d211dbfb6ff2a34190382f43de82928590aa504a04a8c744"
+    },
+    {
+      "document": "Company_Policy_NOrway - norsk.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/NO/no/Company_Policy_NOrway - norsk.sections.jsonl",
+      "extraction_sha256": "d83d70cbdfa296368eed481ec51271697d46233af93ae8b19d65bd1886d9f49a"
+    },
+    {
+      "document": "NL-NL-Benelux-Policy.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/NL/nl/NL-NL-Benelux-Policy.sections.jsonl",
+      "extraction_sha256": "ef5609f900325280a0eea34033e7927e40c904f23627b53baba5bbf82d863f66"
+    },
+    {
+      "document": "LU-FR-Benelux-Policy.pdf",
+      "extraction_file": "outputs/chunk-comparison-full/current/LU/fr/LU-FR-Benelux-Policy.sections.jsonl",
+      "extraction_sha256": "a50f87649c1803ea1c3dd913ae3f890dda7734f9805424dacec56892563640f2"
+    }
+  ],
+  "cases": [
+    {
+      "id": "ho-slp-01-ghana-preferred-customer-signup-order-en",
+      "question": "I'd like to register as a Preferred Customer with Forever Ghana. Do I need to place an order along with my application?",
+      "country": "GH",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "preferred_customer",
+      "source_market": "Ghana",
+      "intent_group": "role_distinction",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b(?:yes|required|must|needs?|needed)\\b",
+          "\\b(?:first|initial|opening)\\s+order\\b"
+        ],
+        "forbidden_patterns": [
+          "53[.,\\s]?000",
+          "\\bF?CFA\\b"
+        ],
+        "required_sections": ["sponsoring-010-ghana"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "The first order goes in with the application form."
+      ],
+      "forbidden_claims": [
+        "Any amount for the Preferred Customer first order: the Ghana record states none.",
+        "The 53.000 francs CFA registration minimum, which belongs to the Guinea Bissau and Guinea Conakry text extracted inside the same section.",
+        "Presenting the FBO first-order requirement of US$100 as the Preferred Customer requirement."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Ghana directory record.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-010-ghana",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 23,
+        "end_page": 26,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "First order required while signing up as Preferred Customer?: Yes, a Preferred customer needs to have a first order with an application form."
+      },
+      "source_evidence": "Forever Ghana record: 'First order required while signing up as Preferred Customer?: Yes, a Preferred customer needs to have a first order with an application form.' The line sits before the 'Welcome to Forever Guinea Bissau and Guinea Conakry' heading, so it is Ghana's own rule.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-010-ghana, PDF pages 23-26 (line position within the record not established). Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "No existing case asks about Ghana. The only Preferred Customer first-order cases are UK (evaluation pack) and Algeria (role-scope comparison), both about an amount; this asks whether an order is required at all, in a record that states no amount.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "new_country", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-02-ghana-prospect-fbo-first-order-conditions-en",
+      "question": "I'm thinking about joining Forever in Ghana as a business owner. How much would my first order have to be?",
+      "country": "GH",
+      "language": "en",
+      "role": "new_prospect",
+      "reader_role": "prospective_fbo",
+      "source_market": "Ghana",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "(?:US\\$|USD\\s?|\\$)\\s?100\\b|\\b100\\s?(?:USD|US dollars)",
+          "3\\s?%[^.]{0,20}VAT|VAT[^.]{0,20}3\\s?%",
+          "3\\s?%[^.]{0,30}handling|handling[^.]{0,30}3\\s?%"
+        ],
+        "forbidden_patterns": [
+          "53[.,\\s]?000",
+          "\\bF?CFA\\b"
+        ],
+        "required_sections": ["sponsoring-010-ghana"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "The US$100 is before the 3% VAT and the 3% handling charge, which are added on top."
+      ],
+      "forbidden_claims": [
+        "A total with VAT and handling already combined into one invented figure.",
+        "The 53.000 francs CFA minimum from the Guinea text in the same section."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Ghana directory record.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-010-ghana",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 23,
+        "end_page": 26,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "Minimum order size FBO: First order requirements is US$100 +3% VAT +3% Handling charge."
+      },
+      "source_evidence": "Forever Ghana record: 'Minimum order size FBO: First order requirements is US$100 +3% VAT +3% Handling charge.' The amount, currency and both surcharges are stated together.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-010-ghana, PDF pages 23-26. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "No existing case asks about Ghana, and no existing case uses the new_prospect role. First-order amount cases exist for Algeria and Korea, neither with added percentage surcharges.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "new_country", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-03-hong-kong-delivery-fee-and-free-threshold-en",
+      "question": "What does Forever Hong Kong charge for delivery, and how much do I need to spend to get free delivery?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Hong Kong",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "(?:HK\\$|HKD)\\s?50(?![\\d,]|[.,]\\d)|\\b50\\s?(?:HKD|Hong Kong dollars)",
+          "(?:HK\\$|HKD)\\s?3[,.\\s]?000|\\b3[,.\\s]?000(?:\\.00)?\\s?(?:HKD|Hong Kong dollars)"
+        ],
+        "forbidden_patterns": [
+          "(?:HK\\$|HKD)\\s?115\\b",
+          "(?:HK\\$|HKD)\\s?2[,.\\s]?000"
+        ],
+        "required_sections": ["sponsoring-030-hong-kong"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "The HK$50 handling fee is the charge for delivery on a purchase of HK$500.",
+        "Both thresholds are measured after personal discount.",
+        "Free delivery needs HK$3,000 or more in a single receipt."
+      ],
+      "forbidden_claims": [
+        "The HK$115 banking fee or the HK$2,000 foreign bonus threshold presented as a delivery figure.",
+        "Any statement about delivery for purchases under HK$500, which the record does not make."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Hong Kong directory record.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-030-hong-kong",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 64,
+        "end_page": 65,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "(A1) Delivery service is available available for purchase of HK$500 (after personal discount) with a handling fee of HK$50. (A2) Free delivery service is rendered for minimum purchase of HK$3,000.00 and above (after personal discount; in a single receipt)."
+      },
+      "source_evidence": "Forever Hong Kong record, Delivery Cost: '(A1) Delivery service is available available for purchase of HK$500 (after personal discount) with a handling fee of HK$50. (A2) Free delivery service is rendered for minimum purchase of HK$3,000.00 and above (after personal discount; in a single receipt).' Both requested facts are in one field.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-030-hong-kong, PDF pages 64-65. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "Hong Kong appears in existing material only as a place excluded from mainland China in the China sponsoring case. No case asks about Hong Kong delivery. The existing delivery-cost cases (Algeria, Réunion, Japan, Serbia, England, China) each ask one figure, not a fee plus a separate free-delivery threshold.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "numeric_role_condition", "multi_part"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-04-tanzania-foreign-then-local-bonus-follow-up-en",
+      "question": "And what about FBOs who live there?",
+      "country": "TZ",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Tanzania",
+      "intent_group": "conversation",
+      "conversation": [
+        {
+          "question": "How does Forever Tanzania pay bonuses to FBOs who live outside the country?",
+          "expected": {
+            "kind": "answer",
+            "required_patterns": ["\\$\\s?100\\b"],
+            "required_sections": ["sponsoring-022-tanzania"]
+          },
+          "source_evidence": "Forever Tanzania record, To foreign FBO's: 'Bonus paid via bank transfers ONLY when it accumulated to $100 and above. Bonus less than $100 will only be paid after accumulating to that level.'"
+        }
+      ],
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\$\\s?5(?![\\d,]|[.,]\\d)",
+          "\\bbank\\b"
+        ],
+        "forbidden_patterns": [
+          "\\bmobile money\\b",
+          "\\bm-?pesa\\b"
+        ],
+        "required_sections": ["sponsoring-022-tanzania"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "A bonus under $5 is carried forward and paid once it accumulates to $5."
+      ],
+      "forbidden_claims": [
+        "Mobile Money or M-Pesa as a bonus payment route: the record lists them only as order payment methods and says bonuses are paid via bank transfer ONLY.",
+        "The $100 foreign-FBO threshold presented as the local threshold.",
+        "Naming the currency behind '$' (US dollars or shillings): the record does not."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Tanzania directory record on both turns.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-022-tanzania",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 49,
+        "end_page": 50,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "Bonus paid via bank transfers ONLY when it accumulated to $5 and above. Bonus less than $5 will only be paid after accumulating to that level."
+      },
+      "source_evidence": "Forever Tanzania record, To local FBO's: 'Bonus paid via bank transfers ONLY when it accumulated to $5 and above. Bonus less than $5 will only be paid after accumulating to that level.' The final question names neither the market nor the topic, so both must come from the first turn.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-022-tanzania, PDF pages 49-50. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "Existing follow-ups switch market (France then Réunion, Belgium then Germany) or ask 'Does that apply to me?'. This one keeps the market and switches the reader group. A unit test resolves the plain name 'Tanzania' for market configuration; no case asks about Tanzania bonuses.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "new_country", "follow_up", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-05-benin-accented-fbo-minimum-order-fr",
+      "question": "Au Bénin, combien dois-je commander au minimum en tant que FBO ?",
+      "country": "BJ",
+      "language": "fr",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Benin",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "€\\s?81\\b|\\b81\\s?(?:€|EUR|euros?)"
+        ],
+        "forbidden_patterns": [
+          "\\bF?CFA\\b",
+          "\\bXOF\\b"
+        ],
+        "required_sections": ["sponsoring-003-benin"],
+        "must_cite": true
+      },
+      "completeness_conditions": [],
+      "forbidden_claims": [
+        "A conversion of €81 into francs CFA or XOF: the record gives no local-currency figure."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Benin directory record even though the question spells the market with an accent the record does not use.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-003-benin",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 9,
+        "end_page": 10,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "Minimum order size FBO: €81."
+      },
+      "source_evidence": "Forever Benin record: 'Minimum order size FBO: €81.' The record title is the unaccented 'Forever Benin'; the question uses the French spelling 'Bénin'.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-003-benin, PDF pages 9-10. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "No case asks about Benin. The existing accent cases are Réunion delivery cost in English. The French minimum-order case asks about Belgium with the wording 'Quel est le montant minimum de commande pour un FBO'; this question is deliberately phrased differently and reaches an English-only directory record from a French question.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "new_country", "non_english", "accent_or_alias", "wording_variation", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-06-canada-monthly-case-credit-limit-en",
+      "question": "Is there a limit on how many case credits I can order in one month here in Canada?",
+      "country": "CA",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Canada",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b25\\b",
+          "\\bmonth",
+          "approv|authori[sz]|permission"
+        ],
+        "forbidden_patterns": [],
+        "required_sections": ["CA:13.01-e"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "The limit can be exceeded only with prior Home Office approval.",
+        "The period is a calendar month."
+      ],
+      "forbidden_claims": [
+        "An absolute ban with no approval route.",
+        "The Benelux 'Benelux Office Approval' wording, which is another market's policy."
+      ],
+      "expected_citation_behaviour": "Cite Canada company policy section 13.01. A citation of the identically worded US policy is a wrong-market citation.",
+      "source": {
+        "document": "CA-EN-Company-Policy.pdf",
+        "section_id": "CA:13.01-e",
+        "country": "CA",
+        "language": "en",
+        "page": 35,
+        "end_page": 35,
+        "extraction_file": "outputs/chunk-comparison-full/current/CA/en/CA-EN-Company-Policy.sections.jsonl",
+        "extraction_sha256": "12eaa7f63278adb200ff1709d13597741455eb0d7c9f9195d42667b8c46ee37f",
+        "passage_role": "supports_required_facts",
+        "quote": "(e) An FBO may not order more than 25 Case Credits in any calendar Month without prior Home Office approval."
+      },
+      "source_evidence": "Canada company policy 13.01(e): 'An FBO may not order more than 25 Case Credits in any calendar Month without prior Home Office approval.'",
+      "provenance": "CA-EN-Company-Policy.pdf, section 13.01(e), PDF page 35 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case uses Canada policy. The retrieval canary asks about US payment methods and expects a 13.01 title, which is a different clause (13.01(c)) in a different market. No case asks about a monthly ordering limit.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-07-canada-order-discrepancy-deadline-fr",
+      "question": "J'ai reçu ma commande au Canada mais il manque des produits. J'ai combien de temps pour le signaler ?",
+      "country": "CA",
+      "language": "fr",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Canada",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b10\\s*jours\\b"
+        ],
+        "forbidden_patterns": [
+          "\\b14\\s*jours\\b",
+          "(?:à compter de|après|dès)\\s+(?:la\\s+)?réception"
+        ],
+        "required_sections": ["CA:13.01-d"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Le délai de 10 jours court à partir de la date de la commande, pas de la réception.",
+        "Le signalement se fait auprès du service clientèle."
+      ],
+      "forbidden_claims": [
+        "Un délai compté depuis la réception de la commande : la question évoque la réception, mais la politique compte depuis la date de la commande.",
+        "Le délai Benelux de 14 jours après réception, qui relève d'une autre politique locale."
+      ],
+      "expected_citation_behaviour": "Cite la section 13.01 de la politique canadienne (version française).",
+      "source": {
+        "document": "CA-FR-Company-Policy.pdf",
+        "section_id": "CA:13.01-d",
+        "country": "CA",
+        "language": "fr",
+        "page": 39,
+        "end_page": 40,
+        "extraction_file": "outputs/chunk-comparison-full/current/CA/fr/CA-FR-Company-Policy.sections.jsonl",
+        "extraction_sha256": "986054c6cb904ef8bd0c08870a232aa166b88ed66ab7268d4fa6f1db61027e96",
+        "passage_role": "supports_required_facts",
+        "quote": "(d) Toute différence d’état ou de quantité doit être signalée au service clientèle au plus tard 10 jours après la date de la commande."
+      },
+      "source_evidence": "Canada company policy (French), 13.01(d): 'Toute différence d’état ou de quantité doit être signalée au service clientèle au plus tard 10 jours après la date de la commande.' The start point is the order date, which the question's wording ('J'ai reçu ma commande') invites the answer to replace with the receipt date.",
+      "provenance": "CA-FR-Company-Policy.pdf, section 13.01(d), PDF pages 39-40 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case uses the French Canadian policy, and no case asks about reporting an order discrepancy. The informal register ('J'ai combien de temps') differs from the formal wording of the existing French case.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "wording_variation", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-08-gb-must-not-get-canada-discrepancy-rule-en",
+      "question": "Under Forever Canada's company policy, how many days does an FBO have to report a problem with the quantity of an order?",
+      "country": "GB",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Canada",
+      "intent_group": "country_scope",
+      "expected": {
+        "kind": "abstain",
+        "forbidden_patterns": [
+          "\\b10\\s*(?:-\\s*)?days?\\b",
+          "\\bten\\s+days\\b"
+        ]
+      },
+      "completeness_conditions": [],
+      "forbidden_claims": [
+        "Canada's 10-day reporting rule, served to a GB session from another market's local policy.",
+        "A UK rule presented as the answer to a question about Canada."
+      ],
+      "expected_citation_behaviour": "No citation of Canada or US local policy. A safe refusal carries no local-policy citation.",
+      "source": {
+        "document": "CA-EN-Company-Policy.pdf",
+        "section_id": "CA:13.01-d",
+        "country": "CA",
+        "language": "en",
+        "page": 35,
+        "end_page": 35,
+        "extraction_file": "outputs/chunk-comparison-full/current/CA/en/CA-EN-Company-Policy.sections.jsonl",
+        "extraction_sha256": "12eaa7f63278adb200ff1709d13597741455eb0d7c9f9195d42667b8c46ee37f",
+        "passage_role": "must_not_be_used",
+        "quote": "(d) Any discrepancy in condition or quantities must be reported to Customer Care no later than 10 days after the date the order was placed."
+      },
+      "source_evidence": "The only source for the requested figure is Canada company policy 13.01(d): 'Any discrepancy in condition or quantities must be reported to Customer Care no later than 10 days after the date the order was placed.' That policy is country-scoped. The Forever North America directory record, which a GB session may use, contains no reporting deadline, and the UK policy extraction contains no '10 days' wording.",
+      "provenance": "CA-EN-Company-Policy.pdf, section 13.01(d), PDF page 35 per extraction metadata; checked against sponsoring-098-north-america and UK-EN-Company-Policy.sections.jsonl on 2026-09-10. Access rule from docs/EVALUATION_REVIEW_QUEUE.md 'Already decided': foreign country-specific company policy is restricted; global sponsoring content is not.",
+      "not_copied_from": "Existing cross-market cases are a US session asking for the Swiss minimum inside German policy and a GB session asking the US opt-in rule. This uses a GB session, Canada policy and a reporting deadline. A US session was deliberately not used, because the US policy's 13.01(d) is worded identically to Canada's.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "cross_market_refusal"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-09-euro-to-tunisian-dinar-rate-out-of-scope-en",
+      "question": "What is today's exchange rate from euros to Tunisian dinars?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "not_stated",
+      "source_market": "Tunisia",
+      "intent_group": "scope_boundary",
+      "expected": {
+        "kind": "abstain",
+        "forbidden_patterns": [
+          "\\b1\\s*(?:€|EUR|euros?)\\s*(?:=|≈|is|equals|is worth)",
+          "\\d+(?:[.,]\\d+)?\\s*(?:TND|dinars?)\\s*(?:per|for|=|to|≈)\\s*(?:one|1|an?)?\\s*(?:€|EUR|euros?)",
+          "(?:€|EUR|euros?)\\s*(?:to|=|→)\\s*\\d+(?:[.,]\\d+)?\\s*(?:TND|dinars?)"
+        ]
+      },
+      "completeness_conditions": [],
+      "forbidden_claims": [
+        "Any current or approximate exchange rate.",
+        "A rate derived from the Tunisia record's '1CC (approx. 650 TND)', which states an order size, not a currency rate."
+      ],
+      "expected_citation_behaviour": "No citation. A refusal that explains AskVera covers approved policies and the sponsoring directory.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-024-tunisia",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 53,
+        "end_page": 54,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "shows_fact_absent",
+        "quote": "Minimum order size FBO: 1CC (approx. 650 TND) by all the ways (Online, call center, product center)",
+        "scope_reference": "config/conversation_routes.json, en.responses.off_topic"
+      },
+      "source_evidence": "The nearest approved content is the Tunisia record's 'Minimum order size FBO: 1CC (approx. 650 TND)', which gives a dinar approximation of an order size and no exchange rate. The approved off_topic copy in config/conversation_routes.json limits AskVera to Forever Living company policies and the international sponsoring directory; a live currency rate is in neither.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-024-tunisia, PDF pages 53-54, quoted on 2026-09-10 from the local extraction named in source; scope from config/conversation_routes.json read on 2026-09-10. Before any model execution.",
+      "not_copied_from": "Existing out-of-scope cases are weather, product price, order tracking, medical and income claims. None asks for a financial figure that an approved record could tempt the answer to derive.",
+      "evaluation_set": "held_out",
+      "coverage": ["out_of_scope_refusal"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-10-tunisia-call-centre-delivery-fee-typos-en",
+      "question": "whats the delivry fee in tunisia if i order thru the call centre and its under 1 cc",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "not_stated",
+      "source_market": "Tunisia",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "9[.,]44",
+          "\\bTND\\b|\\bdinars?\\b"
+        ],
+        "forbidden_patterns": [],
+        "required_sections": ["sponsoring-024-tunisia"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "The 9.440 TND fee applies to call-centre orders under 1 CC; call-centre orders of 1 CC or more are delivered free."
+      ],
+      "forbidden_claims": [
+        "The online threshold of 0.5 CC presented as the call-centre threshold.",
+        "Reading 9.440 TND as nine thousand four hundred and forty dinars."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Tunisia directory record.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-024-tunisia",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 53,
+        "end_page": 54,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "Call Center : if the order is of 1 CC and more ,the delivery fees are free of charge ,for orders less than 1CC delivery fees are 9.440 TND TTC"
+      },
+      "source_evidence": "Forever Tunisia record, Delivery Cost: 'Call Center : if the order is of 1 CC and more ,the delivery fees are free of charge ,for orders less than 1CC delivery fees are 9.440 TND TTC'. The online line directly above uses a 0.5 CC threshold instead.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-024-tunisia, PDF pages 53-54. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "Tunisia is named in existing material only inside a market-vocabulary comment. No case asks about Tunisia, and no case uses deliberate lowercase typos ('delivry', 'thru') with an ordering-channel condition. The retrieval canary's typo cases are about recognized manager, Belgium minimum and Mexico sponsoring.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "wording_variation", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-11-hong-kong-application-approval-time-unknown-en",
+      "question": "I'm sponsoring someone in Hong Kong who handed in their application form in person. How long until their FBO application is approved?",
+      "country": "US",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "sponsoring_fbo",
+      "source_market": "Hong Kong",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "abstain",
+        "forbidden_patterns": [
+          "\\b\\d+\\s*(?:working\\s+|business\\s+)?(?:days?|hours?|weeks?)\\b",
+          "\\bwithin\\s+(?:a|one|two|three|a few)\\s+(?:days?|weeks?)\\b"
+        ]
+      },
+      "completeness_conditions": [],
+      "forbidden_claims": [
+        "Any approval or processing time: the Hong Kong record describes how to apply and states none.",
+        "The '3 working days' product delivery time presented as an application processing time."
+      ],
+      "expected_citation_behaviour": "No citation is required. If the reply cites the Hong Kong record to describe the in-person application, it must still state no approval time.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-030-hong-kong",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 64,
+        "end_page": 65,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "shows_fact_absent",
+        "quote": "The applicant must fill out and submit the FBO Application Form in person, together with the original I.D. or copy (for verification)."
+      },
+      "source_evidence": "Forever Hong Kong record, Sign up with a form: 'The applicant must fill out and submit the FBO Application Form in person, together with the original I.D. or copy (for verification).' The record's signing-up section gives no approval or processing time. Its only time figure, 'Products are usually delivered within 3 working days', is about product delivery.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-030-hong-kong, PDF pages 64-65; the whole record was read for any application time on 2026-09-10. Local extraction only; not confirmed against the approved PDF, which could contain text the extraction dropped.",
+      "not_copied_from": "No case asks about application processing time in any market. The existing abstention cases concern unconfigured markets, personal account status and scope boundaries, not a fact missing from an otherwise matching record.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "source_unsupported_uncertainty"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-12-gb-session-foreign-fbo-ghana-bonus-threshold-and-charges-en",
+      "question": "I'm an FBO living outside Ghana. How much do I need to earn before Forever Ghana pays my bonus, and who covers the bank transfer charges?",
+      "country": "GB",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Ghana",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "(?:US\\$|USD\\s?|\\$)\\s?100\\b|\\b100\\s?(?:USD|US dollars)",
+          "responsib|you (?:pay|cover|bear)|FBOs? (?:pay|pays|cover|covers|bear|bears)|borne by|paid by (?:you|the FBO)"
+        ],
+        "forbidden_patterns": [
+          "(?:US\\$|USD\\s?|\\$)\\s?10(?![\\d,]|[.,]\\d)",
+          "(?:US\\$|USD\\s?|\\$)\\s?50(?![\\d,]|[.,]\\d)",
+          "\\bF?CFA\\b"
+        ],
+        "required_sections": ["sponsoring-010-ghana"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Payment is by bank transfer once the bonus is US$100 or more.",
+        "The FBO pays all bank transfer charges.",
+        "A designated form is required to submit banking data."
+      ],
+      "forbidden_claims": [
+        "The local-FBO thresholds (US$10 by bank transfer or mobile money, US$50 by cheque) presented as the foreign-FBO threshold.",
+        "Forever Ghana or the sponsor covering the transfer charges.",
+        "An invented payment schedule or date."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Ghana directory record. A GB session is entitled to global directory content, so refusing is a false abstention.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-010-ghana",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 23,
+        "end_page": 26,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "Bonuses equal or above US$100 are paid by bank transfer. FBOs are resposible for all bank tranfer charges. Designated form required to submit banking data."
+      },
+      "source_evidence": "Forever Ghana record, To foreign FBO's: 'Bonuses equal or above US$100 are paid by bank transfer. FBOs are resposible for all bank tranfer charges. Designated form required to submit banking data.' (source spelling retained). The local-FBO lines directly above use US$10 and US$50.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-010-ghana, PDF pages 23-26. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "The existing foreign-bonus case asks whether a foreign FBO can receive Algeria bonuses at all (yes/no). This asks a threshold plus who bears charges, for a different market, from a GB session. It is the counterpart of case 08: the same GB session must refuse Canada local policy but answer from the global directory.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "multi_part", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-13-italy-preferred-customer-permanent-discount-it",
+      "question": "Sono Cliente Privilegiato in Italia. Cosa devo comprare per avere lo sconto del 30% e vale anche per gli ordini successivi?",
+      "country": "IT",
+      "language": "it",
+      "role": "active_distributor",
+      "reader_role": "preferred_customer",
+      "source_market": "Italy",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "30\\s?%",
+          "\\b2\\s?(?:CC|Case Credits?)\\b|Start Your Journey",
+          "\\b(?:2|due)\\s+mesi\\b"
+        ],
+        "forbidden_patterns": [
+          "\\b4\\s?CC\\b"
+        ],
+        "required_sections": ["IT:3.03"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "I 2 CC di prodotti (oppure uno Start Your Journey Pack) vanno acquistati nell’arco di 2 mesi consecutivi.",
+        "Lo sconto del 30% è permanente per tutti gli ordini successivi."
+      ],
+      "forbidden_claims": [
+        "Uno sconto del 30% che scade o va riguadagnato ogni mese.",
+        "Il requisito di 4 CC per restare attivi presentato come condizione del Cliente Privilegiato."
+      ],
+      "expected_citation_behaviour": "Cita la sezione 3.03 della Company Policy italiana.",
+      "source": {
+        "document": "COMPANY_POLICY_IT_IT.pdf",
+        "section_id": "IT:3.03",
+        "country": "IT",
+        "language": "it",
+        "page": 12,
+        "end_page": 12,
+        "extraction_file": "outputs/chunk-comparison-full/current/IT/it/COMPANY_POLICY_IT_IT.sections.jsonl",
+        "extraction_sha256": "dfb48b2f75c8a502161402dff497cd755d1653d907c65e3465d9493d1b750c91",
+        "passage_role": "supports_required_facts",
+        "quote": "3.03 Quando il Cliente Privilegiato acquista uno Start Your Journey Pack o 2CC di prodotti nell’arco di 2 mesi consecutivi, ha diritto a uno sconto permanente del 30% per tutti gli ordini a seguire."
+      },
+      "source_evidence": "Italy company policy 3.03: 'Quando il Cliente Privilegiato acquista uno Start Your Journey Pack o 2CC di prodotti nell’arco di 2 mesi consecutivi, ha diritto a uno sconto permanente del 30% per tutti gli ordini a seguire.' The purchase condition and the permanence of the discount are in the one clause.",
+      "provenance": "COMPANY_POLICY_IT_IT.pdf, section 3.03, PDF page 12 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No existing case uses Italy policy or an Italian question. The nearest development case by id is the US Preferred Customer discount case (evp-role-us-preferred-customer-discount-en), in English and from another market's policy; this asks Italy's upgrade condition and whether the discount persists.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-14-italy-bonus-payment-day-then-value-date-follow-up-it",
+      "question": "E se la banca esegue il bonifico in un altro giorno, quale data di valuta vale?",
+      "country": "IT",
+      "language": "it",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Italy",
+      "intent_group": "conversation",
+      "conversation": [
+        {
+          "question": "In Italia, quando vengono pagati i bonus del mese?",
+          "expected": {
+            "kind": "answer",
+            "required_patterns": ["\\b15\\b"],
+            "required_sections": ["IT:4.04-d"]
+          },
+          "source_evidence": "Italy company policy 4.04(d): 'I Bonus sulle Vendite Accreditate relative al Mese precedente vengono pagati o accreditati direttamente tramite bonifico bancario il 15 del Mese successivo.'"
+        }
+      ],
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b15\\b"
+        ],
+        "forbidden_patterns": [
+          "\\b(?:1|5|10|20|25|30)\\s+del\\s+mese\\b"
+        ],
+        "required_sections": ["IT:4.04-e"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "La valuta del giorno 15 è garantita indipendentemente dalla data in cui il bonifico è stato eseguito."
+      ],
+      "forbidden_claims": [
+        "Una data di valuta che segue la data di esecuzione del bonifico.",
+        "Un giorno di pagamento diverso dal 15."
+      ],
+      "expected_citation_behaviour": "Cita la sezione 4.04 della Company Policy italiana in entrambi i turni.",
+      "source": {
+        "document": "COMPANY_POLICY_IT_IT.pdf",
+        "section_id": "IT:4.04-e",
+        "country": "IT",
+        "language": "it",
+        "page": 19,
+        "end_page": 19,
+        "extraction_file": "outputs/chunk-comparison-full/current/IT/it/COMPANY_POLICY_IT_IT.sections.jsonl",
+        "extraction_sha256": "dfb48b2f75c8a502161402dff497cd755d1653d907c65e3465d9493d1b750c91",
+        "passage_role": "supports_required_facts",
+        "quote": "(e) Viene garantita come valuta per i beneficiari del bonifico bancario il giorno 15, indipendentemente dalla data in cui il bonifico è stato eseguito."
+      },
+      "source_evidence": "Italy company policy 4.04(e): 'Viene garantita come valuta per i beneficiari del bonifico bancario il giorno 15, indipendentemente dalla data in cui il bonifico è stato eseguito.' The final question names neither the market nor bonuses, so both must come from the first turn.",
+      "provenance": "COMPANY_POLICY_IT_IT.pdf, section 4.04(d)-(e), PDF page 19 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case asks about a bonus payment day or value date in any market. Existing follow-ups switch market (France then Réunion, Belgium then Germany) or reader group (case 04 here); this keeps market and topic implicit and moves from the payment day to the guaranteed value date.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "follow_up", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-15-finland-preferred-customer-sponsor-change-wait-fi",
+      "question": "Olen Preferred Customer Suomessa. Kuinka kauan minun täytyy odottaa ennen kuin voin vaihtaa sponsoria?",
+      "country": "FI",
+      "language": "fi",
+      "role": "active_distributor",
+      "reader_role": "preferred_customer",
+      "source_market": "Finland",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b6\\b",
+          "kuukau"
+        ],
+        "forbidden_patterns": [
+          "\\b(?:12|36)\\s*kuukau"
+        ],
+        "required_sections": ["FI:4.02-a"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Kuusi peräkkäistä kalenterikuukautta Preferred Customerina.",
+        "Laskenta alkaa kuukaudesta, jona rekisteröintipyyntö on käsitelty."
+      ],
+      "forbidden_claims": [
+        "FBO:n 12 kuukauden passiivisuussääntö tai 36 kuukauden käytäntö esitettynä Preferred Customerin sponsorinvaihtosääntönä.",
+        "Laskennan aloittaminen ensimmäisestä tilauksesta eikä rekisteröinnin käsittelykuukaudesta."
+      ],
+      "expected_citation_behaviour": "Viittaa Suomen Company Policyn kohtaan 4.02.",
+      "source": {
+        "document": "Company_Policy_Finland - suomi.pdf",
+        "section_id": "FI:4.02-a",
+        "country": "FI",
+        "language": "fi",
+        "page": 12,
+        "end_page": 12,
+        "extraction_file": "outputs/chunk-comparison-full/current/FI/fi/Company_Policy_Finland - suomi.sections.jsonl",
+        "extraction_sha256": "7df953664a6468f8d211dbfb6ff2a34190382f43de82928590aa504a04a8c744",
+        "passage_role": "supports_required_facts",
+        "quote": "(a) Preferred Customer on oikeutettu valitsemaan uuden sponsorin oltuaan Preferred Customer 6 peräkkäisen kalenterikuukauden ajan, alkaen kuukaudesta, jona rekisteröintipyyntö on käsitelty."
+      },
+      "source_evidence": "Finland company policy 4.02(a): 'Preferred Customer on oikeutettu valitsemaan uuden sponsorin oltuaan Preferred Customer 6 peräkkäisen kalenterikuukauden ajan, alkaen kuukaudesta, jona rekisteröintipyyntö on käsitelty.' The period and its start month are both stated.",
+      "provenance": "Company_Policy_Finland - suomi.pdf, section 4.02(a), PDF page 12 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case uses Finland policy or a Finnish question. The only Nordic development cases (DK and SE) ask about the FBO Support fee in English from section 2-part-1-definition-18; this is a different clause, reader and language.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-16-norway-former-fbo-reapplication-and-downline-no",
+      "question": "Jeg sa opp forhandlerskapet mitt i Forever Norge. Når kan jeg søke om å bli FBO igjen, og får jeg beholde den gamle downline-en min?",
+      "country": "NO",
+      "language": "no",
+      "role": "new_prospect",
+      "reader_role": "former_fbo",
+      "source_market": "Norway",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b(?:ett|1)\\s*(?:\\(1\\)\\s*)?år\\b|\\b12\\s*måneder",
+          "(?:ikke|uten)[^.]{0,60}downline|downline[^.]{0,60}(?:ikke|uten|mister)"
+        ],
+        "forbidden_patterns": [
+          "\\b(?:6|24|36)\\s*måneder"
+        ],
+        "required_sections": ["NO:17.08-c"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "FLP må godta den nye søknaden.",
+        "Man starter på nivået Preferred Customer og kan velge sponsor."
+      ],
+      "forbidden_claims": [
+        "At den tidligere downline-en følger med tilbake.",
+        "At man starter på sitt tidligere salgsnivå.",
+        "At ny registrering er garantert etter ett år."
+      ],
+      "expected_citation_behaviour": "Vis til punkt 17.08 i norsk Company Policy.",
+      "source": {
+        "document": "Company_Policy_NOrway - norsk.pdf",
+        "section_id": "NO:17.08-c",
+        "country": "NO",
+        "language": "no",
+        "page": 44,
+        "end_page": 44,
+        "extraction_file": "outputs/chunk-comparison-full/current/NO/no/Company_Policy_NOrway - norsk.sections.jsonl",
+        "extraction_sha256": "d83d70cbdfa296368eed481ec51271697d46233af93ae8b19d65bd1886d9f49a",
+        "passage_role": "supports_required_facts",
+        "quote": "(c) Person som tidligere har vært registrert FBO hos FLP, som har valgt oppsigelse eller blitt sagt opp, kan etter ett (1) år (12 måneder) søke om nytt forhandlerskap. Hvis FLP godtar søknaden, kan FBO velge sponsor og starter på nivået Preferred Customer uten rett til tidligere downlines."
+      },
+      "source_evidence": "Norway company policy 17.08(c): 'Person som tidligere har vært registrert FBO hos FLP, som har valgt oppsigelse eller blitt sagt opp, kan etter ett (1) år (12 måneder) søke om nytt forhandlerskap. Hvis FLP godtar søknaden, kan FBO velge sponsor og starter på nivået Preferred Customer uten rett til tidligere downlines.' Both requested facts, the waiting period and the loss of the old downline, are in one clause.",
+      "provenance": "Company_Policy_NOrway - norsk.pdf, section 17.08(c), PDF page 44 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case uses Norway policy or a Norwegian question, and no case asks about re-applying after termination. Norway appears in development material only in a run_benchmark.py comment about the shared FBO Support fee section id.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "multi_part", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-17-finland-36-month-inactivity-then-managers-follow-up-fi",
+      "question": "Entä jos hän on Sponsored Recognized Manager ja hänen tiimissään on ensimmäisen sukupolven Recognized Managereita?",
+      "country": "FI",
+      "language": "fi",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Finland",
+      "intent_group": "conversation",
+      "conversation": [
+        {
+          "question": "Mitä Suomessa tapahtuu FBO:lle, joka ei ole ostanut mitään 36 kuukauteen?",
+          "expected": {
+            "kind": "answer",
+            "required_patterns": ["\\b36\\b"],
+            "required_sections": ["FI:4.05-a"]
+          },
+          "source_evidence": "Finland company policy 4.05(a): 'FBO, joka ei ole tehnyt ostosta 36 peräkkäiseen kalenterikuukauteen, menettää kaikki sponsoroidut alalinjat ensimmäiselle ylälinjan FBO:lle.'"
+        }
+      ],
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\bInherited\\b"
+        ],
+        "forbidden_patterns": [
+          "\\bTransferred\\s+Manager"
+        ],
+        "required_sections": ["FI:4.05-b"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Ensimmäisen sukupolven Recognized Managerit luokitellaan uuden sponsorin Inherited Managereiksi."
+      ],
+      "forbidden_claims": [
+        "Managerien luokittelu Transferred Managereiksi.",
+        "Että Managerit jäävät edelleen passiivisen FBO:n alle."
+      ],
+      "expected_citation_behaviour": "Viittaa Suomen Company Policyn kohtaan 4.05 molemmissa vuoroissa.",
+      "source": {
+        "document": "Company_Policy_Finland - suomi.pdf",
+        "section_id": "FI:4.05-b",
+        "country": "FI",
+        "language": "fi",
+        "page": 13,
+        "end_page": 13,
+        "extraction_file": "outputs/chunk-comparison-full/current/FI/fi/Company_Policy_Finland - suomi.sections.jsonl",
+        "extraction_sha256": "7df953664a6468f8d211dbfb6ff2a34190382f43de82928590aa504a04a8c744",
+        "passage_role": "supports_required_facts",
+        "quote": "(b) Jos FBO on Sponsored Recognized Manager ja hänellä on yksi tai useampi ensimmäisen sukupolven Recognized Manager tiimissään, nämä Managerit luokitellaan uuden Sponsorin Inherited Managereiksi."
+      },
+      "source_evidence": "Finland company policy 4.05(b), under 'FBO:n 36 kuukauden käytäntö': 'Jos FBO on Sponsored Recognized Manager ja hänellä on yksi tai useampi ensimmäisen sukupolven Recognized Manager tiimissään, nämä Managerit luokitellaan uuden Sponsorin Inherited Managereiksi.' The final question does not repeat the 36-month rule or the market; both come from the first turn.",
+      "provenance": "Company_Policy_Finland - suomi.pdf, section 4.05(a)-(b), PDF page 13 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case asks about the 36-month inactivity policy or Inherited Managers. Existing follow-ups switch market or reader group; this one narrows the same rule to a manager with first-generation managers.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "follow_up"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-18-netherlands-earned-trip-guest-under-14-nl",
+      "question": "Mijn partner kan niet mee op de reis die ik verdiend heb. Mag ik dan mijn dochter van 13 meenemen?",
+      "country": "NL",
+      "language": "nl",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Netherlands",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b14\\b",
+          "\\b(?:nee|niet|helaas)\\b"
+        ],
+        "forbidden_patterns": [
+          "minimaal\\s+(?:12|13|16|18)\\s+jaar|\\b(?:12|13|16|18)\\s+jaar\\s+of\\s+ouder"
+        ],
+        "required_sections": ["NL:7.03"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Een gast mag alleen mee als de partner van de FBO niet deelneemt.",
+        "De gast moet minimaal 14 jaar zijn, dus een kind van 13 komt niet in aanmerking."
+      ],
+      "forbidden_claims": [
+        "Een uitzondering voor kinderen onder de 14 jaar, bijvoorbeeld met toestemming.",
+        "Een leeftijdsgrens van 18 jaar."
+      ],
+      "expected_citation_behaviour": "Verwijs naar artikel 7.03 van het Benelux Samenwerkingsreglement (Nederlandse versie).",
+      "source": {
+        "document": "NL-NL-Benelux-Policy.pdf",
+        "section_id": "NL:7.03",
+        "country": "NL",
+        "language": "nl",
+        "page": 17,
+        "end_page": 17,
+        "extraction_file": "outputs/chunk-comparison-full/current/NL/nl/NL-NL-Benelux-Policy.sections.jsonl",
+        "extraction_sha256": "ef5609f900325280a0eea34033e7927e40c904f23627b53baba5bbf82d863f66",
+        "passage_role": "supports_required_facts",
+        "quote": "7.03 a) Indien de partner van de eerstgenoemde FBO niet deelneemt aan een r eis die toegekend wordt, dan mag de FBO een gast meenemen zolang deze gast minimaal 14 jaar of ouder is."
+      },
+      "source_evidence": "Benelux policy (Dutch) 7.03(a): 'Indien de partner van de eerstgenoemde FBO niet deelneemt aan een r eis die toegekend wordt, dan mag de FBO een gast meenemen zolang deze gast minimaal 14 jaar of ouder is.' ('een r eis' is an extraction artefact, read as 'een reis'.) The partner condition and the age limit are both stated.",
+      "provenance": "NL-NL-Benelux-Policy.pdf, section 7.03(a), PDF page 17 per extraction metadata. The extraction has no separate 7.03-a row, so the parent 7.03 row is cited. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case uses a Netherlands session, a Dutch question or Earned Trip guest rules. Development cases cite the Benelux policy family only for other clauses (BE:13.01-f, BE:23.59-f).",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "wording_variation", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-19-luxembourg-sapphire-trip-deadline-fr",
+      "question": "Je me suis qualifié pour un voyage Sapphire avec Forever Luxembourg. Dans quel délai dois-je l'effectuer ?",
+      "country": "LU",
+      "language": "fr",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Luxembourg",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b24\\s*mois\\b"
+        ],
+        "forbidden_patterns": [
+          "\\b(?:6|12|36)\\s*mois\\b"
+        ],
+        "required_sections": ["LU:7.03-c"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Le délai de 24 mois court à partir de la qualification."
+      ],
+      "forbidden_claims": [
+        "Un délai compté à partir de la réservation ou de l'annonce du voyage.",
+        "Un délai présenté comme s'appliquant aussi au Global Rally ou à l'Eagle Managers’ Retreat : la règle vise les voyages Sapphire à Platinum Centurion."
+      ],
+      "expected_citation_behaviour": "Cite l'article 7.03 de la politique Benelux (version française).",
+      "source": {
+        "document": "LU-FR-Benelux-Policy.pdf",
+        "section_id": "LU:7.03-c",
+        "country": "LU",
+        "language": "fr",
+        "page": 17,
+        "end_page": 18,
+        "extraction_file": "outputs/chunk-comparison-full/current/LU/fr/LU-FR-Benelux-Policy.sections.jsonl",
+        "extraction_sha256": "a50f87649c1803ea1c3dd913ae3f890dda7734f9805424dacec56892563640f2",
+        "passage_role": "supports_required_facts",
+        "quote": "c) Les voyages Sapphire à Platinum Centurion doivent être effectués dans les 24 mois suivant la qualification."
+      },
+      "source_evidence": "Benelux policy (French, Luxembourg copy) 7.03(c): 'Les voyages Sapphire à Platinum Centurion doivent être effectués dans les 24 mois suivant la qualification.'",
+      "provenance": "LU-FR-Benelux-Policy.pdf, section 7.03(c), PDF pages 17-18 per extraction metadata. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case uses a Luxembourg session or asks about an Earned Trip deadline. The existing French development case asks the Belgium minimum order; the Benelux policy family is cited in development only for other clauses.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-20-poland-first-order-and-delivery-cost-en",
+      "question": "I'm sponsoring someone in Poland. How big does their first FBO order need to be, and how much is delivery?",
+      "country": "PL",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "sponsoring_fbo",
+      "source_market": "Poland",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b250\\s?(?:PLN|zł|złoty|zloty)|PLN\\s?250\\b",
+          "\\b16\\s?(?:PLN|zł|złoty|zloty)|PLN\\s?16\\b"
+        ],
+        "forbidden_patterns": [
+          "(?:€|EUR)\\s?250\\b|\\b250\\s?(?:€|EUR)",
+          "(?:€|EUR)\\s?16\\b|\\b16\\s?(?:€|EUR)"
+        ],
+        "required_sections": ["sponsoring-082-poland"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "No designated first-order form is required.",
+        "The euro figures in the record (≈€65, ≈€4) are approximations of the złoty amounts."
+      ],
+      "forbidden_claims": [
+        "The 250 PLN or 16 PLN figures restated as euro prices.",
+        "The 30-day deadline for the signed original Application Form presented as an ordering deadline.",
+        "A free-delivery threshold: the Delivery Cost field states none."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Poland directory record.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-082-poland",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 169,
+        "end_page": 170,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "Minimum order size FBO: First order requirement is 250 PLN (≈€65). No designated first order form required. The Polish price list can be downloaded on www.foreverliving.com in the FBO section. The website needs to be set up to the right country. • Delivery Cost: 16 PLN (≈€4)"
+      },
+      "source_evidence": "Forever Poland record, Ordering products: 'Minimum order size FBO: First order requirement is 250 PLN (≈€65). No designated first order form required. […] Delivery Cost: 16 PLN (≈€4)'. Both requested figures sit in adjacent fields.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-082-poland, PDF pages 169-170. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "No case asks about Poland. Existing first-order and delivery-cost cases (Algeria, Korea, Japan, Serbia, England, China, Réunion) use other records; none asks a first-order amount and a delivery cost together in złoty.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "new_country", "multi_part", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-21-poland-unregistered-fbo-annual-bonus-payout-en",
+      "question": "I'm an FBO in Poland but I don't have a registered business. When does Forever actually pay out my bonuses?",
+      "country": "PL",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Poland",
+      "intent_group": "directory_fact",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b100\\s?(?:PLN|zł|złoty|zloty)|PLN\\s?100\\b",
+          "once (?:a|per|each) year|\\bannual(?:ly)?\\b|\\byearly\\b|\\b(?:each|every) year\\b"
+        ],
+        "forbidden_patterns": [
+          "\\b(?:monthly|every month|each month)\\b"
+        ],
+        "required_sections": ["sponsoring-082-poland"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Payment is made once a year, when the accumulated bonus exceeds 100 PLN.",
+        "It is paid to the bank account after the FBO sends back the signed cooperation contract."
+      ],
+      "forbidden_claims": [
+        "The pre-filled invoice route, which the record gives for FBOs with a registered business.",
+        "The foreign-FBO threshold (€100/$100/£100) presented as this FBO's threshold.",
+        "Monthly bonus payment."
+      ],
+      "expected_citation_behaviour": "Cite the Forever Poland directory record.",
+      "source": {
+        "document": "International_Sponsoring_Directory.pdf",
+        "section_id": "sponsoring-082-poland",
+        "country": "GLOBAL",
+        "language": "en",
+        "page": 169,
+        "end_page": 170,
+        "extraction_file": "tmp/askvera-global-sponsoring/International_Sponsoring_Directory.directory.jsonl",
+        "extraction_sha256": "5557f474de6ade5ebca2eb0a312cdb306b58fb5d451b4419a11fa2f2c307f970",
+        "passage_role": "supports_required_facts",
+        "quote": "For FBO’s without business entity registered: Bonuses paid out based on cooperation contract send out by the Head Office once a year when the accumulated bonus amount exceeds 100 PLN (≈€22). Paid directly to bank account upon receiving back signed contract."
+      },
+      "source_evidence": "Forever Poland record, Bonus payment: 'For FBO’s without business entity registered: Bonuses paid out based on cooperation contract send out by the Head Office once a year when the accumulated bonus amount exceeds 100 PLN (≈€22). Paid directly to bank account upon receiving back signed contract.' (source spelling retained). The line directly above gives a different, invoice-based route for FBOs with a registered business, and the foreign-FBO line below uses €100/$100/£100.",
+      "provenance": "International_Sponsoring_Directory.pdf, record sponsoring-082-poland, PDF pages 169-170. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF.",
+      "not_copied_from": "No case asks about Poland or about a bonus route that depends on business registration. Case 12 here asks a foreign-FBO threshold for Ghana; this is a local reader with a registration condition, in another market.",
+      "evaluation_set": "held_out",
+      "coverage": ["global_directory", "new_country", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-22-austria-must-not-get-italy-promoter-commission-en",
+      "question": "Under Forever Italy's company policy, what commission does a Promoter earn on their orders?",
+      "country": "AT",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Italy",
+      "intent_group": "country_scope",
+      "expected": {
+        "kind": "abstain",
+        "forbidden_patterns": [
+          "\\b25\\s?%",
+          "\\b30\\s?%"
+        ]
+      },
+      "completeness_conditions": [],
+      "forbidden_claims": [
+        "Italy's 25% Promoter commission, served to an Austrian session from another market's local policy.",
+        "An Austrian policy rate presented as Italy's Promoter commission."
+      ],
+      "expected_citation_behaviour": "No citation of Italy local policy. A safe refusal carries no local-policy citation.",
+      "source": {
+        "document": "COMPANY_POLICY_IT_IT.pdf",
+        "section_id": "IT:4",
+        "country": "IT",
+        "language": "it",
+        "page": 10,
+        "end_page": 10,
+        "extraction_file": "outputs/chunk-comparison-full/current/IT/it/COMPANY_POLICY_IT_IT.sections.jsonl",
+        "extraction_sha256": "dfb48b2f75c8a502161402dff497cd755d1653d907c65e3465d9493d1b750c91",
+        "passage_role": "must_not_be_used",
+        "quote": "4. Commissione su ordine da Promoter: 25% del prezzo di acquisto, al netto di IVA e delle spese di spedizione e consegna."
+      },
+      "source_evidence": "The only source for the requested rate is Italy company policy, commission line 4: 'Commissione su ordine da Promoter: 25% del prezzo di acquisto, al netto di IVA e delle spese di spedizione e consegna.' That policy is country-scoped. The Austrian policy extraction (the shared Germany/Austria/Switzerland policy) contains no 'Promoter', 'Cliente' or 'Club' text, and no International Sponsoring Directory record contains 'Promoter'; the Forever Italy directory record describes Cliente Club only as a retail customer and states no commission.",
+      "provenance": "COMPANY_POLICY_IT_IT.pdf, commission line 4 (extraction section id '4'), PDF page 10 per extraction metadata. Absence checked on 2026-09-10 by text search of every outputs/chunk-comparison-full/current/*/*.sections.jsonl extraction (only the IT and US-ES extractions contain any of those words) and of the directory extraction. Access rule from docs/EVALUATION_REVIEW_QUEUE.md 'Already decided': foreign country-specific company policy is restricted; global sponsoring content is not.",
+      "not_copied_from": "Existing cross-market cases are a US session asking the Swiss minimum inside German policy, a GB session asking the US opt-in rule, and case 08 here (GB session, Canada policy). This uses an Austrian session, Italy policy and a Promoter role that exists only in the Italian policy.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "cross_market_refusal", "new_country"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-23-portugal-must-not-get-italy-premium-customer-commission-en",
+      "question": "What commission does Forever Italy pay an FBO on orders placed by a Cliente Premium?",
+      "country": "PT",
+      "language": "en",
+      "role": "active_distributor",
+      "reader_role": "fbo",
+      "source_market": "Italy",
+      "intent_group": "country_scope",
+      "expected": {
+        "kind": "abstain",
+        "forbidden_patterns": [
+          "\\b25\\s?%"
+        ]
+      },
+      "completeness_conditions": [],
+      "forbidden_claims": [
+        "Italy's 25% commission on Cliente Premium orders, served to a Portuguese session from another market's local policy.",
+        "Any Premium customer bonus percentage taken from Italy's policy."
+      ],
+      "expected_citation_behaviour": "No citation of Italy local policy. A safe refusal carries no local-policy citation.",
+      "source": {
+        "document": "COMPANY_POLICY_IT_IT.pdf",
+        "section_id": "IT:3",
+        "country": "IT",
+        "language": "it",
+        "page": 10,
+        "end_page": 10,
+        "extraction_file": "outputs/chunk-comparison-full/current/IT/it/COMPANY_POLICY_IT_IT.sections.jsonl",
+        "extraction_sha256": "dfb48b2f75c8a502161402dff497cd755d1653d907c65e3465d9493d1b750c91",
+        "passage_role": "must_not_be_used",
+        "quote": "3. Commissione su ordine da Cliente Premium: 25% del prezzo di acquisto, al netto di IVA e delle spese di spedizione e consegna."
+      },
+      "source_evidence": "The only source for the requested rate is Italy company policy, commission line 3: 'Commissione su ordine da Cliente Premium: 25% del prezzo di acquisto, al netto di IVA e delle spese di spedizione e consegna.' That policy is country-scoped. No International Sponsoring Directory record contains 'Premium'. This checkout has no local policy extraction for Portugal, so no Portuguese policy was searched; the refusal rests on the question asking for another market's local policy, not on Portuguese absence.",
+      "provenance": "COMPANY_POLICY_IT_IT.pdf, commission line 3 (extraction section id '3'), PDF page 10 per extraction metadata. Directory absence checked on 2026-09-10 by text search of the directory extraction. Access rule from docs/EVALUATION_REVIEW_QUEUE.md 'Already decided': foreign country-specific company policy is restricted; global sponsoring content is not.",
+      "not_copied_from": "No case uses a Portugal session. It pairs with case 22: the same foreign policy, a different session and a different Italian customer category.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "cross_market_refusal", "new_country"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    },
+    {
+      "id": "ho-slp-24-norway-17-year-old-prospect-age-no",
+      "question": "Jeg er 17 år. Kan jeg registrere meg som FBO i Norge nå?",
+      "country": "NO",
+      "language": "no",
+      "role": "new_prospect",
+      "reader_role": "prospective_fbo",
+      "source_market": "Norway",
+      "intent_group": "country_policy",
+      "expected": {
+        "kind": "answer",
+        "required_patterns": [
+          "\\b18\\b",
+          "\\b(?:nei|ikke)\\b"
+        ],
+        "forbidden_patterns": [
+          "\\b(?:16|17)\\s*år\\s+(?:eller\\s+eldre|er\\s+nok)"
+        ],
+        "required_sections": ["NO:17.01"],
+        "must_cite": true
+      },
+      "completeness_conditions": [
+        "Bare voksne personer som er 18 år eller eldre kan inngå avtale med FLP for å bli FBO."
+      ],
+      "forbidden_claims": [
+        "Registrering som FBO før fylte 18 år med foreldresamtykke: klausulen nevner ingen slik ordning.",
+        "Et løfte om en annen kundetype for 17-åringer, som denne klausulen ikke omtaler."
+      ],
+      "expected_citation_behaviour": "Vis til punkt 17.01 i norsk Company Policy.",
+      "source": {
+        "document": "Company_Policy_NOrway - norsk.pdf",
+        "section_id": "NO:17.01",
+        "country": "NO",
+        "language": "no",
+        "page": 42,
+        "end_page": 43,
+        "extraction_file": "outputs/chunk-comparison-full/current/NO/no/Company_Policy_NOrway - norsk.sections.jsonl",
+        "extraction_sha256": "d83d70cbdfa296368eed481ec51271697d46233af93ae8b19d65bd1886d9f49a",
+        "passage_role": "supports_required_facts",
+        "quote": "Bare voksne personer som er 18 år eller eldre, kan inngå avtale med FLP for å bli FBO."
+      },
+      "source_evidence": "Norway company policy 17.01(a): 'Relasjonen mellom FBO og FLP er av avtalemessig karakter. Bare voksne personer som er 18 år eller eldre, kan inngå avtale med FLP for å bli FBO.'",
+      "provenance": "Company_Policy_NOrway - norsk.pdf, section 17.01(a), PDF pages 42-43 per extraction metadata. The extraction has no separate 17.01-a row, so the parent 17.01 row is cited. Quoted on 2026-09-10 from the local extraction named in source, before any model execution. Local extraction match only; not confirmed against the approved PDF. Section identifier not verified against the active index (review queue V1).",
+      "not_copied_from": "No case asks a minimum age to become an FBO in any market, and no case uses a Norwegian question. It pairs with case 16 as the second Norwegian new-prospect reader.",
+      "evaluation_set": "held_out",
+      "coverage": ["local_policy", "new_country", "non_english", "numeric_role_condition"],
+      "independent_review": {"source_selector": "KRISH (content owner and source reviewer)", "question_author": "Claude Code", "approved_at": "2026-09-10"}
+    }
+  ]
+}

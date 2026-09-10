@@ -89,6 +89,37 @@ def test_answer_case_asserting_nothing_is_refused(tmp_path):
         benchmark.load_fixture(_fixture(tmp_path, [case]))
 
 
+def test_regex_expectations_are_validated_and_scored(tmp_path):
+    case = copy.deepcopy(VALID_CASE)
+    case["expected"] = {
+        "kind": "answer",
+        "required_patterns": [r"\b2\s+Case Credits\b"],
+        "forbidden_patterns": [r"\b3\s+Case Credits\b"],
+    }
+    benchmark.load_fixture(_fixture(tmp_path, [case]))
+    assert benchmark.score_run(case, _run())["passed"]
+    assert not benchmark.score_run(case, _run(answer="The minimum is 3 Case Credits."))["passed"]
+
+
+def test_invalid_regex_is_refused_before_execution(tmp_path):
+    case = copy.deepcopy(VALID_CASE)
+    case["expected"]["required_patterns"] = ["["]
+    with pytest.raises(ValueError, match="invalid required_patterns regex"):
+        benchmark.load_fixture(_fixture(tmp_path, [case]))
+
+
+def test_structured_prior_turn_is_scored():
+    reply = type("Reply", (), {"answer": "The minimum is 3 Case Credits.", "metadata": {}})()
+    case = copy.deepcopy(VALID_CASE)
+    case["conversation"] = [{
+        "question": "What is the minimum?",
+        "expected": {"kind": "answer", "required_patterns": [r"\b2\s+Case Credits\b"]},
+    }]
+    failures = benchmark._prior_turn_failures(case, (reply,))
+    assert len(failures) == 1
+    assert failures[0].startswith("turn 1: missing required pattern")
+
+
 def test_duplicate_case_ids_are_refused(tmp_path):
     with pytest.raises(ValueError, match="unique"):
         benchmark.load_fixture(_fixture(tmp_path, [VALID_CASE, copy.deepcopy(VALID_CASE)]))

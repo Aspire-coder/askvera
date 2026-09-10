@@ -88,8 +88,14 @@ def load_fixture(path: Path) -> tuple[list[dict[str, Any]], str]:
             conversation = case["conversation"]
             if not isinstance(conversation, list) or not conversation:
                 raise ValueError(f"'conversation' must be a non-empty list for {identifier}.")
-            if any(not isinstance(turn, str) or not turn.strip() for turn in conversation):
-                raise ValueError(f"'conversation' turns must be non-empty strings for {identifier}.")
+            if any(
+                not (
+                    isinstance(turn, str) and turn.strip()
+                    or isinstance(turn, dict) and str(turn.get("question") or "").strip()
+                )
+                for turn in conversation
+            ):
+                raise ValueError(f"'conversation' turns need non-empty questions for {identifier}.")
             # Each prior turn is a full generation call, so a conversation case
             # costs len(conversation) + 1 of them. The cap keeps one careless
             # fixture edit from multiplying every deploy's gate cost.
@@ -236,6 +242,7 @@ class _PipelineRun(NamedTuple):
     response: Any
     removed_numeric_claims: list[str]
     duration_ms: float
+    prior_responses: tuple[Any, ...] = ()
 
 
 def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
@@ -283,8 +290,10 @@ def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
         # than a hand-written transcript that could drift from what the system
         # actually says. Each one costs a generation call, which is why
         # conversation cases are opt-in and few.
+        prior_responses = []
         for index, prior_turn in enumerate(case.get("conversation") or []):
-            ask(str(prior_turn), f"turn{index}")
+            message = prior_turn if isinstance(prior_turn, str) else prior_turn["question"]
+            prior_responses.append(ask(str(message), f"turn{index}"))
 
         # Assertions apply to the final question only. The recorder's last
         # retrieval belongs to it for the same reason.
@@ -295,7 +304,8 @@ def run_pipeline_capture(case: dict[str, Any], sequence: int) -> _PipelineRun:
         # far more robust than guessing how a model will format a time.
         removed = list((response.metadata or {}).get("removed_numeric_claims") or [])
         return _PipelineRun(
-            recorder.last, response, removed, round((time.perf_counter() - started) * 1000, 1)
+            recorder.last, response, removed, round((time.perf_counter() - started) * 1000, 1),
+            tuple(prior_responses),
         )
     finally:
         for name, original in originals.items():
