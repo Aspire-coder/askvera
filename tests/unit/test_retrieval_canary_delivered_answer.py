@@ -333,6 +333,31 @@ def test_conversation_turns_must_be_non_empty_strings():
         _validate(_case(conversation=["a"] * (canary.MAX_CONVERSATION_TURNS + 1)))
 
 
+def test_allowed_numeric_removals_must_be_an_unambiguous_non_empty_list():
+    import json as _json
+    import tempfile
+    from pathlib import Path as _Path
+
+    def _validate(case):
+        payload = {"schema_version": 1, "cases": [case]}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+            _json.dump(payload, handle)
+            path = _Path(handle.name)
+        return canary.load_fixture(path)
+
+    with pytest.raises(ValueError, match="allowed_removed_numbers"):
+        _validate(_case(answer_allowed_removed_numbers=[]))
+    with pytest.raises(ValueError, match="allowed_removed_numbers"):
+        _validate(_case(answer_allowed_removed_numbers=[50]))
+    with pytest.raises(ValueError, match="cannot both forbid and allow"):
+        _validate(
+            _case(
+                answer_allowed_removed_numbers=["50"],
+                answer_must_not_remove_numbers=True,
+            )
+        )
+
+
 def test_a_conversation_case_replays_even_when_it_asserts_only_retrieval(monkeypatch):
     """Prior turns are replayed in the pipeline and nowhere else.
 
@@ -405,6 +430,38 @@ def test_an_answer_repair_left_alone_passes(stub_pipeline, monkeypatch):
 
     assert outcome["passed"], outcome["failure_reasons"]
     assert outcome["removed_numeric_claims"] == []
+
+
+def test_a_case_allows_only_its_explicit_known_unsafe_number(stub_pipeline, monkeypatch):
+    monkeypatch.setattr(
+        canary,
+        "run_pipeline_once",
+        _pipeline(stub_pipeline, "The minimum order is 0.200 CC.", 1, removed=["50"]),
+    )
+
+    outcome = canary.run_case_once(
+        _case(answer_allowed_removed_numbers=["50"]), 1
+    )
+
+    assert outcome["passed"], outcome["failure_reasons"]
+
+
+def test_a_case_still_blocks_an_unexpected_numeric_removal(stub_pipeline, monkeypatch):
+    monkeypatch.setattr(
+        canary,
+        "run_pipeline_once",
+        _pipeline(stub_pipeline, "The minimum order is 0.200 CC.", 1, removed=["50", "200"]),
+    )
+
+    outcome = canary.run_case_once(
+        _case(answer_allowed_removed_numbers=["50"]), 1
+    )
+
+    assert not outcome["passed"]
+    assert any(
+        "unexpected numbers ['200']" in reason
+        for reason in outcome["failure_reasons"]
+    )
 
 
 def test_the_repair_assertion_reaches_the_pipeline_on_its_own(stub_pipeline, monkeypatch):
@@ -482,4 +539,6 @@ def test_the_algeria_case_now_blocks_and_is_still_sampled():
 
     assert case["blocking"] is True
     assert case["repeat"] >= 3
+    assert case["answer_allowed_removed_numbers"] == ["50"]
+    assert "answer_must_not_remove_numbers" not in case
     assert "non_blocking_reason" not in case
