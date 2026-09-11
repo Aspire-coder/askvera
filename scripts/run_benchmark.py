@@ -649,6 +649,29 @@ def summarise(results: list[dict[str, Any]], rates: dict[str, float] | None) -> 
     return summary
 
 
+def _write_artifact(
+    artifact: Path | None,
+    summary: dict[str, Any],
+    results: list[dict[str, Any]],
+) -> None:
+    """Atomically preserve a benchmark's completed cases and current state.
+
+    A paid comparison can fail after a response is generated.  Leaving its
+    completed cases only in process memory makes the spend and evidence vanish.
+    Checkpoints use a sibling temporary file so a stopped process cannot replace
+    the last complete record with a partial JSON document.
+    """
+    if artifact is None:
+        return
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    temporary = artifact.with_suffix(artifact.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps({"summary": summary, "cases": results}, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(artifact)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
@@ -734,12 +757,36 @@ def main() -> int:
     logging.disable(logging.INFO)
 
     results = []
+    base_summary = {
+        "status": "in_progress",
+        "planned_cases": len(cases),
+        "completed_cases": 0,
+        "fixture_sha256": fixture_hash,
+        "transport_override_cases": len(transport_overrides),
+        "transport_overrides_sha256": overrides_hash,
+        "repeat": max(1, args.repeat),
+    }
     for index, case in enumerate(cases, start=1):
         request_case, request_country = execution_case_for_request(case, transport_overrides)
         runs = []
-        for attempt in range(max(1, args.repeat)):
-            raw = run_case_once(canary, request_case, index * 1000 + attempt)
-            runs.append(score_run(case, raw))
+        try:
+            for attempt in range(max(1, args.repeat)):
+                raw = run_case_once(canary, request_case, index * 1000 + attempt)
+                runs.append(score_run(case, raw))
+        except Exception as exc:  # preserve paid evidence before returning failure
+            stopped_summary = {
+                **base_summary,
+                "status": "stopped",
+                "completed_cases": len(results),
+                "stopped_case_id": str(case["id"]),
+                "error_type": type(exc).__name__,
+            }
+            _write_artifact(args.artifact, stopped_summary, results)
+            print(
+                f"benchmark stopped before {case['id']}: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return 1
         passed_runs = sum(1 for run in runs if run["passed"])
         results.append({
             "id": case["id"],
@@ -759,6 +806,11 @@ def main() -> int:
             f"{passed_runs}/{len(runs)}  {case['id']}",
             file=sys.stderr,
         )
+        _write_artifact(
+            args.artifact,
+            {**base_summary, "completed_cases": len(results)},
+            results,
+        )
 
     summary = summarise(results, rates)
     summary.update({
@@ -772,11 +824,7 @@ def main() -> int:
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
     if args.artifact:
-        args.artifact.parent.mkdir(parents=True, exist_ok=True)
-        args.artifact.write_text(
-            json.dumps({"summary": summary, "cases": results}, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        _write_artifact(args.artifact, {**summary, "status": "completed"}, results)
         print(f"\nfull per-run record written to {args.artifact}", file=sys.stderr)
 
     # Reporting a measurement is the job; deciding whether it is good enough is

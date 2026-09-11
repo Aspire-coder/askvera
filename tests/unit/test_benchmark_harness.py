@@ -74,6 +74,19 @@ def test_fixture_loads_and_reports_a_content_hash(tmp_path):
     assert len(digest) == 64
 
 
+def test_artifact_checkpoint_is_atomic_and_keeps_completed_cases(tmp_path):
+    artifact = tmp_path / "candidate-results.json"
+    summary = {"status": "in_progress", "completed_cases": 1}
+    cases = [{"id": "case-1", "runs": []}]
+
+    benchmark._write_artifact(artifact, summary, cases)
+
+    assert json.loads(artifact.read_text(encoding="utf-8")) == {
+        "summary": summary, "cases": cases,
+    }
+    assert not artifact.with_suffix(".json.tmp").exists()
+
+
 def _transport_override(tmp_path: Path, payload: dict) -> Path:
     path = tmp_path / "transport-overrides.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
