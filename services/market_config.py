@@ -361,6 +361,12 @@ def find_probable_market_typo(message: str) -> str | None:
                 continue  # an exact match belongs to find_market_mentions, not here
             if token[:1] != normalized_name[:1]:
                 continue
+            # Demonyms such as "Tunisian" are one edit from a country name,
+            # but must not trigger a country-typo confirmation.
+            if (len(token) == len(normalized_name) + 1 and token.startswith(normalized_name)) or (
+                len(token) == len(normalized_name) - 1 and normalized_name.startswith(token)
+            ):
+                continue
             if edit_distance_at_most_one(token, normalized_name):
                 return market_name
     return None

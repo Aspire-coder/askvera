@@ -156,6 +156,81 @@ def _subject_matches_window(subject_tokens: set[str], window_tokens: set[str]) -
     )
 
 
+_ROLE_ABBREVIATIONS = {
+    "fbo": frozenset({"forever", "business", "owner", "owners"}),
+}
+_BULLET_BOUNDARY_RE = re.compile(r"•|\n\s*\n")
+_CONVERSION_TAIL_RE = re.compile(r"\s*[a-z%€£$]{0,3}\s*\(\s*[$€£]?\s*\d[\d.,]*\s*\)")
+_ROLE_DIGIT_RE = re.compile(r"\d")
+_FBO_ROLE_RE = re.compile(r"\bfbo(?:s|['’]s)?\b")
+_OTHER_ROLE_RE = re.compile(
+    r"\b(?:preferred|retail|novus)\s+customers?\b|\bcustomers?\b(?!\s+service)"
+    r"|\b(?:assistant\s+)?(?:supervisors?|managers?)\b|\bmembers?\b|\bdistributors?\b"
+)
+_ROLE_CURRENCY_CODES = frozenset("""
+aed ars aud bdt bob brl cad chf clp cny cop crc czk dkk dop dzd egp eur gbp
+ghs gtq hkd huf idr ils inr jpy kes kgs krw kzt lkr mad mxn myr ngn nok nzd
+pab pen php pkr pln pyg ron rsd rub sar sek sgd thb tnd try twd tzs uah ugx
+usd uyu vnd zar
+""".split())
+_ROLE_UNIT_ALIASES = {"$": "usd", "us$": "usd", "€": "eur", "£": "gbp", "%": "pct", "cc": "cc"}
+_ROLE_UNIT_BEFORE_RE = re.compile(r"(us\$|\$|€|£)\s{0,2}$", re.IGNORECASE)
+_ROLE_UNIT_AFTER_RE = re.compile(r"\s{0,2}(%|€|£|\$|cc(?![a-z])|[a-z]{3}(?![a-z]))", re.IGNORECASE)
+
+
+def _role_mentions(text: str) -> list[tuple[int, str]]:
+    mentions = [(match.start(), "fbo") for match in _FBO_ROLE_RE.finditer(text)]
+    mentions += [(match.start(), "other") for match in _OTHER_ROLE_RE.finditer(text)]
+    return sorted(mentions)
+
+
+def _occurrence_role(source_text: str, start: int, end: int) -> str | None:
+    """Return the role attributed to this occurrence within its source bullet."""
+    left = 0
+    for boundary in _BULLET_BOUNDARY_RE.finditer(source_text, 0, start):
+        left = boundary.end()
+    right_boundary = _BULLET_BOUNDARY_RE.search(source_text, end)
+    right = right_boundary.start() if right_boundary else len(source_text)
+    tail = _CONVERSION_TAIL_RE.match(source_text, end)
+    group_end = tail.end() if tail and tail.end() <= right else end
+    next_figure = _ROLE_DIGIT_RE.search(source_text, group_end, right)
+    after = _role_mentions(source_text[group_end:next_figure.start() if next_figure else right])
+    if after:
+        return after[0][1]
+    before = _role_mentions(source_text[left:start])
+    return before[-1][1] if before else None
+
+
+def _adjacent_unit(text: str, start: int, end: int) -> str:
+    """Return the unit immediately beside a figure, when one is stated."""
+    before = _ROLE_UNIT_BEFORE_RE.search(text[max(0, start - 4):start])
+    if before:
+        token = before.group(1).lower()
+        return _ROLE_UNIT_ALIASES.get(token, token)
+    after = _ROLE_UNIT_AFTER_RE.match(text, end)
+    if after:
+        token = after.group(1).lower()
+        if token in _ROLE_UNIT_ALIASES:
+            return _ROLE_UNIT_ALIASES[token]
+        if token in _ROLE_CURRENCY_CODES:
+            return token
+    return ""
+
+
+def _with_role_equivalents(
+    window_tokens: set[str], attributed_role: str | None = None,
+    claim_unit: str = "", source_unit: str = "",
+) -> set[str]:
+    """Add a full role spelling only for the source figure assigned to it."""
+    tokens = set(window_tokens)
+    units_agree = not claim_unit or not source_unit or claim_unit == source_unit
+    for abbreviation, expansion in _ROLE_ABBREVIATIONS.items():
+        forms = {abbreviation, f"{abbreviation}s"}
+        if attributed_role == abbreviation and tokens & forms and units_agree:
+            tokens |= forms | expansion
+    return tokens
+
+
 def _sentence_for_claim(answer: str, start: int, end: int) -> str:
     """Return the sentence-like local answer window around a numeric claim."""
     left = max(answer.rfind(".", 0, start), answer.rfind("\n", 0, start), answer.rfind(":", 0, start))
@@ -261,9 +336,9 @@ def _subject_token_sets(
 _CLAUSE_DELIMITER_RE = re.compile(r"(?<!\d)[.;](?!\d)")
 
 
-def _source_windows(source_text: str, number: str, radius: int = 260) -> list[str]:
-    """Return clause-bounded source windows around the same number."""
-    windows: list[str] = []
+def _source_occurrences(source_text: str, number: str, radius: int = 260) -> list[tuple[str, int, int]]:
+    """Return each matching clause window and the source occurrence position."""
+    windows: list[tuple[str, int, int]] = []
     pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
     # A range is a pair of figures, and the source rarely writes it the way an
     # answer does. Algeria's record says "between 48h to 96h"; the model wrote
@@ -294,8 +369,13 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
         right_boundary = right_delimiter.start() if right_delimiter else len(source_text)
         window_start = max(left_boundary + 1 if left_boundary != -1 else 0, index - radius)
         window_end = min(right_boundary, match.end() + radius)
-        windows.append(source_text[window_start:window_end])
+        windows.append((source_text[window_start:window_end], match.start(), match.end()))
     return windows
+
+
+def _source_windows(source_text: str, number: str, radius: int = 260) -> list[str]:
+    """Return clause-bounded source windows around the same number."""
+    return [window for window, _, _ in _source_occurrences(source_text, number, radius)]
 
 
 def _claim_is_supported(
@@ -303,9 +383,16 @@ def _claim_is_supported(
 ) -> bool:
     """Return true only when the same number is linked to the same named topic."""
     subject_token_sets = _subject_token_sets(claim, document_markets)
+    claim_at = claim.sentence.find(claim.text)
+    claim_unit = _adjacent_unit(claim.sentence, claim_at, claim_at + len(claim.text)) if claim_at != -1 else ""
     for number in _number_variants(claim.number):
-        for window in _source_windows(source_text, number):
-            window_tokens = _word_tokens(window)
+        for window, occurrence_start, occurrence_end in _source_occurrences(source_text, number):
+            window_tokens = _with_role_equivalents(
+                _word_tokens(window),
+                _occurrence_role(source_text, occurrence_start, occurrence_end),
+                claim_unit,
+                _adjacent_unit(source_text, occurrence_start, occurrence_end),
+            )
             if subject_token_sets and any(
                 _subject_matches_window(subject_tokens, window_tokens) for subject_tokens in subject_token_sets
             ):
