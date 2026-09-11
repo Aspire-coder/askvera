@@ -162,10 +162,14 @@ _ROLE_ABBREVIATIONS = {
 _BULLET_BOUNDARY_RE = re.compile(r"•|\n\s*\n")
 _CONVERSION_TAIL_RE = re.compile(r"\s*[a-z%€£$]{0,3}\s*\(\s*[$€£]?\s*\d[\d.,]*\s*\)")
 _ROLE_DIGIT_RE = re.compile(r"\d")
-_FBO_ROLE_RE = re.compile(r"\bfbo(?:s|['’]s)?\b")
+_FBO_ROLE_RE = re.compile(
+    r"\bfbo(?:s|['’]s)?\b|\bforever\s+business\s+owners?\b",
+    re.IGNORECASE,
+)
 _OTHER_ROLE_RE = re.compile(
     r"\b(?:preferred|retail|novus)\s+customers?\b|\bcustomers?\b(?!\s+service)"
-    r"|\b(?:assistant\s+)?(?:supervisors?|managers?)\b|\bmembers?\b|\bdistributors?\b"
+    r"|\b(?:assistant\s+)?(?:supervisors?|managers?)\b|\bmembers?\b|\bdistributors?\b",
+    re.IGNORECASE,
 )
 _ROLE_CURRENCY_CODES = frozenset("""
 aed ars aud bdt bob brl cad chf clp cny cop crc czk dkk dop dzd egp eur gbp
@@ -195,10 +199,16 @@ def _occurrence_role(source_text: str, start: int, end: int) -> str | None:
     group_end = tail.end() if tail and tail.end() <= right else end
     next_figure = _ROLE_DIGIT_RE.search(source_text, group_end, right)
     after = _role_mentions(source_text[group_end:next_figure.start() if next_figure else right])
-    if after:
-        return after[0][1]
     before = _role_mentions(source_text[left:start])
-    return before[-1][1] if before else None
+    # Directory records usually bind the role as a label immediately before the
+    # amount ("FBO: €81").  A later label in the same extracted bullet can
+    # describe a different audience, such as "Preferred Customer: no minimum".
+    # Letting that later label override the one that precedes the figure makes a
+    # correctly stated FBO amount look unsupported.  A following role is still
+    # useful for prose that states the role after its amount.
+    if before:
+        return before[-1][1]
+    return after[0][1] if after else None
 
 
 def _adjacent_unit(text: str, start: int, end: int) -> str:
@@ -215,6 +225,15 @@ def _adjacent_unit(text: str, start: int, end: int) -> str:
         if token in _ROLE_CURRENCY_CODES:
             return token
     return ""
+
+
+def _explicit_role_label_before_amount(text: str, amount_start: int) -> str | None:
+    """Return a role only when the source labels this exact amount with it."""
+    prefix = text[max(0, amount_start - 90):amount_start]
+    for role, pattern in (("fbo", _FBO_ROLE_RE), ("other", _OTHER_ROLE_RE)):
+        if re.search(rf"(?:{pattern.pattern})\s*:\s*(?:[a-z]{1,3}\$|[^\w\s]+)?\s*$", prefix, pattern.flags):
+            return role
+    return None
 
 
 def _with_role_equivalents(
@@ -385,11 +404,24 @@ def _claim_is_supported(
     subject_token_sets = _subject_token_sets(claim, document_markets)
     claim_at = claim.sentence.find(claim.text)
     claim_unit = _adjacent_unit(claim.sentence, claim_at, claim_at + len(claim.text)) if claim_at != -1 else ""
+    claim_roles = _role_mentions(claim.sentence)
+    claim_role = (
+        min(claim_roles, key=lambda item: abs(item[0] - claim_at))[1]
+        if claim_roles and claim_at != -1 else None
+    )
     for number in _number_variants(claim.number):
         for window, occurrence_start, occurrence_end in _source_occurrences(source_text, number):
+            source_role = _occurrence_role(source_text, occurrence_start, occurrence_end)
+            # A source window can contain nearby rules for more than one role.
+            # Reject a cross-role match only when the source explicitly labels
+            # this particular amount ("FBO: €81").  Wider prose can truthfully
+            # describe a shared first-order rule before or after naming a role.
+            explicit_source_role = _explicit_role_label_before_amount(source_text, occurrence_start)
+            if claim_role and explicit_source_role and claim_role != explicit_source_role:
+                continue
             window_tokens = _with_role_equivalents(
                 _word_tokens(window),
-                _occurrence_role(source_text, occurrence_start, occurrence_end),
+                source_role,
                 claim_unit,
                 _adjacent_unit(source_text, occurrence_start, occurrence_end),
             )
