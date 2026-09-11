@@ -824,7 +824,16 @@ def main() -> int:
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
     if args.artifact:
-        _write_artifact(args.artifact, {**summary, "status": "completed"}, results)
+        _write_artifact(
+            args.artifact,
+            {
+                **summary,
+                "status": "completed",
+                "planned_cases": len(cases),
+                "completed_cases": len(results),
+            },
+            results,
+        )
         print(f"\nfull per-run record written to {args.artifact}", file=sys.stderr)
 
     # Reporting a measurement is the job; deciding whether it is good enough is
