@@ -188,6 +188,38 @@ def _role_mentions(text: str) -> list[tuple[int, str]]:
     return sorted(mentions)
 
 
+_ROLE_SENTENCE_END_RE = re.compile(r"\.(?=\s|$)|;")
+
+
+def _trailing_prose_role(source_text: str, end: int) -> str | None:
+    """The role that prose right after this amount assigns it to, within its clause.
+
+    Algeria writes "Minimum order size FBO: 0,200CC as a first order for Preferred
+    Customers": the heading names FBO, but the clause gives 0,200CC to Preferred
+    Customers. A role that is itself a label ("Preferred Customer: €50") starts
+    the next rule, and a new sentence or a clause after a semicolon ("; Preferred
+    Customers have no minimum") is a separate rule, so neither is read back onto
+    this amount.
+    """
+    right_boundary = _BULLET_BOUNDARY_RE.search(source_text, end)
+    right = right_boundary.start() if right_boundary else len(source_text)
+    tail = _CONVERSION_TAIL_RE.match(source_text, end)
+    group_end = tail.end() if tail and tail.end() <= right else end
+    for stop in (
+        _ROLE_DIGIT_RE.search(source_text, group_end, right),
+        _ROLE_SENTENCE_END_RE.search(source_text, group_end, right),
+    ):
+        if stop:
+            right = min(right, stop.start())
+    segment = source_text[group_end:right]
+    for position, role in _role_mentions(segment):
+        mention = (_FBO_ROLE_RE if role == "fbo" else _OTHER_ROLE_RE).match(segment, position)
+        if mention and re.match(r"\s*:", segment[mention.end():]):
+            continue
+        return role
+    return None
+
+
 def _occurrence_role(source_text: str, start: int, end: int) -> str | None:
     """Return the role attributed to this occurrence within its source bullet."""
     left = 0
@@ -206,6 +238,11 @@ def _occurrence_role(source_text: str, start: int, end: int) -> str | None:
     # Letting that later label override the one that precedes the figure makes a
     # correctly stated FBO amount look unsupported.  A following role is still
     # useful for prose that states the role after its amount.
+    # Prose that names a role right after the amount, in the same sentence, is the
+    # most specific attribution and outranks a heading label before it.
+    trailing = _trailing_prose_role(source_text, end)
+    if trailing:
+        return trailing
     if before:
         return before[-1][1]
     return after[0][1] if after else None
@@ -231,7 +268,7 @@ def _explicit_role_label_before_amount(text: str, amount_start: int) -> str | No
     """Return a role only when the source labels this exact amount with it."""
     prefix = text[max(0, amount_start - 90):amount_start]
     for role, pattern in (("fbo", _FBO_ROLE_RE), ("other", _OTHER_ROLE_RE)):
-        if re.search(rf"(?:{pattern.pattern})\s*:\s*(?:[a-z]{1,3}\$|[^\w\s]+)?\s*$", prefix, pattern.flags):
+        if re.search(rf"(?:{pattern.pattern})\s*:\s*(?:[a-z]{{1,3}}\$|[^\w\s]+)?\s*$", prefix, pattern.flags):
             return role
     return None
 
@@ -417,6 +454,10 @@ def _claim_is_supported(
             # this particular amount ("FBO: €81").  Wider prose can truthfully
             # describe a shared first-order rule before or after naming a role.
             explicit_source_role = _explicit_role_label_before_amount(source_text, occurrence_start)
+            # A heading such as "Minimum order size FBO:" is not this amount's label when
+            # the clause after it gives the amount to another role.
+            if explicit_source_role and explicit_source_role != source_role:
+                explicit_source_role = None
             if claim_role and explicit_source_role and claim_role != explicit_source_role:
                 continue
             window_tokens = _with_role_equivalents(
