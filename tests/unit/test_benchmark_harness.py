@@ -74,6 +74,70 @@ def test_fixture_loads_and_reports_a_content_hash(tmp_path):
     assert len(digest) == 64
 
 
+def test_artifact_checkpoint_is_atomic_and_keeps_completed_cases(tmp_path):
+    artifact = tmp_path / "candidate-results.json"
+    summary = {"status": "in_progress", "completed_cases": 1}
+    cases = [{"id": "case-1", "runs": []}]
+
+    benchmark._write_artifact(artifact, summary, cases)
+
+    assert json.loads(artifact.read_text(encoding="utf-8")) == {
+        "summary": summary, "cases": cases,
+    }
+    assert not artifact.with_suffix(".json.tmp").exists()
+
+
+def _replace_canary_import(monkeypatch) -> None:
+    """Keep benchmark.main local by replacing its dynamically imported runner."""
+    class Loader:
+        def exec_module(self, _module):
+            return None
+
+    class Spec:
+        loader = Loader()
+
+    monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *_: Spec())
+    monkeypatch.setattr(importlib.util, "module_from_spec", lambda _: object())
+
+
+def test_main_checkpoints_completed_cases_when_a_later_case_raises(tmp_path, monkeypatch):
+    fixture = _fixture(tmp_path, [VALID_CASE, {**VALID_CASE, "id": "case-2"}])
+    artifact = tmp_path / "stopped.json"
+    _replace_canary_import(monkeypatch)
+    calls = iter([_run(), RuntimeError("network stopped")])
+    monkeypatch.setattr(benchmark, "run_case_once", lambda *_: next(calls))
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_benchmark.py", "--fixture", str(fixture), "--artifact", str(artifact), "--repeat", "1"],
+    )
+
+    assert benchmark.main() == 1
+    saved = json.loads(artifact.read_text(encoding="utf-8"))
+
+    assert saved["summary"]["status"] == "stopped"
+    assert saved["summary"]["stopped_case_id"] == "case-2"
+    assert saved["summary"]["completed_cases"] == 1
+    assert [case["id"] for case in saved["cases"]] == ["case-1"]
+
+
+def test_main_marks_artifact_completed_only_after_every_case_finishes(tmp_path, monkeypatch):
+    fixture = _fixture(tmp_path, [VALID_CASE, {**VALID_CASE, "id": "case-2"}])
+    artifact = tmp_path / "completed.json"
+    _replace_canary_import(monkeypatch)
+    monkeypatch.setattr(benchmark, "run_case_once", lambda *_: _run())
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_benchmark.py", "--fixture", str(fixture), "--artifact", str(artifact), "--repeat", "1"],
+    )
+
+    assert benchmark.main() == 0
+    saved = json.loads(artifact.read_text(encoding="utf-8"))
+
+    assert saved["summary"]["status"] == "completed"
+    assert saved["summary"]["completed_cases"] == 2
+    assert [case["id"] for case in saved["cases"]] == ["case-1", "case-2"]
+
+
 def _transport_override(tmp_path: Path, payload: dict) -> Path:
     path = tmp_path / "transport-overrides.json"
     path.write_text(json.dumps(payload), encoding="utf-8")

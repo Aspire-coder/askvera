@@ -611,6 +611,123 @@ def _parse_selector_decision(
     return _parse_selector_ranks(json.dumps(payload)), relevant, confidence, directly_answers
 
 
+# The selector reads only the first 1,200 characters of a section.  When it
+# keeps a country-policy section, bind one uniquely best child clause that was
+# already inside that view, without changing the selector's first choice.
+_SELECTOR_VIEW_CHARS = 1200
+_BOUND_CHILD_DOCUMENT_KEYS = ("source_file", "country", "language", "access_scope")
+
+
+def _same_document(parent: dict[str, Any], child: dict[str, Any]) -> bool:
+    """Return whether both rows belong to the same source, country and language."""
+    if not str(parent.get("source_file") or ""):
+        return False
+    return all(str(parent.get(key) or "") == str(child.get(key) or "") for key in _BOUND_CHILD_DOCUMENT_KEYS)
+
+
+def _clause_in_selector_view(parent: dict[str, Any], child: dict[str, Any]) -> bool:
+    """Return whether the child clause is already in the selector's parent view."""
+    content = str(child.get("content") or "")
+    first_line, separator, body = content.partition("\n")
+    prefix = f"section {str(parent.get('section_id') or '').casefold()}:"
+    if separator and first_line.strip().casefold().startswith(prefix):
+        content = body
+    clause = " ".join(content.split())
+    view = " ".join(str(parent.get("content") or "")[:_SELECTOR_VIEW_CHARS].split())
+    return bool(clause) and clause in view
+
+
+def _strictly_best(pairs: list[tuple[dict[str, Any], float]]) -> tuple[dict[str, Any], float] | None:
+    """Return one highest-scoring pair, or ``None`` when the score is tied."""
+    if not pairs:
+        return None
+    ordered = sorted(pairs, key=lambda pair: pair[1], reverse=True)
+    if len(ordered) > 1 and ordered[0][1] == ordered[1][1]:
+        return None
+    return ordered[0]
+
+
+def _bindable_parent(row: dict[str, Any]) -> bool:
+    return (
+        row.get("chunk_type") == "section"
+        and row.get("document_type") == "policy"
+        and row.get("access_scope") == "country"
+    )
+
+
+def _bindable_child(row: dict[str, Any]) -> bool:
+    return (
+        row.get("chunk_type") == "list_item"
+        and row.get("document_type") == "policy"
+        and row.get("access_scope") == "country"
+    )
+
+
+def _bound_child(
+    parent: dict[str, Any], rows: list[tuple[dict[str, Any], float]]
+) -> tuple[dict[str, Any], float] | None:
+    """Return the uniquely best eligible child from the parent section."""
+    parent_id = str(parent.get("section_id") or "")
+    if not parent_id or not _bindable_parent(parent):
+        return None
+    children = [
+        pair
+        for pair in rows
+        if _bindable_child(pair[0])
+        and str(pair[0].get("parent_section_id") or "") == parent_id
+        and _same_document(parent, pair[0])
+        and _clause_in_selector_view(parent, pair[0])
+    ]
+    return _strictly_best(children)
+
+
+def _displaceable_position(
+    selected: list[tuple[dict[str, Any], float]], protected_ids: set[str]
+) -> int | None:
+    """Return a non-top selected position that a bound child may replace."""
+    for position in range(len(selected) - 1, 0, -1):
+        if str(selected[position][0].get("id") or "") not in protected_ids:
+            return position
+    return None
+
+
+def _bind_selected_parent_children(rows: list[tuple[dict[str, Any], float]]) -> list[tuple[dict[str, Any], float]]:
+    """Bind verified country-policy children without reordering selector choices."""
+    if not settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED or not rows:
+        return rows
+    selected_count = 0
+    for row, _score in rows:
+        if not row.get("evidence_selector_selected"):
+            break
+        selected_count += 1
+    if not selected_count:
+        return rows
+
+    selected = list(rows[:selected_count])
+    remaining = list(rows[selected_count:])
+    displaced: list[tuple[dict[str, Any], float]] = []
+    protected_ids: set[str] = set()
+    for parent, _score in rows[:selected_count]:
+        child_pair = _bound_child(parent, rows)
+        if child_pair is None:
+            continue
+        child_id = str(child_pair[0].get("id") or "")
+        if any(str(row.get("id") or "") == child_id for row, _ in selected):
+            continue
+        pair_ids = protected_ids | {str(parent.get("id") or ""), child_id}
+        if len(selected) >= settings.OPENSEARCH_RESULT_COUNT:
+            position = _displaceable_position(selected, pair_ids)
+            if position is None:
+                continue
+            displaced.insert(0, selected.pop(position))
+        protected_ids = pair_ids
+        parent_position = next(index for index, (row, _) in enumerate(selected) if row is parent)
+        child_pair[0]["parent_bound_child"] = True
+        selected.insert(parent_position + 1, child_pair)
+        remaining = [pair for pair in remaining if pair[0] is not child_pair[0]]
+    return [*selected, *displaced, *remaining]
+
+
 class OpenSearchSectionProvider:
     """Retrieve approved document sections from an OpenSearch section index."""
 
@@ -746,6 +863,7 @@ class OpenSearchSectionProvider:
         raw_rows = rows
         rows = self._select_evidence_rows(message, rows, correlation_id)
         selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
+        rows = _bind_selected_parent_children(rows)
 
         eligible_rows = self._finalize_eligible_rows(rows)
         documents = [
@@ -798,6 +916,11 @@ class OpenSearchSectionProvider:
                 "lexical_confidence": lexical_confidence,
                 "max_local_relevance": round(max_local_relevance, 6),
                 "strong_local_match": strong_local_match,
+                "parent_bound_children": [
+                    document.metadata.get("section_id", "")
+                    for document in documents
+                    if document.metadata.get("parent_bound_child")
+                ],
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
                     for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
@@ -1178,5 +1301,6 @@ class OpenSearchSectionProvider:
                 "section_id": row.get("section_id", ""),
                 "section_title": row.get("section_title", ""),
                 "parent_section_id": row.get("parent_section_id", ""),
+                **({"parent_bound_child": True} if row.get("parent_bound_child") else {}),
             },
         )

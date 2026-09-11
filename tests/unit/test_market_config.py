@@ -233,6 +233,27 @@ def test_find_probable_market_typo_ignores_unrelated_words() -> None:
     assert market_config.find_probable_market_typo("What is required for delivery to work?") is None
 
 
+@pytest.mark.parametrize("typo, market", [
+    ("Nigar", "Niger"), ("Tunisa", "Tunisia"), ("Tunsia", "Tunisia"),
+    ("Germny", "Germany"), ("Mexcio", "Mexico"),
+])
+def test_find_probable_market_typo_still_catches_real_misspellings(typo, market) -> None:
+    market_config.load_market_config.cache_clear()
+    assert market_config.find_probable_market_typo(f"What is the minimum order in {typo}?") == market
+
+
+@pytest.mark.parametrize("demonym", ["Tunisian", "German", "Kenyan", "Nigerian", "Austrian"])
+def test_find_probable_market_typo_ignores_a_demonym(demonym) -> None:
+    market_config.load_market_config.cache_clear()
+    assert market_config.find_probable_market_typo(f"Can a {demonym} FBO place an order?") is None
+
+
+@pytest.mark.parametrize("token", ["Tunisiaa", "Tunisi"])
+def test_find_probable_market_typo_accepts_demonym_shaped_tradeoff(token) -> None:
+    market_config.load_market_config.cache_clear()
+    assert market_config.find_probable_market_typo(f"What is the minimum order in {token}?") is None
+
+
 def test_chat_request_accepts_published_sweden_languages() -> None:
     """Sweden accepts only the two company-policy languages being published."""
     market_config.load_market_config.cache_clear()
