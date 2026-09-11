@@ -216,8 +216,43 @@ class ResponseBuilder:
             if self._support_score(answer, document.content or document.excerpt) >= self._minimum_support_score(answer)
             and (not answer_numbers or bool(answer_numbers & self._numbers(document.content or document.excerpt)))
         ]
-        selected = supported[: 1 if answer_numbers else 2]
+        selected = (
+            self._numeric_citations(answer_numbers, supported, documents) if answer_numbers else supported[:2]
+        )
         return [self._source_for_answer(document, answer) for document in selected]
+
+    def _numeric_citations(
+        self,
+        answer_numbers: set[str],
+        supported: list[RetrievedDocument],
+        documents: list[RetrievedDocument],
+    ) -> list[RetrievedDocument]:
+        """Cite the best-supported source, plus one more only for figures it lacks.
+
+        A numeric answer used to keep exactly one citation. Ranking counts every
+        digit group of a phone number as its own figure ("+352 2 786 1452" is
+        four), so an answer stating a policy deadline and a directory contact
+        cited the directory and dropped the policy passage carrying the
+        deadline. The second source is added only when it carries an answer
+        figure the first does not, and never when retrieval holds local policy
+        from more than one market, so another market's policy cannot be cited.
+        """
+        if not supported:
+            return []
+        selected = [supported[0]]
+        local_markets = {
+            str(document.country or "").upper()
+            for document in documents
+            if str(document.country or "").strip() and str(document.country).upper() != "GLOBAL"
+        }
+        if len(local_markets) > 1:
+            return selected
+        uncovered = answer_numbers - self._numbers(selected[0].content or selected[0].excerpt)
+        for document in supported[1:]:
+            if uncovered & self._numbers(document.content or document.excerpt):
+                selected.append(document)
+                break
+        return selected
 
     def _support_score(self, answer: str, source_text: str) -> float:
         """Score how well a source text supports the final answer text."""

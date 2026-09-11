@@ -122,6 +122,20 @@ def _number_variants(number: str) -> set[str]:
         # decimal places, which is as precise as this corpus gets.
         for width in range(len(fraction) + 1, 4):
             variants.add(f"{whole}{separator}{fraction.ljust(width, '0')}")
+
+    # A whole amount is the same amount when the record adds zero cents. Hong
+    # Kong states free delivery "for minimum purchase of HK$3,000.00" and a
+    # model writes "HK$3,000"; a decimal tail is rightly not a match boundary,
+    # so the threshold was removed and the answer kept an empty "Free Delivery:"
+    # heading. Exactly two zeros are added, after the padding above, so "24"
+    # reaches "24.00" but never "24.000", and a point group keeps a comma for
+    # its cents so "3.000" still cannot reach "3,000.00".
+    for variant in list(variants):
+        if re.fullmatch(r"\d+", variant):
+            variants |= {f"{variant}.00", f"{variant},00"}
+    if grouped and grouped.group("whole") != "0":
+        cents = "," if grouped.group("separator") == "." else "."
+        variants.add(f"{normalized}{cents}00")
     return variants
 
 
@@ -743,16 +757,30 @@ def _grounded_time_spans(answer: str, source_texts: list[str]) -> list[tuple[int
     return merged
 
 
+def _document_markets(document: object) -> frozenset[str]:
+    """The markets a retrieved document is about: named in its title, or its country.
+
+    A directory title names the market ("Forever Luxemburg"); a policy title
+    does not ("LU-FR-Benelux-Policy.pdf - Sec 7.03-c: ..."), and its market is
+    the document's country. With the title alone, a French answer saying "Selon
+    la politique de Forever Luxembourg, ... dans les 24 mois" had "Forever
+    Luxembourg" required beside 24 in the policy text, and the deadline sentence
+    was removed. A country that is not a market code never matches a mention.
+    """
+    markets = set(find_market_mentions(str(getattr(document, "title", "") or "")))
+    country = str(getattr(document, "country", "") or "").strip().upper()
+    if country:
+        markets.add(country)
+    return frozenset(markets)
+
+
 def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> list[MeasurableClaim]:
     """Return factual numeric claims that no retrieved source supports."""
     # The title travels with the content because it carries which market the
     # record is about, and a subject naming that market is established by the
     # document rather than by the sentence beside the number.
     sources = [
-        (
-            _normalize(str(getattr(document, "content", "") or "")),
-            frozenset(find_market_mentions(str(getattr(document, "title", "") or ""))),
-        )
+        (_normalize(str(getattr(document, "content", "") or "")), _document_markets(document))
         for document in source_documents
         if getattr(document, "content", "")
     ]
