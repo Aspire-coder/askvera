@@ -1243,6 +1243,10 @@ def _bind_selected_parent_children(rows: list[tuple[dict[str, Any], float]]) -> 
     displaced: list[tuple[dict[str, Any], float]] = []
     protected_ids: set[str] = set()
     for parent, _score in rows[:selected_count]:
+        # An earlier binding may have displaced this parent; it no longer
+        # holds a selected position, so it must not bring its child back.
+        if not any(row is parent for row, _ in selected):
+            continue
         child_pair = _bound_child(parent, rows)
         if child_pair is None:
             continue
@@ -1250,16 +1254,28 @@ def _bind_selected_parent_children(rows: list[tuple[dict[str, Any], float]]) -> 
         if any(str(row.get("id") or "") == child_id for row, _ in selected):
             continue
         pair_ids = protected_ids | {str(parent.get("id") or ""), child_id}
+        position: int | None = None
+        popped: tuple[dict[str, Any], float] | None = None
         if len(selected) >= settings.OPENSEARCH_RESULT_COUNT:
             position = _displaceable_position(selected, pair_ids)
             if position is None:
                 continue
-            displaced.insert(0, selected.pop(position))
+            popped = selected.pop(position)
+        parent_position = next((index for index, (row, _) in enumerate(selected) if row is parent), None)
+        if parent_position is None:
+            if popped is not None and position is not None:
+                selected.insert(position, popped)
+            continue
+        if popped is not None:
+            displaced.insert(0, popped)
         protected_ids = pair_ids
-        parent_position = next(index for index, (row, _) in enumerate(selected) if row is parent)
         child_pair[0]["parent_bound_child"] = True
         selected.insert(parent_position + 1, child_pair)
         remaining = [pair for pair in remaining if pair[0] is not child_pair[0]]
+        # A selector-picked child can already sit in `displaced` (an earlier
+        # binding pushed it out of `selected`) when its own parent binds it
+        # here; without this it would be emitted twice.
+        displaced = [pair for pair in displaced if pair[0] is not child_pair[0]]
     return [*selected, *displaced, *remaining]
 
 

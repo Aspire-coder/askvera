@@ -1,6 +1,7 @@
 """AI chat orchestration for AskVera."""
 
 import re
+import unicodedata
 from contextvars import ContextVar
 from dataclasses import replace
 from functools import lru_cache
@@ -139,6 +140,235 @@ FOLLOW_UP_CONTEXT_MARKERS = FOLLOW_UP_REFERENCE_MARKERS + FOLLOW_UP_TOPIC_SHIFT_
 # returns, what is the policy?" is never pulled into history.
 FOLLOW_UP_MARKET_ELLIPSIS = re.compile(r"^(?:and|but)\s+(?:for|in|about)\s+\S", re.IGNORECASE)
 FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS = 6
+
+
+def _follow_up_unaccented(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
+def _follow_up_tokens(text: str, *, casefold: bool = True) -> tuple[str, ...]:
+    """Word tokens with accents removed, so "für", "fur" and "Für" compare alike."""
+    unaccented = _follow_up_unaccented(text)
+    return tuple(re.findall(r"[^\W_]+", unaccented.casefold() if casefold else unaccented, flags=re.UNICODE))
+
+
+def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Pattern[str]:
+    """One pattern over space-joined follow-up tokens; each fragment matches from a word start.
+
+    Fragments are written with their accents and folded like the tokens, so "é"
+    and "ё" need no second spelling. Only lower-case regex escapes are used.
+    ``word_start=False`` also matches inside a compound ("leveringsbeleid").
+    """
+    folded = (_follow_up_unaccented(fragment).casefold() for fragment in fragments)
+    return re.compile((r"(?<!\w)" if word_start else "") + "(?:" + "|".join(folded) + ")", re.UNICODE)
+
+
+def _follow_up_token_set(*phrases: str) -> frozenset[str]:
+    return frozenset(token for phrase in phrases for token in _follow_up_tokens(phrase))
+
+
+# W14: the same short follow-up shapes in every conversation language. Offline
+# probe 2026-09-12: "En voor Uganda?", "Und für Uganda?", "А для Уганды?" and the
+# rest never reached the history path, so retrieval got the bare follow-up and
+# the prior topic was lost. English is untouched; these apply to the tokens of
+# the message start only, and every shape is bounded like its English twin.
+#
+# 1. Connector ellipsis ("And for Uganda?"): conjunction + preposition, at most
+#    FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS words, and a recognised market is required,
+#    exactly as FOLLOW_UP_MARKET_ELLIPSIS. A question word right after the
+#    connector makes it a full question ("Und für wen gilt das in Uganda?").
+LOCALIZED_FOLLOW_UP_CONNECTORS = frozenset(
+    _follow_up_tokens(f"{conjunction} {preposition}")
+    for conjunctions, prepositions in (
+        (("en", "maar"), ("voor", "in", "naar", "met")),  # nl
+        (("et", "mais"), ("pour", "en", "au", "aux", "à", "dans")),  # fr
+        (("und", "aber"), ("für", "fuer", "in", "im", "nach")),  # de
+        (("y", "pero"), ("para", "en", "por")),  # es
+        (("e", "mas"), ("para", "pra", "em", "no", "na", "nos", "nas")),  # pt
+        (("e", "ma"), ("per", "in", "a", "ad", "nel", "nella")),  # it
+        (("och", "men"), ("för", "i", "om")),  # sv
+        (("og", "men"), ("for", "i", "om", "til")),  # da, no
+        (("а", "и", "но"), ("для", "в", "во", "по")),  # ru
+        (("a", "i"), ("dlya", "dlja", "v", "vo")),  # ru, transliterated
+        (("a", "i", "ali"), ("za", "u", "na")),  # sr, Latin
+        (("а", "и"), ("за", "у", "на")),  # sr, Cyrillic
+    )
+    for conjunction in conjunctions
+    for preposition in prepositions
+)
+# 2. "What about X?" / "How about X?" openers. Like the English topic-shift
+#    markers they need no market ("Qu'en est-il de la commande minimale ?"), but
+#    the words after the opener must be short (LOCALIZED_FOLLOW_UP_MAX_CONTENT
+#    content words) and must not be a question word or a bare pronoun ("Hur är
+#    det med dig?" is small talk). Finnish, Russian and Serbian decline market
+#    names and market_name_aliases.json lists only the base form, so there a
+#    capitalised word that names no recognised market ("А что насчёт Уганды?",
+#    "Entä Ugandassa?") keeps the message standalone rather than merging it
+#    with the previous market, which could then never be replaced.
+LOCALIZED_TOPIC_SHIFT_OPENERS: dict[str, tuple[str, ...]] = {
+    "nl": ("wat dan met", "en wat dan met", "en wat met", "hoe zit het met", "hoe zit het dan met", "en hoe zit het met"),
+    "fr": ("qu'en est-il", "et qu'en est-il", "et pour ce qui est", "et concernant"),
+    "de": ("und was ist mit", "wie sieht es mit", "und wie sieht es mit", "wie steht es mit", "und wie steht es mit"),
+    "es": ("y qué hay de", "y qué pasa con", "y qué tal", "y en cuanto a", "y respecto a"),
+    "pt": ("e quanto", "e sobre", "e que tal", "e o que dizer de"),
+    "it": ("e riguardo", "e per quanto riguarda", "e che dire di"),
+    "sv": ("hur är det med", "och hur är det med", "och vad gäller", "hur blir det med"),
+    "da": ("hvad med", "og hvad med", "hvad så med"),
+    "no": ("hva med", "og hva med", "hva så med"),
+    "fi": ("entä", "entäs", "no entä"),
+    "ru": (
+        "а что насчёт", "что насчёт", "а как насчёт", "как насчёт",
+        "a chto naschet", "chto naschet", "a kak naschet", "kak naschet",
+    ),
+    "sr": (
+        "a šta je sa", "šta je sa", "a šta sa", "a što se tiče",
+        "а шта је са", "шта је са", "а шта са", "а што се тиче",
+    ),
+}
+LOCALIZED_INFLECTED_NAME_LANGUAGES = frozenset({"fi", "ru", "sr"})
+# 3. Topic ellipsis ("And the minimum order?"): conjunction + article, or bare
+#    Swedish "och", then at most two content words, and a question mark. It keeps
+#    the previous market, like "And the email?" does in English - and, like that
+#    English case, only for a directory field: "And the warranty?" stays standalone
+#    in English, so "En de garantie?" and "Y la empresa?" do too (W14b, Fable W14
+#    note 1). The field must be in LOCALIZED_DIRECTORY_FIELD_TERMS, no policy word
+#    may appear, and a capitalised word after a place preposition that names no
+#    recognised market ("Och i Stockholm?", "E a Roma?") keeps the message standalone.
+LOCALIZED_TOPIC_ELLIPSIS_OPENERS = tuple(
+    _follow_up_tokens(f"{opener} {article}")
+    for opener, articles in (
+        ("en", ("de", "het")),  # nl
+        ("et", ("le", "la", "les", "l'")),  # fr
+        ("et pour", ("le", "la", "les", "l'")),  # fr
+        ("und", ("der", "die", "das", "den", "dem")),  # de
+        ("y", ("el", "la", "los", "las")),  # es
+        ("e", ("o", "a", "os", "as")),  # pt
+        ("e", ("il", "lo", "la", "i", "gli", "le", "l'")),  # it
+        ("och", ("",)),  # sv
+    )
+    for article in articles
+)
+# The fields of FOLLOW_UP_DIRECTORY_FIELD_TERMS - (tele)phone, opening hours, email,
+# address, website, delivery/shipping, payment/pay, minimum order - and nothing
+# more. Stems match from a word start, so compounds such as "Lieferkosten",
+# "verzendkosten" and "leveranskostnaden" count; stems that would also start an
+# unrelated word ("liefer" -> "Lieferant", "livr" -> "livre") are spelled out.
+# Bare "hours" words ("heures", "horas", "ore") are left out as too loose. One
+# pattern serves every language, so a shared stem ("adres", "levering") is listed once.
+LOCALIZED_DIRECTORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
+    "nl": (
+        "telefoon", r"e ?mail", "adres", "website", "openingstijd", "openingsuren",
+        "levering", "levertijd", "leverkost", r"leveren\b", "bezorg", "verzend", "betaal", "betaling", r"betalen\b",
+        r"minim\w* bestel", "minimumbestel", "bestelminimum",
+    ),
+    "fr": (
+        "téléphone", "courriel", "adresse", r"site (?:web|internet)", "horaire", r"heures d ouverture",
+        "livraison", r"livrer\b", "expédition", r"expédier\b", "envoi", "paiement", r"payer\b",
+        r"commande\w* minim", r"minim\w* (?:de )?commande",
+    ),
+    "de": (
+        "telefon", "adress", "anschrift", "webseite", "internetseite", "öffnungszeit", "oeffnungszeit",
+        "geschäftszeit", "geschaeftszeit", r"liefer(?:ung|kost|zeit|geb|dauer|n\b)", "versand", "zustell",
+        "zahlung", "bezahl", r"zahlen\b", "mindestbestell", r"minim\w* bestell",
+    ),
+    "es": (
+        "teléfono", "correo", "dirección", r"(?:sitio|página) web", "horario",
+        "entrega", "envío", r"enviar\b", "pago", r"pagar\b", r"pedido\w* mínim", r"mínim\w* (?:de )?pedido",
+        r"compra\w* mínim",
+    ),
+    "pt": (
+        "telefone", "endereço", r"site\b", "horário", "frete", "pagamento",
+        r"encomenda\w* mínim", r"mínim\w* (?:de )?encomenda",
+    ),
+    "it": (
+        "indirizzo", r"sito\b", "posta elettronica", "orari", "consegna", "spedizion", r"spedire\b",
+        "pagament", r"pagare\b", r"ordin\w* minim", r"minim\w* (?:d |di )?ordin",
+    ),
+    "sv": (
+        r"e ?post", "mejl", "webbplats", "hemsida", "webbsida", "öppettid", "leverans", r"leverera\b", "frakt",
+        "betalning", r"betala\b", r"minsta (?:beställning|order)", "minimibeställning", "minimiorder",
+    ),
+    "da": (
+        "hjemmeside", "webside", "åbningstid", "fragt", "forsendelse", r"betale\b",
+        "minimumsbestilling", "minimumsordre", r"mindste (?:bestilling|ordre)",
+    ),
+    "no": ("nettside", "åpningstid", "minstebestilling", r"minste (?:bestilling|ordre)"),
+    "fi": (
+        "puhelin", "sähköposti", "osoite", "osoitte", "verkkosivu", "kotisivu", "aukiolo",
+        r"toimitus(?:maksu|kulu|aika|ajat)?\b", "toimituks", "maksu", r"maksaa\b", "vähimmäistilau", "minimitilau",
+    ),
+    "ru": (
+        "телефон", r"электронн\w* почт", "имейл", "емейл", "адрес", "сайт", r"(?:час|врем|график)\w* работ",
+        "доставк", "пересылк", "оплат", "платёж", r"минимальн\w* (?:сумм\w* )?заказ",
+        "dostavk", "oplat", r"minimaln\w* zakaz", "sajt", r"sait\b",
+    ),
+    "sr": (
+        "imejl", r"radn\w* vrem", "dostav", "isporuk", "pošiljk", "plaćanj", "platit",
+        r"minimaln\w* (?:porudžbin|narudžbin)",
+        "имејл", "мејл", "сајт", r"радн\w* врем", "достав", "испорук", "пошиљк", "плаћањ", "платит",
+        r"минималн\w* (?:поруџбин|наруџбин)",
+    ),
+}
+LOCALIZED_DIRECTORY_FIELD_PATTERN = _follow_up_stem_pattern(
+    *(fragment for fragments in LOCALIZED_DIRECTORY_FIELD_TERMS.values() for fragment in fragments)
+)
+# POLICY_WORD in the same languages: "And the delivery policy?" is not a field request.
+LOCALIZED_POLICY_PATTERN = _follow_up_stem_pattern(
+    "policy", "beleid", "politique", "richtlinie", "politik", "política", "käytäntö", "политик", word_start=False
+)
+# Place prepositions for the capitalised-name guard on the topic ellipsis.
+LOCALIZED_PLACE_PREPOSITIONS = _follow_up_token_set(
+    "in naar", "à a au aux en dans", "im nach", "em no na", "ad nel nella", "i till til", "u", "в во у"
+)
+# Governance (W14b, Fable W14 note 2): a localized "what about ..." question that
+# names none of these is judged on its own words, like "What about the shipping?".
+# Guarantee and promise words keep the anchor, as CONTENT_REQUEST_TERMS does in
+# English; "garantie" also means warranty, which only errs toward keeping it.
+LOCALIZED_CONTENT_REQUEST_PATTERN = _follow_up_stem_pattern(
+    "garant", "gegarand", "zagarant", "гарант", "загарант", "taku", "taat", "belof", "beloof", "promes", "promet", "promis", "versprech",
+    r"lov(?:a|ar|ade|at|e|er|et|ede)\b", "løft", "обещ", "обећ", "obeć",
+    "reclam", "werb", "publicid", "publicit", "pubblicit", "annons", "reklam", "mainos", "témoign", "testimon",
+    "getuig", "erfahrungsbericht", "slogan", "рекла", "отзыв", "оглас",
+)
+LOCALIZED_FOLLOW_UP_MAX_CONTENT = 2
+LOCALIZED_FOLLOW_UP_MAX_TAIL = 5
+# Articles, prepositions and conjunctions that do not count as content words.
+LOCALIZED_FOLLOW_UP_FUNCTION_WORDS = _follow_up_token_set(
+    "the de het een van voor naar in met en",
+    "le la les l du des d a au aux pour et",
+    "der die das den dem ein eine im für nach mit und aus von",
+    "el los las del al para y",
+    "o os as do da dos no na nos nas em ao aos e",
+    "il lo i gli di della alla ad nel nella per",
+    "för till om och",
+    "for til og",
+    "в во для по на с со и а",
+    "u za sa",
+    "у за са",
+)
+# A question word, pronoun or verb among the content words makes a full question
+# or small talk ("En voor wie is dit?", "Et pour quoi faire ?", "Hvad med dig?").
+LOCALIZED_FOLLOW_UP_STOP_WORDS = _follow_up_token_set(
+    "wie wat waar wanneer waarom welke welk hoe hoeveel hoelang jij jou je ik mij is zijn jullie ons",
+    "qui quoi que qu quand ou pourquoi comment combien quel quelle quels quelles toi vous moi tu nous est sont",
+    "wer wen wem wessen was wo wann warum weshalb wieso welche welcher welches dir dich ihnen euch ich sie ist sind "
+    "mir uns",
+    "quién quiénes qué cuál cuáles cuándo dónde cómo cuánto cuánta cuántos cuántas porqué ti usted ustedes yo es son "
+    "estás está nosotros nosotras mí conmigo",
+    "quem qual quais quando onde como quanto quanta quantos quantas porque você vocês são mim nós",
+    "chi che cosa quale quali dove come quanti quante perché te voi lei io sono noi me",
+    "vem vad var när varför hur vilken vilket vilka dig mig er oss du jag ni är",
+    "hvem hvad hvor hvornår hvorfor hvordan hvilken hvilket hvilke jer os jeg vi",
+    "hva deg meg dere",
+    "mikä mitä kuka ketkä missä mistä mihin milloin miksi miten kuinka paljonko sitten sinä sinulle te minulle "
+    "minä me",
+    "что чего чем кто кого кому как где куда когда почему зачем сколько какой какая какие чей потом тогда "
+    "ты вы тебя вас тобой вами я мне меня нас",
+    "šta što ko koga kome kako gde gdje kada kad zašto koliko koji koja koje onda ti vi tebe vas tobom vama ja mi "
+    "mnom nama",
+    "шта што ко кога коме како где када зашто колико који која које онда ти ви тебе тобом вама ја ми мном нама",
+)
 # Removed together with a replaced market name, so "the delivery cost in Mali?"
 # becomes "the delivery cost?" rather than "the delivery cost in?". English, Dutch,
 # French and German place connectors with an optional article; in any other
@@ -1463,13 +1693,36 @@ class AIOrchestrator:
     def _follow_up_carries_own_intent(self, user_message: str) -> bool:
         """True for an interrogative follow-up that requests no new content.
 
-        Deliberately conservative and English-only: it must read as a question and
-        must not name a thing to produce. A message that fails any check keeps the
-        anchor, which is the safer direction.
+        Deliberately conservative: it must read as a question and must not name a
+        thing to produce. A message that fails any check keeps the anchor, which is
+        the safer direction. Besides English, only a localized topic follow-up
+        ("Und die Lieferkosten?", "Hoe zit het met de verzendkosten?") qualifies, as
+        its English twin does (W14b); the market ellipsis "En voor Uganda?" keeps the
+        anchor exactly like "And for Uganda?".
         """
         normalized = " ".join((user_message or "").lower().split())
         if not normalized:
             return False
+        message = " ".join(user_message.split())
+        if (
+            self._localized_follow_up_shape(message) in {"topic", "topic_shift"}
+            and message.endswith("?")
+            and not CONTENT_REQUEST_TERMS.search(message)
+            and not LOCALIZED_CONTENT_REQUEST_PATTERN.search(" ".join(_follow_up_tokens(message)))
+        ):
+            return True
+        # A bare field ellipsis ("And the shipping?") names a directory field and
+        # nothing else, so it is judged on its own words even though "and" is not
+        # a QUESTION_OPENERS word. "And for Uganda?" names a market instead and
+        # keeps the anchor; "And the shipping, write it anyway?" is caught by
+        # CONTENT_REQUEST_TERMS/CONTINUATION_TERMS below.
+        if (
+            normalized.endswith("?")
+            and self._is_directory_field_follow_up(message)
+            and not CONTENT_REQUEST_TERMS.search(normalized)
+            and not CONTINUATION_TERMS.search(normalized)
+        ):
+            return True
         # An auxiliary opener needs an explicit question mark: "do it anyway" opens
         # with one and continues an instruction. A wh-opener reads as a question
         # without one, so "How much would those products cost" is not judged on
@@ -1536,6 +1789,8 @@ class AIOrchestrator:
         if word_count <= 14 and self._contains_follow_up_marker(normalized):
             return True
         message = " ".join(user_message.split())
+        if self._localized_follow_up_shape(message):
+            return True
         user_messages = self._user_messages_from_history(history)
         if self._is_clarification_reply(message):
             # Attach only to a real preceding question; otherwise keep the reply
@@ -1591,8 +1846,75 @@ class AIOrchestrator:
 
     def _contains_topic_shift_marker(self, normalized_message: str) -> bool:
         """Match markers that introduce a new subject alongside a reference cue."""
-        return self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS) or self._is_market_ellipsis(
-            normalized_message
+        return (
+            self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
+            or self._is_market_ellipsis(normalized_message)
+            or self._localized_follow_up_shape(normalized_message) in {"market", "topic_shift"}
+        )
+
+    def _localized_follow_up_shape(self, message: str) -> str:
+        """Name the non-English follow-up shape ``message`` opens with, or return "" (W14).
+
+        "market" for "En voor Oeganda?", "topic_shift" for "Hoe zit het met
+        Oeganda?" and "topic" for "En de minimale bestelling?". Only the start of
+        a short message counts; see LOCALIZED_FOLLOW_UP_CONNECTORS for the limits.
+        Detection only: the history path that follows is the English one, unchanged.
+        """
+        tokens = _follow_up_tokens(message)
+        if not tokens or len(tokens) > 14:
+            return ""
+        names_market = bool(find_market_mentions(message) or find_shared_office_record_countries(message))
+        # The first word that is not an article or preposition decides: Danish "os"
+        # is a stop word, Portuguese "os" an article ("E para os Estados Unidos?").
+        first_content = next((token for token in tokens[2:] if token not in LOCALIZED_FOLLOW_UP_FUNCTION_WORDS), "")
+        if (
+            tokens[:2] in LOCALIZED_FOLLOW_UP_CONNECTORS
+            and 2 < len(tokens) <= FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS
+            and first_content not in LOCALIZED_FOLLOW_UP_STOP_WORDS
+            and names_market
+        ):
+            return "market"
+        for language, openers in LOCALIZED_TOPIC_SHIFT_OPENERS.items():
+            for opener in openers:
+                size = len(_follow_up_tokens(opener))
+                if tokens[:size] != _follow_up_tokens(opener) or not self._is_short_follow_up_tail(tokens[size:]):
+                    continue
+                if (
+                    language in LOCALIZED_INFLECTED_NAME_LANGUAGES
+                    and not names_market
+                    and any(word[:1].isupper() for word in _follow_up_tokens(message, casefold=False)[size:])
+                ):
+                    return ""
+                return "topic_shift"
+        if message.rstrip().endswith("?"):
+            for opener_tokens in LOCALIZED_TOPIC_ELLIPSIS_OPENERS:
+                size = len(opener_tokens)
+                if tokens[:size] != opener_tokens or not self._is_short_follow_up_tail(tokens[size:]):
+                    continue
+                tail = " ".join(tokens[size:])
+                if (
+                    LOCALIZED_DIRECTORY_FIELD_PATTERN.search(tail)
+                    and not LOCALIZED_POLICY_PATTERN.search(tail)
+                    and (names_market or not self._names_unrecognised_place(message))
+                ):
+                    return "topic"
+        return ""
+
+    def _names_unrecognised_place(self, message: str) -> bool:
+        """A capitalised word right after a place preposition ("Och i Stockholm?", "E a Roma?")."""
+        words = _follow_up_tokens(message, casefold=False)
+        return any(
+            word.casefold() in LOCALIZED_PLACE_PREPOSITIONS and following[:1].isupper()
+            for word, following in zip(words[1:], words[2:])
+        )
+
+    def _is_short_follow_up_tail(self, tail: tuple[str, ...]) -> bool:
+        """One or two content words after a follow-up opener, none a question word or pronoun."""
+        if len(tail) > LOCALIZED_FOLLOW_UP_MAX_TAIL:
+            return False
+        content = [word for word in tail if word not in LOCALIZED_FOLLOW_UP_FUNCTION_WORDS]
+        return 0 < len(content) <= LOCALIZED_FOLLOW_UP_MAX_CONTENT and not any(
+            word in LOCALIZED_FOLLOW_UP_STOP_WORDS for word in content
         )
 
     def _is_market_ellipsis(self, message: str) -> bool:
@@ -1714,38 +2036,55 @@ class AIOrchestrator:
         return self._without_market_names(anchor, stale_codes, stale_records)
 
     def _without_market_names(self, text: str, codes: set[str], records: set[str]) -> str:
-        """Delete the shortest word spans that name only ``codes`` or ``records``.
+        """Delete the longest word spans that name only ``codes`` or ``records``.
 
         Each candidate span is confirmed with the same matchers retrieval uses,
         so localized aliases and multi-word names work, and a longer name that
         merely contains a stale one ("Equatorial Guinea" when Guinea is stale)
-        is left alone. A leading place connector ("in", "naar", "au") and a
-        trailing possessive go with the name. Returns "" when nothing substantive is left.
+        is left alone. Candidates are tried longest-first (by word count, then
+        leftmost start) so a fully configured name is removed as one span
+        before any shorter alias contained inside it is even considered - a
+        shorter alias standalone in the catalog (e.g. "Reunion" inside
+        "Reunion Islands", "Congo" inside "Republic of Congo") can no longer
+        jump the queue and strand the rest of the name. A leading place
+        connector ("in", "naar", "au") and a trailing possessive go with the
+        name. Returns "" when nothing substantive is left.
         """
         catalog = [*load_market_config()["markets"], *load_global_directory_markets()]
         names = [str(market.get("name") or "") for market in catalog]
         names.extend(name for aliases in _localized_market_names().values() for name in aliases)
         names.extend(name for office in load_shared_offices() for name in office["serves"])
         name_words: set[str] = set()
+        exact_names: set[str] = set()
         longest = 1
         for name in names:
-            tokens = _normalize_market_text(name).split()
+            normalized_name = _normalize_market_text(name)
+            tokens = normalized_name.split()
             name_words.update(tokens)
+            if normalized_name:
+                exact_names.add(normalized_name)
             longest = max(longest, len(tokens))
 
         words = list(re.finditer(r"[^\W_]+", text, flags=re.UNICODE))
         removed = [False] * len(words)
         spans: list[tuple[int, int]] = []
-        for length in range(1, longest + 1):
+        for length in range(longest, 0, -1):
             for start in range(len(words) - length + 1):
                 end = start + length
                 if any(removed[start:end]):
                     continue
                 if any(_normalize_market_text(word.group()) not in name_words for word in words[start:end]):
                     continue
+                surface = text[words[start].start():words[end - 1].end()]
+                # find_market_mentions checks containment, not equality ("a
+                # turkey" contains configured name "turkey"), so a span is only
+                # trusted once it is itself a full configured name - never a
+                # name plus stray neighbouring words picked up by the longest-
+                # first search before the exact single-word span is tried.
+                if _normalize_market_text(surface) not in exact_names:
+                    continue
                 if not self._reads_as_market_reference(text, words[start].start(), words[end - 1].end()):
                     continue
-                surface = text[words[start].start():words[end - 1].end()]
                 found_codes = find_market_mentions(surface)
                 found_records = find_shared_office_record_countries(surface)
                 if (found_codes or found_records) and found_codes <= codes and found_records <= records:
@@ -1761,8 +2100,34 @@ class AIOrchestrator:
             possessive = REPLACED_MARKET_POSSESSIVE.match(text, span_end)
             cursor = possessive.end() if possessive else span_end
         pieces.append(text[cursor:])
-        cleaned = re.sub(r"\s+([?.!,;:])", r"\1", re.sub(r"\s+", " ", "".join(pieces))).strip(" ,;:")
+        joined = self._without_stray_parens("".join(pieces))
+        cleaned = re.sub(r"\s+([?.!,;:])", r"\1", re.sub(r"\s+", " ", joined)).strip(" ,;:")
         return cleaned if re.search(r"[^\W_]", cleaned, flags=re.UNICODE) else ""
+
+    @staticmethod
+    def _without_stray_parens(text: str) -> str:
+        """Drop any "(" or ")" left unbalanced by a removed market span.
+
+        A configured name can carry its own parenthetical ("Cote d'Ivoire
+        (Ivory Coast)"); the word-span removal above only reaches the letters
+        of the name, so an opening or closing paren immediately outside the
+        last removed word can survive alone. An empty "()" left behind (both
+        parens survive, nothing between them) is dropped the same way.
+        """
+        stack: list[int] = []
+        drop: set[int] = set()
+        for index, character in enumerate(text):
+            if character == "(":
+                stack.append(index)
+            elif character == ")":
+                if stack:
+                    stack.pop()
+                else:
+                    drop.add(index)
+        drop.update(stack)
+        if drop:
+            text = "".join(character for index, character in enumerate(text) if index not in drop)
+        return re.sub(r"\(\s*\)", "", text)
 
     def _reads_as_market_reference(self, text: str, span_start: int, span_end: int) -> bool:
         """True when a span spelling a market name is written as that market in ``text``.
@@ -1861,6 +2226,8 @@ class AIOrchestrator:
         if not normalized:
             return False
         if len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        if self._localized_follow_up_shape(" ".join(user_message.split())):
             return True
         # Field follow-ups and clarification replies cannot be retrieved on their
         # own words either, so the anchor walk passes over them to the question.
