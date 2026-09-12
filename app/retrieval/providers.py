@@ -146,6 +146,18 @@ FOREVER_NAMED_RECORD_RE = re.compile(
     r"[^\W\d_][\w'’-]*\b",
     re.IGNORECASE | re.UNICODE,
 )
+# Operational fields a session's own directory record answers even when no
+# country is named ("What is the delivery cost?" from an NL session). Paired
+# with DIRECTORY_POLICY_WORDING_RE so "What is the delivery cost policy?" stays
+# a company-policy question. The record itself is resolved from market config
+# by _directory_target_country_names, never from a country list here.
+OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
+    r"\bdelivery\s+(?:costs?|charges?|fees?|times?)\b|"
+    r"\bminimum\s+order(?:ing)?\s+(?:amounts?|sizes?|values?)\b|"
+    r"\bpayment\s+methods?\b",
+    re.IGNORECASE,
+)
+DIRECTORY_POLICY_WORDING_RE = re.compile(r"\bpolic(?:y|ies)\b|\brules?\b", re.IGNORECASE)
 
 
 def _verified_conversation_intent(
@@ -581,6 +593,9 @@ def _planned_retrieval_plan(
         # this scope from shared market configuration so planner omissions do
         # not hide approved cross-market evidence.
         named_markets = find_market_mentions(message)
+        # Imported here: opensearch_sections imports this module at load time.
+        from .opensearch_sections import _directory_target_country_names
+
         include_global_documents = (
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
@@ -588,6 +603,14 @@ def _planned_retrieval_plan(
             or bool(find_shared_office_record_countries(message))
             or bool(DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries])))
             and bool(FOREVER_NAMED_RECORD_RE.search(message or ""))
+            # An own-market operational question with no country named opens
+            # the directory only when the session market resolves to a record
+            # name, so the global search is always filtered to that record.
+            or (
+                bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
+                and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
+                and bool(_directory_target_country_names(message, country))
+            )
         )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)

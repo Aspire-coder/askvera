@@ -7,7 +7,6 @@ import math
 import re
 import unicodedata
 from contextvars import ContextVar, Token
-from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any
 
@@ -37,9 +36,12 @@ from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import (
+    DIRECTORY_POLICY_WORDING_RE,
+    OWN_MARKET_DIRECTORY_FIELD_RE,
     RetrievalQueryPlan,
     _document_relevance,
     _planned_retrieval_plan,
+    _tokens,
 )
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
@@ -672,6 +674,19 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
     }
 
 
+def _is_adjacent_letter_swap(token: str, market_name: str) -> bool:
+    """True when ``token`` is ``market_name`` with one pair of neighbouring letters swapped."""
+    if len(token) != len(market_name):
+        return False
+    differences = [index for index, (left, right) in enumerate(zip(token, market_name)) if left != right]
+    return (
+        len(differences) == 2
+        and differences[1] == differences[0] + 1
+        and token[differences[0]] == market_name[differences[1]]
+        and token[differences[1]] == market_name[differences[0]]
+    )
+
+
 def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
     """Return the named market(s) whose global directory record should lead.
 
@@ -690,19 +705,33 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
             name_tokens = market_name.split()
             if len(name_tokens) != 1 or not market_name:
                 continue
-            if any(
-                len(token) >= len(market_name) - 1
-                and (
-                    SequenceMatcher(None, token, market_name).ratio() >= 0.80
-                    or (
-                        len(token) == len(market_name)
-                        and sorted(token) == sorted(market_name)
-                    )
-                )
-                for token in message_tokens
+            # Only one swapped pair of neighbouring letters counts as a typo
+            # ("Mexcio"). A similarity ratio matched ordinary words to markets
+            # ("being" -> Benin, "child" -> Chile) and put a foreign directory
+            # target on company-policy questions (live, SE buy-back turns).
+            if len(market_name) >= 5 and any(
+                _is_adjacent_letter_swap(token, market_name) for token in message_tokens
             ):
                 mentioned_codes.add(str(market.get("code") or "").upper())
-    if not mentioned_codes and not shared_record_countries and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or ""):
+    # With no country named, the session's own record is the target for
+    # contact/sponsoring wording. Its operational fields (delivery cost,
+    # minimum order amount, payment methods) fall back to it too, but only for
+    # a market whose directory record is configured by name in
+    # global_directory_markets.json (NL -> "Netherlands Benelux"); other
+    # markets keep company-policy-only scope for these fields. Policy wording
+    # never falls back.
+    own_market_field = (
+        str(selected_country or "").upper()
+        in {str(market.get("code") or "").upper() for market in load_global_directory_markets()}
+        and bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
+        and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
+    )
+    if (
+        not mentioned_codes
+        and not shared_record_countries
+        and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or "")
+        and not own_market_field
+    ):
         return set()
     target_codes = mentioned_codes or (set() if shared_record_countries else {str(selected_country or "").upper()})
     return {
@@ -726,6 +755,75 @@ def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:
             ]
         )
     return {"bool": {"should": should, "minimum_should_match": 1}}
+
+
+def _question_name_tokens(message: str) -> set[str]:
+    """Tokens written as names in the question: acronyms, numbers, capitalised non-initial words.
+
+    Names ("Forever", "FBO") survive translation unchanged, so they say nothing
+    about which language the question is written in.
+    """
+    words = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", message or ""), flags=re.UNICODE)
+    names = {
+        word
+        for index, word in enumerate(words)
+        if any(character.isdigit() for character in word)
+        or (len(word) >= 2 and word.isupper())
+        or (index > 0 and word[:1].isupper())
+    }
+    return _tokens(" ".join(names))
+
+
+def _translated_query_local_relevance(
+    message: str,
+    country: str,
+    document: RetrievedDocument,
+    planned_queries: list[str],
+    candidate_rows: list[tuple[dict[str, Any], float]],
+) -> float:
+    """Local relevance of the session market's own policy section through a translated planner query.
+
+    A Dutch question scored against the English edition of the right NL section
+    shares only names with it, so its lexical relevance misses the strong-match
+    rescue that the same question passes against the Dutch edition (live: 0.4234
+    vs 0.5134, threshold 0.44). No question-language signal exists, so a planner
+    query stands in only when the question's ordinary (non-name) words appear in
+    none of: the chosen section, any retrieved candidate in that section's
+    language, and the planner query itself. Returns 0.0 for directory records,
+    global rows and other markets' sections.
+    """
+    metadata = document.metadata or {}
+    if (
+        metadata.get("access_scope") == "global"
+        or metadata.get("document_type") in GLOBAL_DIRECTORY_DOCUMENT_TYPES
+        or str(document.country or "").upper() not in {code.upper() for code in get_document_country_codes(country)}
+    ):
+        return 0.0
+    ordinary_words = _tokens(message) - _question_name_tokens(message)
+    if not ordinary_words:
+        return 0.0
+    same_language_text = " ".join(
+        [
+            document.title,
+            document.content,
+            document.excerpt,
+            *(
+                f"{row.get('section_title') or ''} {row.get('content') or ''}"
+                for row, _score in candidate_rows
+                if str(row.get("language") or "") == document.language
+            ),
+        ]
+    )
+    if ordinary_words & _tokens(same_language_text):
+        return 0.0
+    return max(
+        (
+            _document_relevance(query, document)
+            for query in planned_queries
+            if query and not ordinary_words & _tokens(query)
+        ),
+        default=0.0,
+    )
 
 
 def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, Any]:
@@ -1241,6 +1339,19 @@ class OpenSearchSectionProvider:
             rows[0][0].get("evidence_selector_directly_answers") if selector_applied else None
         )
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
+        if (
+            selector_applied
+            and documents
+            and max_local_relevance < settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
+        ):
+            # Only a question sharing no ordinary word with the chosen own-market
+            # section can change here; every other question keeps its value.
+            max_local_relevance = max(
+                max_local_relevance,
+                _translated_query_local_relevance(
+                    message, country, documents[0], search_messages[1:], raw_rows
+                ),
+            )
         strong_local_match = bool(
             selector_applied
             and max_local_relevance >= settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD

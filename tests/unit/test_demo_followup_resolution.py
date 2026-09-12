@@ -92,7 +92,8 @@ def test_kenya_fields_persist_and_japan_replaces_directory_target_not_policy_aut
     assert orchestrator._scope_query(japan, japan_query, japan_history) == japan
 
     after_japan = _resolve(email, _history(kenya, phone, hours, japan))[0]
-    assert after_japan.index("Japan") > after_japan.index("Kenya")
+    # W7: the explicit new target replaced Kenya; the office-address topic carries.
+    assert "Japan" in after_japan and "Kenya" not in after_japan and "office address" in after_japan
     assert after_japan.endswith(f"Follow-up request: {email}")
 
     # Policy authority did not move to Japan: a company-policy request naming
@@ -126,7 +127,7 @@ def test_consecutive_field_changes_and_target_switch() -> None:
     turns.append(germany)
     resolved = _resolve(hours, _history(*turns))[0]
     assert resolved.endswith(f"Follow-up request: {hours}")
-    assert "Germany" in resolved and resolved.index("Germany") > resolved.index("Paraguay")
+    assert "Germany" in resolved and "Paraguay" not in resolved  # W7: Germany replaced Paraguay
     assert payment not in resolved and deliver not in resolved
 
 

@@ -66,11 +66,13 @@ from services.claim_safety import localized_claim_response
 from services.guardrails import is_policy_safety_question
 from services.market_config import (
     _localized_market_names,
+    _normalize_market_text,
     find_market_mentions,
     find_probable_market_typo,
     find_shared_office_record_countries,
     load_global_directory_markets,
     load_market_config,
+    load_shared_offices,
     market_display_name,
 )
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
@@ -131,6 +133,17 @@ FOLLOW_UP_TOPIC_SHIFT_MARKERS = (
     "what if",
 )
 FOLLOW_UP_CONTEXT_MARKERS = FOLLOW_UP_REFERENCE_MARKERS + FOLLOW_UP_TOPIC_SHIFT_MARKERS
+# "And for Guinea?" / "And in Uganda?" swap only the market and lean on the
+# prior question for everything else, exactly like "what about Guinea?". Leading
+# position, a short message and a named market are all required, so "And for
+# returns, what is the policy?" is never pulled into history.
+FOLLOW_UP_MARKET_ELLIPSIS = re.compile(r"^(?:and|but)\s+(?:for|in|about)\s+\S", re.IGNORECASE)
+FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS = 6
+# Removed together with a replaced market name, so "the delivery cost in Mali?"
+# becomes "the delivery cost?" rather than "the delivery cost in?". English only;
+# in another language the connector simply stays, which retrieval tolerates.
+REPLACED_MARKET_LEAD_IN = re.compile(r"\b(?:in|for|of|from|at|to)\s+(?:the\s+)?$", re.IGNORECASE)
+REPLACED_MARKET_POSSESSIVE = re.compile(r"['’]s\b", re.IGNORECASE)
 # A follow-up that opens like a question and asks for no new content is judged on
 # its own words rather than on the question it inherits for retrieval. Both lists
 # are deliberately narrow: anything unmatched keeps the inherited context, which
@@ -1387,14 +1400,20 @@ class AIOrchestrator:
             return user_message
 
         anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        # An explicit new directory market replaces the anchor's market; the
+        # topic still carries. Live 2026-09-12 (W7): "What about delivery cost
+        # for Gambia?" after a Mali question kept "in Mali" here, retrieval
+        # targeted ['Gambia', 'Mali'] and the evidence gate approved both records.
+        anchor = self._replace_directory_target(anchor, user_message)
         if not anchor:
-            # Every candidate was an instruction rather than a question, so there
-            # is nothing that was answered to anchor against.
+            # Every candidate was an instruction rather than a question (or named
+            # only the replaced market), so there is nothing left to anchor against.
             return user_message
         if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
             # A topic-shift follow-up ("what about Kenya?") introduces a new
             # subject that a bare anchor substitution would silently drop.
-            # Keep both the prior topic and the new subject for retrieval.
+            # Keep the prior topic with the new subject for retrieval; any market
+            # the new subject replaced has already been removed from the anchor.
             contextual_query = f"{anchor} {user_message}".strip()
         elif anchor != user_message:
             # Context must never replace the question currently being asked.
@@ -1554,11 +1573,22 @@ class AIOrchestrator:
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
-        return self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS)
+        return self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS) or self._is_market_ellipsis(
+            normalized_message
+        )
 
     def _contains_topic_shift_marker(self, normalized_message: str) -> bool:
         """Match markers that introduce a new subject alongside a reference cue."""
-        return self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
+        return self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS) or self._is_market_ellipsis(
+            normalized_message
+        )
+
+    def _is_market_ellipsis(self, message: str) -> bool:
+        """A short "And for Guinea?" that swaps only the market (FOLLOW_UP_MARKET_ELLIPSIS)."""
+        normalized = " ".join((message or "").split())
+        if len(normalized.split()) > FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS or not FOLLOW_UP_MARKET_ELLIPSIS.match(normalized):
+            return False
+        return bool(find_market_mentions(normalized) or find_shared_office_record_countries(normalized))
 
     def _matches_marker(self, normalized_message: str, markers: tuple[str, ...]) -> bool:
         for marker in markers:
@@ -1630,13 +1660,13 @@ class AIOrchestrator:
 
         `later_messages` is newest-first, so the most recent market shift wins.
 
-        The shifting turn is appended rather than substituted into the anchor.
-        find_market_mentions returns market codes, not the surface names as
-        written, so replacing "Belgium" with "Germany" would need a reverse
-        code-to-name mapping in whichever language the reader used. This mirrors
-        _build_retrieval_query's existing handling of an immediate topic shift,
-        which keeps both the prior topic and the new subject for the same
-        reason, and leaves market scoping to retrieval and evidence approval.
+        The shifting turn is appended, and the market it replaced is removed
+        from the anchor, so the topic carries but only the new market is
+        targeted. Appending alone kept both names: live 2026-09-12, after "What
+        about delivery cost for Gambia?" the next turn still reached the
+        directory target extractor with Mali alongside Gambia. The removal works
+        on the reader's own wording (see _without_market_names), so no reverse
+        code-to-name mapping is needed in whichever language they used.
         """
         if not anchor:
             return anchor
@@ -1644,8 +1674,81 @@ class AIOrchestrator:
         for message in later_messages:
             markets = find_market_mentions(message)
             if markets and markets != anchor_markets:
-                return f"{anchor} {message}".strip()
+                return f"{self._replace_directory_target(anchor, message)} {message}".strip()
         return anchor
+
+    def _replace_directory_target(self, anchor: str, message: str) -> str:
+        """Remove from ``anchor`` each directory market that ``message`` replaced.
+
+        The agreed rule: an explicit new directory target replaces the old one,
+        and the field or topic carries forward. A market the message names again
+        stays, so a comparison ("How does Gambia's delivery cost compare with
+        Mali?") keeps both, and a message naming no market changes nothing.
+        Countries reached through a shared office count as markets on both sides.
+
+        This selects the directory target only. Policy authority is untouched:
+        the evidence gate still judges the request market.
+        """
+        if not anchor:
+            return anchor
+        new_codes = find_market_mentions(message)
+        new_records = find_shared_office_record_countries(message)
+        if not new_codes and not new_records:
+            return anchor
+        stale_codes = find_market_mentions(anchor) - new_codes
+        stale_records = find_shared_office_record_countries(anchor) - new_records
+        if not stale_codes and not stale_records:
+            return anchor
+        return self._without_market_names(anchor, stale_codes, stale_records)
+
+    def _without_market_names(self, text: str, codes: set[str], records: set[str]) -> str:
+        """Delete the shortest word spans that name only ``codes`` or ``records``.
+
+        Each candidate span is confirmed with the same matchers retrieval uses,
+        so localized aliases and multi-word names work, and a longer name that
+        merely contains a stale one ("Equatorial Guinea" when Guinea is stale)
+        is left alone. A leading English connector ("in", "for") and a trailing
+        possessive go with the name. Returns "" when nothing substantive is left.
+        """
+        catalog = [*load_market_config()["markets"], *load_global_directory_markets()]
+        names = [str(market.get("name") or "") for market in catalog]
+        names.extend(name for aliases in _localized_market_names().values() for name in aliases)
+        names.extend(name for office in load_shared_offices() for name in office["serves"])
+        name_words: set[str] = set()
+        longest = 1
+        for name in names:
+            tokens = _normalize_market_text(name).split()
+            name_words.update(tokens)
+            longest = max(longest, len(tokens))
+
+        words = list(re.finditer(r"[^\W_]+", text, flags=re.UNICODE))
+        removed = [False] * len(words)
+        spans: list[tuple[int, int]] = []
+        for length in range(1, longest + 1):
+            for start in range(len(words) - length + 1):
+                end = start + length
+                if any(removed[start:end]):
+                    continue
+                if any(_normalize_market_text(word.group()) not in name_words for word in words[start:end]):
+                    continue
+                surface = text[words[start].start():words[end - 1].end()]
+                found_codes = find_market_mentions(surface)
+                found_records = find_shared_office_record_countries(surface)
+                if (found_codes or found_records) and found_codes <= codes and found_records <= records:
+                    spans.append((words[start].start(), words[end - 1].end()))
+                    removed[start:end] = [True] * length
+        if not spans:
+            return text
+
+        pieces: list[str] = []
+        cursor = 0
+        for span_start, span_end in sorted(spans):
+            pieces.append(REPLACED_MARKET_LEAD_IN.sub("", text[cursor:span_start]))
+            possessive = REPLACED_MARKET_POSSESSIVE.match(text, span_end)
+            cursor = possessive.end() if possessive else span_end
+        pieces.append(text[cursor:])
+        cleaned = re.sub(r"\s+([?.!,;:])", r"\1", re.sub(r"\s+", " ", "".join(pieces))).strip(" ,;:")
+        return cleaned if re.search(r"[^\W_]", cleaned, flags=re.UNICODE) else ""
 
     def _is_instruction_message(self, message: str) -> bool:
         """True for a bare instruction to produce content, which is never context.

@@ -206,7 +206,10 @@ def test_chained_followup_skips_prior_vague_followup() -> None:
 
 
 def test_topic_shift_followup_merges_new_subject_with_prior_topic() -> None:
-    """'What about X' keeps the prior topic and adds the new subject, instead of losing it."""
+    """'What about X' keeps the prior topic and adds the new subject, instead of losing it.
+
+    W7: the new market replaces the prior one, so only the topic carries.
+    """
     orchestrator = AIOrchestrator()
     history = "\n".join(
         [
@@ -217,15 +220,15 @@ def test_topic_shift_followup_merges_new_subject_with_prior_topic() -> None:
 
     query = orchestrator._build_retrieval_query("What about Uganda?", history, "cid")
 
-    assert query == "What are the office hours in Kenya? What about Uganda?"
+    assert query == "What are the office hours? What about Uganda?"
 
 
-def test_and_in_country_followup_is_not_yet_recognized_as_topic_shift() -> None:
-    """Documents current scope: only 'what about'/'how about'/'what if' merge new subjects."""
+def test_and_in_country_followup_is_a_topic_shift_that_replaces_the_market() -> None:
+    """W7: a short leading 'And in/for <market>?' merges like 'what about', replacing the market."""
     orchestrator = AIOrchestrator()
     history = "user: What are the office hours in Kenya?\nvera: Kenya office hours are Monday to Friday."
 
-    assert orchestrator._build_retrieval_query("And in Uganda?", history, "cid") == "And in Uganda?"
+    assert orchestrator._build_retrieval_query("And in Uganda?", history, "cid") == "What are the office hours? And in Uganda?"
 
 
 def test_short_standalone_question_does_not_inherit_history() -> None:
