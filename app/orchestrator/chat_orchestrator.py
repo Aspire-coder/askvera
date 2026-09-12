@@ -172,9 +172,11 @@ WH_QUESTION_OPENERS = re.compile(r"^(?:what|how|when|where|which|who|why|whose|w
 # Paraguay was lost on exactly this turn. It inherits a target only through
 # _inherited_directory_target, never by adding generic words such as "cost" to
 # the follow-up markers, which would drag history into standalone questions.
+# "minimum order" is a directory record field too: live 2026-09-12, "What is
+# the delivery cost in Mali?" -> "What's the minimum order amount?" lost Mali.
 FOLLOW_UP_DIRECTORY_FIELD_TERMS = re.compile(
     r"\b(?:(?:tele)?phone|hours|opening\s+times?|e-?mail|address|website|"
-    r"deliver(?:y|ies|s|ed)?|shipping|payments?|pay)\b",
+    r"deliver(?:y|ies|s|ed)?|shipping|payments?|pay|minimum\s+orders?)\b",
     re.IGNORECASE,
 )
 FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS = 10

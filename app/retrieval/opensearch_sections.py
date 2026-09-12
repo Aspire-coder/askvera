@@ -616,7 +616,15 @@ def _directory_record_country_score(
         return 0.0
     if target_country_names:
         normalized_targets = {_normalize_text(name) for name in target_country_names}
-        if record_country in normalized_targets:
+        # "Kenya/East Africa" names its market before the "/". Compared whole,
+        # "kenya east africa" matched no target, so the Kenya record took the
+        # wrong-country penalty below and was filtered out even when the
+        # selector chose it (live demo run). Only "/"-separated parts count, so
+        # "Guinea" still never matches "Equatorial Guinea".
+        record_segments = {
+            _normalize_text(part) for part in str(metadata.get("record_country") or "").split("/") if part.strip()
+        }
+        if record_country in normalized_targets or record_segments & normalized_targets:
             return 8.0
         # A country explicitly named in the question outranks the selected
         # widget market. This matters for global-directory questions such as

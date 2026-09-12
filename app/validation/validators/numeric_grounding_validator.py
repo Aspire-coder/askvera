@@ -985,10 +985,48 @@ def _occurrence_can_support(
 _CLAUSE_DELIMITER_RE = re.compile(r"(?<!\d)[.;](?!\d)")
 
 
-def _source_occurrences(source_text: str, number: str, radius: int = 260) -> list[tuple[str, int, int]]:
-    """Return each matching clause window and the source occurrence position."""
+# A point or comma before exactly three digits is a thousands group only where the
+# source settles it, figure by figure: the figure is an amount of money in a
+# currency that is never written to three decimal places. Observed live on
+# 2026-09-12: the Mali record states delivery at "2.000 francs CFA", "3.000" and
+# "4.000", the model wrote "2,000", "3,000" and "4,000", and repair deleted the
+# whole fee schedule.
+#
+# Everything else stays as ambiguous as the note on _DIGIT_GROUP_RE says: a Case
+# Credit figure ("1.612CC", "1.000 Case Credits"), a figure with no unit, and the
+# ISO 4217 currencies with three minor digits, where "9.440 TND" is nine dinars
+# and 440 millimes. Separators are never stripped from the text; a grouped source
+# figure is only offered as an occurrence of the same whole number.
+_THREE_DECIMAL_CURRENCIES = frozenset({"bhd", "iqd", "jod", "kwd", "lyd", "omr", "tnd"})
+_GROUPING_CURRENCY_WORD_RE = re.compile(r"\s{0,2}(?:francs?(?:\s+cfa)?|f\s?cfa|cfa|xof|xaf|kr)(?![^\W\d_])")
+_UNGROUPED_THOUSANDS_RE = re.compile(r"[1-9]\d{3,5}")
+
+
+def _currency_groups_thousands(kind: str) -> bool:
+    return kind.startswith("currency:") and kind.partition(":")[2] not in _THREE_DECIMAL_CURRENCIES
+
+
+def _is_grouped_amount(source_text: str, start: int, end: int) -> bool:
+    """Whether the source writes this "2.000"-shaped figure as money that cannot have three decimals."""
+    kind = _measure(source_text, start, end)[0]
+    if kind:
+        return _currency_groups_thousands(kind)
+    return bool(_GROUPING_CURRENCY_WORD_RE.match(source_text, end))
+
+
+def _source_occurrences(
+    source_text: str, number: str, radius: int = 260, grouped_amounts: bool = True
+) -> list[tuple[str, int, int]]:
+    """Return each matching clause window and the source occurrence position.
+
+    ``grouped_amounts`` lets a whole number ("2000") also find the same figure
+    grouped with a point or comma in the source ("2.000 francs CFA"), where
+    _is_grouped_amount settles that the separator is a thousands group.
+    """
     windows: list[tuple[str, int, int]] = []
-    pattern = re.compile(rf"(?<![\d.]){re.escape(number)}(?!\d|\.\d)")
+    # "0,200CC" is a decimal and does not contain the figure 200. Only a leading
+    # zero settles that: "3,000.00" is still reached through its "000.00" tail.
+    pattern = re.compile(rf"(?<![\d.])(?<!\b0,){re.escape(number)}(?!\d|\.\d)")
     # A range is a pair of figures, and the source rarely writes it the way an
     # answer does. Algeria's record says "between 48h to 96h"; the model wrote
     # "48-96", the literal string was absent, and repair deleted a correctly
@@ -1001,7 +1039,15 @@ def _source_occurrences(source_text: str, number: str, radius: int = 260) -> lis
             rf"(?<![\d.]){re.escape(low)}\s*[^\d\s]{{0,4}}\s*(?:-|to|through|until)\s*"
             rf"{re.escape(high)}(?!\d|\.\d)"
         )
-    for match in pattern.finditer(source_text):
+    matches = list(pattern.finditer(source_text))
+    if grouped_amounts and not range_parts and _UNGROUPED_THOUSANDS_RE.fullmatch(number):
+        grouped = re.compile(rf"(?<![\d.,]){number[:-3]}[.,]{number[-3:]}(?![.,]?\d)")
+        matches += [
+            match for match in grouped.finditer(source_text)
+            if _is_grouped_amount(source_text, match.start(), match.end())
+        ]
+        matches.sort(key=lambda match: match.start())
+    for match in matches:
         index = match.start()
         # PDF extraction inserts line breaks for visual wrapping and numbered
         # lists. Keep those lines attached to the heading that names the rule.
@@ -1060,8 +1106,13 @@ def _claim_is_supported(
         min(claim_roles, key=lambda item: abs(item[0] - claim_at))[1]
         if claim_roles and claim_at != -1 else None
     )
+    # A grouped source amount supports only a claim that could be the same money:
+    # "2,000 CC" or "9,440 TND" in the answer never borrows "2.000 francs CFA".
+    grouped_amounts = not claim_kind or _currency_groups_thousands(claim_kind)
     for number in _number_variants(claim.number):
-        for window, occurrence_start, occurrence_end in _source_occurrences(source_text, number):
+        for window, occurrence_start, occurrence_end in _source_occurrences(
+            source_text, number, grouped_amounts=grouped_amounts
+        ):
             # The same figure measuring something else is not support. "36
             # viikkoon" (weeks) against "36 peräkkäiseen kalenterikuukauteen"
             # (months) was removed only by accident of a spurious subject, and

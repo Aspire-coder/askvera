@@ -38,7 +38,24 @@ SENSITIVE_PII_PLACEHOLDERS = frozenset(
 # unresolved. Built from both sets so a new sensitive category can never be
 # added to detection (SENSITIVE_PII_PLACEHOLDERS) without also being covered
 # by the cleanup pass below - the two silently drifted apart once already.
-_UNRESOLVED_PLACEHOLDER_TOKENS = frozenset({"ADDRESS", "EMAIL", "PHONE", "NAME", "PII"}) | SENSITIVE_PII_PLACEHOLDERS
+# scrub_pii writes "[<Comprehend entity type>]" for every type it detects, so
+# each detectable type must be listed here. The live Mali answer delivered
+# "... and [DATE_TIME])" because DATE_TIME was missing.
+_COMPREHEND_PII_ENTITY_TYPES = frozenset(
+    {
+        "ADDRESS", "AGE", "ALL", "AWS_ACCESS_KEY", "AWS_SECRET_KEY", "BANK_ACCOUNT_NUMBER", "BANK_ROUTING",
+        "CA_HEALTH_NUMBER", "CA_SOCIAL_INSURANCE_NUMBER", "CREDIT_DEBIT_CVV", "CREDIT_DEBIT_EXPIRY",
+        "CREDIT_DEBIT_NUMBER", "DATE_TIME", "DRIVER_ID", "EMAIL", "INTERNATIONAL_BANK_ACCOUNT_NUMBER",
+        "IN_AADHAAR", "IN_NREGA", "IN_PERMANENT_ACCOUNT_NUMBER", "IN_VOTER_NUMBER", "IP_ADDRESS",
+        "LICENSE_PLATE", "LOCATION", "MAC_ADDRESS", "NAME", "PASSPORT_NUMBER", "PASSWORD", "PHONE", "PIN",
+        "SSN", "SWIFT_CODE", "UK_NATIONAL_HEALTH_SERVICE_NUMBER", "UK_NATIONAL_INSURANCE_NUMBER",
+        "UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER", "URL", "USERNAME", "US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER",
+        "VEHICLE_IDENTIFICATION_NUMBER",
+    }
+)
+_UNRESOLVED_PLACEHOLDER_TOKENS = (
+    frozenset({"ADDRESS", "EMAIL", "PHONE", "NAME", "PII"}) | SENSITIVE_PII_PLACEHOLDERS | _COMPREHEND_PII_ENTITY_TYPES
+)
 _UNRESOLVED_PLACEHOLDER_PATTERN = "|".join(sorted(_UNRESOLVED_PLACEHOLDER_TOKENS))
 
 
@@ -71,6 +88,9 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
             flags=re.IGNORECASE,
         )
         placeholder_removed = cleaned != line
+        if placeholder_removed:
+            # "(Mon-Fri, 8:00 am-12:00 pm and [DATE_TIME])" must not become "... and)".
+            cleaned = re.sub(r"\s+(?:and|or|&)(?=\s*(?:[)\].,;:!?]|$))", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
