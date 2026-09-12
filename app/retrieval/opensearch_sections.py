@@ -757,6 +757,89 @@ def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:
     return {"bool": {"should": should, "minimum_should_match": 1}}
 
 
+# Common function words per section language, accent-folded. One of them in the
+# question means it is written in the section's language, so it is not a
+# translation and the translated-query rescue does not apply. Each list omits
+# words that are also common in the other listed languages or in es/pt/it
+# (English "is"/"in"/"we"/"of" are Dutch, "also"/"was"/"an" German, "a"/"as"/"on"
+# French or Romance), so a genuine translation is not blocked by a shared word.
+# A section language with no list gets no rescue: its language cannot be told apart.
+SECTION_LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
+    "en": frozenset({
+        "the", "my", "your", "our", "their", "you", "they", "can", "could", "would", "should", "must",
+        "how", "what", "which", "who", "why", "where", "when", "does", "did", "are", "have", "and",
+        "with", "about", "this", "that", "these", "those", "there", "from", "into", "any", "not", "to",
+        "for", "it", "if", "be", "been", "get", "much", "many",
+    }),
+    "nl": frozenset({
+        "het", "een", "ik", "mijn", "jouw", "uw", "hoe", "wat", "welke", "waarom", "wanneer", "hoeveel",
+        "waar", "kan", "kunnen", "mag", "moet", "zijn", "van", "voor", "niet", "ook", "maar", "bij",
+        "naar", "deze", "dat", "wordt", "worden", "heb", "hebben", "heeft", "wij", "zij", "mij", "ons",
+        "geen", "wel", "nog",
+    }),
+    "fr": frozenset({
+        "une", "est", "sont", "mon", "votre", "nous", "vous", "comment", "combien", "pourquoi", "quand",
+        "quel", "quelle", "quels", "quelles", "peut", "peux", "puis", "avec", "pour", "dans", "sur", "pas",
+        "cette", "aux", "au", "et", "suis", "etre", "avoir", "faire", "sa", "ses", "leur", "leurs", "ils",
+        "elle",
+    }),
+    "de": frozenset({
+        "der", "ein", "eine", "einen", "einem", "ist", "sind", "ich", "mein", "meine", "mich", "mir",
+        "warum", "wann", "wieviel", "viel", "kann", "konnen", "darf", "muss", "mit", "und", "nicht",
+        "fur", "auch", "oder", "bei", "wenn", "wird", "habe", "haben", "zu", "von", "dem", "sich", "kein",
+        "keine", "unser", "ihr", "ihre", "wo", "wer", "welche", "welcher", "bitte",
+    }),
+}
+# Markers spelled exactly like common English words ("a delivery van", "fur", "sa",
+# "mon", "mag"). Written in that exact form they are not evidence that a question
+# is a translation (Fable W8b note 3). They stay in SECTION_LANGUAGE_MARKERS, so the
+# section-language check still reads them and the rescue can only become rarer.
+TRANSLATION_EVIDENCE_HOMOGRAPHS: frozenset[str] = frozenset({"van", "fur", "sa", "mon", "mag"})
+
+
+def _question_in_section_language(message: str, section_language: str) -> bool:
+    """True unless the question is verifiably written in a language other than the section's.
+
+    Static and local: the question counts as the section's language when it
+    contains any SECTION_LANGUAGE_MARKERS word for that language, or when that
+    language has no marker list. W8 review: "Can my spouse also join as a
+    distributor?" against the English NL licence section was rescued (0.6625).
+    """
+    markers = SECTION_LANGUAGE_MARKERS.get(_marker_language(section_language))
+    if not markers:
+        return True
+    return bool(_folded_words(message) & markers)
+
+
+def _question_in_another_listed_language(message: str, section_language: str) -> bool:
+    """True when the question carries a SECTION_LANGUAGE_MARKERS word of a language other than the section's.
+
+    Positive evidence of translation. Absence of the section language's markers
+    alone is not enough: "Is a spouse allowed as distributor?" uses no listed
+    English word and was still rescued (W8 review finding 2, 0.6625).
+
+    Names say nothing about the question's language, so words written as names
+    ("Van de Berg", "? Bitte.") are not evidence, and neither is a word spelled
+    exactly like an English one in TRANSLATION_EVIDENCE_HOMOGRAPHS ("a delivery
+    van", "fur"); "für" still is (Fable W8b note 3).
+    """
+    section = _marker_language(section_language)
+    written = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", message or "").casefold(), flags=re.UNICODE)
+    words = _folded_words(" ".join(word for word in written if word not in TRANSLATION_EVIDENCE_HOMOGRAPHS))
+    words -= _question_name_tokens(message)
+    return any(words & markers for language, markers in SECTION_LANGUAGE_MARKERS.items() if language != section)
+
+
+def _marker_language(language: str) -> str:
+    return re.split(r"[-_]", str(language or "").casefold())[0]
+
+
+def _folded_words(message: str) -> set[str]:
+    decomposed = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", message or "")).casefold()
+    folded = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return set(re.findall(r"[^\W_]+", folded, flags=re.UNICODE))
+
+
 def _question_name_tokens(message: str) -> set[str]:
     """Tokens written as names in the question: acronyms, numbers, capitalised non-initial words.
 
@@ -798,6 +881,12 @@ def _translated_query_local_relevance(
         or metadata.get("document_type") in GLOBAL_DIRECTORY_DOCUMENT_TYPES
         or str(document.country or "").upper() not in {code.upper() for code in get_document_country_codes(country)}
     ):
+        return 0.0
+    if _question_in_section_language(message, document.language):
+        # Not a translation: the question's own lexical relevance stands.
+        return 0.0
+    if not _question_in_another_listed_language(message, document.language):
+        # No positive sign of another language either, so still not a translation.
         return 0.0
     ordinary_words = _tokens(message) - _question_name_tokens(message)
     if not ordinary_words:

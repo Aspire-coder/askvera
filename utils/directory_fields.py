@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections.abc import Iterable
 
@@ -464,11 +465,43 @@ def remove_unrequested_directory_fields(
             return match.group(0)
         return ""
 
+    # An unrequested label that sits inside a parenthetical aside within a
+    # sentence - "...at +223 44 90 05 41 (Business Hours: 08:00 am - 12:00
+    # pm)." - must not be handled by the line-wide removal below: cutting
+    # from "Business Hours:" to end-of-line leaves the sentence ending on an
+    # unmatched "(", which the output validator then flags as an incomplete
+    # answer (see tests/unit/test_demo_directory_field_parentheses.py). Remove
+    # the unrequested clauses of those asides first (every such label in the
+    # paragraph, not just the first - see _strip_unrequested_parenthetical),
+    # and let the generic line-start removal below continue to handle every
+    # other case exactly as before.
+    label_start_pattern = re.compile(
+        rf"(?<!\w)(?!{allowed}\b)(?P<label>{labels})\s*:", re.IGNORECASE,
+    )
+    # Work paragraph-by-paragraph (split on a blank line) rather than one
+    # line at a time: a parenthetical aside can itself wrap onto a second
+    # physical line ("(Business Hours: 08:00 am\n- 12:00 pm)"), and scanning
+    # only within a single line can never find that aside's true closing
+    # ")" - see tests/unit/test_demo_directory_field_parentheses.py. Stopping
+    # at a blank line keeps an unrelated later record from ever being treated
+    # as "inside" an earlier paren. (An aside whose own ")" only appears after
+    # a blank line is therefore treated as unclosed - a documented residual.)
+    paragraphs = re.split(r"(\n\s*\n)", answer or "")
+    paren_changes = 0
+    for index, chunk in enumerate(paragraphs):
+        if index % 2:
+            continue  # the blank-line separator itself; leave untouched
+        paragraphs[index], removed = _strip_unrequested_parenthetical(
+            chunk, label_start_pattern, protected, labels
+        )
+        paren_changes += removed
+    de_parenthesized = "".join(paragraphs)
+
     pattern = re.compile(
         rf"(?<!\w)(?!{allowed}\b)(?P<label>{labels})\s*:\s*[^\n]*(?:\n|$)",
         re.IGNORECASE,
     )
-    cleaned, replacements = pattern.subn(_strip_unless_protected, answer or "")
+    cleaned, replacements = pattern.subn(_strip_unless_protected, de_parenthesized)
 
     # Only "Label: value" lines are removed. This runs on every answer, and a
     # sentence-level pass cut policy prose ("Returns are free, but the delivery
@@ -476,7 +509,449 @@ def remove_unrequested_directory_fields(
     # "09.00 am" at its dot (tests/unit/test_demo_directory_prose_preservation.py).
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, replacements > 0
+    return cleaned, replacements > 0 or paren_changes > 0
+
+
+_PAREN_EVENT_RE = re.compile(r"[()\n]")
+_PAREN_CLAUSE_CHAR_RE = re.compile(r"[()\[\];,.!?\n]")
+# An abbreviation that introduces what follows ("(e.g. Fax: ...)") is never a
+# clause boundary, even before a label: splitting there would leave a bare,
+# meaningless "(e.g.)" once the unrequested clause after it is dropped.
+_PAREN_INTRODUCER_ABBREVIATION_RE = re.compile(
+    r"(?<![\w.])(?:e\.g|i\.e|cf|viz|vs|no)\.$", re.IGNORECASE,
+)
+# A short token ("Sat.", "ext.", "Mob.", "pm."), a dotted abbreviation
+# ("a.m.", "p.m.") or a known longer abbreviation is a continuation of the
+# value it sits in, not a sentence end - unless a directory label follows.
+_PAREN_SHORT_ABBREVIATION_RE = re.compile(
+    r"(?<![\w.])(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|"
+    r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+    r"ext|mob|tel|fax|st|rd|ave|dr|mr|mrs|ms|hr|hrs|min|etc|approx|"
+    r"(?:[^\W\d_]\.)+[^\W\d_])\.$",
+    re.IGNORECASE,
+)
+# "am."/"pm." (or "a.m."/"p.m.") close an hours value: a capitalised word
+# that follows them and is not a continuation word starts new prose.
+_PAREN_MERIDIEM_RE = re.compile(r"(?<![\w.])(?:a\.?m|p\.?m)\.$", re.IGNORECASE)
+_PAREN_NEXT_WORD_RE = re.compile(r"\s*([^\W\d_][\w'’-]*)")
+# Capitalised words that continue an hours/contact value after a "." rather
+# than starting new prose: "(Business Hours: 8-12. Saturday 9-1)" or
+# "(Business Hours: 8-12. Mobile 0722 123 456)" is one unrequested clause.
+_PAREN_CONTINUATION_WORDS = frozenset({
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
+    "weekdays", "weekends", "weekend",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    "mobile", "mob", "cell", "cellphone", "tel", "telephone", "phone", "whatsapp",
+    "ext", "extension", "sms", "hotline", "toll", "fax",
+    "closed", "open", "opening", "except", "excluding", "including", "holidays",
+    "holiday", "public", "lunch", "noon", "midnight", "am", "pm",
+    "and", "or", "to", "until", "till", "through",
+})
+
+
+def _is_paren_clause_boundary(
+    text: str, index: int, start: int, stop: int, label_follow_re: re.Pattern[str]
+) -> bool:
+    """Decide whether the ";", ",", ".", "!" or "?" at ``index`` ends a clause.
+
+    ";" always does. "," only does when another known directory label follows
+    (so "08:00 am - 12:00 pm, Monday-Friday" stays one value). "!"/"?" do when
+    followed by whitespace or the end of the aside. "." is the ambiguous one -
+    "9 a.m. - 5 p.m.", "Sat. 9-1", "ext. 12", "Mob. 0722 ..." all contain a
+    "." + space that is not a sentence end - so it only ends a clause when a
+    directory label follows it, or when what follows clearly starts new prose
+    (a capitalised word that is not a weekday, month or contact/hours
+    continuation word) and the "." does not close an abbreviation. When in
+    doubt the text stays in the same clause: for an unrequested clause that
+    means its whole value is removed rather than a fragment of it kept.
+    """
+    char = text[index]
+    if char == ";":
+        return True
+    if char in ",\n":
+        # A "Label: value" line inside a multi-line aside is its own clause.
+        return label_follow_re.match(text, index + 1, stop) is not None
+    following = index + 1
+    if following < stop and not text[following].isspace():
+        return False
+    if char != "." or following >= stop:
+        return True
+    window = max(start, index - 16)
+    if _PAREN_INTRODUCER_ABBREVIATION_RE.search(text, window, following):
+        return False
+    if label_follow_re.match(text, following, stop):
+        return True
+    if (not _PAREN_MERIDIEM_RE.search(text, window, following)
+            and _PAREN_SHORT_ABBREVIATION_RE.search(text, window, following)):
+        return False
+    word = _PAREN_NEXT_WORD_RE.match(text, following, stop)
+    if not word or not word.group(1)[:1].isupper():
+        return False
+    return word.group(1).rstrip(".").casefold() not in _PAREN_CONTINUATION_WORDS
+
+
+def _paren_clause_bounds(
+    text: str,
+    start: int,
+    stop: int,
+    child_spans: list[tuple[int, int]],
+    close_of: dict[int, int],
+    label_follow_re: re.Pattern[str],
+) -> list[tuple[int, int]]:
+    """Split ``text[start:stop]`` (an aside's inner text) into clause ranges.
+
+    Only characters at bracket depth 0 can end a clause. Already-processed
+    nested asides (``child_spans``) are skipped as atomic units, a matched
+    nested "(...)" or "[...]" raises the depth, and an unmatched stray "("
+    (an emoticon, a typo) does not - so it can never stop every later clause
+    boundary from being seen. The boundary character stays attached to the
+    clause before it, so a dropped clause takes its terminator with it.
+    """
+    bounds: list[tuple[int, int]] = []
+    clause_start = start
+    depth = 0
+    position = start
+    for span_start, span_stop in [*child_spans, (stop, stop)]:
+        for found in _PAREN_CLAUSE_CHAR_RE.finditer(text, position, span_start):
+            index = found.start()
+            char = text[index]
+            if char == "(":
+                if index in close_of:
+                    depth += 1
+            elif char == "[":
+                depth += 1
+            elif char in ")]":
+                if depth:
+                    depth -= 1
+            elif not depth and _is_paren_clause_boundary(text, index, start, stop, label_follow_re):
+                bounds.append((clause_start, index + 1))
+                clause_start = index + 1
+        position = span_stop
+    bounds.append((clause_start, stop))
+    return bounds
+
+
+def _rstrip_parts(parts: list[str], chars: str | None) -> None:
+    while parts:
+        stripped = parts[-1].rstrip(chars)
+        if stripped:
+            parts[-1] = stripped
+            return
+        parts.pop()
+
+
+def _render_paren_span(
+    text: str,
+    start: int,
+    stop: int,
+    kids: list[int],
+    nodes: list[list],
+    results: list[tuple[str | None, bool, str] | None],
+) -> str:
+    """Render ``text[start:stop]`` with its processed nested asides applied.
+
+    A kept aside is substituted with its rewritten "(...)". A dropped closed
+    aside is removed together with the spaces before it; a dropped unclosed
+    aside (which ran to the end of its line) also takes trailing whitespace
+    and re-terminates the sentence before it with "." when needed. A dropped
+    aside that carried one half of a "**" bold pair leaves one "**" at the
+    seam so the bold markers stay balanced.
+    """
+    parts: list[str] = []
+    position = start
+    seam = ""
+
+    def _append_text(piece: str) -> None:
+        nonlocal seam
+        if seam:
+            # The dropped aside's odd "**" paired with one right outside it:
+            # cancel that one instead of writing "****".
+            if parts and parts[-1].endswith("**"):
+                parts[-1] = parts[-1][:-2]
+            elif piece.lstrip(" \t").startswith("**"):
+                piece = piece.replace("**", "", 1)
+            else:
+                parts.append(seam)
+            seam = ""
+        parts.append(piece)
+
+    for kid in kids:
+        opener, kid_stop, _closed = nodes[kid]
+        _append_text(text[position:opener])
+        kept, closed, bold = results[kid]
+        if kept is not None:
+            _append_text(kept)
+        elif closed:
+            _rstrip_parts(parts, " \t")
+            seam = bold
+        else:
+            _rstrip_parts(parts, None)
+            seam = bold
+            if not parts or parts[-1][-1] not in ".!?":
+                _append_text(".")
+        position = kid_stop
+    _append_text(text[position:stop])
+    return "".join(parts)
+
+
+def _match_parens(text: str) -> dict[int, int]:
+    """Map every "(" that has a matching ")" to that ")" in one stack pass."""
+    close_of: dict[int, int] = {}
+    pending: list[int] = []
+    for event in _PAREN_EVENT_RE.finditer(text):
+        index = event.start()
+        if text[index] == "(":
+            pending.append(index)
+        elif text[index] == ")" and pending:
+            close_of[pending.pop()] = index
+    return close_of
+
+
+def _paren_label_owner(
+    open_stack: list[tuple[int, int]],
+    line_start: int,
+    extended_opener: dict[int, int],
+) -> tuple[int, bool] | None:
+    """Return ``(opener, closed)`` for the aside a label sits in, or ``None``.
+
+    ``open_stack`` holds the "(" still open at the label, each paired with the
+    innermost *matched* "(" at or below it. The innermost matched "(" wins;
+    otherwise the nearest unmatched "(" on the label's own line, taking a run
+    of directly adjacent unmatched "(((" together. A stray "(" on an earlier
+    line, or none at all, leaves the label to the caller's line-wide pass.
+    """
+    if not open_stack:
+        return None
+    innermost_matched = open_stack[-1][1]
+    if innermost_matched >= 0:
+        return innermost_matched, True
+    top = open_stack[-1][0]
+    if top < line_start:
+        return None
+    opener = extended_opener.get(top)
+    if opener is None:
+        level = len(open_stack) - 1
+        while level > 0:
+            below = open_stack[level - 1][0]
+            # Only a run of directly adjacent "((("; a separate stray such
+            # as the "(" of "Call :( (" keeps its own text.
+            if below < line_start or below + 1 != open_stack[level][0]:
+                break
+            level -= 1
+        opener = open_stack[level][0]
+        extended_opener[top] = opener
+    return opener, False
+
+
+def _assign_paren_owners(
+    text: str, label_starts: list[int], close_of: dict[int, int]
+) -> tuple[dict[int, list[int]], dict[int, bool], list[int]]:
+    """Assign each label start to its aside's opener in one linear sweep.
+
+    Also returns the newlines that sit outside every matched "(...)" - the
+    places an unclosed aside can end.
+    """
+    owned: dict[int, list[int]] = {}
+    closed_owner: dict[int, bool] = {}
+    extended_opener: dict[int, int] = {}
+    open_stack: list[tuple[int, int]] = []
+    depth0_newlines: list[int] = []
+    line_start = 0
+    label_index = 0
+    events = [event.start() for event in _PAREN_EVENT_RE.finditer(text)]
+    events.append(len(text))
+    for index in events:
+        while label_index < len(label_starts) and label_starts[label_index] < index:
+            owner = _paren_label_owner(open_stack, line_start, extended_opener)
+            if owner is not None:
+                owned.setdefault(owner[0], []).append(label_starts[label_index])
+                closed_owner[owner[0]] = owner[1]
+            label_index += 1
+        char = text[index : index + 1]
+        if char == "(":
+            innermost = index if index in close_of else (open_stack[-1][1] if open_stack else -1)
+            open_stack.append((index, innermost))
+        elif char == ")":
+            if open_stack:
+                open_stack.pop()
+        elif char == "\n":
+            if not open_stack or open_stack[-1][1] < 0:
+                depth0_newlines.append(index)
+            line_start = index + 1
+    return owned, closed_owner, depth0_newlines
+
+
+def _unclosed_aside_stop(text: str, opener: int, depth0_newlines: list[int]) -> int:
+    """An unclosed aside runs to the end of its line (before any "\\r\\n")."""
+    newline = bisect.bisect_right(depth0_newlines, opener)
+    if newline >= len(depth0_newlines):
+        return len(text)
+    stop = depth0_newlines[newline]
+    return stop - 1 if stop > opener + 1 and text[stop - 1] == "\r" else stop
+
+
+def _build_paren_nodes(
+    text: str,
+    owned: dict[int, list[int]],
+    closed_owner: dict[int, bool],
+    close_of: dict[int, int],
+    depth0_newlines: list[int],
+) -> tuple[list[list], list[list[int]], list[list[int]], list[int], list[int]]:
+    """Build the nesting tree of affected asides (in opener order)."""
+    nodes: list[list] = []
+    node_labels: list[list[int]] = []
+    for opener in sorted(owned):
+        closed = closed_owner[opener]
+        stop = close_of[opener] + 1 if closed else _unclosed_aside_stop(text, opener, depth0_newlines)
+        nodes.append([opener, stop, closed])
+        node_labels.append(owned[opener])
+
+    children: list[list[int]] = [[] for _ in nodes]
+    root_children: list[int] = []
+    order: list[int] = []
+    chain: list[int] = []
+    for node_index, (opener, stop, _closed) in enumerate(nodes):
+        while chain and nodes[chain[-1]][1] <= opener:
+            chain.pop()
+        if chain and stop > nodes[chain[-1]][1]:
+            continue  # not properly nested; leave that aside untouched
+        (children[chain[-1]] if chain else root_children).append(node_index)
+        chain.append(node_index)
+        order.append(node_index)
+    return nodes, node_labels, children, root_children, order
+
+
+def _append_bold_before_separators(piece: str) -> str:
+    body = piece.rstrip(" \t\r\n;,")
+    return body + "**" + piece[len(body):]
+
+
+def _prepend_bold_after_separators(piece: str) -> str:
+    body = piece.lstrip(" \t\r\n;,")
+    return piece[: len(piece) - len(body)] + "**" + body
+
+
+def _rewrite_paren_node(
+    text: str,
+    node_index: int,
+    tree: tuple[list[list], list[list[int]], list[list[int]]],
+    results: list[tuple[str | None, bool, str] | None],
+    close_of: dict[int, int],
+    label_follow_re: re.Pattern[str],
+) -> None:
+    """Drop the clauses of one aside that hold its own unrequested labels.
+
+    Nested affected asides must already have a result. A dropped run of
+    clauses that carried an odd number of "**" leaves one "**" at the seam:
+    after the kept text when that text has an unclosed bold, otherwise just
+    before the next kept clause - never "****".
+    """
+    nodes, node_labels, children = tree
+    opener, stop, closed = nodes[node_index]
+    kids = children[node_index]
+    bounds = _paren_clause_bounds(
+        text,
+        opener + 1,
+        stop - 1 if closed else stop,
+        [(nodes[kid][0], nodes[kid][1]) for kid in kids],
+        close_of,
+        label_follow_re,
+    )
+    labels_here = node_labels[node_index]
+    kept_parts: list[str] = []
+    kept_bold = 0
+    pending_bold = 0
+    kid_cursor = 0
+    for clause_start, clause_stop in bounds:
+        kid_end = kid_cursor
+        while kid_end < len(kids) and nodes[kids[kid_end]][0] < clause_stop:
+            kid_end += 1
+        piece = _render_paren_span(text, clause_start, clause_stop, kids[kid_cursor:kid_end], nodes, results)
+        kid_cursor = kid_end
+        label_at = bisect.bisect_left(labels_here, clause_start)
+        if label_at < len(labels_here) and labels_here[label_at] < clause_stop:
+            pending_bold ^= piece.count("**") & 1
+            continue
+        if not piece.strip(" \t\r\n;,"):
+            continue
+        if pending_bold and kept_bold & 1:
+            kept_parts[-1] = _append_bold_before_separators(kept_parts[-1])
+            kept_bold += 1
+        elif pending_bold:
+            piece = _prepend_bold_after_separators(piece)
+        pending_bold = 0
+        kept_parts.append(piece)
+        kept_bold += piece.count("**")
+    if pending_bold and kept_parts:
+        kept_parts[-1] = _append_bold_before_separators(kept_parts[-1])
+        pending_bold = 0
+
+    new_inner = "".join(kept_parts).strip()
+    new_inner = re.sub(r"^[;,]\s*", "", new_inner).rstrip(" ;,").strip()
+    if new_inner:
+        results[node_index] = ("(" + new_inner + ")", closed, "")
+        return
+    if closed:
+        # Take a now-empty enclosing "(...)" ("((Fax: 1))") with it rather
+        # than leaving "()" behind.
+        while opener > 0 and text[opener - 1] == "(" and close_of.get(opener - 1) == stop:
+            opener -= 1
+            stop += 1
+        nodes[node_index][0], nodes[node_index][1] = opener, stop
+    results[node_index] = (None, closed, "**" if pending_bold else "")
+
+
+def _strip_unrequested_parenthetical(
+    text: str, label_start_pattern: re.Pattern[str], protected: set[str], labels: str
+) -> tuple[str, int]:
+    """Remove only the unrequested labels' own clauses inside "(...)" asides.
+
+    Every unrequested, unprotected label in ``text`` (one paragraph) is
+    considered - a label at the start of a line, or one named in
+    ``keep_labels``, is skipped rather than ending the scan, so a later
+    parenthetical label in the same paragraph is still handled here (the
+    caller's end-of-line removal would otherwise cut it to a dangling "(").
+
+    Bracket matching is computed once, in one linear stack pass. A label
+    belongs to the innermost "(" before it that has a matching ")" after it;
+    if no enclosing "(" is matched, to the nearest unmatched "(" on the same
+    line (see :func:`_paren_label_owner`), with the aside running to the end
+    of that line. A stray "(" on an earlier line - "Prices (see below",
+    "Sorry :(" - therefore never swallows a later, real aside. Labels outside
+    any aside are left for the caller's line-wide removal.
+
+    Each affected aside is split into clauses (see
+    :func:`_paren_clause_bounds`); only clauses holding one of its own
+    unrequested labels are dropped, so a requested field or plain prose in
+    the same aside survives. If nothing meaningful survives, the whole aside
+    (and the spaces before it, and any now-empty enclosing "(...)") goes; an
+    unclosed aside that keeps something is closed with ")". Nested affected
+    asides are processed innermost-first.
+
+    Returns the rewritten text and the number of asides changed.
+    """
+    label_starts = [
+        found.start()
+        for found in label_start_pattern.finditer(text)
+        if found.group("label").strip().casefold() not in protected
+    ]
+    if not label_starts:
+        return text, 0
+    close_of = _match_parens(text)
+    owned, closed_owner, depth0_newlines = _assign_paren_owners(text, label_starts, close_of)
+    if not owned:
+        return text, 0
+    nodes, node_labels, children, root_children, order = _build_paren_nodes(
+        text, owned, closed_owner, close_of, depth0_newlines
+    )
+    label_follow_re = re.compile(rf"\s*(?:{labels})\s*:", re.IGNORECASE)
+    results: list[tuple[str | None, bool, str] | None] = [None] * len(nodes)
+    for node_index in reversed(order):
+        _rewrite_paren_node(text, node_index, (nodes, node_labels, children), results, close_of, label_follow_re)
+    return _render_paren_span(text, 0, len(text), root_children, nodes, results), len(order)
 
 
 # A minimum-order field value is a figure with at most a currency equivalent,

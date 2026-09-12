@@ -140,9 +140,21 @@ FOLLOW_UP_CONTEXT_MARKERS = FOLLOW_UP_REFERENCE_MARKERS + FOLLOW_UP_TOPIC_SHIFT_
 FOLLOW_UP_MARKET_ELLIPSIS = re.compile(r"^(?:and|but)\s+(?:for|in|about)\s+\S", re.IGNORECASE)
 FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS = 6
 # Removed together with a replaced market name, so "the delivery cost in Mali?"
-# becomes "the delivery cost?" rather than "the delivery cost in?". English only;
-# in another language the connector simply stays, which retrieval tolerates.
-REPLACED_MARKET_LEAD_IN = re.compile(r"\b(?:in|for|of|from|at|to)\s+(?:the\s+)?$", re.IGNORECASE)
+# becomes "the delivery cost?" rather than "the delivery cost in?". English, Dutch,
+# French and German place connectors with an optional article; in any other
+# language the connector simply stays, which retrieval tolerates. The same
+# connector is also what lets a lower-case name count as a market ("in kenya").
+# "van", "von", "de", "à" and the elided "de l'" joined in W8c (Fable W8b note 1:
+# "openingstijden van mali", "Lieferkosten von mali" and "de la turquie" kept the stale market).
+REPLACED_MARKET_LEAD_IN = re.compile(
+    r"(?<![^\W_])(?:in|for|of|from|at|to|naar|voor|uit|van|au|aux|en|pour|du|de|à|nach|fur|für|aus|von)\s+"
+    r"(?:(?:the|la|le|les|de|het|der|die|das)\s+|l['’]\s*)?$",
+    re.IGNORECASE | re.UNICODE,
+)
+# "What about the netherlands?": a lower-case name after "what/how about" counts
+# only when it closes the clause, so "What about china plates?" keeps "china".
+REPLACED_MARKET_QUESTION_LEAD_IN = re.compile(r"(?<![^\W_])(?:what|how)\s+about\s+(?:the\s+)?$", re.IGNORECASE)
+REPLACED_MARKET_CLAUSE_END = re.compile(r"\s*(?:[?.!,;:]|$)")
 REPLACED_MARKET_POSSESSIVE = re.compile(r"['’]s\b", re.IGNORECASE)
 # A follow-up that opens like a question and asks for no new content is judged on
 # its own words rather than on the question it inherits for retrieval. Both lists
@@ -1707,8 +1719,8 @@ class AIOrchestrator:
         Each candidate span is confirmed with the same matchers retrieval uses,
         so localized aliases and multi-word names work, and a longer name that
         merely contains a stale one ("Equatorial Guinea" when Guinea is stale)
-        is left alone. A leading English connector ("in", "for") and a trailing
-        possessive go with the name. Returns "" when nothing substantive is left.
+        is left alone. A leading place connector ("in", "naar", "au") and a
+        trailing possessive go with the name. Returns "" when nothing substantive is left.
         """
         catalog = [*load_market_config()["markets"], *load_global_directory_markets()]
         names = [str(market.get("name") or "") for market in catalog]
@@ -1731,6 +1743,8 @@ class AIOrchestrator:
                     continue
                 if any(_normalize_market_text(word.group()) not in name_words for word in words[start:end]):
                     continue
+                if not self._reads_as_market_reference(text, words[start].start(), words[end - 1].end()):
+                    continue
                 surface = text[words[start].start():words[end - 1].end()]
                 found_codes = find_market_mentions(surface)
                 found_records = find_shared_office_record_countries(surface)
@@ -1742,13 +1756,68 @@ class AIOrchestrator:
 
         pieces: list[str] = []
         cursor = 0
-        for span_start, span_end in sorted(spans):
+        for span_start, span_end in self._with_compound_market_references(text, spans):
             pieces.append(REPLACED_MARKET_LEAD_IN.sub("", text[cursor:span_start]))
             possessive = REPLACED_MARKET_POSSESSIVE.match(text, span_end)
             cursor = possessive.end() if possessive else span_end
         pieces.append(text[cursor:])
         cleaned = re.sub(r"\s+([?.!,;:])", r"\1", re.sub(r"\s+", " ", "".join(pieces))).strip(" ,;:")
         return cleaned if re.search(r"[^\W_]", cleaned, flags=re.UNICODE) else ""
+
+    def _reads_as_market_reference(self, text: str, span_start: int, span_end: int) -> bool:
+        """True when a span spelling a market name is written as that market in ``text``.
+
+        find_market_mentions casefolds, so "a turkey" matches Turkey (W8 review:
+        "Can I ship a turkey to Mali?" lost "turkey"). A name in a cased script
+        is capitalised; a caseless script has nothing to check, and neither does
+        text written without a single capital, where every span counts as the
+        clean base read it (Fable W8b note 1: "is mali open on saturdays?" kept
+        Mali; a kept stale market misroutes retrieval, a lost ordinary word does
+        not). Otherwise a lower-case span counts only when a place connector
+        leads into it ("office hours in kenya", "van mali", "au mali"), a
+        possessive follows ("mali's"), or it closes a "what about" clause
+        ("What about the netherlands?"). W8 review finding 1: a capital
+        anywhere in the text used to reject every lower-case span.
+        """
+        first = text[span_start]
+        if first.isupper() or not first.islower():
+            return True
+        if not any(character.isupper() for character in text):
+            return True
+        before = text[:span_start]
+        if REPLACED_MARKET_LEAD_IN.search(before) or REPLACED_MARKET_POSSESSIVE.match(text, span_end):
+            return True
+        return bool(REPLACED_MARKET_QUESTION_LEAD_IN.search(before) and REPLACED_MARKET_CLAUSE_END.match(text, span_end))
+
+    def _with_compound_market_references(self, text: str, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        """Widen removed spans to the whole compound reference they sit in, in order.
+
+        A removed name inside a shared office's compound record name
+        ("Kenya/East Africa") takes the whole record name with it, and names
+        joined only by a slash ("Mali/Senegal") are removed as one, so no "/"
+        fragment is left (W8 review: "office hours /East Africa?").
+        """
+        compounds: list[tuple[int, int]] = []
+        for office in load_shared_offices():
+            parts = [part.split() for part in str(office["record_country"]).split("/")]
+            if len(parts) < 2 or not all(parts):
+                continue
+            pattern = r"\s*/\s*".join(r"\s+".join(re.escape(word) for word in part) for part in parts)
+            compounds.extend(
+                match.span()
+                for match in re.finditer(rf"(?<![^\W_]){pattern}(?![^\W_])", text, flags=re.IGNORECASE | re.UNICODE)
+            )
+        widened: list[tuple[int, int]] = []
+        for start, end in sorted(spans):
+            for compound_start, compound_end in compounds:
+                if compound_start <= start and end <= compound_end:
+                    start, end = compound_start, compound_end
+                    break
+            if widened and (widened[-1][1] >= start or re.fullmatch(r"\s*/\s*", text[widened[-1][1]:start])):
+                widened[-1] = (widened[-1][0], max(widened[-1][1], end))
+            else:
+                widened.append((start, end))
+        return widened
 
     def _is_instruction_message(self, message: str) -> bool:
         """True for a bare instruction to produce content, which is never context.
