@@ -68,6 +68,7 @@ from services.market_config import (
     _localized_market_names,
     find_market_mentions,
     find_probable_market_typo,
+    find_shared_office_record_countries,
     load_global_directory_markets,
     load_market_config,
     market_display_name,
@@ -216,9 +217,12 @@ def _support_contact_segments(value: str) -> list[str]:
 
 
 def _resolve_support_contact_target_names(lookup_text: str, country: str) -> list[str]:
-    """Return the market name(s) actually named in ``lookup_text``, else the
-    session market's own name. Never guesses a market from nothing."""
+    """Return the market name(s) actually named in ``lookup_text`` plus the
+    ``record_country`` of a configured shared office serving a named country
+    that has no market entry of its own, else the session market's own name.
+    Never guesses a market from nothing."""
     mentioned = [name for name in (market_display_name(code) for code in find_market_mentions(lookup_text)) if name]
+    mentioned.extend(sorted(find_shared_office_record_countries(lookup_text)))
     if mentioned:
         return mentioned
     session_name = market_display_name(country)

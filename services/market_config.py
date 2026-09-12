@@ -70,6 +70,61 @@ def load_global_directory_markets() -> list[dict[str, str]]:
     ]
 
 
+@lru_cache(maxsize=1)
+def load_shared_offices() -> list[dict[str, Any]]:
+    """Load owner-decided shared offices from ``global_directory_markets.json``.
+
+    Each entry names a directory ``record_country`` whose office the owner
+    decided also serves the listed countries (e.g. "Kenya/East Africa"). This
+    is directory data only and never changes policy access. A missing file,
+    missing ``shared_offices`` key or malformed entry fails open to nothing.
+    """
+    path = _global_directory_markets_path()
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return []
+    offices = payload.get("shared_offices") if isinstance(payload, dict) else None
+    if not isinstance(offices, list):
+        return []
+    loaded: list[dict[str, Any]] = []
+    for entry in offices:
+        if not isinstance(entry, dict):
+            continue
+        record_country = str(entry.get("record_country") or "").strip()
+        serves = entry.get("serves")
+        if not record_country or not isinstance(serves, list):
+            continue
+        names = [name.strip() for name in serves if isinstance(name, str) and name.strip()]
+        if names:
+            loaded.append({"record_country": record_country, "serves": names})
+    return loaded
+
+
+def find_shared_office_record_countries(message: str) -> set[str]:
+    """Return the ``record_country`` of each shared office serving a country
+    named in ``message`` that is not a configured market of its own.
+
+    A served country that ``find_market_mentions`` already recognizes keeps
+    its own directory record, so only whole names with no market entry of
+    their own (e.g. "South Sudan") reach the serving office's record.
+    """
+    padded_message = f" {_normalize_market_text(message)} "
+    if not padded_message.strip():
+        return set()
+    record_countries: set[str] = set()
+    for office in load_shared_offices():
+        for name in office["serves"]:
+            normalized_name = _normalize_market_text(name)
+            if not normalized_name or f" {normalized_name} " not in padded_message:
+                continue
+            if find_market_mentions(name):
+                continue
+            record_countries.add(office["record_country"])
+    return record_countries
+
+
 def _policy_locales_path() -> Path:
     """Return the content-managed catalog of policy locales currently published."""
     return Path(os.environ.get("POLICY_LOCALES_CONFIG_PATH", DEFAULT_POLICY_LOCALES_CONFIG_PATH))

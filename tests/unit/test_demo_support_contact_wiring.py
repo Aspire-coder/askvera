@@ -15,7 +15,11 @@ Directory ``record_country`` values are not plain market names - e.g.
 "Kenya/East Africa", "Netherlands Benelux" - so matching is by whole
 segment/word, never substring: "Kenya" matches "Kenya/East Africa", but a
 region word ("East Africa", "Benelux") or an unrelated country named only in
-the record body (South Sudan, Belgium) must never match.
+the record body (Belgium) must never match.
+
+Demo K (owner decision 2026-09-12): South Sudan is served by the configured
+Kenya/East Africa shared office (``shared_offices`` in
+config/global_directory_markets.json), so it now matches that record.
 """
 
 from __future__ import annotations
@@ -194,7 +198,7 @@ def test_resolved_followup_uses_resolved_request_market_not_raw_question(monkeyp
     assert "Telephone Office: +254 712 434 328" in completed.answer
 
 
-def test_south_sudan_target_with_only_kenya_east_africa_record_gets_no_supplement(monkeypatch) -> None:
+def test_south_sudan_target_matches_configured_kenya_east_africa_shared_office(monkeypatch) -> None:
     _identity_scrub(monkeypatch)
     orchestrator = AIOrchestrator()
     document = _kenya_document()
@@ -211,7 +215,7 @@ def test_south_sudan_target_with_only_kenya_east_africa_record_gets_no_supplemen
         resolved_request="Who do I contact in South Sudan?",
     )
 
-    assert "Telephone Office" not in completed.answer
+    assert "Telephone Office: +254 712 434 328" in completed.answer
 
 
 def test_belgium_named_in_request_does_not_match_kenya_east_africa_record(monkeypatch) -> None:

@@ -27,6 +27,7 @@ from services.knowledge_generations import (
 )
 from services.market_config import (
     find_market_mentions,
+    find_shared_office_record_countries,
     get_document_country_codes,
     load_global_directory_markets,
     load_market_config,
@@ -664,10 +665,16 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
 
 
 def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
-    """Return the named market(s) whose global directory record should lead."""
+    """Return the named market(s) whose global directory record should lead.
+
+    A named country served by a configured shared office and without a market
+    entry of its own adds that office's ``record_country`` instead of falling
+    back to the selected market.
+    """
     catalog = [*load_market_config().get("markets", []), *load_global_directory_markets()]
     mentioned_codes = find_market_mentions(message)
-    if not mentioned_codes:
+    shared_record_countries = find_shared_office_record_countries(message)
+    if not mentioned_codes and not shared_record_countries:
         normalized_message = _normalize_text(message)
         message_tokens = [token for token in normalized_message.split() if len(token) >= 4]
         for market in catalog:
@@ -687,14 +694,14 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
                 for token in message_tokens
             ):
                 mentioned_codes.add(str(market.get("code") or "").upper())
-    if not mentioned_codes and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or ""):
+    if not mentioned_codes and not shared_record_countries and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or ""):
         return set()
-    target_codes = mentioned_codes or {str(selected_country or "").upper()}
+    target_codes = mentioned_codes or (set() if shared_record_countries else {str(selected_country or "").upper()})
     return {
         str(country.get("name") or "")
         for country in catalog
         if str(country.get("code") or "").upper() in target_codes
-    }
+    } | shared_record_countries
 
 
 def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:

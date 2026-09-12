@@ -13,7 +13,7 @@ from app.risk.models import RiskContext
 from app.risk.policies.income_claim_policy import IncomeClaimPolicy
 from config import settings
 from services.aws_clients import get_aws_clients
-from services.market_config import find_market_mentions
+from services.market_config import find_market_mentions, find_shared_office_record_countries
 from services.guardrails import is_policy_safety_question
 from utils.logging import get_logger
 
@@ -585,6 +585,7 @@ def _planned_retrieval_plan(
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
             or bool(named_markets)
+            or bool(find_shared_office_record_countries(message))
             or bool(DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries])))
             and bool(FOREVER_NAMED_RECORD_RE.search(message or ""))
         )

@@ -1,6 +1,6 @@
 {
-  "version": "2026-09-03",
-  "description": "Country names covered by the global sponsoring/office directory that find_market_mentions() would otherwise miss - either because the market has no widget deployment and so no entry in markets.json at all (e.g. Japan), or because the directory spells an already-configured market's name differently than markets.json does (e.g. 'Tanzania' vs markets.json's 'Tanzania, United Republic of'). This never changes which country's policy documents a session can access - that stays governed entirely by markets.json/policy_locales.json - it only widens what find_market_mentions() recognizes as a named market for global-directory query planning and the cross-market evidence gate. Deliberately excludes regional groupings the directory lists as a single record covering multiple countries (Central America, North America, Scandinavia, Kenya/East Africa) and constituent countries of an already-configured market (England, Scotland are part of the existing United Kingdom (GB) market) - both need a content-team decision on the right mapping, not a guess.",
+  "version": "2026-09-12",
+  "description": "Country names covered by the global sponsoring/office directory that find_market_mentions() would otherwise miss - either because the market has no widget deployment and so no entry in markets.json at all (e.g. Japan), or because the directory spells an already-configured market's name differently than markets.json does (e.g. 'Tanzania' vs markets.json's 'Tanzania, United Republic of'). This never changes which country's policy documents a session can access - that stays governed entirely by markets.json/policy_locales.json - it only widens what find_market_mentions() recognizes as a named market for global-directory query planning and the cross-market evidence gate. Deliberately excludes regional groupings the directory lists as a single record covering multiple countries (Central America, North America, Scandinavia, Kenya/East Africa) and constituent countries of an already-configured market (England, Scotland are part of the existing United Kingdom (GB) market) - both need a content-team decision on the right mapping, not a guess. A mapping the owner has actually decided is recorded under shared_offices (the serving record's record_country, the countries its office serves, and the decision note) and read by load_shared_offices(); a served country that is a configured market of its own keeps its own record, and no other relationship is inferred.",
   "markets": [
     { "name": "Tanzania", "code": "TZ" },
     { "name": "Bosnia & Herzegovina", "code": "BA" },
@@ -29,5 +29,13 @@
     { "name": "Taiwan", "code": "TW" },
     { "name": "Thailand", "code": "TH" },
     { "name": "Vietnam", "code": "VN" }
+  ],
+  "shared_offices": [
+    {
+      "record_country": "Kenya/East Africa",
+      "record_id": "sponsoring-012-kenya-east-africa",
+      "serves": ["Kenya", "Uganda", "Tanzania", "Burundi", "Rwanda", "South Sudan", "Ethiopia"],
+      "decision": "Owner decision 2026-09-12: the approved International Sponsoring Directory record sponsoring-012-kenya-east-africa lists its office as serving Kenya, Uganda, Tanzania, Burundi, Rwanda, South Sudan and Ethiopia, and its contact, address, hours, delivery fee and minimum orders apply to all listed countries. A listed country that is a configured market of its own (Uganda, Tanzania, Burundi and Rwanda each have their own approved record) keeps its own record. Directory data only: this never changes which country's policy documents a session can access."
+    }
   ]
 }
