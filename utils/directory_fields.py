@@ -21,6 +21,104 @@ _SELF_REFERENTIAL_VALUE_RE = re.compile(
     r"^(?:see|as|same as)\s+above$",
     re.IGNORECASE,
 )
+
+
+# --- B1: one requested-field-set helper reused by removal and restoration ---
+#
+# The old code detected "the one field the question asked about" with an
+# if/elif chain, so a compound request such as "phone and email" only ever
+# matched the first branch (phone) and treated email as unrequested. A single
+# small vocabulary of canonical field keys - each with its own "is this field
+# named in the question" pattern and its own "does this directory label mean
+# this field" pattern - lets both removal and restoration agree on what was
+# actually asked for, including every compound combination, without either
+# function guessing from a single first match.
+_FIELD_REQUEST_PATTERNS: dict[str, re.Pattern[str]] = {
+    "phone": re.compile(r"\b(?:phone|telephone)\b", re.IGNORECASE),
+    "email": re.compile(r"\b(?:email|e-mail)\b", re.IGNORECASE),
+    "website": re.compile(r"\b(?:website|web\s*site|url)\b", re.IGNORECASE),
+    "address": re.compile(r"\b(?:address|located|location)\b", re.IGNORECASE),
+    "business_hours": re.compile(r"\b(?:business|office)\s+hours?\b|\bhours?\b", re.IGNORECASE),
+    "payment_methods": re.compile(r"\bpayment\s+methods?\b", re.IGNORECASE),
+    "delivery_cost": re.compile(r"\bdelivery\s+(?:cost|charge|fee)s?\b", re.IGNORECASE),
+    "delivery_time": re.compile(
+        r"\bdelivery\s+time\b|\blead\s+time\b|\bhow\s+long\b[^.?!]*\bdeliver", re.IGNORECASE
+    ),
+}
+# Order phone is a qualifier of the phone request, not an independent field:
+# "office phone" must exclude it, while "office and order phone" or any
+# mention of "order" alongside phone/telephone must include it.
+_ORDER_PHONE_REQUEST_RE = re.compile(r"\border\b", re.IGNORECASE)
+
+# How each canonical field's directory label is recognised, reused for both
+# stripping an unrequested "Label: value" line and restoring a requested one
+# from the approved record. Order matters when testing a label against these:
+# order_phone must be tried before phone so "Telephone for Orders" is not
+# absorbed by phone's broader pattern.
+_FIELD_LABEL_PATTERNS: dict[str, re.Pattern[str]] = {
+    "order_phone": re.compile(r"^(?:telephone\s+for\s+orders|order\s*phone(?:\s*\d+)?)$", re.IGNORECASE),
+    "phone": re.compile(
+        r"^(?:telephone(?:\s+office)?|phone(?:\s*\d+)?)$", re.IGNORECASE
+    ),
+    "email": re.compile(r"^(?:email|e-mail)$", re.IGNORECASE),
+    "website": re.compile(r"^(?:website|web\s*site|url)$", re.IGNORECASE),
+    "address": re.compile(
+        r"^(?:(?:office\s*(?:&|and)\s*product\s+center\s+)?address)$", re.IGNORECASE
+    ),
+    "business_hours": re.compile(
+        r"^business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?$", re.IGNORECASE
+    ),
+    "payment_methods": re.compile(r"^payment\s+methods?(?:\s+accepted)?$", re.IGNORECASE),
+    "delivery_cost": re.compile(r"^delivery\s+(?:cost|charge|fee)s?$", re.IGNORECASE),
+    "delivery_time": re.compile(r"^(?:average\s+)?(?:delivery|lead)\s+time$", re.IGNORECASE),
+}
+# Fragments (no anchors) used only to build the "this label line is allowed to
+# stay" negative lookahead in remove_unrequested_directory_fields. Phone must
+# exclude "telephone for orders" here even when order_phone is not part of
+# the current allowed set - a prefix match against "phone" would otherwise
+# also (wrongly) protect the order-phone line's "telephone" prefix.
+_FIELD_ALLOWED_LINE_FRAGMENTS: dict[str, str] = {
+    "order_phone": r"telephone\s+for\s+orders|order\s*phone(?:\s*\d+)?",
+    "phone": r"telephone(?!\s+for\s+orders)(?:\s+office)?|phone(?:\s*\d+)?",
+    "email": r"email|e-mail",
+    "website": r"website|web\s*site|url",
+    "address": r"(?:office\s*(?:&|and)\s*product\s+center\s+)?address",
+    "business_hours": r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?",
+    "payment_methods": r"payment\s+methods?(?:\s+accepted)?",
+    "delivery_cost": r"delivery\s+(?:cost|charge|fee)s?",
+    "delivery_time": r"(?:average\s+)?(?:delivery|lead)\s+time",
+}
+
+
+def _requested_directory_field_set(question: str) -> set[str] | None:
+    """Return the canonical fields a question confidently names, or ``None``.
+
+    ``None`` means the request was not confidently understood - the caller
+    must not strip or guess anything in that case, rather than destructively
+    acting on a first guessed match the way the old if/elif chain did.
+    """
+    text = question or ""
+    requested: set[str] = set()
+    for key, pattern in _FIELD_REQUEST_PATTERNS.items():
+        if pattern.search(text):
+            requested.add(key)
+    if "phone" in requested and _ORDER_PHONE_REQUEST_RE.search(text):
+        requested.add("order_phone")
+    if not requested:
+        return None
+    return requested
+
+
+def _label_canonical_field(label: str) -> str | None:
+    """Map a parsed directory label to its canonical field key, if any."""
+    normalized = " ".join((label or "").split())
+    for key in ("order_phone", "phone", "email", "website", "address",
+                "business_hours", "payment_methods", "delivery_cost", "delivery_time"):
+        if _FIELD_LABEL_PATTERNS[key].search(normalized):
+            return key
+    return None
+
+
 _INLINE_FIELD_RE = re.compile(
     r"^(?P<label>business\s+hours\s+(?:office|product\s+(?:centre|center))|"
     r"telephone(?:\s+(?:for\s+orders|office))?|phone(?:\s*\d+)?|"
@@ -195,19 +293,19 @@ def restore_missing_requested_directory_fields(
     field_sets: Iterable[dict[str, object]],
     question: str,
 ) -> tuple[str, list[str]]:
-    """Restore the exact structured directory field explicitly requested.
+    """Restore the exact structured directory field(s) explicitly requested.
 
     Directory prompts can contain a complete field while the generated answer
-    accidentally leaves its value blank. Only the requested field is eligible
-    here, and only from the highest-ranked record, so unrelated fields and
-    neighboring countries cannot be appended.
+    accidentally leaves its value blank. Only fields the question confidently
+    names are eligible, and only from the highest-ranked (primary) record, so
+    unrelated fields and neighboring countries can never be appended. A
+    request naming several fields (e.g. "payment methods and delivery cost")
+    restores each one found in the primary record and silently skips any
+    field the record does not have - it never invents the missing one.
     """
     original = (answer or "").strip()
-    question_text = (question or "").casefold()
-    requested_patterns: list[re.Pattern[str]] = []
-    if re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
-        requested_patterns.append(re.compile(r"^business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?$", re.IGNORECASE))
-    if not requested_patterns:
+    requested = _requested_directory_field_set(question)
+    if not requested:
         return original, []
 
     primary_fields = next((fields for fields in field_sets if fields), {})
@@ -215,7 +313,10 @@ def restore_missing_requested_directory_fields(
     for raw_label, raw_value in primary_fields.items():
         label = str(raw_label).strip()
         value = str(raw_value).strip()
-        if not label or not value or not any(pattern.search(label) for pattern in requested_patterns):
+        if not label or not value:
+            continue
+        canonical = _label_canonical_field(label)
+        if canonical is None or canonical not in requested:
             continue
         if not _value_is_present(original, value):
             missing.append((label, value))
@@ -297,9 +398,22 @@ def _remove_field_sentences(answer: str, pattern: re.Pattern) -> tuple[str, int]
     return re.sub(r"\n{3,}", "\n\n", repaired), len(spans)
 
 
-def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str, bool]:
-    """Remove extra labelled directory fields when one field was requested."""
+def remove_unrequested_directory_fields(
+    answer: str,
+    question: str,
+    *,
+    keep_labels: Iterable[str] = (),
+) -> tuple[str, bool]:
+    """Remove extra labelled directory fields when only some were requested.
+
+    ``keep_labels`` names exact labels (as they appear in the answer, e.g.
+    ``"Office Phone"``) that must never be removed even though the question
+    does not name their field - used to protect an explicitly approved
+    supplemental contact block (see :func:`build_support_contact_supplement`)
+    from being deleted again by this cleanup pass.
+    """
     question_text = (question or "").casefold()
+    protected = {str(label).strip().casefold() for label in keep_labels if str(label).strip()}
     # Remove only a standalone French orders sentence for a single-field request.
     if (re.search(r"\b(?:téléphone|numéro)\b", question_text)
             and re.search(r"\b(?:bureau|réception)\b", question_text)
@@ -313,17 +427,11 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     if re.search(r"\b(all|every|complete)\s+(contact|directory)|\bcontact details?\b", question_text):
         return answer, False
 
-    if re.search(r"\b(phone|telephone)\b", question_text):
-        allowed = r"telephone(?!\s+for\s+orders)(?:\s+office)?|phone(?:\s*\d+)?"
-    elif re.search(r"\b(email|e-mail)\b", question_text):
-        allowed = r"email|e-mail"
-    elif re.search(r"\b(website|web site|url)\b", question_text):
-        allowed = r"website|web site|url"
-    elif re.search(r"\b(address|located|location)\b", question_text):
-        allowed = r"(?:office\s*(?:&|and)\s*product\s+center\s+)?address"
-    elif re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
-        allowed = r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?"
-    elif re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
+    # A dedicated minimum-order question is not one of the nine directory
+    # fields this helper set covers; it keeps its own narrow, unaffected path
+    # so an order-size answer still sheds unrelated payment/delivery/hours
+    # prose exactly as before.
+    if re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
         cleaned, replacements = _remove_field_sentences(
             answer or "",
             re.compile(
@@ -333,19 +441,39 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
             ),
         )
         return cleaned.strip(), replacements > 0
-    else:
+
+    requested = _requested_directory_field_set(question_text)
+    if not requested:
+        # The request is not confidently understood as naming a specific
+        # field - do not destructively strip anything based on a guess.
         return answer, False
+
+    allowed_parts = [_FIELD_ALLOWED_LINE_FRAGMENTS[key] for key in requested if key in _FIELD_ALLOWED_LINE_FRAGMENTS]
+    allowed = "|".join(allowed_parts) if allowed_parts else r"(?!)"
 
     labels = (
         r"telephone\s+for\s+orders|telephone(?:\s+office)?|phone(?:\s*\d+)?|"
         r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|"
-        r"office\s*(?:&|and)\s*product\s+center\s+address|address|fax|email|website"
+        r"office\s*(?:&|and)\s*product\s+center\s+address|address|fax|email|website|"
+        r"payment\s+methods?(?:\s+accepted)?|delivery\s+(?:cost|charge|fee)s?|"
+        r"(?:average\s+)?(?:delivery|lead)\s+time"
     )
+
+    def _strip_unless_protected(match: re.Match[str]) -> str:
+        if match.group("label").strip().casefold() in protected:
+            return match.group(0)
+        return ""
+
     pattern = re.compile(
         rf"(?<!\w)(?!{allowed}\b)(?P<label>{labels})\s*:\s*[^\n]*(?:\n|$)",
         re.IGNORECASE,
     )
-    cleaned, replacements = pattern.subn("", answer or "")
+    cleaned, replacements = pattern.subn(_strip_unless_protected, answer or "")
+
+    # Only "Label: value" lines are removed. This runs on every answer, and a
+    # sentence-level pass cut policy prose ("Returns are free, but the delivery
+    # cost is not refunded." became "Returns are free, but.") and split
+    # "09.00 am" at its dot (tests/unit/test_demo_directory_prose_preservation.py).
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned, replacements > 0
@@ -356,38 +484,150 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
 # the capture ran into rather than a value worth restoring.
 _MAX_RESTORED_VALUE_CHARS = 80
 
+# --- B2: minimum amount to start as an FBO --------------------------------
+#
+# The old capture used `[^.\n]+`, which stops at the *first* period - so a
+# decimal value like "9.440 TND" was truncated to "9" and everything after
+# the point was dropped. A period is only a genuine field boundary when it is
+# not itself part of a number (i.e. not immediately preceded AND followed by
+# a digit, as in "9.440"); `_scan_order_size_value` below walks the source
+# character by character to tell the two apart, rather than trying to encode
+# that distinction in one regex.
+_MINIMUM_WORD = r"min[ui]{1,2}mum|minimun"
+_ORDER_SIZE_QUESTION_RE = re.compile(
+    rf"\b(?:{_MINIMUM_WORD})\b[^.?!\n]*\b(?:orders?|amount|cc|size)\b"
+    rf"|\b(?:orders?|amount|cc)\b[^.?!\n]*\b(?:{_MINIMUM_WORD})\b"
+    r"|\border\s+size\b"
+    r"|\bhow\s+much\b[^.?!\n]*\b(?:start|begin|ordering|order)\b[^.?!\n]*\bfbo\b"
+    r"|\bhow\s+much\b[^.?!\n]*\bneed\b[^.?!\n]*\bstart\b"
+    r"|\b(?:smallest|least)\b[^.?!\n]*\border\b",
+    re.IGNORECASE,
+)
+# Rank qualification and the joining/registration fee are distinct fields
+# from the minimum order size, even though a question about either can also
+# contain the word "minimum" or "CC". Never answer one with the other.
+_RANK_QUALIFICATION_RE = re.compile(
+    r"\b(?:rank|qualify|qualification|supervisor|assistant\s+supervisor|manager|"
+    r"soaring\s+manager|executive)\b",
+    re.IGNORECASE,
+)
+_FEE_ONLY_RE = re.compile(r"\b(?:joining|registration|sign[- ]?up)\s+fee\b", re.IGNORECASE)
+_ONGOING_ORDER_QUESTION_RE = re.compile(
+    r"\bongoing\b|\bsubsequent\s+orders?\b|\breorder(?:ing)?\b|\brepeat\s+orders?\b|"
+    r"after\s+(?:the\s+)?first\s+order|\bcontinu\w*\s+(?:order|purchas\w*)\b",
+    re.IGNORECASE,
+)
+_PREFERRED_CUSTOMER_QUESTION_RE = re.compile(r"\bpreferred\s+customer\b", re.IGNORECASE)
+_FBO_ROLE_QUESTION_RE = re.compile(r"\bfbo\b|\bforever\s+business\s+owner\b|\bdistributor\b", re.IGNORECASE)
+
+_FIRST_ORDER_LABEL_RE = re.compile(r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*", re.IGNORECASE)
+_ONGOING_ORDER_LABEL_RE = re.compile(
+    r"(?:after\s+sponsorship|ongoing\s+(?:minimum\s+)?orders?|subsequent\s+orders?)\s*[:\-]\s*",
+    re.IGNORECASE,
+)
+_ORDER_SIZE_ROLE_HEADING_RE = re.compile(
+    r";\s*(?:preferred\s+customer|supervisor|assistant\s+supervisor|manager|home\s+office|fbo)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_order_size_question(question_text: str) -> bool:
+    """True only for a minimum-order-size request, never a fee or rank one."""
+    if _RANK_QUALIFICATION_RE.search(question_text) or _FEE_ONLY_RE.search(question_text):
+        return False
+    return bool(_ORDER_SIZE_QUESTION_RE.search(question_text))
+
+
+_ORDER_SIZE_ABBREVIATION_RE = re.compile(
+    r"(?<![^\W\d_])(?:excl|incl|approx|min|max|e\.g|i\.e|etc|vs)$",
+    re.IGNORECASE,
+)
+
+
+def _scan_order_size_value(source: str, label_pattern: re.Pattern[str]) -> str | None:
+    """Return the field value after ``label_pattern``, stopping at its true end.
+
+    A stop is: a newline; a semicolon immediately introducing a different
+    role's heading (so a decimal field followed by ``"; Preferred Customer:
+    ..."`` never absorbs the next role's text); or a period that is not part
+    of a number - i.e. not both immediately preceded and immediately followed
+    by a digit, which is what distinguishes a decimal point ("9.440") from an
+    ordinary sentence-ending period. Everything else, including an explicit
+    approximate-equivalent parenthetical such as "(around 750 MAD)" or
+    "(≈€65)", stays part of the value.
+    """
+    match = label_pattern.search(source or "")
+    if not match:
+        return None
+    text = source
+    start = match.end()
+    index = start
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\n":
+            break
+        if char == ".":
+            prev_digit = index > 0 and text[index - 1].isdigit()
+            next_digit = index + 1 < length and text[index + 1].isdigit()
+            # "€50,00 in products excl. VAT and excl. literature." - an
+            # abbreviation's period continues the value when more of the same
+            # line follows it.
+            continues_line = index + 1 < length and text[index + 1] not in "\r\n"
+            if not (prev_digit and next_digit) and not (
+                continues_line and _ORDER_SIZE_ABBREVIATION_RE.search(text, 0, index)
+            ):
+                break
+        elif char == ";" and _ORDER_SIZE_ROLE_HEADING_RE.match(text, index):
+            break
+        index += 1
+    value = " ".join(text[start:index].split()).strip().rstrip(",;")
+    return value or None
+
 
 def restore_missing_requested_order_size(
     answer: str,
     source_texts: Iterable[str],
     question: str,
 ) -> tuple[str, bool]:
-    """Restore an explicit minimum-order value when another FAQ row was selected."""
-    if not re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question or "", re.IGNORECASE):
+    """Restore an explicit minimum-order value when another FAQ row was selected.
+
+    Resolves whether the question asks about the first order or an ongoing
+    (subsequent) minimum and restores only the matching source field. Never
+    restores an FBO-labelled figure into a question that names only the
+    Preferred Customer role - the field is a different one and none of the
+    recognised source labels here carries a Preferred Customer figure.
+    """
+    question_text = question or ""
+    if not _is_order_size_question(question_text):
         return answer, False
+    if (_PREFERRED_CUSTOMER_QUESTION_RE.search(question_text)
+            and not _FBO_ROLE_QUESTION_RE.search(question_text)):
+        return answer, False
+
+    ongoing = bool(_ONGOING_ORDER_QUESTION_RE.search(question_text))
+    label_pattern = _ONGOING_ORDER_LABEL_RE if ongoing else _FIRST_ORDER_LABEL_RE
+    field_label = "After sponsorship" if ongoing else "Minimum order size FBO"
+
     corrected = answer or ""
     for source in source_texts:
-        match = re.search(
-            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.\n]+)",
-            source or "",
-            re.IGNORECASE,
-        )
-        if not match:
+        value = _scan_order_size_value(source or "", label_pattern)
+        if value is None:
             continue
-        value = " ".join(match.group("value").split()).strip()
-        # The capture runs to the next period or newline, so in a record whose
-        # minimum-order line continues into prose it swallows that prose too.
-        # Appending it as a sentence then ends the answer mid-phrase - which is
-        # how the Algeria answer came to end on the word "the", and be discarded
-        # whole by the output validator as structurally incomplete. A field
-        # value is short; a paragraph is not this function's to append.
+        # The scan stops at the field's true boundary, but a record with no
+        # boundary at all before the next real sentence (no period, no
+        # newline) still runs on into unrelated prose. Appending that as a
+        # sentence would end the answer mid-phrase - which is how the
+        # Algeria answer came to end on the word "the" and be discarded whole
+        # by the output validator as structurally incomplete. A field value
+        # is short; a paragraph is not this function's to append.
         if len(value) > _MAX_RESTORED_VALUE_CHARS:
             return corrected, False
-        if value and _normalize_for_comparison(value) not in _normalize_for_comparison(corrected):
-            separator = "\n\n" if corrected.strip() else ""
-            corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
-            return corrected, True
-        return corrected, False
+        if _normalize_for_comparison(value) in _normalize_for_comparison(corrected):
+            return corrected, False
+        separator = "\n\n" if corrected.strip() else ""
+        corrected = f"{corrected.strip()}{separator}{field_label}: {value}."
+        return corrected, True
     return corrected, False
 
 
@@ -400,11 +640,18 @@ def correct_directory_source_contradictions(
     changed = False
     for source in source_texts:
         source_text = source or ""
+        # Deliberately NOT re.DOTALL: `.` must not cross a newline here. A
+        # non-greedy `.*?` under DOTALL will happily bridge past an unrelated
+        # record boundary to the *nearest* "around/approximately CUR" phrase
+        # anywhere later in the string, pairing one country's CC value with
+        # another country's currency equivalent. Bounding the match to a
+        # single line/sentence keeps it to the record that actually states
+        # both the CC value and its equivalent together.
         order_match = re.search(
             r"(?P<cc>\d+(?:[.,]\d+)?\s*CC).*?(?:around|approximately)\s*"
             r"(?P<amount>[\d.,]+)\s*(?P<currency>[A-Z]{3})\b",
             source_text,
-            re.IGNORECASE | re.DOTALL,
+            re.IGNORECASE,
         )
         if order_match and re.search(re.escape(order_match.group("cc")), corrected, re.IGNORECASE):
             amount = order_match.group("amount")
@@ -415,7 +662,7 @@ def correct_directory_source_contradictions(
                 rf"\g<1>{amount} {currency}",
                 corrected,
                 count=1,
-                flags=re.IGNORECASE | re.DOTALL,
+                flags=re.IGNORECASE,
             )
             changed = changed or replacements > 0
 
@@ -434,6 +681,65 @@ def correct_directory_source_contradictions(
             changed = changed or replacements > 0
 
     return corrected, changed
+
+
+# --- B3: helpful customer-care contact block, without losing the answer ----
+
+
+def build_support_contact_supplement(
+    answer: str,
+    approved_fields: dict[str, object],
+    recommends_customer_care: bool,
+    *,
+    hours_requested: bool = False,
+) -> tuple[str, list[str]] | None:
+    """Return a short supplemental contact block, or ``None``.
+
+    ``approved_fields`` must be the primary approved directory record - the
+    same "selected applicable record" contract used elsewhere in this module.
+    Returns ``None`` when the answer does not recommend customer care, or
+    when no approved contact exists in ``approved_fields`` at all: this is a
+    pure echo of already-approved fields and never invents a phone, email,
+    website or hours, never fetches from the web, and never exposes a
+    private contact.
+
+    At most one phone is kept (the office label and any international
+    prefix are preserved exactly as parsed - an order phone is never chosen
+    as the supplemental contact), at most one email or approved website, and
+    business hours only when ``hours_requested`` is true. The caller is
+    responsible for resolving which office is actually responsible for this
+    answer (home-market policy vs. a destination's serving office) before
+    passing that office's record here; this function does not choose between
+    records.
+    """
+    if not recommends_customer_care or not approved_fields:
+        return None
+
+    picked: list[tuple[str, str]] = []
+    have_kind: set[str] = set()
+    for raw_label, raw_value in approved_fields.items():
+        label = str(raw_label).strip()
+        value = str(raw_value).strip()
+        if not label or not value or _is_self_referential_value(value):
+            continue
+        canonical = _label_canonical_field(label)
+        if canonical == "phone":
+            kind = "phone"
+        elif canonical in ("email", "website"):
+            kind = "contact_point"
+        elif canonical == "business_hours" and hours_requested:
+            kind = "business_hours"
+        else:
+            continue
+        if kind in have_kind:
+            continue
+        have_kind.add(kind)
+        picked.append((label, value))
+
+    if not picked:
+        return None
+    block = "\n".join(f"{label}: {value}" for label, value in picked)
+    return block, [label for label, _ in picked]
 
 
 def _is_field_label(value: str) -> bool:

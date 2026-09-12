@@ -372,6 +372,88 @@ def find_probable_market_typo(message: str) -> str | None:
     return None
 
 
+# Generic English word-formation patterns for nationality adjectives
+# ("Italy" -> "Italian", "Belgium" -> "Belgian", "Sweden" -> "Swedish",
+# "Kyrgyzstan" -> "Kyrgyz"). They are applied to configured market names, so a
+# new market is covered without a code change; they are not a list of market
+# adjectives. Irregular forms that share no stem with the name ("Swiss",
+# "British", "American") cannot be derived and are not recognised.
+_ADJECTIVE_NAME_ENDINGS = ("", "a", "e", "o", "y", "ia", "ium", "en", "stan")
+_ADJECTIVE_SUFFIXES = ("n", "an", "ian", "ish", "ese", "i")
+_BARE_STEM_ENDINGS = frozenset({"y", "stan"})
+_MIN_ADJECTIVE_STEM_LENGTH = 4
+
+
+def _derived_market_adjectives(normalized_name: str) -> set[str]:
+    forms: set[str] = set()
+    for ending in _ADJECTIVE_NAME_ENDINGS:
+        if not normalized_name.endswith(ending):
+            continue
+        stem = normalized_name[: len(normalized_name) - len(ending)]
+        if len(stem) < _MIN_ADJECTIVE_STEM_LENGTH:
+            continue
+        if ending in _BARE_STEM_ENDINGS:
+            forms.add(stem)
+        forms.update(stem + suffix for suffix in _ADJECTIVE_SUFFIXES)
+    forms.discard(normalized_name)
+    return forms
+
+
+def market_adjective_codes(word: str, session_country: str = "") -> set[str]:
+    """Return markets a single English adjective such as "Italian" refers to.
+
+    This is deliberately separate from ``find_market_mentions``, which is
+    unchanged: a nationality adjective is far weaker evidence of a market
+    request than a name ("my Italian downline"), so callers must supply the
+    grammatical context themselves. The only caller is the cross-market
+    company-policy refusal, which asks about the word directly modifying
+    "company policy".
+
+    A form derived from a single-word configured market name wins. Otherwise
+    the word may name a language that a market publishes its company policy
+    in ("Norwegian", "Dutch"); the result is then every such publishing market,
+    which is only evidence that some market is meant, not which one.
+
+    When ``session_country`` is given, a word naming one of that market's own
+    configured languages returns an empty set, because "the German company
+    policy" from an Austrian session may be asking for the German-language
+    version of Austria's own policy.
+    """
+    target = _normalize_market_text(word)
+    if not target or " " in target:
+        return set()
+    configured_markets = [market for market in load_market_config()["markets"] if market.get("enabled", True)]
+    session = str(session_country or "").strip().upper()
+    if session:
+        for market in configured_markets:
+            if str(market.get("code") or "").upper() != session:
+                continue
+            session_languages = {
+                _normalize_market_text(str(language.get("name") or ""))
+                for language in market.get("languages", [])
+            }
+            if target in session_languages:
+                return set()
+
+    derived = {
+        str(market["code"]).upper()
+        for market in [*configured_markets, *load_global_directory_markets()]
+        if " " not in (name := _normalize_market_text(str(market.get("name") or "")))
+        and name
+        and target in _derived_market_adjectives(name)
+    }
+    if derived:
+        return derived
+
+    language_codes = {
+        str(language.get("code") or "").lower()
+        for market in configured_markets
+        for language in market.get("languages", [])
+        if _normalize_market_text(str(language.get("name") or "")) == target
+    }
+    return {code for code, entry in load_policy_locales().items() if entry["languages"] & language_codes}
+
+
 def _normalize_market_text(value: str) -> str:
     """Normalize configured names and user wording for whole-name matching."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()

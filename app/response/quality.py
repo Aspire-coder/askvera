@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from app.retrieval.models import RetrievedDocument
+from utils.redaction import drop_emptied_lead_ins
 _PLACEHOLDER_RE = re.compile(
     r"\*{4,}|(?:\[|\{|<)(?:ADDRESS|EMAIL|NAME|PHONE|PII|URL|WEBSITE|CONTACT|TBD)(?::[^\]\}>]*)?(?:\]|\}|>)",
     flags=re.IGNORECASE,
@@ -64,8 +65,9 @@ def remove_or_replace_contact_placeholders(answer: str, country: str) -> tuple[s
         return answer, []
     contacts = contact_for_country(country)
     changes: list[str] = []
-    lines: list[str] = []
-    for line in answer.splitlines():
+    originals = answer.splitlines()
+    lines: list[str | None] = []
+    for line in originals:
         updated = line
         if _WEBSITE_PLACEHOLDER_RE.search(updated):
             website = contacts.get("website", "")
@@ -74,6 +76,7 @@ def remove_or_replace_contact_placeholders(answer: str, country: str) -> tuple[s
                 changes.append("website_replaced")
             else:
                 changes.append("website_line_removed")
+                lines.append(None)
                 continue
         if _PHONE_PLACEHOLDER_RE.search(updated):
             phone = contacts.get("customerCarePhone", "")
@@ -82,13 +85,19 @@ def remove_or_replace_contact_placeholders(answer: str, country: str) -> tuple[s
                 changes.append("phone_replaced")
             else:
                 changes.append("phone_line_removed")
+                lines.append(None)
                 continue
         if _PLACEHOLDER_RE.search(updated):
             changes.append("unresolved_placeholder_line_removed")
+            lines.append(None)
             continue
-        if updated.strip():
-            lines.append(updated.rstrip())
-    return "\n".join(lines).strip(), sorted(set(changes))
+        lines.append(updated.rstrip() if updated.strip() else None)
+    # Tracker row 27: removing every contact line under "You can reach them
+    # at:" left the lead-in introducing nothing at the end of the answer.
+    without_orphans = drop_emptied_lead_ins(lines, originals)
+    if without_orphans != lines:
+        changes.append("orphaned_lead_in_removed")
+    return "\n".join(line for line in without_orphans if line).strip(), sorted(set(changes))
 
 
 def contains_unresolved_placeholder(answer: str) -> bool:

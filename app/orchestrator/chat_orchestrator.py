@@ -1,8 +1,11 @@
 """AI chat orchestration for AskVera."""
 
 import re
+from contextvars import ContextVar
 from dataclasses import replace
+from functools import lru_cache
 from time import perf_counter
+from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -61,7 +64,14 @@ from services.semantic_cache import (
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
 from services.guardrails import is_policy_safety_question
-from services.market_config import find_market_mentions, find_probable_market_typo, market_display_name
+from services.market_config import (
+    _localized_market_names,
+    find_market_mentions,
+    find_probable_market_typo,
+    load_global_directory_markets,
+    load_market_config,
+    market_display_name,
+)
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -69,6 +79,7 @@ from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.inline_citations import separate_verified_citations
 from utils.directory_fields import (
+    build_support_contact_supplement,
     parse_directory_fields,
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
@@ -152,6 +163,134 @@ CONTENT_REQUEST_TERMS = re.compile(
     r"promise|promises|guarantee|guarantees|guaranteed)\b",
     re.IGNORECASE,
 )
+# A wh-question needs no question mark to read as a question ("How much would
+# those products cost"). Auxiliary openers still do: "do that" is an instruction.
+WH_QUESTION_OPENERS = re.compile(r"^(?:what|how|when|where|which|who|why|whose|whom)\b", re.IGNORECASE)
+# A bounded request for one directory field that names no market of its own
+# ("What payment methods do they take?", "And the hours?"). Recorded as TC-070:
+# Paraguay was lost on exactly this turn. It inherits a target only through
+# _inherited_directory_target, never by adding generic words such as "cost" to
+# the follow-up markers, which would drag history into standalone questions.
+FOLLOW_UP_DIRECTORY_FIELD_TERMS = re.compile(
+    r"\b(?:(?:tele)?phone|hours|opening\s+times?|e-?mail|address|website|"
+    r"deliver(?:y|ies|s|ed)?|shipping|payments?|pay)\b",
+    re.IGNORECASE,
+)
+FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS = 10
+# A short reply that supplies a detail for the question just asked. Recorded as
+# TC-051 ("I live in Arizona.") and TC-055 ("I bought it 45 days ago.").
+CLARIFICATION_REPLY = re.compile(
+    r"^(?:(?:i\s+am|i['’]m|i\s+live|i\s+bought|i\s+purchased|i\s+ordered|i\s+joined|i\s+signed\s+up|"
+    r"i\s+mean|we\s+are|we['’]re|we\s+live)\b"
+    r"|(?:about\s+|around\s+|over\s+|almost\s+)?\d+\s+(?:days?|weeks?|months?|years?)(?:\s+ago)?\s*[.!]?$)",
+    re.IGNORECASE,
+)
+CLARIFICATION_REPLY_MAX_WORDS = 10
+POLICY_WORD = re.compile(r"\bpolic(?:y|ies)\b", re.IGNORECASE)
+# B3: a narrow English-only signal that the delivered answer is directing the
+# reader to contact a human channel - never a refusal/fallback/guardrail
+# pattern, and never inferred from the user's question.
+_CARE_CONTACT_RECOMMENDATION_RE = re.compile(
+    r"\b(?:contact|reach\s+out\s+to|get\s+in\s+touch\s+with|speak\s+(?:to|with))\s+"
+    r"(?:your\s+)?(?:local\s+)?(?:customer\s+(?:care|service|support)|support(?:\s+team)?|"
+    r"(?:the\s+)?(?:local\s+)?forever\s+(?:business\s+)?office)\b",
+    re.IGNORECASE,
+)
+
+
+def _support_contact_response_is_ineligible(chat_response: ChatResponse) -> bool:
+    """A refusal/fallback/guardrail answer never gets a support-contact block."""
+    metadata = chat_response.metadata or {}
+    return bool(
+        metadata.get("fallback")
+        or metadata.get("failure_layer")
+        or metadata.get("response_source") in {"guardrail", "fallback", "client_action"}
+    )
+
+
+def _support_contact_segments(value: str) -> list[str]:
+    """Split a directory ``record_country`` (or a market name) into lower-cased
+    word segments on both "/" and whitespace - "Kenya/East Africa" ->
+    ["kenya", "east", "africa"]."""
+    return [part.casefold() for part in re.split(r"[/\s]+", value.strip()) if part]
+
+
+def _resolve_support_contact_target_names(lookup_text: str, country: str) -> list[str]:
+    """Return the market name(s) actually named in ``lookup_text``, else the
+    session market's own name. Never guesses a market from nothing."""
+    mentioned = [name for name in (market_display_name(code) for code in find_market_mentions(lookup_text)) if name]
+    if mentioned:
+        return mentioned
+    session_name = market_display_name(country)
+    return [session_name] if session_name else []
+
+
+def _directory_record_matches_a_target(record_country: str, target_names: list[str]) -> bool:
+    """True only for a whole-segment/word match - never a region word (``East
+    Africa``, ``Benelux``) or a country named only inside a record's body."""
+    tokens = _support_contact_segments(record_country)
+    for name in target_names:
+        name_words = _support_contact_segments(name)
+        width = len(name_words)
+        if not width or width > len(tokens):
+            continue
+        if any(tokens[start:start + width] == name_words for start in range(len(tokens) - width + 1)):
+            return True
+    return False
+
+
+def _find_matching_support_contact_record(documents: list, target_names: list[str]):
+    """Return the single GLOBAL directory record matching ``target_names``, or
+    ``None`` when there is no match or more than one different record matches
+    - this never falls back to "the first directory record"."""
+    matched: dict[str, Any] = {}
+    for document in documents:
+        if document.country != "GLOBAL":
+            continue
+        if not (document.metadata.get("directory_kind") or document.metadata.get("directory_section")):
+            continue
+        record_country = str(document.metadata.get("record_country") or "").strip()
+        if record_country and _directory_record_matches_a_target(record_country, target_names):
+            matched[document.id or document.content] = document
+    if len(matched) != 1:
+        return None
+    return next(iter(matched.values()))
+
+
+def _support_contact_approved_fields(document: Any) -> dict[str, object]:
+    """Return the record's approved field map - never invented, always the
+    same fields already surfaced by the retrieval/directory pipeline."""
+    directory_fields_value = document.metadata.get("directory_fields")
+    if isinstance(directory_fields_value, dict):
+        return directory_fields_value
+    return parse_directory_fields(document.content)
+
+
+def _support_contact_already_quoted(answer: str, approved_fields: dict[str, object], added_labels: list[str]) -> bool:
+    """True when the answer already quotes a phone or email value the
+    supplement would add - never duplicate an already-delivered contact."""
+    answer_digits = re.sub(r"\D", "", answer)
+    answer_lower = answer.casefold()
+    for label in added_labels:
+        label_lower = label.casefold()
+        if "phone" not in label_lower and "email" not in label_lower:
+            continue
+        value = str(approved_fields.get(label, "")).strip()
+        value_digits = re.sub(r"\D", "", value)
+        if value_digits and len(value_digits) >= 7 and value_digits in answer_digits:
+            return True
+        if value and value.casefold() in answer_lower:
+            return True
+    return False
+
+
+def _add_citation_if_absent(citations: list, source: dict) -> list:
+    """Append ``source`` only when no existing citation already carries its URI."""
+    if any(existing.get("uri") == source.get("uri") for existing in citations):
+        return list(citations)
+    return [*citations, source]
+
+
 DIRECTORY_DETAIL_TERMS = re.compile(
     r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
     re.IGNORECASE,
@@ -200,6 +339,190 @@ CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
 )
 
 
+# Diagnostic capture for offline evaluation (scripts/run_benchmark.py).
+#
+# Off by default, and nothing in the API turns it on. While it is off none of
+# the capture code runs and response metadata is exactly what it was. The
+# benchmark enables it in its own process so each turn's response carries a
+# "diagnostic_capture" record: what retrieval returned, what the output
+# validator found, the answer handed to numeric repair, and what repair
+# removed and why. A single-run comparison could not tell generation variance
+# from a repair removal, because none of that was recorded.
+#
+# Recording only. It never changes an answer, a citation or a repair decision,
+# and the key is in neither ChatResponse's public API metadata nor its cache
+# value.
+DIAGNOSTIC_CAPTURE_ENABLED = False
+DIAGNOSTIC_CAPTURE_VERSION = 1
+_DIAGNOSTIC_CAPTURE: ContextVar[dict[str, Any] | None] = ContextVar("askvera_diagnostic_capture", default=None)
+_CAPTURED_DOCUMENT_METADATA = (
+    "section_id", "parent_section_id", "access_scope", "document_type", "parent_bound_child",
+    "ingestion_id", "logical_document_id", "content_hash",
+)
+_CAPTURED_RETRIEVAL_METADATA = (
+    "provider", "candidate_count", "evidence_selector_applied", "evidence_selector_confidence",
+    "evidence_selector_rejected", "top_source_directly_answers", "parent_bound_children",
+    "conversation_intent", "conversation_subtype", "intent_confidence", "client_action",
+    "global_documents_searched", "strong_local_match", "explicit_section_reference",
+    "generation_lookup",
+    "retrieval_rank_lists", "candidate_section_ids", "evidence_selector_candidate_section_ids",
+    "evidence_selector_selected_ranks",
+)
+
+
+def _captured_issues(result: ValidationResult) -> list[dict[str, object]]:
+    return [
+        {"code": issue.code, "severity": issue.severity.value, "field": issue.field, "message": issue.message[:500]}
+        for issue in result.issues
+    ]
+
+
+def _record_capture_failure(capture: dict[str, Any], stage: str) -> None:
+    """Log a failed recording and note it in the capture; the response goes on unchanged."""
+    LOGGER.exception("diagnostic_capture_failed", stage=stage)
+    capture.setdefault("errors", []).append(stage)
+
+
+def _record_diagnostic_retrieval(stage: str, retrieval_result: RetrievalResult | None) -> None:
+    """Append one retrieval to the current turn's capture, when capture is on.
+
+    Never raises: a recording failure is logged and noted, never delivered.
+    """
+    capture = _DIAGNOSTIC_CAPTURE.get()
+    if capture is None or retrieval_result is None:
+        return
+    try:
+        _append_diagnostic_retrieval(capture, stage, retrieval_result)
+    except Exception:  # noqa: BLE001 - diagnostic recording must never break a response
+        _record_capture_failure(capture, stage)
+
+
+def _append_diagnostic_retrieval(capture: dict[str, Any], stage: str, retrieval_result: RetrievalResult) -> None:
+    metadata = retrieval_result.metadata or {}
+    sources = metadata.get("candidate_sources")
+    capture["retrievals"].append({
+        "stage": stage,
+        "confidence": retrieval_result.confidence,
+        "documents": [
+            {
+                "id": document.id,
+                "source": document.source,
+                "country": document.country,
+                "language": document.language,
+                "score": document.score,
+                **{key: document.metadata[key] for key in _CAPTURED_DOCUMENT_METADATA if key in document.metadata},
+            }
+            for document in retrieval_result.documents
+        ],
+        "metadata": {key: metadata[key] for key in _CAPTURED_RETRIEVAL_METADATA if key in metadata},
+        # The selector's candidates as the provider reports them. "section" is
+        # parent_section_id when there is one, so a child candidate cannot be
+        # told apart from its parent here. None means no list was exposed.
+        "candidate_sections": [
+            {key: source.get(key) for key in ("section", "country", "uri", "score")}
+            for source in sources
+            if isinstance(source, dict)
+        ] if isinstance(sources, list) else None,
+    })
+
+
+def _record_diagnostic_validation(
+    chat_response: ChatResponse,
+    result: ValidationResult,
+    outcome: str,
+    numeric_repair: dict[str, Any] | None = None,
+) -> None:
+    """Append one output validation, and any numeric repair it attempted, when capture is on.
+
+    Never raises: removal_diagnostics re-runs claim extraction, and a failure
+    there or anywhere in recording is logged and noted, never delivered.
+    """
+    capture = _DIAGNOSTIC_CAPTURE.get()
+    if capture is None:
+        return
+    try:
+        _append_diagnostic_validation(capture, chat_response, result, outcome, numeric_repair)
+    except Exception:  # noqa: BLE001 - diagnostic recording must never break a response
+        _record_capture_failure(capture, f"validation:{outcome}")
+
+
+def _append_diagnostic_validation(
+    capture: dict[str, Any],
+    chat_response: ChatResponse,
+    result: ValidationResult,
+    outcome: str,
+    numeric_repair: dict[str, Any] | None,
+) -> None:
+    repair_record = None
+    if numeric_repair is not None:
+        repaired_result = numeric_repair.get("result")
+        repair_record = {
+            "removed_numeric_claims": list(numeric_repair["removed"]),
+            # Each figure the validator could not ground, and whether the
+            # evidence contains it at all: absent means the model invented it,
+            # present means a real figure that subject matching rejected.
+            "removal_reasons": [
+                {**diagnostic, "reason": "unsupported_numeric_claim"}
+                for diagnostic in removal_diagnostics(chat_response.answer or "", numeric_repair["documents"])
+            ],
+            "answer_after_repair": numeric_repair["answer"],
+            "post_repair_issues": _captured_issues(repaired_result) if repaired_result is not None else None,
+            "accepted": outcome == "numeric_repair_accepted",
+        }
+    capture["validations"].append({
+        "answer_before_validation": chat_response.answer,
+        "issues": _captured_issues(result),
+        "critical": result.has_critical(),
+        "outcome": outcome,
+        "numeric_repair": repair_record,
+    })
+
+
+def _record_diagnostic_raw_answer(text: str) -> None:
+    """Keep the model's own answer, before any editor touches it, when capture is on.
+
+    pre_repair_answer is taken after citation separation, directory
+    restoration, PII scrubbing and placeholder clean-up, so a sentence one of
+    those removed was indistinguishable from one the model never wrote.
+    Never raises, and never changes what is delivered.
+    """
+    capture = _DIAGNOSTIC_CAPTURE.get()
+    if capture is None:
+        return
+    try:
+        capture.setdefault("raw_model_answers", []).append(str(text or ""))
+    except Exception:  # noqa: BLE001 - diagnostic recording must never break a response
+        _record_capture_failure(capture, "raw_model_answer")
+
+
+@lru_cache(maxsize=1)
+def _load_public_market_place_names() -> tuple[str, ...]:
+    names: set[str] = set()
+    aliases = _localized_market_names()
+    for market in [*load_market_config().get("markets", []), *load_global_directory_markets()]:
+        code = str(market.get("code") or "").upper()
+        names.add(str(market.get("name") or "").strip())
+        names.update(str(alias).strip() for alias in aliases.get(code, []))
+    return tuple(sorted(name for name in names if name))
+
+
+def _public_market_place_names() -> tuple[str, ...]:
+    """Configured market names in every configured language.
+
+    A generated answer names the user's market ("here in Canada") and, for
+    international sponsoring, the destination market. Comprehend labels those
+    bare names ADDRESS, and the masked token then made the placeholder
+    clean-up delete the whole line, policy figure included. A missing or
+    malformed config degrades to the previous behaviour (nothing preserved)
+    and is not cached, so a later request retries it.
+    """
+    try:
+        return _load_public_market_place_names()
+    except Exception:  # noqa: BLE001 - config trouble must not break PII scrubbing
+        LOGGER.exception("public_market_place_names_unavailable")
+        return ()
+
+
 class ConsentRequiredError(Exception):
     """Raised when a chat request has not accepted the current legal terms."""
 
@@ -243,6 +566,26 @@ class AIOrchestrator:
 
     def handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Run the existing chat flow and return response data."""
+        if not DIAGNOSTIC_CAPTURE_ENABLED:
+            return self._handle_chat(body, correlation_id)
+        from app.retrieval.opensearch_sections import disable_rank_list_capture, enable_rank_list_capture
+
+        token = _DIAGNOSTIC_CAPTURE.set(
+            {"version": DIAGNOSTIC_CAPTURE_VERSION, "retrievals": [], "validations": [], "errors": []}
+        )
+        rank_list_token = enable_rank_list_capture()
+        try:
+            response = self._handle_chat(body, correlation_id)
+            capture = _DIAGNOSTIC_CAPTURE.get()
+        finally:
+            disable_rank_list_capture(rank_list_token)
+            _DIAGNOSTIC_CAPTURE.reset(token)
+        # Attached after the turn was persisted and counted, with the same
+        # answer and citations: recording must not change what was delivered.
+        return self._replace_answer(response, response.answer, {"diagnostic_capture": capture})
+
+    def _handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
+        """The chat flow itself; handle_chat adds optional diagnostic capture around it."""
         LOGGER.info(
             "ai_orchestrator_request_started",
             correlation_id=correlation_id,
@@ -331,11 +674,14 @@ class AIOrchestrator:
             )
 
         cache_key = build_cache_key(request_query, body.country, body.language, body.role)
-        cached_response = self._cached_response(cache_key, body, correlation_id, scrubbed_input)
+        cached_response = self._cached_response(
+            cache_key, body, correlation_id, scrubbed_input, resolved_request=request_query
+        )
         if cached_response:
             return cached_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        _record_diagnostic_retrieval("question", retrieval_result)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
             retrieval_query,
             retrieval_result,
@@ -385,6 +731,7 @@ class AIOrchestrator:
                 correlation_id,
                 retrieval_result=retrieval_result,
             )
+        _record_diagnostic_raw_answer(model_response.text)
 
         if model_response.finish_reason == "guardrail_intervened":
             return self.response_builder.fallback(
@@ -434,6 +781,7 @@ class AIOrchestrator:
             correlation_id,
             user_question=body.message,
             country=body.country,
+            resolved_request=request_query,
         )
         chat_response = self._validate_response(
             chat_response,
@@ -491,6 +839,7 @@ class AIOrchestrator:
         *,
         user_question: str,
         country: str = "",
+        resolved_request: str = "",
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
         citation_cleaned = separate_verified_citations(chat_response.answer, retrieval_result.documents)
@@ -600,6 +949,14 @@ class AIOrchestrator:
                 {"directory_source_contradiction_corrected": True},
             )
 
+        chat_response = self._apply_support_contact_supplement(
+            chat_response,
+            retrieval_result,
+            resolved_request,
+            user_question,
+            country,
+        )
+
         safe_answer = scrub_pii(
             chat_response.answer,
             correlation_id,
@@ -610,6 +967,7 @@ class AIOrchestrator:
                 *(document.content for document in retrieval_result.documents),
             ],
             allowed_name_texts=[user_question],
+            allowed_location_texts=_public_market_place_names(),
         )
         if safe_answer != chat_response.answer:
             chat_response = self._replace_answer(chat_response, safe_answer, {"response_pii_scrubbed": True})
@@ -633,12 +991,88 @@ class AIOrchestrator:
                 {"unresolved_pii_placeholders_removed": True},
             )
         if not chat_response.answer.strip():
-            chat_response = self._replace_answer(
+            refusal = self._replace_answer(
                 chat_response,
                 self._insufficient_evidence_message(language, user_question),
                 {"empty_after_output_cleanup": True, "fallback": True},
             )
+            # The refusal states no policy fact, so it cites no source. Keeping
+            # the citations built for the emptied answer presented a policy
+            # passage as the source of "the documents do not contain enough
+            # information".
+            chat_response = ChatResponse(
+                answer=refusal.answer,
+                citations=[],
+                suggestions=refusal.suggestions,
+                cards=refusal.cards,
+                confidence=refusal.confidence,
+                metadata=refusal.metadata,
+                correlation_id=refusal.correlation_id,
+            )
         return chat_response
+
+    def _apply_support_contact_supplement(
+        self,
+        chat_response: ChatResponse,
+        retrieval_result: RetrievalResult,
+        resolved_request: str,
+        user_question: str,
+        country: str,
+    ) -> ChatResponse:
+        """Append an approved support-contact block when the answer recommends care.
+
+        Only ever echoes fields already present on exactly one GLOBAL
+        directory record whose ``record_country`` matches a market actually
+        named in the resolved request (or the session market, when the
+        request names none). Never falls back to "first directory record",
+        never fires for a refusal/fallback/guardrail answer, and never
+        duplicates a phone or email already quoted in the answer.
+        """
+        if _support_contact_response_is_ineligible(chat_response) or not _CARE_CONTACT_RECOMMENDATION_RE.search(
+            chat_response.answer or ""
+        ):
+            return chat_response
+
+        lookup_text = resolved_request or user_question or ""
+        target_names = _resolve_support_contact_target_names(lookup_text, country)
+        if not target_names:
+            return chat_response
+
+        document = _find_matching_support_contact_record(retrieval_result.documents, target_names)
+        if document is None:
+            return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
+
+        approved_fields = _support_contact_approved_fields(document)
+        if not approved_fields:
+            return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
+
+        supplement = build_support_contact_supplement(
+            chat_response.answer,
+            approved_fields,
+            True,
+            hours_requested=bool(re.search(r"\bhours?\b", lookup_text, re.IGNORECASE)),
+        )
+        if not supplement:
+            return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
+        block, added_labels = supplement
+
+        if _support_contact_already_quoted(chat_response.answer, approved_fields, added_labels):
+            return chat_response
+
+        completed_answer = f"{chat_response.answer.strip()}\n\n{block}"
+        citations = _add_citation_if_absent(chat_response.citations, document.to_source())
+        return ChatResponse(
+            answer=completed_answer,
+            citations=citations,
+            suggestions=chat_response.suggestions,
+            cards=chat_response.cards,
+            confidence=chat_response.confidence,
+            metadata={
+                **chat_response.metadata,
+                "support_contact_supplemented": {"labels": added_labels, "record_id": document.id},
+            },
+            correlation_id=chat_response.correlation_id,
+        )
 
     @staticmethod
     def _replace_answer(
@@ -663,6 +1097,7 @@ class AIOrchestrator:
         body: ChatRequest,
         correlation_id: str,
         session_input: str = "",
+        resolved_request: str = "",
     ) -> ChatResponse | None:
         """Read and revalidate a cached response before returning it."""
         cache_started = perf_counter()
@@ -683,7 +1118,9 @@ class AIOrchestrator:
                 "outputTokensSaved": saved_output_tokens,
             },
         )
-        response = self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+        response = self._cached_response_value(
+            cached, body, correlation_id, cache_type="exact", resolved_request=resolved_request
+        )
         return response
 
     def _cached_response_value(
@@ -693,6 +1130,7 @@ class AIOrchestrator:
         correlation_id: str,
         *,
         cache_type: str,
+        resolved_request: str = "",
     ) -> ChatResponse | None:
         if not cached:
             return None
@@ -706,6 +1144,7 @@ class AIOrchestrator:
             correlation_id,
             user_question=body.message,
             country=body.country,
+            resolved_request=resolved_request,
         )
         chat_response = self._validate_response(
             chat_response, body, correlation_id, retrieval_result=evidence
@@ -776,6 +1215,7 @@ class AIOrchestrator:
             body,
             correlation_id,
             cache_type="semantic",
+            resolved_request=retrieval_query,
         )
         if not response or response.metadata.get("cache") != "semantic":
             return response, cached, duration_ms
@@ -993,9 +1433,13 @@ class AIOrchestrator:
         normalized = " ".join((user_message or "").lower().split())
         if not normalized:
             return False
-        # An explicit question mark is required. Opening with an auxiliary verb is
-        # not enough: "do it anyway" opens with one and continues an instruction.
-        if not normalized.endswith("?") or not QUESTION_OPENERS.match(normalized):
+        # An auxiliary opener needs an explicit question mark: "do it anyway" opens
+        # with one and continues an instruction. A wh-opener reads as a question
+        # without one, so "How much would those products cost" is not judged on
+        # the unsafe question it was anchored to for retrieval.
+        if not QUESTION_OPENERS.match(normalized):
+            return False
+        if not normalized.endswith("?") and not WH_QUESTION_OPENERS.match(normalized):
             return False
         if CONTINUATION_TERMS.search(normalized):
             return False
@@ -1052,7 +1496,55 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
-        return word_count <= 14 and self._contains_follow_up_marker(normalized)
+        if word_count <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        message = " ".join(user_message.split())
+        user_messages = self._user_messages_from_history(history)
+        if self._is_clarification_reply(message):
+            # Attach only to a real preceding question; otherwise keep the reply
+            # as it is and let the normal path ask for what is missing.
+            return bool(self._latest_context_anchor(user_messages))
+        if self._is_directory_field_follow_up(message):
+            return bool(self._inherited_directory_target(user_messages))
+        return False
+
+    def _is_directory_field_follow_up(self, message: str) -> bool:
+        """A short request for one directory field that names no market or policy."""
+        normalized = " ".join((message or "").split())
+        if not normalized or len(normalized.split()) > FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS:
+            return False
+        if find_market_mentions(normalized) or POLICY_WORD.search(normalized) or self._is_instruction_message(normalized):
+            return False
+        return bool(FOLLOW_UP_DIRECTORY_FIELD_TERMS.search(normalized))
+
+    def _is_clarification_reply(self, message: str) -> bool:
+        """A short statement supplying a detail ("I live in Arizona.", "45 days ago")."""
+        normalized = " ".join((message or "").split())
+        if not normalized or "?" in normalized or len(normalized.split()) > CLARIFICATION_REPLY_MAX_WORDS:
+            return False
+        if CONTENT_REQUEST_TERMS.search(normalized) or self._is_instruction_message(normalized):
+            return False
+        return bool(CLARIFICATION_REPLY.match(normalized))
+
+    def _inherited_directory_target(self, user_messages: list[str]) -> set[str]:
+        """Return the one market the latest relevant USER turn named, or nothing.
+
+        Walks back over dependent turns only. A substantive turn with no market
+        ("What is the return policy?") ends the walk, so a topic switch stops
+        inheritance; a turn naming two markets is ambiguous and inherits nothing.
+        Refused instructions are skipped, and assistant turns are never read.
+        This selects a directory target only; policy authority stays the request
+        market and is enforced later by the evidence gate.
+        """
+        for message in reversed(user_messages):
+            if self._is_instruction_message(message):
+                continue
+            markets = set(find_market_mentions(self._answered_clause_of(message)))
+            if markets:
+                return markets if len(markets) == 1 else set()
+            if not self._is_context_dependent_message(message):
+                return set()
+        return set()
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
@@ -1096,8 +1588,24 @@ class AIOrchestrator:
             if self._is_context_dependent_message(message):
                 later_messages.append(message)
                 continue
-            return self._carry_forward_market_shift(self._answered_clause_of(message), later_messages)
+            anchor = self._carry_forward_market_shift(self._answered_clause_of(message), later_messages)
+            return self._carry_forward_clarifications(anchor, later_messages)
         return ""
+
+    def _carry_forward_clarifications(self, anchor: str, later_messages: list[str]) -> str:
+        """Keep details the user supplied for the anchor question, oldest first.
+
+        TC-053..055: "What is the return policy?" -> "I am a Preferred Customer in
+        the U.S." -> "I bought it 45 days ago." The middle reply is skipped as
+        context-dependent, and dropping it answers the last turn for nobody in
+        particular. Only the user's own clarification replies are kept.
+        """
+        if not anchor:
+            return anchor
+        for message in reversed(later_messages):
+            if self._is_clarification_reply(message) and message not in anchor:
+                anchor = f"{anchor} {message}"
+        return anchor
 
     def _carry_forward_market_shift(self, anchor: str, later_messages: list[str]) -> str:
         """Keep a market named after the anchor, so the subject cannot revert.
@@ -1174,7 +1682,11 @@ class AIOrchestrator:
         normalized = " ".join(user_message.lower().split())
         if not normalized:
             return False
-        return len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized)
+        if len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        # Field follow-ups and clarification replies cannot be retrieved on their
+        # own words either, so the anchor walk passes over them to the question.
+        return self._is_directory_field_follow_up(user_message) or self._is_clarification_reply(user_message)
 
     def _user_messages_from_history(self, history: str) -> list[str]:
         """Extract prior user messages from compact session history."""
@@ -1520,6 +2032,7 @@ class AIOrchestrator:
         except Exception:  # noqa: BLE001 - best-effort addition, must never break the fallback path
             LOGGER.exception("office_contact_lookup_failed", correlation_id=correlation_id)
             return None
+        _record_diagnostic_retrieval("office_contact_lookup", directory_result)
 
         record = next(
             (
@@ -2014,6 +2527,7 @@ class AIOrchestrator:
         # Recorded before any repair attempt, so ValidationHealth reflects what
         # the model produced rather than what repair rescued.
         record_validation_outcome(has_critical=result.has_critical())
+        numeric_repair_attempt: dict[str, Any] | None = None
         if result.has_critical():
             critical_codes = {
                 str(issue.code).upper()
@@ -2030,10 +2544,18 @@ class AIOrchestrator:
                     chat_response.answer,
                     retrieval_result.documents,
                 )
+                numeric_repair_attempt = {
+                    "answer": repaired_answer,
+                    "removed": removed_numbers,
+                    "documents": retrieval_result.documents,
+                    "result": None,
+                }
                 if repaired_answer and repaired_answer != chat_response.answer:
                     repaired_response = ChatResponse(
                         answer=repaired_answer,
-                        citations=chat_response.citations,
+                        citations=self._citations_after_repair(
+                            chat_response, repaired_answer, model_response, retrieval_result, body, correlation_id
+                        ),
                         suggestions=chat_response.suggestions,
                         cards=chat_response.cards,
                         confidence=chat_response.confidence,
@@ -2055,6 +2577,7 @@ class AIOrchestrator:
                             correlation_id=correlation_id,
                         )
                     )
+                    numeric_repair_attempt["result"] = repaired_result
                     if not repaired_result.has_critical():
                         # Sections are logged alongside the removed figures so a
                         # reviewer can check the removal against the evidence
@@ -2082,6 +2605,9 @@ class AIOrchestrator:
                             ],
                         )
                         record_numeric_repair(len(removed_numbers))
+                        _record_diagnostic_validation(
+                            chat_response, result, "numeric_repair_accepted", numeric_repair_attempt
+                        )
                         return self._with_validation_metadata(repaired_response, repaired_result)
             failure_layer = self._validation_failure_layer(result)
             LOGGER.warning(
@@ -2096,6 +2622,7 @@ class AIOrchestrator:
                     if issue.severity.value.upper() == "CRITICAL"
                 ],
             )
+            _record_diagnostic_validation(chat_response, result, "critical_fallback", numeric_repair_attempt)
             return self._with_validation_metadata(
                 self.response_builder.fallback(
                     self._insufficient_evidence_message(body.language, body.message),
@@ -2104,7 +2631,48 @@ class AIOrchestrator:
                 ),
                 result,
             )
+        _record_diagnostic_validation(chat_response, result, "no_critical_issue")
         return self._with_validation_metadata(chat_response, result)
+
+    def _citations_after_repair(
+        self,
+        chat_response: ChatResponse,
+        repaired_answer: str,
+        model_response: ModelResponse | None,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> list[dict[str, object]]:
+        """Citations for an answer numeric repair has just shortened.
+
+        Citations were chosen from the model's text before repair deleted
+        sentences from it, so a model answer's citations are chosen again for
+        the text the reader receives. Fallback, refusal, narrowing and other
+        controlled copy keeps the citations it was built with (normally none):
+        re-choosing them would attach policy passages to a refusal whose
+        numeric addendum repair removed.
+
+        Choosing citations must never fail the answer. On any error the
+        citations built before repair are kept and the error is logged.
+        """
+        metadata = chat_response.metadata or {}
+        if (
+            metadata.get("fallback")
+            or metadata.get("failure_layer")
+            or metadata.get("response_source", "model") != "model"
+        ):
+            return chat_response.citations
+        try:
+            return self.response_builder.reconcile_citations(
+                built_answer=model_response.text if model_response is not None else chat_response.answer,
+                delivered_answer=repaired_answer,
+                citations=chat_response.citations,
+                retrieval_result=retrieval_result,
+                session_country=body.country,
+            )
+        except Exception:  # noqa: BLE001 - citation choice is best-effort and must never break the answer
+            LOGGER.exception("citation_reconcile_failed", correlation_id=correlation_id)
+            return chat_response.citations
 
     def _validation_failure_layer(self, result: ValidationResult) -> str:
         """Classify critical validation failures for diagnostics."""

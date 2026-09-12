@@ -7,12 +7,19 @@ import unicodedata
 from dataclasses import dataclass
 
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
-from services.market_config import find_market_mentions
+from services.market_config import find_market_mentions, market_adjective_codes
 from utils.redaction import PHONE_RE
 
 
-# Numbers are universal. The validator deliberately does not enumerate English
-# units such as "months" or document-specific terms such as "Case Credits".
+# Numbers are universal. Claim extraction deliberately does not depend on unit
+# words such as "months" or document terms such as "Case Credits": every figure
+# is a claim, whatever follows it. Unit words are read only afterwards, by
+# _measure, to compare what an answer figure and a source figure count. That
+# lexicon is per measure (hour, day, week, month, year, Case Credits, currency,
+# percent) in the corpus languages, never per market, and a figure whose unit it
+# does not recognise is compared exactly as before. The only abbreviations it
+# expands are CC <-> Case Credits and FBO <-> Forever Business Owner, and only
+# for subject matching (_with_unit_equivalents).
 # A thousands group belongs to the number in front of it. Without this,
 # "7 800DZD" was read as the claim "7", which then matched nothing once the
 # source had been canonicalised to "7800dzd", and the sentence stating
@@ -314,6 +321,71 @@ def _context_for_claim(answer: str, start: int, end: int, radius: int = 220) -> 
     return answer[max(0, start - radius) : min(len(answer), end + radius)].strip()
 
 
+# A sentence, clause or line end. Markdown emphasis may close between the
+# punctuation and the space: "**Aldersgrense:** Bare voksne personer som er 18
+# år" ends its label at ":**", and without allowing for the asterisks the label
+# and the capitalised first word after it read as one subject, {aldersgrense,
+# bare}, which no source states beside 18.
+_SEGMENT_BOUNDARY_RE = re.compile(r"[\n\r]+|(?<=[.!?:;])[*_]*\s")
+
+
+def _is_title_case_word(word: str) -> bool:
+    return word[:1].isupper() and (len(word) == 1 or word[1:].islower())
+
+
+def _is_acronym(word: str) -> bool:
+    return 2 <= len(word) <= 6 and word.isupper()
+
+
+def _entity_phrases(text: str) -> list[tuple[str, bool, bool]]:
+    """Capitalised phrases, each flagged when it is an acronym freed from a segment's first word,
+    and whether the phrase itself begins at the segment's first word.
+
+    A segment's first word is capitalised by spelling, not because it is a
+    name. Beside a lone acronym it became half of a two-word subject: "Suomessa
+    FBO, joka ei ole tehnyt ostosta 36 ..." ("In Finland an FBO who ...")
+    required "suomessa" beside 36 in the Finnish 4.05(a) text, and the sentence
+    restating that clause was deleted; "Kun FBO" ("When an FBO") did the same.
+    The acronym is the name, so it is kept as a one-word subject that must still
+    be found beside the figure, and the word in front of it is dropped.
+
+    The third element records whether the entity's own first word is also the
+    segment's first word ("Ifølge Company Policy for Norge": "Ifølge" starts
+    both). A later capitalised modifier ("According to the US Company Policy":
+    "US" starts only the entity, not the sentence) is never sentence-initial
+    capitalisation, so it is not exempt from the market-modifier check below.
+    """
+    entities: list[tuple[str, bool, bool]] = []
+    for segment in _SEGMENT_BOUNDARY_RE.split(text):
+        first_entity = len(entities)
+        current: list[str] = []
+        current_start = 0
+        # Letters glued to a digit ("2CC", "B2C", "4B") are a unit or a code, not a
+        # word of a name: "Under 2CC koster det €12" made "Under CC" a subject.
+        # Bounded by non-word characters on both sides, so "GO2FBO" yields
+        # nothing rather than the fragments "G" and "BO".
+        segment_words = re.findall(r"(?<!\w)[^\W\d_]+(?!\w)", segment, flags=re.UNICODE)
+        for index, word in enumerate(segment_words):
+            if word[:1].isupper():
+                if not current:
+                    current_start = index
+                current.append(word)
+            elif current:
+                entities.append((" ".join(current), False, current_start == 0))
+                current = []
+        if current:
+            entities.append((" ".join(current), False, current_start == 0))
+        if (
+            len(entities) > first_entity
+            and len(segment_words) >= 2
+            and entities[first_entity][0] == f"{segment_words[0]} {segment_words[1]}"
+            and _is_title_case_word(segment_words[0])
+            and _is_acronym(segment_words[1])
+        ):
+            entities[first_entity] = (segment_words[1], True, False)
+    return entities
+
+
 def _capitalized_entity_phrases(text: str) -> list[str]:
     """Extract title-like phrases without a language-specific alphabet or stopword list.
 
@@ -324,24 +396,201 @@ def _capitalized_entity_phrases(text: str) -> list[str]:
     source. The number was then reported ungrounded and the whole answer was
     replaced by the insufficient-evidence fallback.
     """
-    entities: list[str] = []
-    for segment in re.split(r"[\n\r]+|(?<=[.!?:;])\s", text):
-        current: list[str] = []
-        for word in re.findall(r"[^\W\d_]+", segment, flags=re.UNICODE):
-            if word[:1].isupper():
-                current.append(word)
-            elif current:
-                entities.append(" ".join(current))
-                current = []
-        if current:
-            entities.append(" ".join(current))
-    return entities
+    return [phrase for phrase, _, _ in _entity_phrases(text)]
+
+
+# A short lead-in label at the start of the line the figure is on:
+# "**Delivery Charge:** For purchases of HK$500 ...". Markdown emphasis and a
+# list marker are allowed around it.
+_LINE_LABEL_RE = re.compile(
+    r"^\s*(?:[-*+•]\s+|\d+[.)]\s+)?[*_]{0,3}(?P<label>[^\W\d_][^\n:.!?;*_]{0,60}?)"
+    r"\s*[*_]{0,3}\s*:[*_]{0,3}\s"
+)
+_LABEL_MAX_WORDS = 5
+
+
+def _line_label(sentence_prefix: str) -> str:
+    match = _LINE_LABEL_RE.match(sentence_prefix)
+    if not match or len(re.findall(r"[^\W\d_]+", match.group("label"))) > _LABEL_MAX_WORDS:
+        return ""
+    return match.group("label")
+
+
+# Marketing-plan ranks. With the role words above they decide whether a label
+# names who or which tier a rule applies to; such a label always binds in full.
+_TIER_RE = re.compile(
+    r"\b(?:assistant|senior|soaring|sapphire|diamond|platinum|centurion|eagle|chairman)\b",
+    re.IGNORECASE,
+)
+# Letter-digit codes ("B2C", "B2B", "2CC"), which word tokens cannot see.
+_CODE_TOKEN_RE = re.compile(r"(?<![^\W_])(?=[^\W_]*\d)(?=[^\W_]*[^\W\d_])[^\W_]{2,8}(?![^\W_])")
+
+
+def _code_tokens(text: str) -> set[str]:
+    return set(_CODE_TOKEN_RE.findall(_normalize(text)))
+
+
+def _names_role(label: str) -> bool:
+    return bool(_role_mentions(label) or _TIER_RE.search(label))
+
+
+def _spans(words: list[str], minimum_tokens: int) -> list[set[str]]:
+    token_sets: list[set[str]] = []
+    for start in range(len(words)):
+        for end in range(len(words), start, -1):
+            tokens = _word_tokens(" ".join(words[start:end]))
+            if len(tokens) >= minimum_tokens and tokens not in token_sets:
+                token_sets.append(tokens)
+    return token_sets
+
+
+def _label_binding(
+    label: str, document_markets: frozenset[str], document_vocabulary: frozenset[str]
+) -> tuple[list[set[str]], str]:
+    """How an inline lead-in label ("**Delivery Charge:** ...") binds the figures on its line.
+
+    A label is the model's own heading written inline, so a word in it that the
+    document never uses cannot be required beside the figure: "**Standard
+    Delivery:** ... HK$500 ... HK$50" lost both amounts because the Hong Kong
+    record never says "standard". But a label must never bind less than the
+    same sentence without it, so dropping words is paid for, not free:
+
+    - a label naming the document's market binds nothing, as before;
+    - a label naming a role or tier ("Senior Manager", "Supervisor", "FBO",
+      "Preferred Customer") binds in full, one word included;
+    - a label whose words the document all uses binds in full, and a one-word
+      label must also pass the ordinary lexical check ("context");
+    - otherwise the label words and codes the document uses must be beside the
+      figure, and the sentence after the label must itself share content words
+      with the figure's own rule ("body"). "**Shipping Fee:** A handling fee of
+      HK$115 applies" keeps {fee}, which is beside 115, but its sentence shares
+      no content word with the banking-fee rule, so 115 is still removed.
+    """
+    if document_markets and find_market_mentions(label) & document_markets:
+        return [], ""
+    words = [word for word in re.findall(r"[^\W\d_]+", label, flags=re.UNICODE) if len(word) >= 2]
+    if _names_role(label):
+        return _spans(words, 1 if len(words) == 1 else 2), ""
+    codes = _code_tokens(label)
+    known_words = [word for word in words if _in_vocabulary(_normalize(word), document_vocabulary)]
+    known_codes = {code for code in codes if code in document_vocabulary}
+    # Only a Title Case label was ever a capitalised subject. A sentence-case
+    # label ("Delivery charge", "Bonus payment threshold") never bound its words,
+    # so its words are not required now either; only its codes and its sentence.
+    title_case = bool(words) and all(word[:1].isupper() for word in words)
+    if len(known_words) == len(words) and known_codes == codes:
+        if not title_case:
+            return ([known_codes], "context") if known_codes else ([], "")
+        if len(words) >= 2:
+            return [tokens | known_codes for tokens in _spans(words, 2)], ""
+        subject = _word_tokens(" ".join(words)) | known_codes
+        return ([subject], "context") if subject else ([], "")
+    subject = (_word_tokens(" ".join(known_words)) if title_case else set()) | known_codes
+    return ([subject] if subject else []), "body"
+
+
+def _in_vocabulary(token: str, vocabulary: frozenset[str]) -> bool:
+    return token in vocabulary or any(
+        _tokens_match(token, word) for word in vocabulary if len(word) >= 6 and len(token) >= 6
+    )
+
+
+_DOCUMENT_NAME_RE = re.compile(r"^\s*(.+?\.(?:pdf|docx?|txt|md|html?))(?=\s|$)", re.IGNORECASE)
+_DOCUMENT_NAME_NOISE = frozenset({"pdf", "doc", "docx", "txt", "html", "htm"})
+
+
+def _document_name_tokens(document: object) -> frozenset[str]:
+    """Words of the file a retrieved document comes from ("COMPANY_POLICY_IT_IT.pdf")."""
+    match = _DOCUMENT_NAME_RE.match(str(getattr(document, "title", "") or ""))
+    if not match:
+        return frozenset()
+    return frozenset(
+        token for token in _word_tokens(match.group(1).replace("_", " "))
+        if len(token) >= 3 and token not in _DOCUMENT_NAME_NOISE
+    )
+
+
+def _without_document_name(words: list[str], name_tokens: frozenset[str]) -> list[str]:
+    """Drop a run of two or more words that together name the source document."""
+    kept: list[str] = []
+    index = 0
+    while index < len(words):
+        end = index
+        while end < len(words) and _in_vocabulary(_normalize(words[end]), name_tokens):
+            end += 1
+        if end - index >= 2:
+            index = end
+            continue
+        kept.append(words[index])
+        index += 1
+    return kept
+
+
+def _names_documents_market(word: str, document_markets: frozenset[str]) -> bool:
+    """Whether a single capitalised word names one of the document's own markets.
+
+    Recognition is by market name (``find_market_mentions``) or by adjective
+    or demonym (``market_adjective_codes``); either is enough. An unknown
+    regional or collective word -- "Benelux", "Scandinavian", "American",
+    "US" -- is recognised by neither and returns False, which keeps base's
+    behaviour of not forgiving it.
+    """
+    if not document_markets:
+        return False
+    if find_market_mentions(word) & document_markets:
+        return True
+    return bool(market_adjective_codes(word) & document_markets)
+
+
+# A figure, its unit abbreviation and a parenthetical spelling that abbreviation
+# out: "2CC (Crediti Caso)", "2 CC (Credit Certificates)", "**2CC** (Case Credits)".
+_UNIT_EXPANSION_RE = re.compile(
+    r"(?<![\w.])\d[\d.,]*\s?(?P<unit>[^\W\d_]{2,6})[*_]{0,3}\s*\((?P<expansion>[^()\n]{1,80})\)"
+)
+
+
+def _without_unit_expansions(text: str) -> str:
+    """Drop a parenthetical that only expands the unit written beside a figure.
+
+    Such a parenthetical names the unit, not the rule's subject. Letters glued to
+    a figure are not words (see _entity_phrases), so in "acquista 2CC (Credit
+    Certificati) nell'arco di 2 mesi consecutivi" the expansion alone became the
+    subject of the months figure, was absent from the Italian 3.03 clause, and
+    repair deleted the whole sentence. Spaced "2 CC (...)" survived only because
+    "CC" joined the phrase and matched the source's "2CC".
+
+    Narrow on purpose: the abbreviation must be a known unit (_unit_word_kind),
+    and the parenthetical must have one word per letter, each starting with that
+    letter. "2CC (Aloe Vera)" and "2CC di Aloe Vera Gel" keep their subject.
+    """
+    def replace(match: re.Match[str]) -> str:
+        unit = match.group("unit")
+        words = re.findall(r"[^\W\d_]+", match.group("expansion"))
+        expands_unit = (
+            unit.isupper()
+            and bool(_unit_word_kind(unit.casefold()))
+            and len(words) == len(unit)
+            and all(word[:1].casefold() == letter.casefold() for word, letter in zip(words, unit))
+        )
+        if not expands_unit:
+            return match.group(0)
+        return text[match.start():match.start("expansion") - 1].rstrip() + " "
+
+    return _UNIT_EXPANSION_RE.sub(replace, text)
 
 
 def _subject_token_sets(
-    claim: MeasurableClaim, document_markets: frozenset[str] = frozenset()
-) -> list[set[str]]:
-    """Extract named subjects that connect a number to the policy topic."""
+    claim: MeasurableClaim,
+    document_markets: frozenset[str] = frozenset(),
+    document_vocabulary: frozenset[str] | None = None,
+    document_name_tokens: frozenset[str] = frozenset(),
+) -> tuple[list[set[str]], str]:
+    """Named subjects that connect a number to the policy topic, and what else must
+    bind it ("", "context" or "body").
+
+    See _label_binding for the two non-empty modes; every other subject binds
+    exactly as it did before inline labels were read.
+    """
     # Preserve this occurrence's position: splitting on the numeric text links
     # repeated values to the first subject instead of the current claim. The
     # prefix is already bounded to what precedes THIS occurrence.
@@ -361,9 +610,15 @@ def _subject_token_sets(
     # "To qualify as Assistant Manager ... two paths: generate 120 ..." keeps its
     # subject after the colon, and cutting there let a number belonging to
     # another rank pass as grounded.
-    sentence_prefix = re.split(r"[\n\r]|(?<=[.!?])\s", claim.prefix)[-1]
-    phrases = _capitalized_entity_phrases(sentence_prefix)
-    phrases = [phrase for phrase in phrases if len(_word_tokens(phrase)) >= 2][-1:]
+    sentence_prefix = re.split(r"[\n\r]|(?<=[.!?])[*_]*\s", claim.prefix)[-1]
+    phrases = [
+        (phrase, freed, starts_segment)
+        for phrase, freed, starts_segment in _entity_phrases(_without_unit_expansions(sentence_prefix))
+        if freed or len(_word_tokens(phrase)) >= 2
+    ][-1:]
+    label = _line_label(sentence_prefix) if document_vocabulary is not None else ""
+    if label and (not phrases or phrases[0][0] in label):
+        return _label_binding(label, document_markets, document_vocabulary)
     # A subject that names the market this document is about is established by
     # the document, not by the sentence beside the number.
     #
@@ -381,12 +636,60 @@ def _subject_token_sets(
     # a figure belonging to a different rank cannot pass.
     if document_markets:
         phrases = [
-            phrase for phrase in phrases if not (find_market_mentions(phrase) & document_markets)
+            (phrase, freed, starts_segment) for phrase, freed, starts_segment in phrases
+            if not (find_market_mentions(phrase) & document_markets)
         ]
 
     token_sets: list[set[str]] = []
-    for phrase in phrases:
+    for phrase, freed, starts_segment in phrases:
         words = re.findall(r"[^\W\d_]+", phrase, flags=re.UNICODE)
+        minimum_tokens = 1 if freed else 2
+        # The document's own name is established by the document, as its market
+        # is. "Ifølge Company Policy for Norge må du være 18 år" and "Secondo la
+        # Company Policy italiana ... 2 mesi" required "company policy" beside the
+        # figure, and no clause repeats its document's title. Only a run of two or
+        # more name words is dropped, and never when the sentence names a market
+        # the document is not about, wherever it stands: "Ifølge Company Policy
+        # for Sverige ... 18 år" against the Norwegian clause keeps its full
+        # phrase, as before. Market names come from
+        # services.market_config.find_market_mentions (called, not changed), which
+        # knows every market in markets.json and the global directory list,
+        # including ones without a chat deployment such as Mexico and Spain.
+        #
+        # A market named as a CAPITALISED MODIFIER inside the document-name run
+        # itself is a second, narrower leak this same forgiveness must not
+        # cover: "According to the US Company Policy ... 25 Case Credits"
+        # against a Canadian record names a market the document is not about,
+        # every bit as much as a trailing "for Sverige" does, but the modifier
+        # sits where the drop below would otherwise erase it along with
+        # "Company Policy" once nothing bigger than "US" is left over. So every
+        # capitalised word of this phrase other than one that is only
+        # capitalised because it starts the sentence ("Ifølge Company Policy
+        # for Norge": "Ifølge") must itself be a recognised mention of the
+        # document's OWN market -- by name (find_market_mentions) or by
+        # adjective/demonym (market_adjective_codes) -- or the drop does not
+        # happen at all and the full phrase is kept exactly as base keeps it.
+        # An own-market adjective ("the Canadian Company Policy" against a CA
+        # record) is forgiven the same way a trailing "for Norge" is. Regional
+        # or collective words find_market_mentions and market_adjective_codes
+        # do not know ("Benelux", "Scandinavian", "American", "US") are never
+        # forgiven, matching base.
+        modifiers = words[1:] if starts_segment else words
+        unrecognised_modifier = any(
+            not _in_vocabulary(_normalize(word), document_name_tokens)
+            and not _names_documents_market(word, document_markets)
+            for word in modifiers
+        )
+        if (
+            not unrecognised_modifier
+            and document_name_tokens
+            and not (find_market_mentions(_claim_sentence_text(claim, sentence_prefix)) - document_markets)
+        ):
+            unnamed = _without_document_name(words, document_name_tokens)
+            if len(unnamed) != len(words):
+                words = unnamed
+                if len(_word_tokens(" ".join(words))) < 2:
+                    continue
         # Consider every contiguous multi-word span, not only suffixes. A leading
         # grammatical word ("For Assistant Manager") was already handled; a
         # TRAILING one was not, so a heading like "Recognized Manager
@@ -395,11 +698,287 @@ def _subject_token_sets(
         # The number itself must still be present in the source: these spans only
         # decide which occurrence a number is bound to.
         for start in range(len(words)):
-            for end in range(len(words), start + 1, -1):
+            for end in range(len(words), start, -1):
                 tokens = _word_tokens(" ".join(words[start:end]))
-                if len(tokens) >= 2 and tokens not in token_sets:
+                if len(tokens) >= minimum_tokens and tokens not in token_sets:
                     token_sets.append(tokens)
-    return token_sets
+    return token_sets, ""
+
+
+# What a figure measures, read from the unit written beside it. Compared only
+# when both the answer and the source state one, so a figure written without a
+# unit is judged exactly as before. The list is per measure, not per market:
+# it names months, weeks and so on in the corpus languages.
+_MEASURE_WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (kind, re.compile(pattern))
+    for kind, pattern in (
+        ("hour", r"h|hrs?|hours?|tunti\w*|tunnin|timer|timen|uur|uren|ore|heures?|stunden?|horas?"),
+        ("day", r"days?|\w*päiv\w*|(?:virke|arbeids|kalender|arbets)?dag(?:e|er|ar|en|ene|arna)?"
+                r"|werkdag\w*|giorn[oi]|jours?|tage?n?|días?|dias?"),
+        ("week", r"weeks?|viik\w*|uker?|uka|uken|uger?|veck\w*|weken?|settiman[ae]|semaines?|wochen?|semanas?"),
+        ("month", r"months?|\w*kuukau\w*|\w*måned\w*|\w*månad\w*|\w*maand\w*|mes[ei]?|meses|mês|mois|\w*monat\w*"),
+        ("year", r"years?|vuo(?:si|de\w*|tta)|\w*vuotia\w*|år|års|året|jaar|jaren|ann[oi]|ans|années?"
+                 r"|jahre?n?|años?|anos?"),
+        ("cc", r"ccs?|crédits?"),
+        ("currency:dollar", r"dollars?|dollaria|dollari"),
+        ("currency:eur", r"euros?|euroa|euron"),
+        ("currency:krone", r"kron(?:er|or|a|e)"),
+        ("currency:gbp", r"pounds?"),
+        ("percent", r"percent|prosent\w*|procent|prozent|pourcent"),
+    )
+)
+_TIME_KINDS = frozenset({"hour", "day", "week", "month", "year"})
+_MEASURE_TOKEN_RE = re.compile(r"[^\W\d_]+|[\d.;:!?()\[\]]")
+# A comma ends the figure's clause for its period: in "25 Case Credits, and
+# Home Office approval, which takes days, is needed" the days are not the limit's.
+# A colon ends it only before a space: Finnish writes "2 CC:n arvosta".
+_PERIOD_STOP_RE = re.compile(r"[\d.,;!?\n]|:(?![^\W\d_])")
+# A currency code in front of the figure ("HKD 500"). Codes that are also common
+# words are not read there.
+_CODE_BEFORE_RE = re.compile(r"(?<![^\W\d_])([a-z]{3})\s{1,2}$", re.IGNORECASE)
+_AMBIGUOUS_CODE_WORDS = frozenset({"try", "mad", "pen", "cop", "ron", "bob"})
+_PERIOD_WORD_LIMIT = 8
+# The dollar amounts of different markets are written "$", "HK$" or "HKD"
+# interchangeably, so only the family is compared; euro against dollar is not.
+_CURRENCY_FAMILIES = {
+    **{code: "dollar" for code in ("usd", "hkd", "cad", "aud", "nzd", "sgd", "twd")},
+    **{code: "krone" for code in ("nok", "sek", "dkk")},
+}
+
+
+def _unit_word_kind(word: str) -> str:
+    for kind, pattern in _MEASURE_WORDS:
+        if pattern.fullmatch(word):
+            return kind
+    return ""
+
+
+def _written_unit_kind(text: str, start: int, end: int) -> str:
+    """The unit written as a symbol or code beside the figure ("HK$50", "HKD 500", "2CC", "30%")."""
+    unit = _adjacent_unit(text, start, end)
+    if not unit:
+        code = _CODE_BEFORE_RE.search(text, max(0, start - 6), start)
+        if code and code.group(1).lower() in _ROLE_CURRENCY_CODES - _AMBIGUOUS_CODE_WORDS:
+            unit = code.group(1).lower()
+    if unit == "cc":
+        return "cc"
+    if unit == "pct":
+        return "percent"
+    return f"currency:{_CURRENCY_FAMILIES.get(unit, unit)}" if unit else ""
+
+
+def _unit_word_after(text: str, scan_from: int) -> str:
+    """The unit named by the words right after a figure ("36 peräkkäiseen kalenterikuukauteen")."""
+    words: list[str] = []
+    for match in _MEASURE_TOKEN_RE.finditer(text, scan_from, min(len(text), scan_from + 80)):
+        if not match.group(0)[0].isalpha():
+            break
+        words.append(unicodedata.normalize("NFKC", match.group(0)).casefold())
+        # A fourth word is read only to finish "... Open Group Case Credits".
+        if len(words) == 4:
+            break
+    for index, word in enumerate(words[:3]):
+        if word == "case" and index + 1 < len(words) and words[index + 1].startswith("credit"):
+            return "cc"
+        kind = _unit_word_kind(word)
+        # A short word before any unit ("25 per month", "18 or older") ends the
+        # figure's own phrase; a unit further on belongs to something else.
+        if kind or len(word) <= 3:
+            return kind
+    return ""
+
+
+def _period_after(text: str, scan_from: int) -> str:
+    """The first time unit later in the figure's own clause ("25 Case Credits in any calendar Month")."""
+    limit = min(len(text), scan_from + 120)
+    stop = _PERIOD_STOP_RE.search(text, scan_from, limit)
+    content_words = 0
+    for word in re.findall(r"[^\W\d_]+", text[scan_from:stop.start() if stop else limit]):
+        word = unicodedata.normalize("NFKC", word).casefold()
+        # Short words are too ambiguous across languages to read as a period
+        # ("an", "ora", "dag"), and they do not count towards the limit, so
+        # "2 CC koopt binnen een periode van twee opeenvolgende maanden"
+        # reaches its months. "år" is the one short word that only means years.
+        if len(word) < 4 and word != "år":
+            continue
+        word_kind = _unit_word_kind(word)
+        if word_kind in _TIME_KINDS:
+            return word_kind
+        content_words += 1
+        if content_words == _PERIOD_WORD_LIMIT:
+            break
+    return ""
+
+
+def _measure(text: str, start: int, end: int) -> tuple[str, str]:
+    """Return (unit, period) for the figure at text[start:end]; "" where none is written.
+
+    The unit is what the figure counts ("25 Case Credits", "36 kuukautta",
+    "HK$50"). The period is the first time unit later in the same clause
+    ("25 Case Credits in any calendar Month"). A figure in parentheses reads on
+    past its bracket: "trettiseks (36) sammenhengende kalendermåneder".
+    """
+    scan_from = end + 1 if text[end:end + 1] == ")" else end
+    kind = _written_unit_kind(text, start, end) or _unit_word_after(text, scan_from)
+    return kind, (kind if kind in _TIME_KINDS else _period_after(text, scan_from))
+
+
+def _claim_measure(claim: MeasurableClaim) -> tuple[str, str]:
+    """The claim's unit and period, read at this occurrence rather than the first equal figure."""
+    position = len(claim.prefix.lstrip())
+    if claim.context[position:position + len(claim.text)] == claim.text:
+        return _measure(claim.context, position, position + len(claim.text))
+    at = claim.sentence.find(claim.text)
+    return _measure(claim.sentence, at, at + len(claim.text)) if at != -1 else ("", "")
+
+
+def _with_unit_equivalents(window_tokens: set[str]) -> set[str]:
+    """"2CC" in a source is "2 Case Credits" in an answer, and "Forever Business Owners" is "FBO".
+
+    Used for subject matching only. The lexical fallback counts shared words, and
+    adding words there let "Per restare attivo devi acquistare 2 Case Credits al
+    mese" borrow the Preferred Customer clause's "2CC".
+    """
+    tokens = set(window_tokens)
+    if tokens & {"cc", "ccs"}:
+        tokens |= {"case", "credit", "credits"}
+    if {"forever", "business"} <= tokens and tokens & {"owner", "owners"}:
+        tokens |= {"fbo", "fbos"}
+    return tokens
+
+
+_UNIT_LETTERS = frozenset("hmdksx")
+_RULE_SEPARATOR_RE = re.compile(r"\s/|/\s")
+_CLOCK_READING_RE = re.compile(
+    r"\s?(?:h\d{2}|h\b|[ap]\.?\s?m\b|uhr\b|heures?\b|hrs?\b|hours?\b|o['’]?clock\b|uur\b|u\b|timer?\b)",
+    re.IGNORECASE,
+)
+
+
+def _claim_position(claim: MeasurableClaim) -> int:
+    """This claim's offset in its context, or -1."""
+    position = len(claim.prefix.lstrip())
+    return position if claim.context[position:position + len(claim.text)] == claim.text else -1
+
+
+def _glued_letter(text: str, end: int) -> str:
+    """A single letter written straight after a figure ("2B"), unless it is a unit ("48h")."""
+    match = re.match(r"([a-z])(?![^\W\d_])", text[end:end + 2], re.IGNORECASE)
+    letter = match.group(1).lower() if match else ""
+    return "" if letter in _UNIT_LETTERS else letter
+
+
+def _claim_glued_letter(claim: MeasurableClaim) -> str:
+    position = _claim_position(claim)
+    return _glued_letter(claim.context, position + len(claim.text)) if position != -1 else ""
+
+
+def _claim_reads_as_clock(claim: MeasurableClaim) -> bool:
+    """True when the answer writes this figure as a time of day ("17h00", "9 am", "17 Uhr")."""
+    if re.fullmatch(r"\d{1,2}[:.]\d{2}", claim.text):
+        return True
+    position = _claim_position(claim)
+    if position == -1:
+        return False
+    after = claim.context[position + len(claim.text):position + len(claim.text) + 12]
+    before = claim.context[max(0, position - 12):position]
+    # "from 09 to 17": two hours joined as a range read as times as well.
+    return bool(
+        _CLOCK_READING_RE.match(after)
+        or _CLOCK_RANGE_AFTER_RE.match(after)
+        or _CLOCK_RANGE_BEFORE_RE.search(before)
+    )
+
+
+_CLOCK_RANGE_AFTER_RE = re.compile(
+    r"\s?(?:-|–|—|to|à|bis|tot|til|till)\s?\d{1,2}(?:[:.h]\d{2})?(?!\d)", re.IGNORECASE
+)
+_CLOCK_RANGE_BEFORE_RE = re.compile(
+    r"(?<!\d)\d{1,2}(?:[:.h]\d{2})?\s?(?:-|–|—|to|à|bis|tot|til|till)\s?$", re.IGNORECASE
+)
+
+
+def _claim_sentence_text(claim: MeasurableClaim, sentence_prefix: str) -> str:
+    """The whole sentence a claim stands in: its prefix, the figure and what follows up to the end."""
+    position = _claim_position(claim)
+    rest = claim.context[position:] if position != -1 else claim.sentence
+    stop = re.search(r"[.!?](?=\s|$)|\n", rest)
+    return sentence_prefix + rest[:stop.start() if stop else len(rest)]
+
+
+def _rule_segment(source_text: str, start: int, end: int, radius: int = 260) -> str:
+    """The source text of the one rule a figure belongs to.
+
+    A clause, further cut at a spaced slash, which separates alternatives inside
+    a directory field: "B2C/ under 2CC - €18 ex VAT/ over 2CC- €12 ex VAT".
+    """
+    left = max(0, start - radius)
+    for pattern in (_CLAUSE_DELIMITER_RE, _RULE_SEPARATOR_RE):
+        for match in pattern.finditer(source_text, left, start):
+            left = max(left, match.end())
+    right = min(len(source_text), end + radius)
+    for pattern in (_CLAUSE_DELIMITER_RE, _RULE_SEPARATOR_RE):
+        match = pattern.search(source_text, end, right)
+        if match:
+            right = min(right, match.start())
+    return source_text[left:right]
+
+
+def _shares_rule_words(sentence: str, segment: str) -> bool:
+    """The sentence shares a content word (four letters or more) with the rule, and either a
+    second word or every word it has: a value line such as "(888) 440-ALOE (2563)" has one."""
+    sentence_tokens = _word_tokens(sentence)
+    shared = sentence_tokens & _word_tokens(segment)
+    if not any(len(token) >= 4 for token in shared):
+        return False
+    return len(shared) >= 2 or shared == sentence_tokens
+
+
+def _measures_agree(claim_measure: tuple[str, str], source_measure: tuple[str, str]) -> bool:
+    """Whether an answer figure and a source figure count the same thing over the same period.
+
+    Compared only where both write a unit or a period. A time word beside one
+    figure and a count beside the other are two halves of one rule: "2 CC koopt
+    binnen 2 maanden" restates "2 CC koopt binnen een periode van twee
+    opeenvolgende maanden", whose only 2 is the CC. So a time unit is compared
+    with the period stated in the count's own clause, which must state one:
+    "2CC ... nell'arco di 4 mesi" does not borrow the 4 of "attivo con i 4CC".
+    """
+    (claim_kind, claim_period), (source_kind, source_period) = claim_measure, source_measure
+    if claim_kind and source_kind and claim_kind != source_kind:
+        if (claim_kind in _TIME_KINDS) == (source_kind in _TIME_KINDS):
+            return False
+        time_kind, count_period = (
+            (claim_kind, source_period) if claim_kind in _TIME_KINDS else (source_kind, claim_period)
+        )
+        return count_period == time_kind
+    return not (claim_period and source_period and claim_period != source_period)
+
+
+def _occurrence_can_support(
+    source_text: str,
+    start: int,
+    end: int,
+    claim_letter: str,
+    claim_reads_as_clock: bool,
+    clock_spans: list[tuple[int, int]],
+) -> bool:
+    """False for a source figure that is part of a code, another house number, or a clock time.
+
+    A figure glued to a letter in front ("(A2)", "B2C") is part of a code, not a
+    quantity. One glued to a letter behind ("Kvarnbygatan 2B") is a house number
+    and must be the same one. A clock time supports only a figure the answer
+    writes as a time: "17" gains the variant "17.00", and in the Luxembourg
+    record that is "Business Hours Office 09.00 am – 17.00 pm", not a count.
+    """
+    preceding = source_text[start - 1:start] if start else ""
+    if preceding.isascii() and preceding.isalpha():
+        return False
+    if claim_letter and _glued_letter(source_text, end) != claim_letter:
+        return False
+    return claim_reads_as_clock or not any(
+        span_start <= start and end <= span_end for span_start, span_end in clock_spans
+    )
 
 
 # A sentence or clause end, but never the point inside a decimal figure.
@@ -449,10 +1028,31 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
 
 
 def _claim_is_supported(
-    claim: MeasurableClaim, source_text: str, document_markets: frozenset[str] = frozenset()
+    claim: MeasurableClaim,
+    source_text: str,
+    document_markets: frozenset[str] = frozenset(),
+    document_name_tokens: frozenset[str] | None = None,
 ) -> bool:
-    """Return true only when the same number is linked to the same named topic."""
-    subject_token_sets = _subject_token_sets(claim, document_markets)
+    """Return true only when the same number is linked to the same named topic.
+
+    ``document_name_tokens`` is given by unsupported_numeric_claims, which holds
+    the document and its title; both the validator's verdict and repair go
+    through it. It also enables the inline-label reading, which needs the
+    document's own vocabulary. Without it both stay off, so a caller holding only
+    text (the structured-record rescue in NumericGroundingValidator.validate) is
+    never more lenient than before.
+    """
+    vocabulary = (
+        frozenset(_word_tokens(source_text) | _code_tokens(source_text))
+        if document_name_tokens is not None else None
+    )
+    subject_token_sets, binding = _subject_token_sets(
+        claim, document_markets, vocabulary, document_name_tokens or frozenset()
+    )
+    claim_kind, claim_period = _claim_measure(claim)
+    claim_letter = _claim_glued_letter(claim)
+    claim_reads_as_clock = _claim_reads_as_clock(claim)
+    clock_spans = [(start, end) for start, end, keys in _time_occurrences(source_text) if keys]
     claim_at = claim.sentence.find(claim.text)
     claim_unit = _adjacent_unit(claim.sentence, claim_at, claim_at + len(claim.text)) if claim_at != -1 else ""
     claim_roles = _role_mentions(claim.sentence)
@@ -462,6 +1062,18 @@ def _claim_is_supported(
     )
     for number in _number_variants(claim.number):
         for window, occurrence_start, occurrence_end in _source_occurrences(source_text, number):
+            # The same figure measuring something else is not support. "36
+            # viikkoon" (weeks) against "36 peräkkäiseen kalenterikuukauteen"
+            # (months) was removed only by accident of a spurious subject, and
+            # "25 Case Credits in any calendar week" against "... calendar Month"
+            # was kept. Compared only when both sides write a unit or a period.
+            source_kind, source_period = _measure(source_text, occurrence_start, occurrence_end)
+            if not _measures_agree((claim_kind, claim_period), (source_kind, source_period)):
+                continue
+            if not _occurrence_can_support(
+                source_text, occurrence_start, occurrence_end, claim_letter, claim_reads_as_clock, clock_spans
+            ):
+                continue
             source_role = _occurrence_role(source_text, occurrence_start, occurrence_end)
             # A source window can contain nearby rules for more than one role.
             # Reject a cross-role match only when the source explicitly labels
@@ -480,17 +1092,25 @@ def _claim_is_supported(
                 claim_unit,
                 _adjacent_unit(source_text, occurrence_start, occurrence_end),
             )
-            if subject_token_sets and any(
-                _subject_matches_window(subject_tokens, window_tokens) for subject_tokens in subject_token_sets
-            ):
+            subject_window_tokens = _with_unit_equivalents(window_tokens) | _code_tokens(window)
+            subject_bound = any(
+                _subject_matches_window(subject_tokens, subject_window_tokens)
+                for subject_tokens in subject_token_sets
+            )
+            if subject_token_sets and not subject_bound:
+                continue
+            if binding == "body":
+                if _shares_rule_words(claim.sentence, _rule_segment(source_text, occurrence_start, occurrence_end)):
+                    return True
+                continue
+            if subject_bound and binding != "context":
                 return True
 
             # Some scripts do not capitalize names. In that case, retain a modest
             # lexical check instead of inventing a locale-specific entity grammar.
-            if not subject_token_sets:
-                context_overlap = _word_tokens(claim.context) & window_tokens
-                if len(context_overlap) >= 2:
-                    return True
+            context_overlap = _word_tokens(claim.context) & window_tokens
+            if len(context_overlap) >= 2:
+                return True
     return False
 
 
@@ -780,21 +1400,25 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
     # record is about, and a subject naming that market is established by the
     # document rather than by the sentence beside the number.
     sources = [
-        (_normalize(str(getattr(document, "content", "") or "")), _document_markets(document))
+        (
+            _normalize(str(getattr(document, "content", "") or "")),
+            _document_markets(document),
+            _document_name_tokens(document),
+        )
         for document in source_documents
         if getattr(document, "content", "")
     ]
     if not sources:
         return []
-    source_texts = [source_text for source_text, _ in sources]
+    source_texts = [source_text for source_text, _, _ in sources]
     grounded_spans = _grounded_phone_spans(answer, source_texts) + _grounded_time_spans(answer, source_texts)
     return [
         claim
         for claim in _extract_claims(answer)
         if not any(start <= claim.start and claim.end <= end for start, end in grounded_spans)
         if not any(
-            _claim_is_supported(claim, source_text, document_markets)
-            for source_text, document_markets in sources
+            _claim_is_supported(claim, source_text, document_markets, name_tokens)
+            for source_text, document_markets, name_tokens in sources
         )
     ]
 

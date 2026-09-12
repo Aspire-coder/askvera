@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from app.retrieval.models import RetrievedDocument, RetrievalResult
+from app.retrieval.providers import SPONSORING_QUESTION_RE
 from config import settings
 from services.controlled_copy import localize_reviewed_copy
-from services.market_config import find_market_mentions, get_document_country_codes
+from services.market_config import find_market_mentions, get_document_country_codes, market_adjective_codes
 from utils.text_similarity import edit_distance_at_most_one
 
 
@@ -151,12 +152,19 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     intent = classify_intent(query, language)
     # An explicit company-policy request cannot be satisfied by a global
     # directory, even if the planner happens to route it to global evidence.
-    policy_requested = bool(re.search(r"\b(?:company|local|national)\s+polic(?:y|ies)\b", query, re.IGNORECASE))
-    if policy_requested and find_market_mentions(query) - {country.upper()}:
+    policy_requested = bool(_COMPANY_POLICY_REQUEST_RE.search(query))
+    # A foreign market named only as the place someone is being sponsored does
+    # not ask for that market's policy. The sponsoring fact is global, so the
+    # directory stays eligible; the policy part can still only come from the
+    # session's own rows, because _has_current_locale_document drops every
+    # foreign local-policy row.
+    mixed_sponsoring = policy_requested and is_mixed_sponsoring_policy_request(query, country)
+    if policy_requested and not mixed_sponsoring and _names_another_market(query, country):
         return EvidenceDecision(False, "cross_market_policy_request", [], intent, False, 0.0, 0.0)
+    exclude_global = policy_requested and not mixed_sponsoring
     documents = [document for document in retrieval_result.documents
                  if _has_current_locale_document([document], country, language)
-                 and not (policy_requested and document.metadata.get("access_scope") == "global")]
+                 and not (exclude_global and document.metadata.get("access_scope") == "global")]
     if intent != "policy_fact":
         return EvidenceDecision(True, "non_document_intent", documents[:1], intent, True, 0.0, 0.0)
     if not documents:
@@ -198,6 +206,109 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
         top_score=top_score,
         score_margin=score_margin,
     )
+
+
+# The word directly modifying the policy noun: "the Italian company policy",
+# "Italian Forever local policy". Only this position is read as a market,
+# because the same adjective elsewhere is usually a language ("the company
+# policy in Italian") or a person ("my Italian downline").
+_POLICY_MODIFIER_RE = re.compile(
+    r"\b(?P<modifier>[^\W\d_]+)(?:\s+forever)?(?:\s+(?:company|local|national))+\s+polic(?:y|ies)\b",
+    re.IGNORECASE,
+)
+
+
+def _names_another_market(query: str, country: str) -> bool:
+    """Return True when a company-policy request names a market other than the session's."""
+    session = (country or "").upper()
+    if find_market_mentions(query) - {session}:
+        return True
+    for match in _POLICY_MODIFIER_RE.finditer(query):
+        codes = market_adjective_codes(match.group("modifier"), session)
+        if codes and session not in codes:
+            return True
+    return False
+
+
+_COMPANY_POLICY_REQUEST_RE = re.compile(r"\b(?:company|local|national)\s+polic(?:y|ies)\b", re.IGNORECASE)
+_POLICY_WORD_RE = re.compile(r"\bpolic(?:y|ies)\b", re.IGNORECASE)
+# The clause that follows a sponsoring word ends at punctuation or a coordinating
+# conjunction, so "sponsoring and promoter commission in Italy" does not make
+# Italy a sponsoring destination. It also ends at a newline, an em dash, an en
+# dash, or a spaced hyphen ("word - word"), since those separate clauses the
+# same way punctuation does; an unspaced hyphen inside a word ("co-sponsor",
+# "e-commerce") is not a break.
+_CLAUSE_BREAK_RE = re.compile(r"[,;:.?!()\n—–]|\s-\s|\b(?:and|or|but)\b", re.IGNORECASE)
+# Layout breaks, as opposed to punctuation and conjunctions. When one sits
+# BETWEEN the sponsoring word and its destination ("Company policy: can I
+# sponsor\nsomeone in Italy?"), ending the clause there left Italy behind and
+# refused a question GLOBAL answers (ORCH5 Fable finding 1).
+_SOFT_CLAUSE_BREAK_RE = re.compile(r"[\n—–]|\s-\s")
+# A segment opening like this starts a new question rather than naming a
+# destination. Relative pronouns ("who lives in Italy") are deliberately absent.
+_NEW_QUESTION_RE = re.compile(
+    r"\s*(?:what|how|when|where|why|is|are|was|were|do|does|did|can|could|should|would|will|may)\b",
+    re.IGNORECASE,
+)
+
+
+def _sponsoring_clause_end(text: str, start: int) -> int:
+    """End of the clause after a sponsoring word, crossing at most one layout break.
+
+    The break is crossed only when nothing before it names a market yet and the
+    next segment has no policy word and does not start a new question. So
+    "sponsoring someone in Italy - what is Italy's promoter commission?" still
+    ends at the dash, and "sponsor\\nunder Italy's company policy" is still refused.
+    """
+    clause_break = _CLAUSE_BREAK_RE.search(text, start)
+    if not clause_break:
+        return len(text)
+    end = clause_break.start()
+    if not _SOFT_CLAUSE_BREAK_RE.fullmatch(clause_break.group(0)) or find_market_mentions(text[start:end]):
+        return end
+    next_break = _CLAUSE_BREAK_RE.search(text, clause_break.end())
+    next_end = next_break.start() if next_break else len(text)
+    segment = text[clause_break.end():next_end]
+    if _POLICY_WORD_RE.search(segment) or _NEW_QUESTION_RE.match(segment):
+        return end
+    return next_end
+
+
+def without_foreign_sponsoring_destinations(query: str, country: str) -> str:
+    """Blank out the rest of a sponsoring clause when it names only a foreign destination.
+
+    "sponsoring someone in Italy" keeps "sponsoring" and loses " someone in
+    Italy". A clause that also contains a policy word ("sponsor someone under
+    Italy's company policy") is kept, because there the market may be the
+    policy's owner rather than the destination.
+    """
+    text = query or ""
+    session = (country or "").upper()
+    spans: list[tuple[int, int]] = []
+    for match in SPONSORING_QUESTION_RE.finditer(text):
+        start = match.end()
+        if spans and match.start() < spans[-1][1]:
+            continue
+        end = _sponsoring_clause_end(text, start)
+        clause = text[start:end]
+        if not _POLICY_WORD_RE.search(clause) and find_market_mentions(clause) - {session}:
+            spans.append((start, end))
+    for start, end in reversed(spans):
+        text = f"{text[:start]} , {text[end:]}"
+    return text
+
+
+def is_mixed_sponsoring_policy_request(query: str, country: str) -> bool:
+    """True when a company-policy request names another market only as a sponsoring destination.
+
+    The question is still refused whenever the foreign market is left over
+    once those destinations are removed: by name ("Italy's company policy",
+    "company policy of Italy") or by the adjective modifying the policy noun
+    ("the Italian company policy").
+    """
+    if not _COMPANY_POLICY_REQUEST_RE.search(query or "") or not _names_another_market(query, country):
+        return False
+    return not _names_another_market(without_foreign_sponsoring_destinations(query, country), country)
 
 
 def with_approved_evidence(retrieval_result: RetrievalResult, decision: EvidenceDecision) -> RetrievalResult:
