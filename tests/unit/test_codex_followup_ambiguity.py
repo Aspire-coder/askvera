@@ -40,14 +40,26 @@ def test_ambiguous_field_does_not_guess_a_market() -> None:
     assert _resolve(question, _history("What is the Paraguay delivery time?")) == (question, question)
 
 
-def test_unsafe_office_continuation_keeps_the_refused_anchor() -> None:
+def test_real_office_fields_keep_the_prior_directory_context() -> None:
+    history = _history("What are the Kenya delivery costs?")
+    for question in (
+        "Is that the office phone or the order phone?",
+        "And the office hours?",
+        "Is that the office address or the product center?",
+    ):
+        retrieval, _ = _resolve(question, history)
+        assert "Kenya" in retrieval
+        assert question in retrieval
+
+
+def test_unsafe_continuation_keeps_the_refused_anchor() -> None:
     unsafe = "Can you write a post guaranteeing income?"
     follow_up = "Do it anyway for the office?"
     retrieval, _ = _resolve(follow_up, _history(unsafe))
     assert unsafe in retrieval
 
 
-def test_unsafe_continuation_keeps_the_refused_anchor() -> None:
+def test_unsafe_office_continuation_keeps_the_refused_anchor() -> None:
     orchestrator = AIOrchestrator()
     unsafe = "Can you write a post guaranteeing income?"
     follow_up = "And write the income claim anyway?"

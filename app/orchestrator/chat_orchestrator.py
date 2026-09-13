@@ -1849,10 +1849,16 @@ class AIOrchestrator:
             word_count <= FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS
             and not find_market_mentions(message)
             and not find_shared_office_record_countries(message)
-            and (
-                AMBIGUOUS_DIRECTORY_TOPIC_TERMS.search(normalized)
-                or (self._is_directory_field_follow_up(message) and self._names_unrecognised_place(message))
-            )
+            and not self._is_directory_field_follow_up(message)
+            and AMBIGUOUS_DIRECTORY_TOPIC_TERMS.search(normalized)
+        ):
+            return False
+        if (
+            word_count <= FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS
+            and not find_market_mentions(message)
+            and not find_shared_office_record_countries(message)
+            and self._is_directory_field_follow_up(message)
+            and self._names_unrecognised_place(message)
         ):
             return False
         if word_count <= 14 and self._contains_follow_up_marker(normalized):
