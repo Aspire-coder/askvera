@@ -290,10 +290,14 @@ LOCALIZED_DIRECTORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
         "betalning", r"betala\b", r"minsta (?:beställning|order)", "minimibeställning", "minimiorder",
     ),
     "da": (
-        "hjemmeside", "webside", "åbningstid", "fragt", "forsendelse", r"betale\b",
+        "telefon", r"e ?mail", "adresse", "hjemmeside", "webside", "åbningstid", "levering", "fragt", "forsendelse",
+        "betaling", r"betale\b",
         "minimumsbestilling", "minimumsordre", r"mindste (?:bestilling|ordre)",
     ),
-    "no": ("nettside", "åpningstid", "minstebestilling", r"minste (?:bestilling|ordre)"),
+    "no": (
+        "telefon", r"e ?post", "epost", "adresse", "nettside", "hjemmeside", "åpningstid", "levering", "frakt",
+        "betaling", r"betale\b", "minstebestilling", "minsteordre", r"minste (?:bestilling|ordre)",
+    ),
     "fi": (
         "puhelin", "sähköposti", "osoite", "osoitte", "verkkosivu", "kotisivu", "aukiolo",
         r"toimitus(?:maksu|kulu|aika|ajat)?\b", "toimituks", "maksu", r"maksaa\b", "vähimmäistilau", "minimitilau",
@@ -304,7 +308,8 @@ LOCALIZED_DIRECTORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
         "dostavk", "oplat", r"minimaln\w* zakaz", "sajt", r"sait\b",
     ),
     "sr": (
-        "imejl", r"radn\w* vrem", "dostav", "isporuk", "pošiljk", "plaćanj", "platit",
+        "telefon", "imejl", "email", "adres", r"radn\w* vrem", "dostav", "isporuk", "pošiljk", "slanj",
+        "plaćanj", "platit",
         r"minimaln\w* (?:porudžbin|narudžbin)",
         "имејл", "мејл", "сајт", r"радн\w* врем", "достав", "испорук", "пошиљк", "плаћањ", "платит",
         r"минималн\w* (?:поруџбин|наруџбин)",
@@ -315,7 +320,7 @@ LOCALIZED_DIRECTORY_FIELD_PATTERN = _follow_up_stem_pattern(
 )
 # POLICY_WORD in the same languages: "And the delivery policy?" is not a field request.
 LOCALIZED_POLICY_PATTERN = _follow_up_stem_pattern(
-    "policy", "beleid", "politique", "richtlinie", "politik", "política", "käytäntö", "политик", word_start=False
+    "policy", "beleid", "politique", "richtlinie", "politik", "política", "käytäntö", "politica", "retningslinj", "riktlinj", "политик", word_start=False
 )
 # Place prepositions for the capitalised-name guard on the topic ellipsis.
 LOCALIZED_PLACE_PREPOSITIONS = _follow_up_token_set(
@@ -431,10 +436,26 @@ WH_QUESTION_OPENERS = re.compile(r"^(?:what|how|when|where|which|who|why|whose|w
 # the delivery cost in Mali?" -> "What's the minimum order amount?" lost Mali.
 FOLLOW_UP_DIRECTORY_FIELD_TERMS = re.compile(
     r"\b(?:(?:tele)?phone|hours|opening\s+times?|e-?mail|address|website|"
-    r"deliver(?:y|ies|s|ed)?|shipping|payments?|pay|minimum\s+orders?)\b",
+    r"deliver(?:y|ies|s|ed)?|shipping|payments?|payment\s+methods?|pay|"
+    r"minimum\s+(?:orders?|amounts?|requirements?)|order\s+minimums?)\b",
     re.IGNORECASE,
 )
+# The localized vocabulary above is also the authoritative narrow field list for
+# short continuations. Keep the English pattern for its readable fast path, and
+# add the existing per-language stems without broadening policy matching.
+FOLLOW_UP_DIRECTORY_FIELD_TERMS = re.compile(
+    rf"(?:{FOLLOW_UP_DIRECTORY_FIELD_TERMS.pattern}|{LOCALIZED_DIRECTORY_FIELD_PATTERN.pattern})",
+    re.IGNORECASE | re.UNICODE,
+)
 FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS = 10
+# These labels intentionally do not identify one retrievable directory field.
+# A bare topic ellipsis using them must clarify rather than inherit a market.
+AMBIGUOUS_DIRECTORY_TOPIC_TERMS = re.compile(
+    r"\b(?:office|contact|kantoor|bureau|kontakt|oficina|contacto|kontor|"
+    r"toimisto|yhteystiedot|ufficio|contatto|büro|офис|контакт|kontor|"
+    r"kancelarija|канцеларија)\b",
+    re.IGNORECASE | re.UNICODE,
+)
 # A short reply that supplies a detail for the question just asked. Recorded as
 # TC-051 ("I live in Arizona.") and TC-055 ("I bought it 45 days ago.").
 CLARIFICATION_REPLY = re.compile(
@@ -543,6 +564,16 @@ def _support_contact_already_quoted(answer: str, approved_fields: dict[str, obje
         if value and value.casefold() in answer_lower:
             return True
     return False
+
+
+# Marks a citation that was added ONLY to back the appended support-contact
+# block, not any claim the answer itself makes. camelCase like the other keys
+# RetrievedDocument.to_source() emits ("documentVersion", "sectionTitle"), and
+# named after the "support_contact_supplemented" response-metadata key so the
+# block, its metadata and its citation read as one feature. Citations stay a
+# flat list of dicts - this is a field on a source, not a new collection - so
+# every existing caller that iterates them keeps working unchanged.
+SUPPORT_CONTACT_SUPPLEMENT_CITATION_FIELD = "supportContactSupplement"
 
 
 def _add_citation_if_absent(citations: list, source: dict) -> list:
@@ -1130,6 +1161,7 @@ class AIOrchestrator:
                 completed_answer,
                 directory_field_sets,
                 user_question,
+                language=language,
             )
             restored_fields = [*restored_requested_fields, *restored_fields]
         if restored_fields:
@@ -1216,6 +1248,7 @@ class AIOrchestrator:
             resolved_request,
             user_question,
             country,
+            language,
         )
 
         safe_answer = scrub_pii(
@@ -1279,6 +1312,7 @@ class AIOrchestrator:
         resolved_request: str,
         user_question: str,
         country: str,
+        language: str = "en",
     ) -> ChatResponse:
         """Append an approved support-contact block when the answer recommends care.
 
@@ -1288,6 +1322,23 @@ class AIOrchestrator:
         request names none). Never falls back to "first directory record",
         never fires for a refusal/fallback/guardrail answer, and never
         duplicates a phone or email already quoted in the answer.
+
+        ``language`` is the request language ``_secure_and_complete_response``
+        already resolved for this turn - the same value the rest of that
+        method's steps use. It selects the block's field LABELS from the
+        reviewed table in :mod:`utils.directory_fields`; it never translates,
+        adds or alters a field VALUE, and any language without a reviewed
+        table (including "en") keeps the record's own English labels.
+
+        The block is separated from the answer by a blank line, and the
+        record's citation - when the supplement is what introduced it - is
+        marked ``supportContactSupplement`` so a reader can tell a source
+        cited only for an appended contact detail from one that backs a claim
+        the answer actually makes. The marker is camelCase to match the other
+        source keys (``documentVersion``, ``sectionTitle``) and named after
+        the existing ``support_contact_supplemented`` metadata key. A record
+        the answer *already* cites backs the answer too, so that citation is
+        deliberately left unmarked. Citations stay a flat list of dicts.
         """
         if _support_contact_response_is_ineligible(chat_response) or not _CARE_CONTACT_RECOMMENDATION_RE.search(
             chat_response.answer or ""
@@ -1312,6 +1363,7 @@ class AIOrchestrator:
             approved_fields,
             True,
             hours_requested=bool(re.search(r"\bhours?\b", lookup_text, re.IGNORECASE)),
+            language=language,
         )
         if not supplement:
             return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
@@ -1321,7 +1373,11 @@ class AIOrchestrator:
             return chat_response
 
         completed_answer = f"{chat_response.answer.strip()}\n\n{block}"
-        citations = _add_citation_if_absent(chat_response.citations, document.to_source())
+        # Marked on a copy, never on the document's own ``to_source()`` output:
+        # the same record may be cited elsewhere in this response for a reason
+        # that has nothing to do with this block.
+        supplement_source = {**document.to_source(), SUPPORT_CONTACT_SUPPLEMENT_CITATION_FIELD: True}
+        citations = _add_citation_if_absent(chat_response.citations, supplement_source)
         return ChatResponse(
             answer=completed_answer,
             citations=citations,
@@ -1786,9 +1842,24 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
+        message = " ".join(user_message.split())
+        if word_count <= 14 and CONTINUATION_TERMS.search(normalized):
+            return True
+        if (
+            word_count <= FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS
+            and not find_market_mentions(message)
+            and not find_shared_office_record_countries(message)
+            and (
+                AMBIGUOUS_DIRECTORY_TOPIC_TERMS.search(normalized)
+                or (self._is_directory_field_follow_up(message) and self._names_unrecognised_place(message))
+            )
+        ):
+            return False
         if word_count <= 14 and self._contains_follow_up_marker(normalized):
             return True
-        message = " ".join(user_message.split())
+        # Continuations such as "write the income claim anyway?" intentionally
+        # retain the prior action for governance, including when they mention an
+        # otherwise ambiguous directory topic.
         if self._localized_follow_up_shape(message):
             return True
         user_messages = self._user_messages_from_history(history)
@@ -1805,7 +1876,12 @@ class AIOrchestrator:
         normalized = " ".join((message or "").split())
         if not normalized or len(normalized.split()) > FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS:
             return False
-        if find_market_mentions(normalized) or POLICY_WORD.search(normalized) or self._is_instruction_message(normalized):
+        if (
+            find_market_mentions(normalized)
+            or POLICY_WORD.search(normalized)
+            or LOCALIZED_POLICY_PATTERN.search(normalized)
+            or self._is_instruction_message(normalized)
+        ):
             return False
         return bool(FOLLOW_UP_DIRECTORY_FIELD_TERMS.search(normalized))
 
@@ -1879,6 +1955,8 @@ class AIOrchestrator:
                 size = len(_follow_up_tokens(opener))
                 if tokens[:size] != _follow_up_tokens(opener) or not self._is_short_follow_up_tail(tokens[size:]):
                     continue
+                if not names_market and self._names_unrecognised_place(message):
+                    return ""
                 if (
                     language in LOCALIZED_INFLECTED_NAME_LANGUAGES
                     and not names_market

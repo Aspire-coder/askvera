@@ -121,8 +121,53 @@ def _mask_refund_money(segment: str, text: str | None = None, offset: int = 0) -
     return _REFUND_MONEY_RE.sub(replace, segment)
 
 
-def _window_tokens(segment: str, text: str | None = None, offset: int = 0, percent: bool = False) -> list[str | None]:
+# W18 (2026-09-12, candidate 0eb5493, diagnostic case 15): the answer to "What is the return policy?" described the FBO
+# buyback: "that profit is deducted from your refund", "bonuses ... received by your upline are deducted from them",
+# "a refund check equal to your cost of the products, minus bonuses you personally received". A profit, bonus or
+# commission that is deducted, charged back or taken back (or that a refund is "minus"/"less") is taken away, not
+# promised. It is masked only when judging a copula satisfaction guarantee (below); the earnings search still sees
+# "profit". It is never masked when its line clause (up to ".", "!", "?", ";", ":" or a line break) has a negation
+# ("no profit is deducted"), a gain or prize word, or another earnings, money or currency word inside the wording.
+_DEDUCTION_NOUN = r"(?:profits?|bonus(?:es)?|commissions?)"
+_DEDUCTED_ITEMS = rf"{_DEDUCTION_NOUN}(?:\s+(?:and|&)\s+(?:case\s+credits?|{_DEDUCTION_NOUN}))?"
+_DEDUCTION_RE = re.compile(
+    rf"\b{_DEDUCTED_ITEMS}(?:\s+[^\W\d_]+){{0,4}}?\s+(?:is|are|was|were|will\s+be|gets?)\s+"
+    r"(?:deducted|charged\s+back|taken\s+back|subtracted|withheld)\b"
+    rf"|\b(?:minus|less)\s+(?:(?:the|any|all|your)\s+)?{_DEDUCTED_ITEMS}\b",
+    re.IGNORECASE,
+)
+_LINE_CLAUSE_END_RE = re.compile(r"[.!?;:\n]")
+_NEGATION_RE = re.compile(r"\b(?:no|not|never|none|nothing|without|zero)\b|n['’]t\b", re.IGNORECASE)
+_DEDUCTION_WORD_RE = re.compile(rf"{_DEDUCTION_NOUN}|case|credits?|and|minus|less", re.IGNORECASE)
+
+
+def _mask_deductions(segment: str, text: str, offset: int) -> str:
+    """Blank deduction wording (same length, so offsets into text still hold) unless its clause says otherwise."""
+
+    def replace(match: re.Match) -> str:
+        before = _LINE_CLAUSE_END_RE.split(text[:offset + match.start()])[-1]
+        after = _LINE_CLAUSE_END_RE.split(text[offset + match.end():], maxsplit=1)[0]
+        clause = f"{before} {match.group(0)} {after}"
+        inner = [word for word in re.findall(r"\w+|[$€£¥]", match.group(0)) if not _DEDUCTION_WORD_RE.fullmatch(word)]
+        if (
+            _NEGATION_RE.search(clause)
+            or _GAIN_OR_PRIZE_RE.search(before) or _GAIN_OR_PRIZE_RE.search(after)
+            or any(_NEARBY_EARNINGS_RE.fullmatch(word) or _GAIN_OR_PRIZE_RE.fullmatch(word) for word in inner)
+        ):
+            return match.group(0)
+        return "deducted".ljust(len(match.group(0)))
+
+    return _DEDUCTION_RE.sub(replace, segment)
+
+
+def _window_tokens(
+    segment: str, text: str | None = None, offset: int = 0, percent: bool = False, deductions: bool = False,
+) -> list[str | None]:
     """Words of a segment (at offset in text), with None marking each sentence end."""
+    if text is None:
+        text = segment
+    if deductions:
+        segment = _mask_deductions(segment, text, offset)
     masked = _mask_refund_money(segment, text, offset)
     if percent:
         masked = _PERCENT_RE.sub(" percent ", masked)
@@ -165,11 +210,23 @@ _WARRANTY_GUARANTEE = (
     rf"|\bguaranteed\s+(?:to\s+be\s+)?(?:free\s+(?:from|of)|against)\s+{_WARRANTY_OBJECT}{_WARRANTY_DURATION}"
     rf"{_WARRANTY_END}"
 )
-_CONSUMER_OR_WARRANTY_RE = re.compile(rf"{CONSUMER_GUARANTEE_RE.pattern}|{_WARRANTY_GUARANTEE}", re.IGNORECASE)
+# W18 (2026-09-12, candidate 0eb5493, diagnostic case 15): "**100% product satisfaction is guaranteed.**" was not a
+# consumer guarantee at all, so it paired with the buyback "profit" paragraphs later. A satisfaction guarantee with a
+# verb between ("satisfaction is guaranteed", "customer satisfaction will be 100% guaranteed") is set aside under the
+# warranty rule below: only when every earnings, money or currency word in the whole text is refund or deduction
+# wording. "Satisfaction is guaranteed. ... you will make a lot of money." keeps it.
+_COPULA_SATISFACTION_GUARANTEE = (
+    rf"\b{_HUNDRED_PERCENT}(?:(?:customer|product)\s+)?satisfaction\s+(?:is|are|will\s+be)\s+"
+    rf"(?:(?:always|fully)\s+)?{_HUNDRED_PERCENT}guaranteed\b"
+)
+_CONSUMER_OR_WARRANTY_RE = re.compile(
+    rf"{CONSUMER_GUARANTEE_RE.pattern}|{_WARRANTY_GUARANTEE}|{_COPULA_SATISFACTION_GUARANTEE}", re.IGNORECASE
+)
+_COPULA_SATISFACTION_RE = re.compile(_COPULA_SATISFACTION_GUARANTEE, re.IGNORECASE)
 
 
 def _is_warranty(match: re.Match) -> bool:
-    """The match came from the warranty shapes, not from CONSUMER_GUARANTEE_RE (whose alternatives are tried first)."""
+    """The match came from the warranty or copula-satisfaction shapes, not from CONSUMER_GUARANTEE_RE (tried first)."""
     consumer = CONSUMER_GUARANTEE_RE.match(match.string, match.start())
     return not (consumer and consumer.end() == match.end())
 
@@ -363,15 +420,31 @@ def _without_consumer_guarantees(text: str) -> str:
         position = match.end()
     tokens.extend(_window_tokens(text[position:], text, position))
 
+    copula = {index for index, match in enumerate(matches) if _COPULA_SATISFACTION_RE.fullmatch(match.group(0))}
     kept = {
         token for at, token in enumerate(tokens)
-        if isinstance(token, int) and (_earnings_nearby(tokens, at, -1) or _earnings_nearby(tokens, at, 1))
+        if isinstance(token, int) and token not in copula
+        and (_earnings_nearby(tokens, at, -1) or _earnings_nearby(tokens, at, 1))
     }
     # W16b: a warranty is set aside only when every money word in the whole text is refund wording, however far
     # apart: "The guarantee covers defects and the money is refunded. Join the team and after a few months you will
     # make a lot of money." keeps it.
     if any(isinstance(token, str) and _NEARBY_EARNINGS_RE.fullmatch(token) for token in tokens):
-        kept.update(index for index, match in enumerate(matches) if _is_warranty(match))
+        kept.update(index for index, match in enumerate(matches) if _is_warranty(match) and index not in copula)
+    # W18: a copula satisfaction guarantee ("satisfaction is guaranteed") follows the same whole-text rule, but here
+    # deduction wording ("profit is deducted from your refund") is not a money word either. (A money word nearby is
+    # also a money word anywhere, so the nearby check adds nothing for it.) Every other consumer guarantee and warranty
+    # is judged exactly as before: masking deductions in their word window would push a later "make money" out of it
+    # ("Money-back guarantee. Your profit is deducted from your refund and you will make money.").
+    if copula:
+        position = 0
+        words: list[str | None] = []
+        for match in matches:
+            words.extend(_window_tokens(text[position:match.start()], text, position, deductions=True))
+            position = match.end()
+        words.extend(_window_tokens(text[position:], text, position, deductions=True))
+        if any(isinstance(word, str) and _NEARBY_EARNINGS_RE.fullmatch(word) for word in words):
+            kept.update(copula)
 
     # A referring guarantee ("the guarantee", "our guarantee") is set aside only
     # when a consumer guarantee was set aside above (so the text has no earnings

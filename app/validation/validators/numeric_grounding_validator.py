@@ -25,9 +25,18 @@ from utils.redaction import PHONE_RE
 # source had been canonicalised to "7800dzd", and the sentence stating
 # Algeria's minimum order was deleted.
 _GROUPED_NUMBER = r"\d+(?:[ \u00a0\u202f]\d{3}(?!\d))*(?:[.,]\d+)?"
+# A thousands group written with one separator and cents with the other is one
+# amount: "$1,300.00 MXN", "1.300,00". The two separators differ, so neither can
+# be the decimal the other is, and nothing about the 1000x ambiguity noted below
+# applies. Without this the Mexico minimum order "$50 USD or $1,300.00 MXN" was
+# read as the claims "1" and "300.00", neither of which the record states, and
+# repair deleted the minimum order from English and Spanish answers (live,
+# 2026-09-12).
+_MIXED_GROUPED_AMOUNT = r"\d{1,3}(?:,\d{3})+\.\d{1,2}|\d{1,3}(?:\.\d{3})+,\d{1,2}"
+_CLAIM_NUMBER = rf"(?:{_MIXED_GROUPED_AMOUNT}|{_GROUPED_NUMBER})"
 NUMERIC_CLAIM_PATTERN = re.compile(
-    rf"(?<![\w.])(?P<number>{_GROUPED_NUMBER}"
-    rf"(?:\s*(?:-|\u2013|\u2014)\s*{_GROUPED_NUMBER})?)(?!\d|\.\d)",
+    rf"(?<![\w.])(?P<number>{_CLAIM_NUMBER}"
+    rf"(?:\s*(?:-|\u2013|\u2014)\s*{_CLAIM_NUMBER})?)(?!\d|\.\d)",
     re.UNICODE,
 )
 
@@ -640,6 +649,17 @@ def _subject_token_sets(
             if not (find_market_mentions(phrase) & document_markets)
         ]
 
+    # The company's own name identifies no rule: every policy document is
+    # Forever Living's, and its clauses say "FLP" or nothing. "Forever Living
+    # offers a 100% Customer Satisfaction Guarantee" required {forever, living}
+    # beside 100 in Sweden's 21.02, which reads "guaranteed a 100% Customer
+    # Satisfaction Guarantee", and the guarantee was deleted; Spanish 21.03 lost
+    # "se les garantiza 100% de satisfacción" the same way (live, 2026-09-12).
+    # Dropping the name must not leave the figure unbound, so the words the
+    # answer writes right after the figure must follow it in the source too.
+    if document_vocabulary is not None and len(phrases) == 1 and _names_only_the_company(phrases[0][0]):
+        return [], "trailing"
+
     token_sets: list[set[str]] = []
     for phrase, freed, starts_segment in phrases:
         words = re.findall(r"[^\W\d_]+", phrase, flags=re.UNICODE)
@@ -737,6 +757,8 @@ _PERIOD_STOP_RE = re.compile(r"[\d.,;!?\n]|:(?![^\W\d_])")
 # words are not read there.
 _CODE_BEFORE_RE = re.compile(r"(?<![^\W\d_])([a-z]{3})\s{1,2}$", re.IGNORECASE)
 _AMBIGUOUS_CODE_WORDS = frozenset({"try", "mad", "pen", "cop", "ron", "bob"})
+_CODE_AFTER_RE = re.compile(r"\s{0,2}([a-z]{3})(?![^\W\d_])", re.IGNORECASE)
+_SYMBOL_UNITS = frozenset({"usd", "eur", "gbp"})
 _PERIOD_WORD_LIMIT = 8
 # The dollar amounts of different markets are written "$", "HK$" or "HKD"
 # interchangeably, so only the family is compared; euro against dollar is not.
@@ -756,6 +778,16 @@ def _unit_word_kind(word: str) -> str:
 def _written_unit_kind(text: str, start: int, end: int) -> str:
     """The unit written as a symbol or code beside the figure ("HK$50", "HKD 500", "2CC", "30%")."""
     unit = _adjacent_unit(text, start, end)
+    # A symbol in front and a code behind ("$1,300.00 MXN", "$50 USD"): the code
+    # says which money it is. Read by the symbol alone, "$1,300.00 USD" grounded
+    # in "$1,300.00 MXN" and "$50 MXN" in "$50 USD".
+    code_after = _CODE_AFTER_RE.match(text, end)
+    if (
+        unit in _SYMBOL_UNITS
+        and code_after
+        and code_after.group(1).lower() in _ROLE_CURRENCY_CODES - _AMBIGUOUS_CODE_WORDS
+    ):
+        unit = code_after.group(1).lower()
     if not unit:
         code = _CODE_BEFORE_RE.search(text, max(0, start - 6), start)
         if code and code.group(1).lower() in _ROLE_CURRENCY_CODES - _AMBIGUOUS_CODE_WORDS:
@@ -1073,6 +1105,38 @@ def _source_windows(source_text: str, number: str, radius: int = 260) -> list[st
     return [window for window, _, _ in _source_occurrences(source_text, number, radius)]
 
 
+_COMPANY_NAME_WORDS = frozenset({"forever", "living", "products", "flp"})
+_CONTENT_WORD_RE = re.compile(r"[^\W\d_]{4,}")
+_TRAILING_WORDS_REQUIRED = 2
+_TRAILING_SOURCE_WORDS = 6
+
+
+def _names_only_the_company(phrase: str) -> bool:
+    """"Forever Living" or "Forever Living Products", and no other word."""
+    tokens = _word_tokens(phrase)
+    return {"forever", "living"} <= tokens and tokens <= _COMPANY_NAME_WORDS
+
+
+def _trailing_words_agree(claim: MeasurableClaim, source_text: str, occurrence_end: int) -> bool:
+    """The first two content words after the answer figure follow the source figure in its clause."""
+    position = _claim_position(claim)
+    if position == -1:
+        return False
+    rest = claim.context[position + len(claim.text):]
+    stop = re.search(r"[.!?](?=[*_]*(?:\s|$))|[\n;(]", rest)
+    claim_words = _CONTENT_WORD_RE.findall(_normalize(rest[:stop.start() if stop else len(rest)]))
+    if len(claim_words) < _TRAILING_WORDS_REQUIRED:
+        return False
+    source_stop = _CLAUSE_DELIMITER_RE.search(source_text, occurrence_end)
+    source_words = _CONTENT_WORD_RE.findall(
+        source_text[occurrence_end:source_stop.start() if source_stop else len(source_text)]
+    )[:_TRAILING_SOURCE_WORDS]
+    return all(
+        any(_tokens_match(word, source_word) for source_word in source_words)
+        for word in claim_words[:_TRAILING_WORDS_REQUIRED]
+    )
+
+
 def _claim_is_supported(
     claim: MeasurableClaim,
     source_text: str,
@@ -1149,6 +1213,10 @@ def _claim_is_supported(
                 for subject_tokens in subject_token_sets
             )
             if subject_token_sets and not subject_bound:
+                continue
+            if binding == "trailing":
+                if _trailing_words_agree(claim, source_text, occurrence_end):
+                    return True
                 continue
             if binding == "body":
                 if _shares_rule_words(claim.sentence, _rule_segment(source_text, occurrence_start, occurrence_end)):
@@ -1279,13 +1347,28 @@ def _grounded_phone_spans(answer: str, source_texts: list[str]) -> list[tuple[in
     def key(value: str) -> str:
         return re.sub(r"[\s()+.-]", "", value).casefold()
 
-    approved = {
-        key(match.group())
-        for source in source_texts
-        for match in _phone_matches(source)
-        if label.search(source[max(0, match.start() - 65):match.start()])
-    }
-    return [(match.start(), match.end()) for match in _phone_matches(answer) if key(match.group()) in approved]
+    # A contact value's line suffix ("+256 3921 77993/4": lines ...993 and
+    # ...994) belongs to the value only when the source writes the same suffix
+    # on the same number. Without it the "4" was left as a claim of its own,
+    # found only inside the phone, and the office phone line was deleted from
+    # the Uganda answers (live, 2026-09-12).
+    approved: dict[str, set[str]] = {}
+    for source in source_texts:
+        for match in _phone_matches(source):
+            if label.search(source[max(0, match.start() - 65):match.start()]):
+                suffix = _PHONE_LINE_SUFFIX_RE.match(source, match.end())
+                approved.setdefault(key(match.group()), set()).update({suffix.group(1)} if suffix else set())
+    spans: list[tuple[int, int]] = []
+    for match in _phone_matches(answer):
+        suffixes = approved.get(key(match.group()))
+        if suffixes is None:
+            continue
+        suffix = _PHONE_LINE_SUFFIX_RE.match(answer, match.end())
+        spans.append((match.start(), suffix.end() if suffix and suffix.group(1) in suffixes else match.end()))
+    return spans
+
+
+_PHONE_LINE_SUFFIX_RE = re.compile(r"/(\d{1,2})(?!\d)")
 
 
 # A clock time, written with either separator: 09:00, 09.00, 9:00.
@@ -1463,6 +1546,11 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
         return []
     source_texts = [source_text for source_text, _, _ in sources]
     grounded_spans = _grounded_phone_spans(answer, source_texts) + _grounded_time_spans(answer, source_texts)
+    directory_records = [
+        (_directory_record_fields(str(document.content)), _directory_record_markets(document))
+        for document in source_documents
+        if getattr(document, "content", "") and _is_global_directory_record(document)
+    ]
     return [
         claim
         for claim in _extract_claims(answer)
@@ -1471,7 +1559,187 @@ def unsupported_numeric_claims(answer: str, source_documents: list[object]) -> l
             _claim_is_supported(claim, source_text, document_markets, name_tokens)
             for source_text, document_markets, name_tokens in sources
         )
+        if not _directory_field_supports(claim, answer, directory_records)
     ]
+
+
+# --- A directory field named in the answer's own language -------------------
+#
+# A sponsoring-directory record is a list of English "• Label: value" fields, and
+# an answer in Dutch, French, German or Spanish names the field in its own words.
+# Neither the subject check nor the lexical fallback can connect "bezorgkosten
+# **$3 binnen het land**" to "• Delivery Cost: $3 within the country.", so repair
+# deleted correct delivery costs, lead times and minimum orders from every
+# non-English Kenya, Uganda and Mexico answer (live, 2026-09-12), and left a
+# French answer with empty "Frais de livraison :" and "Commande minimum :"
+# headings. An English answer fared no better when its sentence opened "For FBOs
+# in Mexico", which became a subject no field repeats.
+#
+# This path supports a figure only when all of these hold:
+# - the document is a GLOBAL directory record;
+# - the answer names one of three fields (delivery cost, lead time, minimum
+#   order) in the figure's own sentence before it, or as the heading line directly
+#   above a line that does not name one;
+# - the record's field of that kind states the figure, with an agreeing unit and
+#   period, not inside a clock time, and for the role the answer names (English);
+# - the market the answer names last before the figure is this record's, and not
+#   another retrieved record's; with no market named, no other record's market
+#   was retrieved.
+# The answer-side vocabulary is field names only, nothing else:
+#   delivery cost  en delivery cost/charge/fee, nl bezorgkosten/verzendkosten,
+#                  fr coût/frais de livraison, de Lieferkosten/Versandkosten,
+#                  es costo/coste/gastos de envío
+#   lead time      en lead/delivery time, nl levertijd/bezorgtijd, fr délai,
+#                  de Lieferzeit, es tiempo (promedio) de entrega/llegada
+#   minimum order  en minimum order (size/amount), nl minimale bestelling/
+#                  minimumbestelling, fr commande minimum/minimale, minimum de
+#                  commande, de Mindestbestellung, es tamaño/monto/importe mínimo
+#                  de pedido, pedido mínimo
+_DIRECTORY_RECORD_FIELD_RE = re.compile(
+    r"•[ \t]*(?P<label>delivery\s+cost|(?:average\s+)?lead\s+time(?:\s+for\s+orders\s+to\s+arrive)?"
+    r"|minimum\s+order\s+size(?:\s+fbo)?)[ \t]*:(?P<value>[^•]*)",
+    re.IGNORECASE,
+)
+_ANSWER_FIELD_TERMS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("delivery_time", re.compile(
+        r"\b(?:lead|delivery)\s+times?\b|\blevertijd|\bbezorgtijd|\bd[ée]lais?\b|\blieferzeit"
+        r"|\btiempos?\s+(?:promedio\s+)?de\s+(?:entrega|llegada)\b",
+        re.IGNORECASE,
+    )),
+    ("delivery_cost", re.compile(
+        r"\bdelivery\s+(?:costs?|charges?|fees?)\b|\bbezorgkosten|\bverzendkosten"
+        r"|\b(?:coûts?|couts?|frais)\s+de\s+livraison\b|\blieferkosten|\bversandkosten"
+        r"|\b(?:costos?|costes?|gastos?)\s+de\s+env[ií]o\b",
+        re.IGNORECASE,
+    )),
+    ("minimum_order", re.compile(
+        r"\bminimum\s+order(?:\s+(?:size|amount))?\b|\bminimale?\s+bestelling\w*|\bminimumbestel\w*"
+        r"|\bcommande\s+minim(?:um|ale)\b|\bminimum\s+de\s+commande\b|\bmindestbestell\w*"
+        r"|\b(?:tamaño|monto|importe)\s+m[ií]nimo\s+de\s+pedido\b|\bpedido\s+m[ií]nimo\b",
+        re.IGNORECASE,
+    )),
+)
+_FIELD_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?][*_]*(?=\s)")
+_MARKET_SEGMENT_BOUNDARY_RE = re.compile(r"[.!?](?=\s)|\n")
+
+
+def _is_global_directory_record(document: object) -> bool:
+    metadata = getattr(document, "metadata", None) or {}
+    return str(getattr(document, "country", "") or "").strip().upper() == "GLOBAL" and bool(
+        metadata.get("directory_kind") or metadata.get("directory_section")
+    )
+
+
+def _directory_record_markets(document: object) -> frozenset[str]:
+    """The market a directory record is about, from its title and its record country."""
+    metadata = getattr(document, "metadata", None) or {}
+    markets = set(find_market_mentions(str(getattr(document, "title", "") or "")))
+    markets |= set(find_market_mentions(str(metadata.get("record_country", "") or "")))
+    return frozenset(markets - {"GLOBAL"})
+
+
+def _directory_record_fields(content: str) -> list[tuple[str, str]]:
+    """(field, normalised "label: value") for each delivery cost, lead time and minimum order bullet."""
+    fields: list[tuple[str, str]] = []
+    for match in _DIRECTORY_RECORD_FIELD_RE.finditer(content or ""):
+        label = " ".join(match.group("label").split()).casefold()
+        field = "delivery_time" if "lead" in label else "delivery_cost" if "delivery" in label else "minimum_order"
+        lines = match.group("value").split("\n")
+        value = lines[0]
+        # A value wrapped by PDF extraction continues on the next line until its sentence ends.
+        for line in lines[1:3]:
+            if value.rstrip().endswith(".") or not line.strip():
+                break
+            value = f"{value} {line}"
+        fields.append((field, _normalize(f"{label}: {value}")[:260]))
+    return fields
+
+
+def _last_field_term(text: str) -> str:
+    matches = [
+        (match.end(), field)
+        for field, pattern in _ANSWER_FIELD_TERMS
+        for match in pattern.finditer(text)
+    ]
+    return max(matches)[1] if matches else ""
+
+
+def _answer_field_for_claim(answer: str, start: int) -> str:
+    """The directory field the answer names for the figure at ``start``, or ""."""
+    line_start = answer.rfind("\n", 0, start) + 1
+    sentence_start = line_start
+    for boundary in _FIELD_SENTENCE_BOUNDARY_RE.finditer(answer, line_start, start):
+        sentence_start = boundary.end()
+    field = _last_field_term(answer[sentence_start:start])
+    if field or sentence_start != line_start:
+        return field
+    # "**Frais de livraison :**" on its own line names the field of the line below.
+    previous = [line for line in answer[:line_start].split("\n") if line.strip()]
+    heading = previous[-1].strip().strip("*_#").strip() if previous else ""
+    if heading.endswith(":") and len(heading) <= 60:
+        return _last_field_term(heading)
+    return ""
+
+
+def _latest_market_mentions(answer: str, start: int) -> frozenset[str]:
+    """Markets named in the last sentence or line before ``start`` that names any."""
+    text = answer[:start]
+    bounds = [0, *(match.end() for match in _MARKET_SEGMENT_BOUNDARY_RE.finditer(text)), len(text)]
+    for left, right in reversed(list(zip(bounds, bounds[1:]))):
+        mentions = set(find_market_mentions(text[left:right])) - {"GLOBAL"}
+        if mentions:
+            return frozenset(mentions)
+    return frozenset()
+
+
+def _directory_field_supports(
+    claim: MeasurableClaim,
+    answer: str,
+    directory_records: list[tuple[list[tuple[str, str]], frozenset[str]]],
+) -> bool:
+    """Whether a retrieved directory record states this figure in the field the answer names."""
+    if not any(fields for fields, _ in directory_records):
+        return False
+    field = _answer_field_for_claim(answer, claim.start)
+    if not field:
+        return False
+    mentions = _latest_market_mentions(answer, claim.start)
+    claim_kind, claim_period = _claim_measure(claim)
+    claim_letter = _claim_glued_letter(claim)
+    claim_reads_as_clock = _claim_reads_as_clock(claim)
+    claim_at = claim.sentence.find(claim.text)
+    claim_roles = _role_mentions(claim.sentence)
+    claim_role = (
+        min(claim_roles, key=lambda item: abs(item[0] - claim_at))[1]
+        if claim_roles and claim_at != -1 else None
+    )
+    grouped_amounts = not claim_kind or _currency_groups_thousands(claim_kind)
+    for index, (fields, markets) in enumerate(directory_records):
+        other_markets = frozenset().union(
+            *(other for position, (_, other) in enumerate(directory_records) if position != index)
+        ) - markets
+        if mentions:
+            if not mentions & markets or mentions & other_markets:
+                continue
+        elif other_markets:
+            continue
+        for record_field, text in fields:
+            if record_field != field:
+                continue
+            clock_spans = [(start, end) for start, end, keys in _time_occurrences(text) if keys]
+            for number in _number_variants(claim.number):
+                for _, start, end in _source_occurrences(text, number, grouped_amounts=grouped_amounts):
+                    if not _measures_agree((claim_kind, claim_period), _measure(text, start, end)):
+                        continue
+                    if not _occurrence_can_support(
+                        text, start, end, claim_letter, claim_reads_as_clock, clock_spans
+                    ):
+                        continue
+                    source_role = _occurrence_role(text, start, end)
+                    if claim_role and source_role and claim_role != source_role:
+                        continue
+                    return True
+    return False
 
 
 def numbers_present_in_sources(numbers: list[str], source_documents: list[object]) -> dict[str, bool]:
@@ -1605,6 +1873,9 @@ def _drop_orphaned_lead_ins(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
+_LIST_MARKER_CLOSER_RE = re.compile(r"(?m)^[ \t]*(?:\d{1,3}|[A-Za-z])\)")
+
+
 def _drop_orphaned_delimiters(text: str) -> str:
     """Remove brackets this repair orphaned, never a matched pair.
 
@@ -1620,12 +1891,16 @@ def _drop_orphaned_delimiters(text: str) -> str:
     touch is unchanged.
     """
     removable: set[int] = set()
+    # "1) ..." and "a) ..." at a line start are list markers, not closers. They
+    # were read as unmatched and stripped, so a repaired Spanish answer listed
+    # its options as "1 Obtener ..." and "2 Cancelar ..." (live, 2026-09-12).
+    list_markers = {match.end() - 1 for match in _LIST_MARKER_CLOSER_RE.finditer(text)}
     for opener, closer in (("(", ")"), ("[", "]")):
         open_positions: list[int] = []
         for index, character in enumerate(text):
             if character == opener:
                 open_positions.append(index)
-            elif character == closer:
+            elif character == closer and index not in list_markers:
                 if open_positions:
                     open_positions.pop()
                 else:

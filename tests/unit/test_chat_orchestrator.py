@@ -1604,7 +1604,7 @@ def test_exact_assistant_capability_returns_controlled_response_before_retrieval
 
     response = orchestrator.handle_chat(body, "cid")
 
-    assert "your guide to Forever Living" in response.answer
+    assert "an AI guide to Forever Living's official policies" in response.answer
     assert response.metadata["response_source"] == "template"
     retriever.retrieve.assert_not_called()
     router.generate.assert_not_called()
@@ -1800,7 +1800,7 @@ def test_semantic_thanks_route_is_trusted_without_an_exact_phrase_match(monkeypa
 
     response = orchestrator.handle_chat(body, "cid")
 
-    assert response.answer == "Anytime! I'm here if anything else comes up."
+    assert response.answer == "You're welcome!"
     assert response.metadata["intent"] == "assistant_meta"
     router.generate.assert_not_called()
 

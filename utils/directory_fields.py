@@ -64,7 +64,7 @@ _FIELD_LABEL_PATTERNS: dict[str, re.Pattern[str]] = {
     "email": re.compile(r"^(?:email|e-mail)$", re.IGNORECASE),
     "website": re.compile(r"^(?:website|web\s*site|url)$", re.IGNORECASE),
     "address": re.compile(
-        r"^(?:(?:office\s*(?:&|and)\s*product\s+center\s+)?address)$", re.IGNORECASE
+        r"^(?:(?:office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+)?address)$", re.IGNORECASE
     ),
     "business_hours": re.compile(
         r"^business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?$", re.IGNORECASE
@@ -72,6 +72,12 @@ _FIELD_LABEL_PATTERNS: dict[str, re.Pattern[str]] = {
     "payment_methods": re.compile(r"^payment\s+methods?(?:\s+accepted)?$", re.IGNORECASE),
     "delivery_cost": re.compile(r"^delivery\s+(?:cost|charge|fee)s?$", re.IGNORECASE),
     "delivery_time": re.compile(r"^(?:average\s+)?(?:delivery|lead)\s+time$", re.IGNORECASE),
+    # "fax" is not a *requestable* field (no _FIELD_REQUEST_PATTERNS entry),
+    # so adding it here cannot change what remove_unrequested_directory_fields
+    # or restore_missing_requested_directory_fields treat as requested/allowed
+    # - it exists only so restore_missing_directory_contacts can look up a
+    # localized label for a fax line it appends (W20 follow-up).
+    "fax": re.compile(r"^fax(?:\s*\d+)?$", re.IGNORECASE),
 }
 # Fragments (no anchors) used only to build the "this label line is allowed to
 # stay" negative lookahead in remove_unrequested_directory_fields. Phone must
@@ -83,7 +89,7 @@ _FIELD_ALLOWED_LINE_FRAGMENTS: dict[str, str] = {
     "phone": r"telephone(?!\s+for\s+orders)(?:\s+office)?|phone(?:\s*\d+)?",
     "email": r"email|e-mail",
     "website": r"website|web\s*site|url",
-    "address": r"(?:office\s*(?:&|and)\s*product\s+center\s+)?address",
+    "address": r"(?:office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+)?address",
     "business_hours": r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?",
     "payment_methods": r"payment\s+methods?(?:\s+accepted)?",
     "delivery_cost": r"delivery\s+(?:cost|charge|fee)s?",
@@ -114,7 +120,7 @@ def _label_canonical_field(label: str) -> str | None:
     """Map a parsed directory label to its canonical field key, if any."""
     normalized = " ".join((label or "").split())
     for key in ("order_phone", "phone", "email", "website", "address",
-                "business_hours", "payment_methods", "delivery_cost", "delivery_time"):
+                "business_hours", "payment_methods", "delivery_cost", "delivery_time", "fax"):
         if _FIELD_LABEL_PATTERNS[key].search(normalized):
             return key
     return None
@@ -123,7 +129,7 @@ def _label_canonical_field(label: str) -> str | None:
 _INLINE_FIELD_RE = re.compile(
     r"^(?P<label>business\s+hours\s+(?:office|product\s+(?:centre|center))|"
     r"telephone(?:\s+(?:for\s+orders|office))?|phone(?:\s*\d+)?|"
-    r"office\s*(?:&|and)\s*product\s+center\s+address|"
+    r"office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+address|"
     r"address|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)"
     r"\s*[:#-]?\s+(?P<value>.+)$",
     re.IGNORECASE,
@@ -210,6 +216,8 @@ def restore_missing_directory_contacts(
     answer: str,
     field_sets: Iterable[dict[str, object]],
     question: str = "",
+    *,
+    language: str = "en",
 ) -> tuple[str, list[str]]:
     """Restore exact contacts from the highest-ranked directory record.
 
@@ -219,6 +227,18 @@ def restore_missing_directory_contacts(
     answer already states that same labeled field with a different value -
     a mangled number, a dropped digit, a stale placeholder - that line is
     corrected in place instead of leaving it wrong and appending a duplicate.
+
+    ``language`` renders a newly APPENDED field's label (never a corrected
+    one - see below) using the same reviewed table as
+    :func:`build_support_contact_supplement`
+    (:data:`_SUPPORT_CONTACT_LABEL_TRANSLATIONS`); the default ``"en"`` and
+    any language without a table keep output byte-identical to calling this
+    function without the argument. A line already present in the answer
+    under its own label - whether the record's English label or a label the
+    model already wrote in the answer's language, e.g. "Téléphone commandes"
+    - is matched and deduplicated purely by VALUE (see ``_value_is_present``
+    below), so it is corrected in place with its existing label untouched,
+    never re-labeled and never duplicated by this translation.
     """
     original = (answer or "").strip()
     if _asks_only_for_a_non_contact_field(question):
@@ -274,11 +294,35 @@ def restore_missing_directory_contacts(
         return original, []
 
     if missing:
-        exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
+        exact_fields = "\n".join(
+            f"{_translated_contact_label(label, language)}: {value}" for label, value in missing
+        )
         separator = "\n\n" if corrected.strip() else ""
         corrected = f"{corrected}{separator}{exact_fields}"
 
-    return corrected, [*corrected_labels, *(label for label, _ in missing)]
+    return corrected, [
+        *corrected_labels,
+        *(_translated_contact_label(label, language) for label, _ in missing),
+    ]
+
+
+def _translated_contact_label(label: str, language: str) -> str:
+    """Look up ``label``'s localized text in :data:`_SUPPORT_CONTACT_LABEL_TRANSLATIONS`.
+
+    Falls back to ``label`` itself - the record's own (always-English) text
+    - when ``language`` has no reviewed table, or when this particular label
+    has no canonical field mapping (:func:`_label_canonical_field`) or no
+    entry for it in the language's table. Never used for a label already
+    present in the answer (see :func:`restore_missing_directory_contacts`),
+    only for one about to be newly appended.
+    """
+    table = _SUPPORT_CONTACT_LABEL_TRANSLATIONS.get((language or "").strip().lower())
+    if not table:
+        return label
+    canonical = _label_canonical_field(label)
+    if canonical and canonical in table:
+        return table[canonical]
+    return label
 
 
 def _replace_labeled_line_value(text: str, label: str, value: str) -> tuple[str, int]:
@@ -353,6 +397,62 @@ _DANGLING_LEAD_END = re.compile(
     r"(?:,\s*)?\b(?:the|a|an|and|or|with|for|to|at|in|of|from|that)\s*$",
     re.IGNORECASE,
 )
+# --- W20-1: a connector word left dangling when its field is removed ------
+#
+# "You can reach the office by telephone at +226 ... during \nBusiness Hours
+# Office: 08:00 am - 17:00 pm." has its unrequested "Business Hours Office:
+# ..." line removed below (see remove_unrequested_directory_fields), but the
+# sentence's own lead-in word introducing that field - "during" - sits on
+# the line *before* it and is not part of that removed line, so it was left
+# dangling ("... during \nPlease note: ..."). Applied only as a post-pass
+# after a removal actually happened, and only when the connector is the very
+# last thing on its own line (so "...during office hours: 09.00-17.00" - the
+# object of "during" is still there - is left exactly alone).
+#
+# Documented limitation (W20 follow-up, intentionally not changed): the
+# mandatory `\s+` after the connector word means this only fires when some
+# trailing whitespace still separates the connector from the end of the
+# line - i.e. the shape produced by removing a field that sat on its own
+# following line, as in the example above. A connector immediately abutting
+# the end of the line with no whitespace at all ("...during" with nothing
+# after it, not even a trailing space) is not recognised and is left as is.
+_DANGLING_FIELD_CONNECTOR_RE = re.compile(
+    r"(?:,\s*)?\b(?:during|from|between|on|at|for|in|with)\s+(?:the\s+)?$",
+    re.IGNORECASE,
+)
+
+
+def _strip_dangling_field_connectors(text: str) -> str:
+    """Drop a connector word left with nothing after it on its own line."""
+    lines = text.split("\n")
+    for index, line in enumerate(lines):
+        if _DANGLING_FIELD_CONNECTOR_RE.search(line):
+            lines[index] = _DANGLING_FIELD_CONNECTOR_RE.sub("", line).rstrip()
+    return "\n".join(lines)
+
+
+# --- W20-2: a label the removal above cannot see because it has no value --
+#
+# Restoring a missing contact (restore_missing_directory_contacts) can
+# append a fully labelled "Label: value" line for a field the model had
+# already started but never finished - leaving its own valueless heading
+# ("Office & Product Centre", no colon, nothing after it) untouched
+# elsewhere in the answer. When that field is not actually requested, the
+# freshly appended value line is removed again by the pattern above, but the
+# earlier bare heading - lacking a colon - never matched that pattern and
+# survives alone. This intentionally looser pattern (address optional,
+# either "center" or "centre") exists only to find such a *valueless*
+# leftover heading at the very end of the answer so it can be dropped too;
+# it is never used to remove a label that still has its value.
+_BARE_DIRECTORY_LABEL_RE = re.compile(
+    r"^\**(?:"
+    r"office\s*(?:&|and)\s*product\s+cent(?:er|re)(?:\s+address)?|"
+    r"telephone\s+for\s+orders|telephone(?:\s+office)?|phone(?:\s*\d+)?|"
+    r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|"
+    r"address|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?"
+    r")\**$",
+    re.IGNORECASE,
+)
 _SCAFFOLDING_LEAD = re.compile(
     r"\s*(?:"
     r"(?:if|when)\s+you(?:\s*'re|\s+are)?\s+order(?:ing)?\s+online"
@@ -397,6 +497,30 @@ def _remove_field_sentences(answer: str, pattern: re.Pattern) -> tuple[str, int]
         repaired = repaired[:start] + replacement + repaired[end:]
     repaired = re.sub(r"[ \t]{2,}", " ", repaired)
     return re.sub(r"\n{3,}", "\n\n", repaired), len(spans)
+
+
+def _strip_trailing_bare_directory_label(text: str, protected: set[str]) -> str:
+    """Drop a directory field label left dangling with no value at the end.
+
+    A label is only ever useful attached to its value. If everything after a
+    heading-only label (no colon, nothing following it) has already been
+    removed - see :data:`_BARE_DIRECTORY_LABEL_RE` - the bare heading itself
+    is dropped along with the blank line that led into it, rather than left
+    standing alone. Never touches a label still holding its value, and never
+    touches one named in ``protected`` (e.g. an explicitly kept supplemental
+    contact label).
+    """
+    stripped = (text or "").rstrip()
+    if not stripped:
+        return text or ""
+    last_break = stripped.rfind("\n")
+    last_line = stripped[last_break + 1 :]
+    candidate = last_line.strip()
+    if candidate.casefold() in protected:
+        return stripped
+    if _BARE_DIRECTORY_LABEL_RE.match(candidate):
+        stripped = stripped[:last_break] if last_break != -1 else ""
+    return stripped.rstrip()
 
 
 def remove_unrequested_directory_fields(
@@ -455,7 +579,7 @@ def remove_unrequested_directory_fields(
     labels = (
         r"telephone\s+for\s+orders|telephone(?:\s+office)?|phone(?:\s*\d+)?|"
         r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|"
-        r"office\s*(?:&|and)\s*product\s+center\s+address|address|fax|email|website|"
+        r"office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+address|address|fax|email|website|"
         r"payment\s+methods?(?:\s+accepted)?|delivery\s+(?:cost|charge|fee)s?|"
         r"(?:average\s+)?(?:delivery|lead)\s+time"
     )
@@ -509,7 +633,15 @@ def remove_unrequested_directory_fields(
     # "09.00 am" at its dot (tests/unit/test_demo_directory_prose_preservation.py).
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, replacements > 0 or paren_changes > 0
+    changed = replacements > 0 or paren_changes > 0
+    if changed:
+        # W20-1/W20-2: a removal above can leave its own lead-in connector
+        # word dangling on the line before it, or (when a value line just
+        # restored was itself the thing removed) a valueless label heading
+        # dangling at the very end - see both helpers for the exact shapes.
+        cleaned = _strip_dangling_field_connectors(cleaned)
+        cleaned = _strip_trailing_bare_directory_label(cleaned, protected)
+    return cleaned, changed
 
 
 _PAREN_EVENT_RE = re.compile(r"[()\n]")
@@ -1160,6 +1292,91 @@ def correct_directory_source_contradictions(
 
 # --- B3: helpful customer-care contact block, without losing the answer ----
 
+# --- W20-3: localized labels for the supplemental contact block -----------
+#
+# The labels here are the ones this function can emit (see the "kind"
+# resolution below, plus "address"/"order_phone" kept for completeness since
+# a future caller may extend the picking logic to include them). The English
+# text always comes verbatim from the approved directory record itself - a
+# canonical global document - regardless of the answer's language, which is
+# correct for English answers but was also being appended, untranslated,
+# under French/German/Spanish (and other) answers. This table renders only
+# the LABEL in the answer's language; the VALUE that follows it is always
+# copied byte-for-byte from the approved record and is never touched here.
+# Reviewed translations; unknown languages, and "en" itself, fall back to the
+# record's own label text (see the ``language`` parameter below).
+#
+# W20 follow-up: "fax" was added (with a translation for every language
+# below) because restore_missing_directory_contacts - unlike
+# build_support_contact_supplement - can also append a Fax line (it restores
+# every contact field found in the record, not just phone/email/website/
+# hours), and that function now looks up this same table.
+_SUPPORT_CONTACT_LABEL_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "nl": {
+        "address": "Kantoor- en productcentrumadres",
+        "phone": "Telefoon kantoor",
+        "order_phone": "Telefoon voor bestellingen",
+        "email": "E-mail",
+        "website": "Website",
+        "business_hours": "Openingstijden",
+        "fax": "Fax",
+    },
+    "fr": {
+        "address": "Adresse du bureau et du centre de produits",
+        "phone": "Téléphone bureau",
+        "order_phone": "Téléphone pour commandes",
+        "email": "E-mail",
+        "website": "Site web",
+        "business_hours": "Heures d'ouverture",
+        "fax": "Fax",
+    },
+    "de": {
+        "address": "Adresse des Büro- und Produktcenters",
+        "phone": "Telefon Büro",
+        "order_phone": "Telefon für Bestellungen",
+        "email": "E-Mail",
+        "website": "Website",
+        "business_hours": "Geschäftszeiten",
+        "fax": "Fax",
+    },
+    "es": {
+        "address": "Dirección de la oficina y centro de productos",
+        "phone": "Teléfono de oficina",
+        "order_phone": "Teléfono para pedidos",
+        "email": "Correo electrónico",
+        "website": "Sitio web",
+        "business_hours": "Horario de oficina",
+        "fax": "Fax",
+    },
+    "it": {
+        "address": "Indirizzo dell'ufficio e centro prodotti",
+        "phone": "Telefono ufficio",
+        "order_phone": "Telefono per ordini",
+        "email": "E-mail",
+        "website": "Sito web",
+        "business_hours": "Orario d'ufficio",
+        "fax": "Fax",
+    },
+    "pt": {
+        "address": "Endereço do escritório e centro de produtos",
+        "phone": "Telefone do escritório",
+        "order_phone": "Telefone para pedidos",
+        "email": "E-mail",
+        "website": "Site",
+        "business_hours": "Horário de funcionamento",
+        "fax": "Fax",
+    },
+    "sv": {
+        "address": "Kontors- och produktcenteradress",
+        "phone": "Telefon kontor",
+        "order_phone": "Telefon för beställningar",
+        "email": "E-post",
+        "website": "Webbplats",
+        "business_hours": "Öppettider",
+        "fax": "Fax",
+    },
+}
+
 
 def build_support_contact_supplement(
     answer: str,
@@ -1167,6 +1384,7 @@ def build_support_contact_supplement(
     recommends_customer_care: bool,
     *,
     hours_requested: bool = False,
+    language: str = "en",
 ) -> tuple[str, list[str]] | None:
     """Return a short supplemental contact block, or ``None``.
 
@@ -1186,9 +1404,20 @@ def build_support_contact_supplement(
     answer (home-market policy vs. a destination's serving office) before
     passing that office's record here; this function does not choose between
     records.
+
+    ``language`` renders each picked field's LABEL in that language from a
+    small reviewed table (see :data:`_SUPPORT_CONTACT_LABEL_TRANSLATIONS`)
+    instead of the record's own (always-English) label text. It never
+    translates, adds or alters a field VALUE - only which word introduces it.
+    The default ``"en"`` keeps output byte-identical to calling this function
+    without the argument at all, and any language this module does not have
+    a reviewed table for (including "en" itself) falls back to the record's
+    own label text.
     """
     if not recommends_customer_care or not approved_fields:
         return None
+
+    label_table = _SUPPORT_CONTACT_LABEL_TRANSLATIONS.get((language or "").strip().lower())
 
     picked: list[tuple[str, str]] = []
     have_kind: set[str] = set()
@@ -1209,6 +1438,8 @@ def build_support_contact_supplement(
         if kind in have_kind:
             continue
         have_kind.add(kind)
+        if label_table and canonical in label_table:
+            label = label_table[canonical]
         picked.append((label, value))
 
     if not picked:
