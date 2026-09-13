@@ -294,9 +294,16 @@ def restore_missing_directory_contacts(
         return original, []
 
     if missing:
-        exact_fields = "\n".join(
-            f"{_translated_contact_label(label, language)}: {value}" for label, value in missing
-        )
+        # See build_support_contact_supplement's matching comment: the
+        # widget's renderer merges consecutive plain lines into one run-on
+        # paragraph, so more than one appended field must be bulleted.
+        if len(missing) == 1:
+            label, value = missing[0]
+            exact_fields = f"{_translated_contact_label(label, language)}: {value}"
+        else:
+            exact_fields = "\n".join(
+                f"- {_translated_contact_label(label, language)}: {value}" for label, value in missing
+            )
         separator = "\n\n" if corrected.strip() else ""
         corrected = f"{corrected}{separator}{exact_fields}"
 
@@ -523,6 +530,29 @@ def _strip_trailing_bare_directory_label(text: str, protected: set[str]) -> str:
     return stripped.rstrip()
 
 
+_ORPHANED_BULLET_LINE_RE = re.compile(r"^[ \t]*(?:[-*][ \t]*)+$")
+
+
+def _strip_orphaned_bullet_lines(text: str) -> str:
+    """Drop bullet markers left with nothing after them on their own line.
+
+    Bulleting a contact block's fields (see :func:`build_support_contact_supplement`
+    and :func:`restore_missing_directory_contacts`) lets each survive as its own
+    row in the widget's renderer instead of collapsing into one run-on
+    paragraph. When one of those fields turns out to be unrequested, the
+    removal pattern below matches "Label: value" through its trailing
+    newline - the "- " marker sits before that match, outside it, and is
+    left standing. Removing that newline can also merge two such orphaned
+    markers onto the very same line (one field's leftover "- " immediately
+    followed by the next field's own "- ", becoming "- -"), which is why
+    this matches one-or-more repeated markers, not just one. A real bulleted
+    item, however short its text, is left completely alone.
+    """
+    lines = (text or "").split("\n")
+    kept = [line for line in lines if not _ORPHANED_BULLET_LINE_RE.match(line)]
+    return "\n".join(kept)
+
+
 def remove_unrequested_directory_fields(
     answer: str,
     question: str,
@@ -639,7 +669,12 @@ def remove_unrequested_directory_fields(
         # word dangling on the line before it, or (when a value line just
         # restored was itself the thing removed) a valueless label heading
         # dangling at the very end - see both helpers for the exact shapes.
+        # A bulleted field's own now-empty "- " marker is a third, distinct
+        # shape (see _strip_orphaned_bullet_lines) and is cleared before the
+        # bare-label check, so that check still sees the true last line.
         cleaned = _strip_dangling_field_connectors(cleaned)
+        cleaned = _strip_orphaned_bullet_lines(cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
         cleaned = _strip_trailing_bare_directory_label(cleaned, protected)
     return cleaned, changed
 
@@ -1444,7 +1479,15 @@ def build_support_contact_supplement(
 
     if not picked:
         return None
-    block = "\n".join(f"{label}: {value}" for label, value in picked)
+    # The widget's renderer only starts a new visual line at a blank line or
+    # a bullet marker; two "Label: value" lines joined by a single "\n" are
+    # merged into one run-on paragraph. A lone field reads fine as plain
+    # text, but two or more must be bulleted so each keeps its own row.
+    if len(picked) == 1:
+        label, value = picked[0]
+        block = f"{label}: {value}"
+    else:
+        block = "\n".join(f"- {label}: {value}" for label, value in picked)
     return block, [label for label, _ in picked]
 
 

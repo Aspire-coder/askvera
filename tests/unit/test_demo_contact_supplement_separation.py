@@ -180,9 +180,13 @@ def test_supplement_is_separated_from_the_answer_by_a_blank_line(monkeypatch) ->
     assert answer.startswith(_care_answer())
     supplement_start = answer.index("Telephone Office:")
     joining_text = answer[len(_care_answer()):supplement_start]
-    # A blank line, and nothing else - the block must not run into the
-    # answer's closing sentence, and no heading is introduced here.
-    assert joining_text == "\n\n"
+    # A blank line, and nothing else but an optional bullet marker - the
+    # block must not run into the answer's closing sentence, and no heading
+    # is introduced here. This fixture's two fields (phone and email) are
+    # bulleted so each keeps its own row in the widget's renderer (see
+    # test_demo_contact_block_rendering.py); a single-field supplement is
+    # left as plain text and would join with "\n\n" alone.
+    assert joining_text in ("\n\n", "\n\n- ")
     assert "#" not in joining_text
 
 
