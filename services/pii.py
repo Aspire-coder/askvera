@@ -13,6 +13,7 @@ from utils.redaction import (
     EMAIL_RE,
     GOVERNMENT_ID_RE,
     PHONE_RE,
+    drop_emptied_lead_ins,
     redact_ibans,
     redact_payment_cards,
 )
@@ -37,7 +38,24 @@ SENSITIVE_PII_PLACEHOLDERS = frozenset(
 # unresolved. Built from both sets so a new sensitive category can never be
 # added to detection (SENSITIVE_PII_PLACEHOLDERS) without also being covered
 # by the cleanup pass below - the two silently drifted apart once already.
-_UNRESOLVED_PLACEHOLDER_TOKENS = frozenset({"ADDRESS", "EMAIL", "PHONE", "NAME", "PII"}) | SENSITIVE_PII_PLACEHOLDERS
+# scrub_pii writes "[<Comprehend entity type>]" for every type it detects, so
+# each detectable type must be listed here. The live Mali answer delivered
+# "... and [DATE_TIME])" because DATE_TIME was missing.
+_COMPREHEND_PII_ENTITY_TYPES = frozenset(
+    {
+        "ADDRESS", "AGE", "ALL", "AWS_ACCESS_KEY", "AWS_SECRET_KEY", "BANK_ACCOUNT_NUMBER", "BANK_ROUTING",
+        "CA_HEALTH_NUMBER", "CA_SOCIAL_INSURANCE_NUMBER", "CREDIT_DEBIT_CVV", "CREDIT_DEBIT_EXPIRY",
+        "CREDIT_DEBIT_NUMBER", "DATE_TIME", "DRIVER_ID", "EMAIL", "INTERNATIONAL_BANK_ACCOUNT_NUMBER",
+        "IN_AADHAAR", "IN_NREGA", "IN_PERMANENT_ACCOUNT_NUMBER", "IN_VOTER_NUMBER", "IP_ADDRESS",
+        "LICENSE_PLATE", "LOCATION", "MAC_ADDRESS", "NAME", "PASSPORT_NUMBER", "PASSWORD", "PHONE", "PIN",
+        "SSN", "SWIFT_CODE", "UK_NATIONAL_HEALTH_SERVICE_NUMBER", "UK_NATIONAL_INSURANCE_NUMBER",
+        "UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER", "URL", "USERNAME", "US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER",
+        "VEHICLE_IDENTIFICATION_NUMBER",
+    }
+)
+_UNRESOLVED_PLACEHOLDER_TOKENS = (
+    frozenset({"ADDRESS", "EMAIL", "PHONE", "NAME", "PII"}) | SENSITIVE_PII_PLACEHOLDERS | _COMPREHEND_PII_ENTITY_TYPES
+)
 _UNRESOLVED_PLACEHOLDER_PATTERN = "|".join(sorted(_UNRESOLVED_PLACEHOLDER_TOKENS))
 
 
@@ -56,9 +74,11 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
     """
     if not text or "[" not in text:
         return text
-    kept_lines: list[str] = []
-    for line in text.splitlines():
+    originals = text.splitlines()
+    kept_lines: list[str | None] = []
+    for line in originals:
         if re.search(rf"\[(?:{_UNRESOLVED_PLACEHOLDER_PATTERN})\]\s*:", line, flags=re.IGNORECASE):
+            kept_lines.append(None)
             continue
         cleaned = re.sub(
             rf"\s*\[(?:{_UNRESOLVED_PLACEHOLDER_PATTERN})\]"
@@ -67,12 +87,21 @@ def remove_unresolved_pii_placeholders(text: str) -> str:
             line,
             flags=re.IGNORECASE,
         )
+        placeholder_removed = cleaned != line
+        if placeholder_removed:
+            # "(Mon-Fri, 8:00 am-12:00 pm and [DATE_TIME])" must not become "... and)".
+            cleaned = re.sub(r"\s+(?:and|or|&)(?=\s*(?:[)\].,;:!?]|$))", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
-        if cleaned:
-            kept_lines.append(cleaned)
-    return "\n".join(kept_lines)
+        # Tracker row 27: "- **[BANK_ACCOUNT]** - **" lost its token and was
+        # shown as an empty bullet reading "- **". A line left with nothing but
+        # markup once its placeholder is gone is removed, not displayed.
+        if placeholder_removed and not any(character.isalnum() for character in cleaned):
+            kept_lines.append(None)
+            continue
+        kept_lines.append(cleaned or None)
+    return "\n".join(line for line in drop_emptied_lead_ins(kept_lines, originals) if line)
 
 
 def _pii_language_code(language: str) -> str | None:
@@ -125,6 +154,25 @@ def _looks_like_location_name(entity_text: str) -> bool:
         return False
     tokens = re.findall(r"[^\W_]+", entity_text, flags=re.UNICODE)
     return 1 <= len(tokens) <= 4
+
+
+def _location_key(value: str) -> str:
+    """Normalize a place name for whole-name comparison."""
+    key = re.sub(r"[^\w]+", " ", str(value or "").casefold(), flags=re.UNICODE).strip()
+    return key[4:] if key.startswith("the ") else key
+
+
+def _is_allowed_location_name(entity_text: str, allowed_location_keys: frozenset[str]) -> bool:
+    """Return whether an entity is, in its entirety, one configured public place name.
+
+    Comprehend labels a bare country name such as "Canada" as ADDRESS. In a
+    generated answer that is the market the policy belongs to, not anyone's
+    address, and masking it made the placeholder clean-up delete the whole line
+    carrying the policy figure. Only an exact whole-entity match is preserved:
+    a street, a city or any address that merely contains a country name is
+    still masked.
+    """
+    return _looks_like_location_name(entity_text) and _location_key(entity_text) in allowed_location_keys
 
 
 def _scrub_pattern_pii(text: str, allowed_texts: Iterable[str]) -> str:
@@ -203,16 +251,26 @@ def scrub_pii(
     *,
     allowed_texts: Iterable[str] = (),
     allowed_name_texts: Iterable[str] = (),
+    allowed_location_texts: Iterable[str] = (),
     preserve_location_names: bool = False,
     preserve_person_names: bool = False,
 ) -> str:
-    """Mask PII entities using Amazon Comprehend."""
+    """Mask PII entities using Amazon Comprehend.
+
+    ``allowed_location_texts`` names public places (for example configured
+    market names) that are kept when a detected ADDRESS or LOCATION entity is
+    exactly one of them. Unlike ``preserve_location_names`` it keeps nothing
+    outside that list.
+    """
     if not text:
         return text
     started = perf_counter()
     language_code = _pii_language_code(language or settings.COMPREHEND_PII_LANGUAGE_CODE)
     approved = tuple(allowed_texts)
     approved_names = tuple(allowed_name_texts)
+    approved_location_keys = frozenset(
+        key for key in (_location_key(name) for name in allowed_location_texts) if key
+    )
     if language_code is None:
         scrubbed = _scrub_pattern_pii(text, approved)
         LOGGER.info(
@@ -247,6 +305,8 @@ def scrub_pii(
         if entity_type == "NAME" and _approved_entity(entity_text, approved_names):
             continue
         if preserve_location_names and entity_type in {"ADDRESS", "LOCATION"} and _looks_like_location_name(entity_text):
+            continue
+        if entity_type in {"ADDRESS", "LOCATION"} and _is_allowed_location_name(entity_text, approved_location_keys):
             continue
         if preserve_person_names and entity_type == "NAME":
             continue

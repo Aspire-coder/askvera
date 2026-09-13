@@ -230,6 +230,84 @@ def test_response_builder_does_not_attach_an_unrelated_source() -> None:
     assert response.citations == []
 
 
+def _section_doc(doc_id, country, section, content, score, parent=""):
+    return RetrievedDocument(
+        id=doc_id, title=f"{country} {section}", content=content, source=f"s3://kb/{doc_id}",
+        country=country, score=score, metadata={"section_id": section, "parent_section_id": parent},
+    )
+
+
+_GERMANY_DIRECTORY = (
+    "Welcome to Forever Germany!\nTelephone for Orders +49 6131 8999 0\n"
+    "Email service@example.de\nMinimum order size FBO: 50,00 in products.\n"
+    "Delivery Cost: 5,00 per order."
+)
+
+
+def test_numeric_answer_cites_policy_figure_alongside_directory_contact() -> None:
+    """A phone number must not crowd out the passage carrying the requested figure.
+
+    Every digit group of "+49 6131 8999 0" counts as a figure, so the directory
+    record outranked the policy passage and the single numeric citation dropped it.
+    """
+    policy = _section_doc("DE:9.02-b", "DE", "9.02-b",
+                          "Section 9.02: b) Incentive trips must be completed within 18 months of qualifying.",
+                          0.93, parent="9.02")
+    directory = _section_doc("GLOBAL:sponsoring-de", "GLOBAL", "sponsoring-de", _GERMANY_DIRECTORY, 0.81)
+    answer = ("Incentive trips must be completed within 18 months of qualifying. For booking questions, "
+              "call Forever Germany on +49 6131 8999 0 or email service@example.de.")
+    citations = ResponseBuilder()._supporting_citations(answer, RetrievalResult([policy, directory], [], 0.9))
+    assert {citation["section"] for citation in citations} == {"9.02", "sponsoring-de"}
+
+
+def test_non_english_numeric_answer_keeps_policy_citation_next_to_contact() -> None:
+    policy = _section_doc("NL:6.04-a", "NL", "6.04-a",
+                          "Sectie 6.04: a) Een reis moet binnen 12 maanden na kwalificatie worden gemaakt.",
+                          0.9, parent="6.04")
+    directory = _section_doc("GLOBAL:sponsoring-nl", "GLOBAL", "sponsoring-nl",
+                             "Welcome to Forever Netherlands!\nTelephone Office +31 55 123 4567", 0.85)
+    answer = "Je reis moet binnen 12 maanden na kwalificatie worden gemaakt. Bel gerust +31 55 123 4567."
+    citations = ResponseBuilder()._supporting_citations(answer, RetrievalResult([directory, policy], [], 0.9))
+    # Whichever source ranks second used to be dropped; both figures need their own.
+    assert sorted(citation["section"] for citation in citations) == ["6.04", "sponsoring-nl"]
+
+
+def test_directory_fact_answer_still_cites_only_the_directory_record() -> None:
+    policy = _section_doc("DE:3.01", "DE", "3.01",
+                          "Section 3.01: An FBO needs 4 Active Case Credits and orders of 50 products.", 0.9)
+    directory = _section_doc("GLOBAL:sponsoring-de", "GLOBAL", "sponsoring-de", _GERMANY_DIRECTORY, 0.8)
+    answer = ("Forever Germany's FBO minimum order is 50,00 in products and delivery costs 5,00 per order. "
+              "Orders: +49 6131 8999 0.")
+    citations = ResponseBuilder()._supporting_citations(answer, RetrievalResult([policy, directory], [], 0.9))
+    assert [citation["section"] for citation in citations] == ["sponsoring-de"]
+
+
+def test_single_source_numeric_answer_keeps_one_citation() -> None:
+    governing = _section_doc("DE:9.02-b", "DE", "9.02-b",
+                             "Section 9.02: b) Incentive trips must be completed within 18 months of qualifying.",
+                             0.9, parent="9.02")
+    nearby = _section_doc("DE:9.03", "DE", "9.03",
+                          "Section 9.03: Guests on incentive trips must be 18 or older.", 0.95)
+    answer = "Incentive trips must be completed within 18 months of qualifying."
+    citations = ResponseBuilder()._supporting_citations(answer, RetrievalResult([nearby, governing], [], 0.9))
+    assert [citation["section"] for citation in citations] == ["9.02"]
+
+
+def test_second_numeric_citation_never_reaches_another_markets_policy() -> None:
+    own = _section_doc("DE:4.01", "DE", "4.01", "Section 4.01: Bonuses are paid monthly by bank transfer.", 0.9)
+    foreign = _section_doc("AT:9.02-b", "AT", "9.02-b",
+                           "Section 9.02: b) Incentive trips must be completed within 18 months of qualifying.",
+                           0.7, parent="9.02")
+    directory = _section_doc("GLOBAL:sponsoring-de", "GLOBAL", "sponsoring-de", _GERMANY_DIRECTORY, 0.8)
+    answer = ("Incentive trips must be completed within 18 months of qualifying. "
+              "Call Forever Germany on +49 6131 8999 0.")
+    citations = ResponseBuilder()._supporting_citations(
+        answer, RetrievalResult([own, foreign, directory], [], 0.9)
+    )
+    assert "AT" not in {citation["country"] for citation in citations}
+    assert [citation["section"] for citation in citations] == ["sponsoring-de"]
+
+
 def test_verified_evidence_citation_survives_cross_language_answer() -> None:
     """Claim-verified evidence must not be dropped by language-sensitive token overlap."""
     document = RetrievedDocument(

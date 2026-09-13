@@ -6,7 +6,7 @@ import json
 import math
 import re
 import unicodedata
-from difflib import SequenceMatcher
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Any
 
@@ -19,9 +19,14 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.embeddings import embed_text
 from services.guardrails import is_policy_safety_question
-from services.knowledge_generations import active_generation_ids
+from services.knowledge_generations import (
+    active_generation_ids,
+    generation_lookup_failure,
+    reset_generation_lookup_failure,
+)
 from services.market_config import (
     find_market_mentions,
+    find_shared_office_record_countries,
     get_document_country_codes,
     load_global_directory_markets,
     load_market_config,
@@ -31,9 +36,12 @@ from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import (
+    DIRECTORY_POLICY_WORDING_RE,
+    OWN_MARKET_DIRECTORY_FIELD_RE,
     RetrievalQueryPlan,
     _document_relevance,
     _planned_retrieval_plan,
+    _tokens,
 )
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
@@ -120,6 +128,258 @@ def _scope_filter(country: str, language: str, scope: str) -> dict[str, Any]:
     }
 
 
+# Per-request count of generation filters built, and how many fell back to the
+# no-generation sentinel. Reset when retrieval starts; read into its metadata.
+_generation_filter_counts: ContextVar[tuple[int, int]] = ContextVar(
+    "askvera_generation_filter_counts", default=(0, 0)
+)
+
+
+def _start_generation_lookup_signal() -> None:
+    reset_generation_lookup_failure()
+    _generation_filter_counts.set((0, 0))
+
+
+def _count_generation_filter(*, sentinel: bool) -> None:
+    total, sentinels = _generation_filter_counts.get()
+    _generation_filter_counts.set((total + 1, sentinels + int(sentinel)))
+
+
+def _generation_lookup_fields() -> dict[str, Any]:
+    """Say why a generation-filtered search may be empty; internal diagnostics only.
+
+    ``failed``: a lookup raised; ``error_type`` is the exception type name only.
+    ``none_active``: no failure, and every filter fell back to the sentinel.
+    ``ok``: no failure, and at least one filter used published generation ids.
+    Absent when the generation pointer is off or no filter was built.
+    """
+    total, sentinels = _generation_filter_counts.get()
+    if total == 0:
+        return {}
+    error_type = generation_lookup_failure()
+    if error_type:
+        status = "failed"
+    elif sentinels == total:
+        status = "none_active"
+    else:
+        status = "ok"
+    return {
+        "generation_lookup": {
+            "status": status,
+            "error_type": error_type,
+            "filter_count": total,
+            "sentinel_filter_count": sentinels,
+        }
+    }
+
+
+# Rank-list capture, for offline rank-fusion and selector diagnosis: each
+# search's ranked hits with raw scores, the merged order, the candidates sent to
+# the selector and the selector's raw picks. Diagnostic only and off by default:
+# the orchestrator's benchmark diagnostic capture is the only caller of
+# enable_rank_list_capture, for one request. When off, every hook below returns
+# at once and retrieval adds no metadata key. It never reads settings or the
+# environment, records no document or query text, and never mutates a hit or row.
+RANK_LIST_CAPTURE_VERSION = 1
+RANK_LIST_METADATA_KEYS = (
+    "retrieval_rank_lists",
+    "candidate_section_ids",
+    "evidence_selector_candidate_section_ids",
+    "evidence_selector_selected_ranks",
+)
+_RANK_LIST_DOCUMENT_FIELDS = (
+    "id", "section_id", "parent_section_id", "country", "language",
+    "access_scope", "document_type", "chunk_type",
+)
+_RANK_LIST_MAX_SEARCHES = 24
+_RANK_LIST_MAX_HITS = 30
+_RANK_LIST_MAX_MERGED = 60
+_RANK_LIST_MAX_RANKS = 30
+_RANK_LIST_MAX_TARGETS = 16
+_RANK_LIST_ID_CHARS = 160
+_RANK_LIST_SECTION_CHARS = 48
+_RANK_LIST_CODE_CHARS = 24
+_rank_list_capture_enabled: ContextVar[bool] = ContextVar("askvera_rank_list_capture", default=False)
+_rank_list_record: ContextVar[dict[str, Any] | None] = ContextVar("askvera_rank_list_record", default=None)
+
+
+def enable_rank_list_capture() -> Token[bool]:
+    """Turn rank-list capture on in the current context; reset with the returned token."""
+    return _rank_list_capture_enabled.set(True)
+
+
+def disable_rank_list_capture(token: Token[bool]) -> None:
+    _rank_list_capture_enabled.reset(token)
+
+
+def _start_rank_list_record() -> dict[str, Any] | None:
+    if not _rank_list_capture_enabled.get():
+        return None
+    record: dict[str, Any] = {
+        "version": RANK_LIST_CAPTURE_VERSION,
+        "hit_fields": ["section_id", "rank", "raw_score", "document"],
+        "document_fields": list(_RANK_LIST_DOCUMENT_FIELDS),
+        "limits": {
+            "searches": _RANK_LIST_MAX_SEARCHES,
+            "hits_per_search": _RANK_LIST_MAX_HITS,
+            "merged": _RANK_LIST_MAX_MERGED,
+        },
+        "documents": [],
+        "searches": [],
+        "searches_not_recorded": 0,
+        "merged_count": None,
+        "merged_order": None,
+        "selector_outcome": "not_called",
+        "selector_candidates": None,
+        "selector_relevant_evidence": None,
+        "selector_selected_ranks": None,
+        "recording_errors": 0,
+        "_document_index": {},
+        "_selector_candidate_section_ids": None,
+    }
+    _rank_list_record.set(record)
+    return record
+
+
+def _rank_list_text(value: object, limit: int) -> str:
+    return str(value or "")[:limit]
+
+
+def _rank_list_document(record: dict[str, Any], identifier: object, fields: dict[str, Any]) -> int | None:
+    """Return the document-table index for one hit or row; ``None`` when it has no id."""
+    key = _rank_list_text(identifier, _RANK_LIST_ID_CHARS)
+    if not key:
+        return None
+    index = record["_document_index"]
+    if key not in index:
+        index[key] = len(record["documents"])
+        record["documents"].append([
+            key,
+            _rank_list_text(fields.get("section_id"), _RANK_LIST_SECTION_CHARS),
+            _rank_list_text(fields.get("parent_section_id"), _RANK_LIST_SECTION_CHARS),
+            *(_rank_list_text(fields.get(name), _RANK_LIST_CODE_CHARS) for name in _RANK_LIST_DOCUMENT_FIELDS[3:]),
+        ])
+    return index[key]
+
+
+def _record_rank_list_search(
+    record: dict[str, Any] | None,
+    kind: str,
+    query_index: int | None,
+    weight: float,
+    response: dict[str, Any],
+) -> None:
+    """Record one search's ranked hits with the raw OpenSearch score, before any weighting."""
+    if record is None:
+        return
+    try:
+        if len(record["searches"]) >= _RANK_LIST_MAX_SEARCHES:
+            record["searches_not_recorded"] += 1
+            return
+        hits = response.get("hits", {}).get("hits", [])
+        ranked = []
+        for rank, hit in enumerate(hits[:_RANK_LIST_MAX_HITS], start=1):
+            source = hit.get("_source", {}) or {}
+            ranked.append([
+                _rank_list_text(source.get("section_id"), _RANK_LIST_SECTION_CHARS),
+                rank,
+                float(hit.get("_score") or 0.0),
+                _rank_list_document(record, source.get("id") or hit.get("_id", ""), source),
+            ])
+        record["searches"].append(
+            {"kind": kind, "query_index": query_index, "weight": weight, "hit_count": len(hits), "hits": ranked}
+        )
+    except Exception:  # noqa: BLE001 - diagnostic recording must never change retrieval
+        record["recording_errors"] += 1
+
+
+def _record_rank_list_merged(record: dict[str, Any] | None, rows: list[tuple[dict[str, Any], float]]) -> None:
+    if record is None:
+        return
+    try:
+        record["merged_count"] = len(rows)
+        record["merged_order"] = [
+            [
+                _rank_list_text(row.get("section_id"), _RANK_LIST_SECTION_CHARS),
+                float(score),
+                _rank_list_document(record, row.get("id"), row),
+            ]
+            for row, score in rows[:_RANK_LIST_MAX_MERGED]
+        ]
+    except Exception:  # noqa: BLE001 - diagnostic recording must never change retrieval
+        record["recording_errors"] += 1
+
+
+def _record_rank_list_selector(
+    outcome: str,
+    *,
+    candidates: list[tuple[dict[str, Any], float]] | None = None,
+    ranks: list[int] | None = None,
+    relevant_evidence: bool | None = None,
+) -> None:
+    """Record what the selector was shown and its raw ranked picks, before binding."""
+    record = _rank_list_record.get() if _rank_list_capture_enabled.get() else None
+    if record is None:
+        return
+    try:
+        record["selector_outcome"] = outcome
+        if candidates is not None:
+            record["selector_candidates"] = [_rank_list_document(record, row.get("id"), row) for row, _score in candidates]
+            record["_selector_candidate_section_ids"] = [
+                _rank_list_text(row.get("section_id"), _RANK_LIST_SECTION_CHARS) for row, _score in candidates
+            ]
+        if ranks is not None:
+            record["selector_selected_ranks"] = [int(rank) for rank in ranks[:_RANK_LIST_MAX_RANKS]]
+            record["selector_relevant_evidence"] = relevant_evidence
+    except Exception:  # noqa: BLE001 - diagnostic recording must never change retrieval
+        record["recording_errors"] += 1
+
+
+def _rank_list_fields(
+    record: dict[str, Any] | None,
+    *,
+    raw_rows: list[tuple[dict[str, Any], float]] | None = None,
+    search_plan: RetrievalQueryPlan | None = None,
+    target_country_names: set[str] | None = None,
+) -> dict[str, Any]:
+    """Close this retrieval's record and return its metadata keys; ``{}`` when capture is off."""
+    if record is None:
+        return {}
+    _rank_list_record.set(None)
+    try:
+        if search_plan is not None:
+            record["query_count"] = len(search_plan.queries)
+            record["prefer_outline"] = bool(search_plan.prefer_outline)
+            record["include_global_documents"] = bool(search_plan.include_global_documents)
+        if target_country_names is not None:
+            record["target_country_names"] = sorted(
+                _rank_list_text(name, _RANK_LIST_SECTION_CHARS) for name in target_country_names
+            )[:_RANK_LIST_MAX_TARGETS]
+        selector_section_ids = record["_selector_candidate_section_ids"]
+        fields: dict[str, Any] = {
+            # A JSON copy: plain types only, and detached from the closed record.
+            "retrieval_rank_lists": json.loads(
+                json.dumps({key: value for key, value in record.items() if not key.startswith("_")})
+            ),
+            "evidence_selector_candidate_section_ids": (
+                list(selector_section_ids) if selector_section_ids is not None else None
+            ),
+            "evidence_selector_selected_ranks": (
+                list(record["selector_selected_ranks"]) if record["selector_selected_ranks"] is not None else None
+            ),
+        }
+        if raw_rows is not None:
+            # Each candidate's own section id, parallel to candidate_sources,
+            # whose "section" prefers the parent.
+            fields["candidate_section_ids"] = [
+                _rank_list_text(row.get("section_id"), _RANK_LIST_SECTION_CHARS)
+                for row, _score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
+            ]
+        return fields
+    except Exception:  # noqa: BLE001 - diagnostic recording must never change retrieval
+        return {"retrieval_rank_lists": {"version": RANK_LIST_CAPTURE_VERSION, "recording_failed": True}}
+
+
 def _generation_filters(
     country: str,
     language: str,
@@ -148,6 +408,7 @@ def _generation_filters(
         access_scope=access_scope,
         document_type=document_type,
     )
+    _count_generation_filter(sentinel=not generation_ids)
     if not generation_ids:
         return [exact_term_query("ingestion_id", "__no_active_generation__")]
     return [exact_terms_query("ingestion_id", sorted(generation_ids))]
@@ -357,7 +618,15 @@ def _directory_record_country_score(
         return 0.0
     if target_country_names:
         normalized_targets = {_normalize_text(name) for name in target_country_names}
-        if record_country in normalized_targets:
+        # "Kenya/East Africa" names its market before the "/". Compared whole,
+        # "kenya east africa" matched no target, so the Kenya record took the
+        # wrong-country penalty below and was filtered out even when the
+        # selector chose it (live demo run). Only "/"-separated parts count, so
+        # "Guinea" still never matches "Equatorial Guinea".
+        record_segments = {
+            _normalize_text(part) for part in str(metadata.get("record_country") or "").split("/") if part.strip()
+        }
+        if record_country in normalized_targets or record_segments & normalized_targets:
             return 8.0
         # A country explicitly named in the question outranks the selected
         # widget market. This matters for global-directory questions such as
@@ -405,11 +674,30 @@ def _vector_query(message: str, country: str, language: str, *, scope: str = "lo
     }
 
 
+def _is_adjacent_letter_swap(token: str, market_name: str) -> bool:
+    """True when ``token`` is ``market_name`` with one pair of neighbouring letters swapped."""
+    if len(token) != len(market_name):
+        return False
+    differences = [index for index, (left, right) in enumerate(zip(token, market_name)) if left != right]
+    return (
+        len(differences) == 2
+        and differences[1] == differences[0] + 1
+        and token[differences[0]] == market_name[differences[1]]
+        and token[differences[1]] == market_name[differences[0]]
+    )
+
+
 def _directory_target_country_names(message: str, selected_country: str) -> set[str]:
-    """Return the named market(s) whose global directory record should lead."""
+    """Return the named market(s) whose global directory record should lead.
+
+    A named country served by a configured shared office and without a market
+    entry of its own adds that office's ``record_country`` instead of falling
+    back to the selected market.
+    """
     catalog = [*load_market_config().get("markets", []), *load_global_directory_markets()]
     mentioned_codes = find_market_mentions(message)
-    if not mentioned_codes:
+    shared_record_countries = find_shared_office_record_countries(message)
+    if not mentioned_codes and not shared_record_countries:
         normalized_message = _normalize_text(message)
         message_tokens = [token for token in normalized_message.split() if len(token) >= 4]
         for market in catalog:
@@ -417,26 +705,40 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
             name_tokens = market_name.split()
             if len(name_tokens) != 1 or not market_name:
                 continue
-            if any(
-                len(token) >= len(market_name) - 1
-                and (
-                    SequenceMatcher(None, token, market_name).ratio() >= 0.80
-                    or (
-                        len(token) == len(market_name)
-                        and sorted(token) == sorted(market_name)
-                    )
-                )
-                for token in message_tokens
+            # Only one swapped pair of neighbouring letters counts as a typo
+            # ("Mexcio"). A similarity ratio matched ordinary words to markets
+            # ("being" -> Benin, "child" -> Chile) and put a foreign directory
+            # target on company-policy questions (live, SE buy-back turns).
+            if len(market_name) >= 5 and any(
+                _is_adjacent_letter_swap(token, market_name) for token in message_tokens
             ):
                 mentioned_codes.add(str(market.get("code") or "").upper())
-    if not mentioned_codes and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or ""):
+    # With no country named, the session's own record is the target for
+    # contact/sponsoring wording. Its operational fields (delivery cost,
+    # minimum order amount, payment methods) fall back to it too, but only for
+    # a market whose directory record is configured by name in
+    # global_directory_markets.json (NL -> "Netherlands Benelux"); other
+    # markets keep company-policy-only scope for these fields. Policy wording
+    # never falls back.
+    own_market_field = (
+        str(selected_country or "").upper()
+        in {str(market.get("code") or "").upper() for market in load_global_directory_markets()}
+        and bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
+        and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
+    )
+    if (
+        not mentioned_codes
+        and not shared_record_countries
+        and not _GLOBAL_DIRECTORY_INTENT_RE.search(message or "")
+        and not own_market_field
+    ):
         return set()
-    target_codes = mentioned_codes or {str(selected_country or "").upper()}
+    target_codes = mentioned_codes or (set() if shared_record_countries else {str(selected_country or "").upper()})
     return {
         str(country.get("name") or "")
         for country in catalog
         if str(country.get("code") or "").upper() in target_codes
-    }
+    } | shared_record_countries
 
 
 def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:
@@ -453,6 +755,164 @@ def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:
             ]
         )
     return {"bool": {"should": should, "minimum_should_match": 1}}
+
+
+# Common function words per section language, accent-folded. One of them in the
+# question means it is written in the section's language, so it is not a
+# translation and the translated-query rescue does not apply. Each list omits
+# words that are also common in the other listed languages or in es/pt/it
+# (English "is"/"in"/"we"/"of" are Dutch, "also"/"was"/"an" German, "a"/"as"/"on"
+# French or Romance), so a genuine translation is not blocked by a shared word.
+# A section language with no list gets no rescue: its language cannot be told apart.
+SECTION_LANGUAGE_MARKERS: dict[str, frozenset[str]] = {
+    "en": frozenset({
+        "the", "my", "your", "our", "their", "you", "they", "can", "could", "would", "should", "must",
+        "how", "what", "which", "who", "why", "where", "when", "does", "did", "are", "have", "and",
+        "with", "about", "this", "that", "these", "those", "there", "from", "into", "any", "not", "to",
+        "for", "it", "if", "be", "been", "get", "much", "many",
+    }),
+    "nl": frozenset({
+        "het", "een", "ik", "mijn", "jouw", "uw", "hoe", "wat", "welke", "waarom", "wanneer", "hoeveel",
+        "waar", "kan", "kunnen", "mag", "moet", "zijn", "van", "voor", "niet", "ook", "maar", "bij",
+        "naar", "deze", "dat", "wordt", "worden", "heb", "hebben", "heeft", "wij", "zij", "mij", "ons",
+        "geen", "wel", "nog",
+    }),
+    "fr": frozenset({
+        "une", "est", "sont", "mon", "votre", "nous", "vous", "comment", "combien", "pourquoi", "quand",
+        "quel", "quelle", "quels", "quelles", "peut", "peux", "puis", "avec", "pour", "dans", "sur", "pas",
+        "cette", "aux", "au", "et", "suis", "etre", "avoir", "faire", "sa", "ses", "leur", "leurs", "ils",
+        "elle",
+    }),
+    "de": frozenset({
+        "der", "ein", "eine", "einen", "einem", "ist", "sind", "ich", "mein", "meine", "mich", "mir",
+        "warum", "wann", "wieviel", "viel", "kann", "konnen", "darf", "muss", "mit", "und", "nicht",
+        "fur", "auch", "oder", "bei", "wenn", "wird", "habe", "haben", "zu", "von", "dem", "sich", "kein",
+        "keine", "unser", "ihr", "ihre", "wo", "wer", "welche", "welcher", "bitte",
+    }),
+}
+# Markers spelled exactly like common English words ("a delivery van", "fur", "sa",
+# "mon", "mag"). Written in that exact form they are not evidence that a question
+# is a translation (Fable W8b note 3). They stay in SECTION_LANGUAGE_MARKERS, so the
+# section-language check still reads them and the rescue can only become rarer.
+TRANSLATION_EVIDENCE_HOMOGRAPHS: frozenset[str] = frozenset({"van", "fur", "sa", "mon", "mag"})
+
+
+def _question_in_section_language(message: str, section_language: str) -> bool:
+    """True unless the question is verifiably written in a language other than the section's.
+
+    Static and local: the question counts as the section's language when it
+    contains any SECTION_LANGUAGE_MARKERS word for that language, or when that
+    language has no marker list. W8 review: "Can my spouse also join as a
+    distributor?" against the English NL licence section was rescued (0.6625).
+    """
+    markers = SECTION_LANGUAGE_MARKERS.get(_marker_language(section_language))
+    if not markers:
+        return True
+    return bool(_folded_words(message) & markers)
+
+
+def _question_in_another_listed_language(message: str, section_language: str) -> bool:
+    """True when the question carries a SECTION_LANGUAGE_MARKERS word of a language other than the section's.
+
+    Positive evidence of translation. Absence of the section language's markers
+    alone is not enough: "Is a spouse allowed as distributor?" uses no listed
+    English word and was still rescued (W8 review finding 2, 0.6625).
+
+    Names say nothing about the question's language, so words written as names
+    ("Van de Berg", "? Bitte.") are not evidence, and neither is a word spelled
+    exactly like an English one in TRANSLATION_EVIDENCE_HOMOGRAPHS ("a delivery
+    van", "fur"); "für" still is (Fable W8b note 3).
+    """
+    section = _marker_language(section_language)
+    written = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", message or "").casefold(), flags=re.UNICODE)
+    words = _folded_words(" ".join(word for word in written if word not in TRANSLATION_EVIDENCE_HOMOGRAPHS))
+    words -= _question_name_tokens(message)
+    return any(words & markers for language, markers in SECTION_LANGUAGE_MARKERS.items() if language != section)
+
+
+def _marker_language(language: str) -> str:
+    return re.split(r"[-_]", str(language or "").casefold())[0]
+
+
+def _folded_words(message: str) -> set[str]:
+    decomposed = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", message or "")).casefold()
+    folded = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return set(re.findall(r"[^\W_]+", folded, flags=re.UNICODE))
+
+
+def _question_name_tokens(message: str) -> set[str]:
+    """Tokens written as names in the question: acronyms, numbers, capitalised non-initial words.
+
+    Names ("Forever", "FBO") survive translation unchanged, so they say nothing
+    about which language the question is written in.
+    """
+    words = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", message or ""), flags=re.UNICODE)
+    names = {
+        word
+        for index, word in enumerate(words)
+        if any(character.isdigit() for character in word)
+        or (len(word) >= 2 and word.isupper())
+        or (index > 0 and word[:1].isupper())
+    }
+    return _tokens(" ".join(names))
+
+
+def _translated_query_local_relevance(
+    message: str,
+    country: str,
+    document: RetrievedDocument,
+    planned_queries: list[str],
+    candidate_rows: list[tuple[dict[str, Any], float]],
+) -> float:
+    """Local relevance of the session market's own policy section through a translated planner query.
+
+    A Dutch question scored against the English edition of the right NL section
+    shares only names with it, so its lexical relevance misses the strong-match
+    rescue that the same question passes against the Dutch edition (live: 0.4234
+    vs 0.5134, threshold 0.44). No question-language signal exists, so a planner
+    query stands in only when the question's ordinary (non-name) words appear in
+    none of: the chosen section, any retrieved candidate in that section's
+    language, and the planner query itself. Returns 0.0 for directory records,
+    global rows and other markets' sections.
+    """
+    metadata = document.metadata or {}
+    if (
+        metadata.get("access_scope") == "global"
+        or metadata.get("document_type") in GLOBAL_DIRECTORY_DOCUMENT_TYPES
+        or str(document.country or "").upper() not in {code.upper() for code in get_document_country_codes(country)}
+    ):
+        return 0.0
+    if _question_in_section_language(message, document.language):
+        # Not a translation: the question's own lexical relevance stands.
+        return 0.0
+    if not _question_in_another_listed_language(message, document.language):
+        # No positive sign of another language either, so still not a translation.
+        return 0.0
+    ordinary_words = _tokens(message) - _question_name_tokens(message)
+    if not ordinary_words:
+        return 0.0
+    same_language_text = " ".join(
+        [
+            document.title,
+            document.content,
+            document.excerpt,
+            *(
+                f"{row.get('section_title') or ''} {row.get('content') or ''}"
+                for row, _score in candidate_rows
+                if str(row.get("language") or "") == document.language
+            ),
+        ]
+    )
+    if ordinary_words & _tokens(same_language_text):
+        return 0.0
+    return max(
+        (
+            _document_relevance(query, document)
+            for query in planned_queries
+            if query and not ordinary_words & _tokens(query)
+        ),
+        default=0.0,
+    )
 
 
 def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, Any]:
@@ -488,21 +948,96 @@ def _hit_to_row(hit: dict[str, Any], *, score_weight: float = 1.0) -> dict[str, 
     }
 
 
+_SELECTOR_HEADING_CHARS = 160
+_SELECTOR_HIDDEN_CLAUSE_LIMIT = 8
+_SELECTOR_SECTION_PREFIX_RE = re.compile(r"section\s+(\S+?):\s*(\S.*)$", re.IGNORECASE)
+_SELECTOR_CLAUSE_MARKER_RE = re.compile(r"^[ \t]*\(?([a-z]|[ivx]{2,4})\)[ \t]", re.MULTILINE)
+
+
+def _selector_heading_path(row: dict[str, Any]) -> tuple[str, str]:
+    """Return a child chunk's governing heading path and its text without the heading line.
+
+    The extractor writes a child's governing heading as its first content line,
+    ``Section <parent>: <heading>``, while ``section_title`` holds the clause's
+    own first line. Near-identical clauses from different sections therefore
+    differ only inside the text. Lifting that verified line into the header
+    keeps clause, heading and section identity together at no text cost.
+    Any other row, including one whose heading is longer than the header
+    allows, keeps its content unchanged, so no previously visible text is lost.
+
+    The path is read from the row's own content, not from parent metadata: it
+    relies on the extractor's ``Section <id>:`` first-line convention. The id
+    in that line must be the row's parent or a prefix of the row's own id, but
+    it is what the header shows. Scope never depends on it: country, language
+    and access filters are applied before any view is built.
+    """
+    content = str(row.get("content") or "")
+    parent_id = str(row.get("parent_section_id") or "")
+    first_line, separator, body = content.partition("\n")
+    match = _SELECTOR_SECTION_PREFIX_RE.match(first_line.strip())
+    if not parent_id or not separator or match is None:
+        return "", content
+    prefix_id, heading = match.group(1), match.group(2).strip()
+    section_id = str(row.get("section_id") or "")
+    if prefix_id != parent_id and not section_id.startswith(f"{prefix_id}-"):
+        return "", content
+    if len(heading) > _SELECTOR_HEADING_CHARS:
+        return "", content
+    path = f"{prefix_id} {heading}"
+    clause = _SELECTOR_CLAUSE_MARKER_RE.match(body)
+    if clause:
+        path = f"{path} > ({clause.group(1)})"
+    return path, body
+
+
+def _selector_truncation_notice(text: str, shown: int) -> str:
+    """Say that the selector sees only part of the text, and which clauses it misses.
+
+    Without this, a clause cut off mid-sentence reads as complete and a
+    directory field beyond the view reads as absent. The notice is bounded and
+    never replaces visible text.
+    """
+    if len(text) <= shown:
+        return ""
+    hidden = [f"({match.group(1)})" for match in _SELECTOR_CLAUSE_MARKER_RE.finditer(text, shown)]
+    hidden = list(dict.fromkeys(hidden))
+    notice = f"[Text truncated: {shown} of {len(text)} characters shown"
+    visible = list(_SELECTOR_CLAUSE_MARKER_RE.finditer(text, 0, shown))
+    next_start = next((match.start() for match in _SELECTOR_CLAUSE_MARKER_RE.finditer(text, shown)), len(text))
+    if visible and text[shown:next_start].strip():
+        notice += f"; clause ({visible[-1].group(1)}) continues"
+    if hidden:
+        listed = ", ".join(hidden[:_SELECTOR_HIDDEN_CLAUSE_LIMIT])
+        more = ", ..." if len(hidden) > _SELECTOR_HIDDEN_CLAUSE_LIMIT else ""
+        notice += f"; clauses not shown: {listed}{more}"
+    return f"{notice}]"
+
+
 def _selector_candidate_text(row: dict[str, Any], score: float, index: int) -> str:
     """Format one candidate for the evidence selector."""
-    content = str(row.get("content") or "")
     metadata = dict(row.get("metadata") or {})
-    return (
-        f"Candidate {index}\n"
-        f"Document type: {row.get('document_type', '')}\n"
-        f"Access scope: {row.get('access_scope', 'country')}\n"
-        f"Record type: {metadata.get('directory_section', '')}\n"
-        f"Record country: {metadata.get('record_country', '')}\n"
-        f"Section: {row.get('section_id', '')}\n"
-        f"Title: {row.get('section_title', '')}\n"
-        f"Current score: {score}\n"
-        f"Text:\n{content[:1200]}"
+    heading_path, text = _selector_heading_path(row)
+    lines = [
+        f"Candidate {index}",
+        f"Document type: {row.get('document_type', '')}",
+        f"Access scope: {row.get('access_scope', 'country')}",
+        f"Record type: {metadata.get('directory_section', '')}",
+        f"Record country: {metadata.get('record_country', '')}",
+        f"Section: {row.get('section_id', '')}",
+    ]
+    if heading_path:
+        lines.append(f"Heading path: {heading_path}")
+    lines.extend(
+        [
+            f"Title: {row.get('section_title', '')}",
+            f"Current score: {score}",
+            f"Text:\n{text[:_SELECTOR_VIEW_CHARS]}",
+        ]
     )
+    notice = _selector_truncation_notice(text, _SELECTOR_VIEW_CHARS)
+    if notice:
+        lines.append(notice)
+    return "\n".join(lines)
 
 
 def _selector_candidates(
@@ -708,6 +1243,10 @@ def _bind_selected_parent_children(rows: list[tuple[dict[str, Any], float]]) -> 
     displaced: list[tuple[dict[str, Any], float]] = []
     protected_ids: set[str] = set()
     for parent, _score in rows[:selected_count]:
+        # An earlier binding may have displaced this parent; it no longer
+        # holds a selected position, so it must not bring its child back.
+        if not any(row is parent for row, _ in selected):
+            continue
         child_pair = _bound_child(parent, rows)
         if child_pair is None:
             continue
@@ -715,16 +1254,28 @@ def _bind_selected_parent_children(rows: list[tuple[dict[str, Any], float]]) -> 
         if any(str(row.get("id") or "") == child_id for row, _ in selected):
             continue
         pair_ids = protected_ids | {str(parent.get("id") or ""), child_id}
+        position: int | None = None
+        popped: tuple[dict[str, Any], float] | None = None
         if len(selected) >= settings.OPENSEARCH_RESULT_COUNT:
             position = _displaceable_position(selected, pair_ids)
             if position is None:
                 continue
-            displaced.insert(0, selected.pop(position))
+            popped = selected.pop(position)
+        parent_position = next((index for index, (row, _) in enumerate(selected) if row is parent), None)
+        if parent_position is None:
+            if popped is not None and position is not None:
+                selected.insert(position, popped)
+            continue
+        if popped is not None:
+            displaced.insert(0, popped)
         protected_ids = pair_ids
-        parent_position = next(index for index, (row, _) in enumerate(selected) if row is parent)
         child_pair[0]["parent_bound_child"] = True
         selected.insert(parent_position + 1, child_pair)
         remaining = [pair for pair in remaining if pair[0] is not child_pair[0]]
+        # A selector-picked child can already sit in `displaced` (an earlier
+        # binding pushed it out of `selected`) when its own parent binds it
+        # here; without this it would be emitted twice.
+        displaced = [pair for pair in displaced if pair[0] is not child_pair[0]]
     return [*selected, *displaced, *remaining]
 
 
@@ -742,6 +1293,8 @@ class OpenSearchSectionProvider:
 
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
+        _start_generation_lookup_signal()
+        rank_record = _start_rank_list_record()
         try:
             search_plan = self._build_search_plan(message, country, language, correlation_id)
             if search_plan.client_action:
@@ -790,6 +1343,7 @@ class OpenSearchSectionProvider:
                     index=self.index_name,
                     body=_exact_section_query(explicit_section_id, country, language),
                 )
+                _record_rank_list_search(rank_record, "exact", None, 1.0, exact_response)
                 text_hits.extend(
                     {**hit, "_score": max(float(hit.get("_score") or 0.0), 100.0)}
                     for hit in exact_response.get("hits", {}).get("hits", [])
@@ -800,10 +1354,12 @@ class OpenSearchSectionProvider:
                     index=self.index_name,
                     body=_text_query(search_message, country, language, scope="locale"),
                 )
+                _record_rank_list_search(rank_record, "text", index, weight, text_response)
                 vector_response = client.search(
                     index=self.index_name,
                     body=_vector_query(search_message, country, language, scope="locale"),
                 )
+                _record_rank_list_search(rank_record, "vector", index, weight, vector_response)
                 text_hits.extend(
                     {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
                     for hit in text_response.get("hits", {}).get("hits", [])
@@ -818,6 +1374,7 @@ class OpenSearchSectionProvider:
                     index=self.index_name,
                     body=_outline_text_query(message, country, language),
                 )
+                _record_rank_list_search(rank_record, "outline", None, 1.0, outline_response)
                 text_hits.extend(outline_response.get("hits", {}).get("hits", []))
 
             if search_plan.include_global_documents:
@@ -841,11 +1398,22 @@ class OpenSearchSectionProvider:
                     index=self.index_name,
                     body=global_vector_query,
                 )
+                _record_rank_list_search(rank_record, "global_text", None, 1.0, global_text_response)
+                _record_rank_list_search(rank_record, "global_vector", None, 1.0, global_vector_response)
                 text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
                 vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
         except OpenSearchException:
             LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
-            return RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={"provider": "opensearch_section"})
+            return RetrievalResult(
+                documents=[],
+                citations=[],
+                confidence=0.0,
+                metadata={
+                    "provider": "opensearch_section",
+                    **_generation_lookup_fields(),
+                    **_rank_list_fields(rank_record),
+                },
+            )
 
         typo_ranking_queries = safe_typo_ranking_queries(message, search_messages[1:])
         rows = self._merge_hits(
@@ -860,6 +1428,7 @@ class OpenSearchSectionProvider:
             from .bedrock_reranker import rerank_rows
 
             rows = rerank_rows(message, rows, correlation_id=correlation_id)
+        _record_rank_list_merged(rank_record, rows)
         raw_rows = rows
         rows = self._select_evidence_rows(message, rows, correlation_id)
         selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
@@ -875,6 +1444,19 @@ class OpenSearchSectionProvider:
             rows[0][0].get("evidence_selector_directly_answers") if selector_applied else None
         )
         max_local_relevance = _document_relevance(message, documents[0]) if documents else 0.0
+        if (
+            selector_applied
+            and documents
+            and max_local_relevance < settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
+        ):
+            # Only a question sharing no ordinary word with the chosen own-market
+            # section can change here; every other question keeps its value.
+            max_local_relevance = max(
+                max_local_relevance,
+                _translated_query_local_relevance(
+                    message, country, documents[0], search_messages[1:], raw_rows
+                ),
+            )
         strong_local_match = bool(
             selector_applied
             and max_local_relevance >= settings.OPENSEARCH_SELECTOR_STRONG_MATCH_THRESHOLD
@@ -925,6 +1507,13 @@ class OpenSearchSectionProvider:
                     self._document_from_row(row, score).to_source()
                     for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
                 ],
+                **_generation_lookup_fields(),
+                **_rank_list_fields(
+                    rank_record,
+                    raw_rows=raw_rows,
+                    search_plan=search_plan,
+                    target_country_names=target_country_names,
+                ),
             },
         )
         LOGGER.info(
@@ -1083,6 +1672,7 @@ class OpenSearchSectionProvider:
 
         candidate_limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
         candidates = _selector_candidates(rows, candidate_limit)
+        _record_rank_list_selector("requested", candidates=candidates)
         candidate_text = "\n\n".join(
             _selector_candidate_text(row, score, index)
             for index, (row, score) in enumerate(candidates, start=1)
@@ -1155,12 +1745,15 @@ class OpenSearchSectionProvider:
             decision = _parse_selector_decision(text)
         except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
             LOGGER.exception("opensearch_evidence_selector_failed", correlation_id=correlation_id)
+            _record_rank_list_selector("failed")
             return rows
 
         if decision is None:
             LOGGER.warning("opensearch_evidence_selector_invalid", correlation_id=correlation_id)
+            _record_rank_list_selector("invalid")
             return rows
         ranks, relevant_evidence, top_rank_confidence, directly_answers_top_rank = decision
+        _record_rank_list_selector("parsed", ranks=ranks, relevant_evidence=relevant_evidence)
         if (
             settings.OPENSEARCH_RETRIEVAL_HARDENING_ENABLED
             and relevant_evidence is False

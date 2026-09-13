@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,20 @@ _CACHE_SECONDS = 15.0
 _cache_lock = threading.Lock()
 _cache_loaded_at = 0.0
 _cache_rows: list[dict[str, Any]] = []
+# Per-request outcome of the lookup, for retrieval diagnostics only. It holds the
+# exception *type name* of a failed lookup and never its message or traceback,
+# which carry the database host, port and SQL text.
+_lookup_failure: ContextVar[str | None] = ContextVar("askvera_generation_lookup_failure", default=None)
+
+
+def reset_generation_lookup_failure() -> None:
+    """Start a new request's lookup outcome, and allow its one failure warning."""
+    _lookup_failure.set(None)
+
+
+def generation_lookup_failure() -> str | None:
+    """Return the exception type name of this request's failed lookup, if any."""
+    return _lookup_failure.get()
 
 
 def build_logical_document_id(
@@ -97,8 +112,13 @@ def _active_generation_rows(*, fresh: bool = False) -> list[dict[str, Any]]:
                         """
                     )
                 ).mappings().all()
-        except SQLAlchemyError:
-            LOGGER.exception("active_generation_lookup_failed")
+        except SQLAlchemyError as exc:
+            # Still fails closed with no rows. Log once per request, with the
+            # exception type name only: no traceback, message, host or SQL.
+            error_type = type(exc).__name__
+            if _lookup_failure.get() is None:
+                LOGGER.error("active_generation_lookup_failed", error_type=error_type)
+            _lookup_failure.set(error_type)
             return []
         _cache_rows = [dict(row) for row in rows]
         _cache_loaded_at = now

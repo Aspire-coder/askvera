@@ -110,6 +110,40 @@ def _matches(topic: str, text: str, negation_aware: bool = False) -> bool:
     return _matched_phrase(topic, text, negation_aware) != ""
 
 
+# Generated answers only. A UK retail answer was refused as a medical claim
+# because it said products may be sold "within the section of the premises where
+# the service is supplied (for example, a treatment room)". "treatment" there
+# names a place, not a remedy. The skip is deliberately narrow: only "room(s)" or
+# "area(s)" directly after it, and never when the same clause names a condition,
+# patient or remedy - "used in cancer treatment areas" and "a treatment room for
+# eczema patients" are claims and stay blocked (Fable review). "treat disease"
+# and "cure" are separate phrases that still match on their own.
+_PREMISES_AFTER_TREATMENT_RE = re.compile(r"\s+(?:rooms?|areas?)(?!\w)", re.IGNORECASE)
+_MEDICAL_CONTEXT_RE = re.compile(
+    r"(?<!\w)(?:cancer\w*|tumou?r\w*|chemo\w*|arthritis|rheumat\w*|gout|eczema|psoriasis|acne|diabet\w*|"
+    r"diseases?|ill|illness(?:es)?|sick\w*|sufferers?|infections?|inflamm\w*|conditions?|patients?|pains?|"
+    r"injur(?:y|ies)|wounds?|symptoms?|disorders?|syndromes?|ibs|blood\s+pressure|hypertens\w*|obes\w*|"
+    r"cholesterol|asthma|allerg(?:y|ies|ic)|migrain\w*|depression|anxiety|insomnia|therap(?:y|ies)|medical|"
+    r"recover\w*|cur(?:e|es|ed|ing)|heal(?:s|ed|ing)?|remed(?:y|ies))(?!\w)",
+    re.IGNORECASE,
+)
+# Sentence scope, not clause scope: a line break or semicolon must not separate
+# "treatment rooms" from "for eczema". A "." inside "09.00" is not a boundary.
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?=\s|$)")
+
+
+def _is_premises_treatment(text: str, start: int, end: int) -> bool:
+    """True when "treatment" at [start, end) names a room or area in a sentence with no medical context."""
+    if not _PREMISES_AFTER_TREATMENT_RE.match(text, end):
+        return False
+    sentence_start = 0
+    for boundary in _SENTENCE_BOUNDARY_RE.finditer(text, 0, start):
+        sentence_start = boundary.end()
+    sentence_end_match = _SENTENCE_BOUNDARY_RE.search(text, end)
+    sentence_end = sentence_end_match.start() if sentence_end_match else len(text)
+    return not _MEDICAL_CONTEXT_RE.search(text, sentence_start, sentence_end)
+
+
 def _matched_phrase(topic: str, text: str, negation_aware: bool = False) -> str:
     """Return the denied phrase that text asserts, or an empty string."""
     if topic in {"income_claim", "medical_claim"} and is_policy_safety_question(text):
@@ -119,6 +153,13 @@ def _matched_phrase(topic: str, text: str, negation_aware: bool = False) -> str:
         expression = _phrase_expression(pattern)
         for found in expression.finditer(text):
             if negation_aware and _is_denial(text, found.start()):
+                continue
+            if (
+                negation_aware
+                and topic == "medical_claim"
+                and pattern == "treatment"
+                and _is_premises_treatment(text, found.start(), found.end())
+            ):
                 continue
             return pattern
     return ""

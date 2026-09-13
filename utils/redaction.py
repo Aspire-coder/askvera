@@ -60,6 +60,35 @@ def redact_ibans(text: str, replacement: str = "[BANK_ACCOUNT]") -> str:
     )
 
 
+_LEAD_IN_END_RE = re.compile(r":[\s*_]*$")
+
+
+def drop_emptied_lead_ins(kept: list[str | None], originals: list[str]) -> list[str | None]:
+    """Drop a lead-in whose whole following block was removed by cleanup.
+
+    ``kept[i]`` is the cleaned text of ``originals[i]``, or None when cleanup
+    removed that line. A kept line ending in ":" introduces the block below it
+    (up to the next blank line). When every line of that block was removed,
+    "You can reach them at:" introduces nothing and is dropped too. A lead-in
+    that still introduces any surviving line, or that ended the original text,
+    is left alone.
+    """
+    result = list(kept)
+    for index, line in enumerate(kept):
+        if line is None or not _LEAD_IN_END_RE.search(line):
+            continue
+        block: list[int] = []
+        for follower in range(index + 1, len(originals)):
+            if not originals[follower].strip():
+                if block:
+                    break
+                continue
+            block.append(follower)
+        if block and all(kept[follower] is None for follower in block):
+            result[index] = None
+    return result
+
+
 def redact_common_pii(text: str) -> str:
     """Mask common language-neutral email and phone values for telemetry."""
     redacted = GOVERNMENT_ID_RE.sub("[GOVERNMENT_ID]", text or "")

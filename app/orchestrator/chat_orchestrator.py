@@ -1,8 +1,12 @@
 """AI chat orchestration for AskVera."""
 
 import re
+import unicodedata
+from contextvars import ContextVar
 from dataclasses import replace
+from functools import lru_cache
 from time import perf_counter
+from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -61,7 +65,17 @@ from services.semantic_cache import (
 from services.consent_service import has_valid_consent
 from services.claim_safety import localized_claim_response
 from services.guardrails import is_policy_safety_question
-from services.market_config import find_market_mentions, find_probable_market_typo, market_display_name
+from services.market_config import (
+    _localized_market_names,
+    _normalize_market_text,
+    find_market_mentions,
+    find_probable_market_typo,
+    find_shared_office_record_countries,
+    load_global_directory_markets,
+    load_market_config,
+    load_shared_offices,
+    market_display_name,
+)
 from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_pii_placeholders, scrub_pii
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
@@ -69,6 +83,7 @@ from utils.exceptions import SessionExpiredError
 from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.inline_citations import separate_verified_citations
 from utils.directory_fields import (
+    build_support_contact_supplement,
     parse_directory_fields,
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
@@ -119,6 +134,263 @@ FOLLOW_UP_TOPIC_SHIFT_MARKERS = (
     "what if",
 )
 FOLLOW_UP_CONTEXT_MARKERS = FOLLOW_UP_REFERENCE_MARKERS + FOLLOW_UP_TOPIC_SHIFT_MARKERS
+# "And for Guinea?" / "And in Uganda?" swap only the market and lean on the
+# prior question for everything else, exactly like "what about Guinea?". Leading
+# position, a short message and a named market are all required, so "And for
+# returns, what is the policy?" is never pulled into history.
+FOLLOW_UP_MARKET_ELLIPSIS = re.compile(r"^(?:and|but)\s+(?:for|in|about)\s+\S", re.IGNORECASE)
+FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS = 6
+
+
+def _follow_up_unaccented(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
+def _follow_up_tokens(text: str, *, casefold: bool = True) -> tuple[str, ...]:
+    """Word tokens with accents removed, so "für", "fur" and "Für" compare alike."""
+    unaccented = _follow_up_unaccented(text)
+    return tuple(re.findall(r"[^\W_]+", unaccented.casefold() if casefold else unaccented, flags=re.UNICODE))
+
+
+def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Pattern[str]:
+    """One pattern over space-joined follow-up tokens; each fragment matches from a word start.
+
+    Fragments are written with their accents and folded like the tokens, so "é"
+    and "ё" need no second spelling. Only lower-case regex escapes are used.
+    ``word_start=False`` also matches inside a compound ("leveringsbeleid").
+    """
+    folded = (_follow_up_unaccented(fragment).casefold() for fragment in fragments)
+    return re.compile((r"(?<!\w)" if word_start else "") + "(?:" + "|".join(folded) + ")", re.UNICODE)
+
+
+def _follow_up_token_set(*phrases: str) -> frozenset[str]:
+    return frozenset(token for phrase in phrases for token in _follow_up_tokens(phrase))
+
+
+# W14: the same short follow-up shapes in every conversation language. Offline
+# probe 2026-09-12: "En voor Uganda?", "Und für Uganda?", "А для Уганды?" and the
+# rest never reached the history path, so retrieval got the bare follow-up and
+# the prior topic was lost. English is untouched; these apply to the tokens of
+# the message start only, and every shape is bounded like its English twin.
+#
+# 1. Connector ellipsis ("And for Uganda?"): conjunction + preposition, at most
+#    FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS words, and a recognised market is required,
+#    exactly as FOLLOW_UP_MARKET_ELLIPSIS. A question word right after the
+#    connector makes it a full question ("Und für wen gilt das in Uganda?").
+LOCALIZED_FOLLOW_UP_CONNECTORS = frozenset(
+    _follow_up_tokens(f"{conjunction} {preposition}")
+    for conjunctions, prepositions in (
+        (("en", "maar"), ("voor", "in", "naar", "met")),  # nl
+        (("et", "mais"), ("pour", "en", "au", "aux", "à", "dans")),  # fr
+        (("und", "aber"), ("für", "fuer", "in", "im", "nach")),  # de
+        (("y", "pero"), ("para", "en", "por")),  # es
+        (("e", "mas"), ("para", "pra", "em", "no", "na", "nos", "nas")),  # pt
+        (("e", "ma"), ("per", "in", "a", "ad", "nel", "nella")),  # it
+        (("och", "men"), ("för", "i", "om")),  # sv
+        (("og", "men"), ("for", "i", "om", "til")),  # da, no
+        (("а", "и", "но"), ("для", "в", "во", "по")),  # ru
+        (("a", "i"), ("dlya", "dlja", "v", "vo")),  # ru, transliterated
+        (("a", "i", "ali"), ("za", "u", "na")),  # sr, Latin
+        (("а", "и"), ("за", "у", "на")),  # sr, Cyrillic
+    )
+    for conjunction in conjunctions
+    for preposition in prepositions
+)
+# 2. "What about X?" / "How about X?" openers. Like the English topic-shift
+#    markers they need no market ("Qu'en est-il de la commande minimale ?"), but
+#    the words after the opener must be short (LOCALIZED_FOLLOW_UP_MAX_CONTENT
+#    content words) and must not be a question word or a bare pronoun ("Hur är
+#    det med dig?" is small talk). Finnish, Russian and Serbian decline market
+#    names and market_name_aliases.json lists only the base form, so there a
+#    capitalised word that names no recognised market ("А что насчёт Уганды?",
+#    "Entä Ugandassa?") keeps the message standalone rather than merging it
+#    with the previous market, which could then never be replaced.
+LOCALIZED_TOPIC_SHIFT_OPENERS: dict[str, tuple[str, ...]] = {
+    "nl": ("wat dan met", "en wat dan met", "en wat met", "hoe zit het met", "hoe zit het dan met", "en hoe zit het met"),
+    "fr": ("qu'en est-il", "et qu'en est-il", "et pour ce qui est", "et concernant"),
+    "de": ("und was ist mit", "wie sieht es mit", "und wie sieht es mit", "wie steht es mit", "und wie steht es mit"),
+    "es": ("y qué hay de", "y qué pasa con", "y qué tal", "y en cuanto a", "y respecto a"),
+    "pt": ("e quanto", "e sobre", "e que tal", "e o que dizer de"),
+    "it": ("e riguardo", "e per quanto riguarda", "e che dire di"),
+    "sv": ("hur är det med", "och hur är det med", "och vad gäller", "hur blir det med"),
+    "da": ("hvad med", "og hvad med", "hvad så med"),
+    "no": ("hva med", "og hva med", "hva så med"),
+    "fi": ("entä", "entäs", "no entä"),
+    "ru": (
+        "а что насчёт", "что насчёт", "а как насчёт", "как насчёт",
+        "a chto naschet", "chto naschet", "a kak naschet", "kak naschet",
+    ),
+    "sr": (
+        "a šta je sa", "šta je sa", "a šta sa", "a što se tiče",
+        "а шта је са", "шта је са", "а шта са", "а што се тиче",
+    ),
+}
+LOCALIZED_INFLECTED_NAME_LANGUAGES = frozenset({"fi", "ru", "sr"})
+# 3. Topic ellipsis ("And the minimum order?"): conjunction + article, or bare
+#    Swedish "och", then at most two content words, and a question mark. It keeps
+#    the previous market, like "And the email?" does in English - and, like that
+#    English case, only for a directory field: "And the warranty?" stays standalone
+#    in English, so "En de garantie?" and "Y la empresa?" do too (W14b, Fable W14
+#    note 1). The field must be in LOCALIZED_DIRECTORY_FIELD_TERMS, no policy word
+#    may appear, and a capitalised word after a place preposition that names no
+#    recognised market ("Och i Stockholm?", "E a Roma?") keeps the message standalone.
+LOCALIZED_TOPIC_ELLIPSIS_OPENERS = tuple(
+    _follow_up_tokens(f"{opener} {article}")
+    for opener, articles in (
+        ("en", ("de", "het")),  # nl
+        ("et", ("le", "la", "les", "l'")),  # fr
+        ("et pour", ("le", "la", "les", "l'")),  # fr
+        ("und", ("der", "die", "das", "den", "dem")),  # de
+        ("y", ("el", "la", "los", "las")),  # es
+        ("e", ("o", "a", "os", "as")),  # pt
+        ("e", ("il", "lo", "la", "i", "gli", "le", "l'")),  # it
+        ("och", ("",)),  # sv
+    )
+    for article in articles
+)
+# The fields of FOLLOW_UP_DIRECTORY_FIELD_TERMS - (tele)phone, opening hours, email,
+# address, website, delivery/shipping, payment/pay, minimum order - and nothing
+# more. Stems match from a word start, so compounds such as "Lieferkosten",
+# "verzendkosten" and "leveranskostnaden" count; stems that would also start an
+# unrelated word ("liefer" -> "Lieferant", "livr" -> "livre") are spelled out.
+# Bare "hours" words ("heures", "horas", "ore") are left out as too loose. One
+# pattern serves every language, so a shared stem ("adres", "levering") is listed once.
+LOCALIZED_DIRECTORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
+    "nl": (
+        "telefoon", r"e ?mail", "adres", "website", "openingstijd", "openingsuren",
+        "levering", "levertijd", "leverkost", r"leveren\b", "bezorg", "verzend", "betaal", "betaling", r"betalen\b",
+        r"minim\w* bestel", "minimumbestel", "bestelminimum",
+    ),
+    "fr": (
+        "téléphone", "courriel", "adresse", r"site (?:web|internet)", "horaire", r"heures d ouverture",
+        "livraison", r"livrer\b", "expédition", r"expédier\b", "envoi", "paiement", r"payer\b",
+        r"commande\w* minim", r"minim\w* (?:de )?commande",
+    ),
+    "de": (
+        "telefon", "adress", "anschrift", "webseite", "internetseite", "öffnungszeit", "oeffnungszeit",
+        "geschäftszeit", "geschaeftszeit", r"liefer(?:ung|kost|zeit|geb|dauer|n\b)", "versand", "zustell",
+        "zahlung", "bezahl", r"zahlen\b", "mindestbestell", r"minim\w* bestell",
+    ),
+    "es": (
+        "teléfono", "correo", "dirección", r"(?:sitio|página) web", "horario",
+        "entrega", "envío", r"enviar\b", "pago", r"pagar\b", r"pedido\w* mínim", r"mínim\w* (?:de )?pedido",
+        r"compra\w* mínim",
+    ),
+    "pt": (
+        "telefone", "endereço", r"site\b", "horário", "frete", "pagamento",
+        r"encomenda\w* mínim", r"mínim\w* (?:de )?encomenda",
+    ),
+    "it": (
+        "indirizzo", r"sito\b", "posta elettronica", "orari", "consegna", "spedizion", r"spedire\b",
+        "pagament", r"pagare\b", r"ordin\w* minim", r"minim\w* (?:d |di )?ordin",
+    ),
+    "sv": (
+        r"e ?post", "mejl", "webbplats", "hemsida", "webbsida", "öppettid", "leverans", r"leverera\b", "frakt",
+        "betalning", r"betala\b", r"minsta (?:beställning|order)", "minimibeställning", "minimiorder",
+    ),
+    "da": (
+        "telefon", r"e ?mail", "adresse", "hjemmeside", "webside", "åbningstid", "levering", "fragt", "forsendelse",
+        "betaling", r"betale\b",
+        "minimumsbestilling", "minimumsordre", r"mindste (?:bestilling|ordre)",
+    ),
+    "no": (
+        "telefon", r"e ?post", "epost", "adresse", "nettside", "hjemmeside", "åpningstid", "levering", "frakt",
+        "betaling", r"betale\b", "minstebestilling", "minsteordre", r"minste (?:bestilling|ordre)",
+    ),
+    "fi": (
+        "puhelin", "sähköposti", "osoite", "osoitte", "verkkosivu", "kotisivu", "aukiolo",
+        r"toimitus(?:maksu|kulu|aika|ajat)?\b", "toimituks", "maksu", r"maksaa\b", "vähimmäistilau", "minimitilau",
+    ),
+    "ru": (
+        "телефон", r"электронн\w* почт", "имейл", "емейл", "адрес", "сайт", r"(?:час|врем|график)\w* работ",
+        "доставк", "пересылк", "оплат", "платёж", r"минимальн\w* (?:сумм\w* )?заказ",
+        "dostavk", "oplat", r"minimaln\w* zakaz", "sajt", r"sait\b",
+    ),
+    "sr": (
+        "telefon", "imejl", "email", "adres", r"radn\w* vrem", "dostav", "isporuk", "pošiljk", "slanj",
+        "plaćanj", "platit",
+        r"minimaln\w* (?:porudžbin|narudžbin)",
+        "имејл", "мејл", "сајт", r"радн\w* врем", "достав", "испорук", "пошиљк", "плаћањ", "платит",
+        r"минималн\w* (?:поруџбин|наруџбин)",
+    ),
+}
+LOCALIZED_DIRECTORY_FIELD_PATTERN = _follow_up_stem_pattern(
+    *(fragment for fragments in LOCALIZED_DIRECTORY_FIELD_TERMS.values() for fragment in fragments)
+)
+# POLICY_WORD in the same languages: "And the delivery policy?" is not a field request.
+LOCALIZED_POLICY_PATTERN = _follow_up_stem_pattern(
+    "policy", "beleid", "politique", "richtlinie", "politik", "política", "käytäntö", "politica", "retningslinj", "riktlinj", "политик", word_start=False
+)
+# Place prepositions for the capitalised-name guard on the topic ellipsis.
+LOCALIZED_PLACE_PREPOSITIONS = _follow_up_token_set(
+    "in naar", "à a au aux en dans", "im nach", "em no na", "ad nel nella", "i till til", "u", "в во у"
+)
+# Governance (W14b, Fable W14 note 2): a localized "what about ..." question that
+# names none of these is judged on its own words, like "What about the shipping?".
+# Guarantee and promise words keep the anchor, as CONTENT_REQUEST_TERMS does in
+# English; "garantie" also means warranty, which only errs toward keeping it.
+LOCALIZED_CONTENT_REQUEST_PATTERN = _follow_up_stem_pattern(
+    "garant", "gegarand", "zagarant", "гарант", "загарант", "taku", "taat", "belof", "beloof", "promes", "promet", "promis", "versprech",
+    r"lov(?:a|ar|ade|at|e|er|et|ede)\b", "løft", "обещ", "обећ", "obeć",
+    "reclam", "werb", "publicid", "publicit", "pubblicit", "annons", "reklam", "mainos", "témoign", "testimon",
+    "getuig", "erfahrungsbericht", "slogan", "рекла", "отзыв", "оглас",
+)
+LOCALIZED_FOLLOW_UP_MAX_CONTENT = 2
+LOCALIZED_FOLLOW_UP_MAX_TAIL = 5
+# Articles, prepositions and conjunctions that do not count as content words.
+LOCALIZED_FOLLOW_UP_FUNCTION_WORDS = _follow_up_token_set(
+    "the de het een van voor naar in met en",
+    "le la les l du des d a au aux pour et",
+    "der die das den dem ein eine im für nach mit und aus von",
+    "el los las del al para y",
+    "o os as do da dos no na nos nas em ao aos e",
+    "il lo i gli di della alla ad nel nella per",
+    "för till om och",
+    "for til og",
+    "в во для по на с со и а",
+    "u za sa",
+    "у за са",
+)
+# A question word, pronoun or verb among the content words makes a full question
+# or small talk ("En voor wie is dit?", "Et pour quoi faire ?", "Hvad med dig?").
+LOCALIZED_FOLLOW_UP_STOP_WORDS = _follow_up_token_set(
+    "wie wat waar wanneer waarom welke welk hoe hoeveel hoelang jij jou je ik mij is zijn jullie ons",
+    "qui quoi que qu quand ou pourquoi comment combien quel quelle quels quelles toi vous moi tu nous est sont",
+    "wer wen wem wessen was wo wann warum weshalb wieso welche welcher welches dir dich ihnen euch ich sie ist sind "
+    "mir uns",
+    "quién quiénes qué cuál cuáles cuándo dónde cómo cuánto cuánta cuántos cuántas porqué ti usted ustedes yo es son "
+    "estás está nosotros nosotras mí conmigo",
+    "quem qual quais quando onde como quanto quanta quantos quantas porque você vocês são mim nós",
+    "chi che cosa quale quali dove come quanti quante perché te voi lei io sono noi me",
+    "vem vad var när varför hur vilken vilket vilka dig mig er oss du jag ni är",
+    "hvem hvad hvor hvornår hvorfor hvordan hvilken hvilket hvilke jer os jeg vi",
+    "hva deg meg dere",
+    "mikä mitä kuka ketkä missä mistä mihin milloin miksi miten kuinka paljonko sitten sinä sinulle te minulle "
+    "minä me",
+    "что чего чем кто кого кому как где куда когда почему зачем сколько какой какая какие чей потом тогда "
+    "ты вы тебя вас тобой вами я мне меня нас",
+    "šta što ko koga kome kako gde gdje kada kad zašto koliko koji koja koje onda ti vi tebe vas tobom vama ja mi "
+    "mnom nama",
+    "шта што ко кога коме како где када зашто колико који која које онда ти ви тебе тобом вама ја ми мном нама",
+)
+# Removed together with a replaced market name, so "the delivery cost in Mali?"
+# becomes "the delivery cost?" rather than "the delivery cost in?". English, Dutch,
+# French and German place connectors with an optional article; in any other
+# language the connector simply stays, which retrieval tolerates. The same
+# connector is also what lets a lower-case name count as a market ("in kenya").
+# "van", "von", "de", "à" and the elided "de l'" joined in W8c (Fable W8b note 1:
+# "openingstijden van mali", "Lieferkosten von mali" and "de la turquie" kept the stale market).
+REPLACED_MARKET_LEAD_IN = re.compile(
+    r"(?<![^\W_])(?:in|for|of|from|at|to|naar|voor|uit|van|au|aux|en|pour|du|de|à|nach|fur|für|aus|von)\s+"
+    r"(?:(?:the|la|le|les|de|het|der|die|das)\s+|l['’]\s*)?$",
+    re.IGNORECASE | re.UNICODE,
+)
+# "What about the netherlands?": a lower-case name after "what/how about" counts
+# only when it closes the clause, so "What about china plates?" keeps "china".
+REPLACED_MARKET_QUESTION_LEAD_IN = re.compile(r"(?<![^\W_])(?:what|how)\s+about\s+(?:the\s+)?$", re.IGNORECASE)
+REPLACED_MARKET_CLAUSE_END = re.compile(r"\s*(?:[?.!,;:]|$)")
+REPLACED_MARKET_POSSESSIVE = re.compile(r"['’]s\b", re.IGNORECASE)
 # A follow-up that opens like a question and asks for no new content is judged on
 # its own words rather than on the question it inherits for retrieval. Both lists
 # are deliberately narrow: anything unmatched keeps the inherited context, which
@@ -152,6 +424,165 @@ CONTENT_REQUEST_TERMS = re.compile(
     r"promise|promises|guarantee|guarantees|guaranteed)\b",
     re.IGNORECASE,
 )
+# A wh-question needs no question mark to read as a question ("How much would
+# those products cost"). Auxiliary openers still do: "do that" is an instruction.
+WH_QUESTION_OPENERS = re.compile(r"^(?:what|how|when|where|which|who|why|whose|whom)\b", re.IGNORECASE)
+# A bounded request for one directory field that names no market of its own
+# ("What payment methods do they take?", "And the hours?"). Recorded as TC-070:
+# Paraguay was lost on exactly this turn. It inherits a target only through
+# _inherited_directory_target, never by adding generic words such as "cost" to
+# the follow-up markers, which would drag history into standalone questions.
+# "minimum order" is a directory record field too: live 2026-09-12, "What is
+# the delivery cost in Mali?" -> "What's the minimum order amount?" lost Mali.
+FOLLOW_UP_DIRECTORY_FIELD_TERMS = re.compile(
+    r"\b(?:(?:tele)?phone|hours|opening\s+times?|e-?mail|address|website|"
+    r"deliver(?:y|ies|s|ed)?|shipping|payments?|payment\s+methods?|pay|"
+    r"minimum\s+(?:orders?|amounts?|requirements?)|order\s+minimums?)\b",
+    re.IGNORECASE,
+)
+# The localized vocabulary above is also the authoritative narrow field list for
+# short continuations. Keep the English pattern for its readable fast path, and
+# add the existing per-language stems without broadening policy matching.
+FOLLOW_UP_DIRECTORY_FIELD_TERMS = re.compile(
+    rf"(?:{FOLLOW_UP_DIRECTORY_FIELD_TERMS.pattern}|{LOCALIZED_DIRECTORY_FIELD_PATTERN.pattern})",
+    re.IGNORECASE | re.UNICODE,
+)
+FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS = 10
+# These labels intentionally do not identify one retrievable directory field.
+# A bare topic ellipsis using them must clarify rather than inherit a market.
+AMBIGUOUS_DIRECTORY_TOPIC_TERMS = re.compile(
+    r"\b(?:office|contact|kantoor|bureau|kontakt|oficina|contacto|kontor|"
+    r"toimisto|yhteystiedot|ufficio|contatto|büro|офис|контакт|kontor|"
+    r"kancelarija|канцеларија)\b",
+    re.IGNORECASE | re.UNICODE,
+)
+# A short reply that supplies a detail for the question just asked. Recorded as
+# TC-051 ("I live in Arizona.") and TC-055 ("I bought it 45 days ago.").
+CLARIFICATION_REPLY = re.compile(
+    r"^(?:(?:i\s+am|i['’]m|i\s+live|i\s+bought|i\s+purchased|i\s+ordered|i\s+joined|i\s+signed\s+up|"
+    r"i\s+mean|we\s+are|we['’]re|we\s+live)\b"
+    r"|(?:about\s+|around\s+|over\s+|almost\s+)?\d+\s+(?:days?|weeks?|months?|years?)(?:\s+ago)?\s*[.!]?$)",
+    re.IGNORECASE,
+)
+CLARIFICATION_REPLY_MAX_WORDS = 10
+POLICY_WORD = re.compile(r"\bpolic(?:y|ies)\b", re.IGNORECASE)
+# B3: a narrow English-only signal that the delivered answer is directing the
+# reader to contact a human channel - never a refusal/fallback/guardrail
+# pattern, and never inferred from the user's question.
+_CARE_CONTACT_RECOMMENDATION_RE = re.compile(
+    r"\b(?:contact|reach\s+out\s+to|get\s+in\s+touch\s+with|speak\s+(?:to|with))\s+"
+    r"(?:your\s+)?(?:local\s+)?(?:customer\s+(?:care|service|support)|support(?:\s+team)?|"
+    r"(?:the\s+)?(?:local\s+)?forever\s+(?:business\s+)?office)\b",
+    re.IGNORECASE,
+)
+
+
+def _support_contact_response_is_ineligible(chat_response: ChatResponse) -> bool:
+    """A refusal/fallback/guardrail answer never gets a support-contact block."""
+    metadata = chat_response.metadata or {}
+    return bool(
+        metadata.get("fallback")
+        or metadata.get("failure_layer")
+        or metadata.get("response_source") in {"guardrail", "fallback", "client_action"}
+    )
+
+
+def _support_contact_segments(value: str) -> list[str]:
+    """Split a directory ``record_country`` (or a market name) into lower-cased
+    word segments on both "/" and whitespace - "Kenya/East Africa" ->
+    ["kenya", "east", "africa"]."""
+    return [part.casefold() for part in re.split(r"[/\s]+", value.strip()) if part]
+
+
+def _resolve_support_contact_target_names(lookup_text: str, country: str) -> list[str]:
+    """Return the market name(s) actually named in ``lookup_text`` plus the
+    ``record_country`` of a configured shared office serving a named country
+    that has no market entry of its own, else the session market's own name.
+    Never guesses a market from nothing."""
+    mentioned = [name for name in (market_display_name(code) for code in find_market_mentions(lookup_text)) if name]
+    mentioned.extend(sorted(find_shared_office_record_countries(lookup_text)))
+    if mentioned:
+        return mentioned
+    session_name = market_display_name(country)
+    return [session_name] if session_name else []
+
+
+def _directory_record_matches_a_target(record_country: str, target_names: list[str]) -> bool:
+    """True only for a whole-segment/word match - never a region word (``East
+    Africa``, ``Benelux``) or a country named only inside a record's body."""
+    tokens = _support_contact_segments(record_country)
+    for name in target_names:
+        name_words = _support_contact_segments(name)
+        width = len(name_words)
+        if not width or width > len(tokens):
+            continue
+        if any(tokens[start:start + width] == name_words for start in range(len(tokens) - width + 1)):
+            return True
+    return False
+
+
+def _find_matching_support_contact_record(documents: list, target_names: list[str]):
+    """Return the single GLOBAL directory record matching ``target_names``, or
+    ``None`` when there is no match or more than one different record matches
+    - this never falls back to "the first directory record"."""
+    matched: dict[str, Any] = {}
+    for document in documents:
+        if document.country != "GLOBAL":
+            continue
+        if not (document.metadata.get("directory_kind") or document.metadata.get("directory_section")):
+            continue
+        record_country = str(document.metadata.get("record_country") or "").strip()
+        if record_country and _directory_record_matches_a_target(record_country, target_names):
+            matched[document.id or document.content] = document
+    if len(matched) != 1:
+        return None
+    return next(iter(matched.values()))
+
+
+def _support_contact_approved_fields(document: Any) -> dict[str, object]:
+    """Return the record's approved field map - never invented, always the
+    same fields already surfaced by the retrieval/directory pipeline."""
+    directory_fields_value = document.metadata.get("directory_fields")
+    if isinstance(directory_fields_value, dict):
+        return directory_fields_value
+    return parse_directory_fields(document.content)
+
+
+def _support_contact_already_quoted(answer: str, approved_fields: dict[str, object], added_labels: list[str]) -> bool:
+    """True when the answer already quotes a phone or email value the
+    supplement would add - never duplicate an already-delivered contact."""
+    answer_digits = re.sub(r"\D", "", answer)
+    answer_lower = answer.casefold()
+    for label in added_labels:
+        label_lower = label.casefold()
+        if "phone" not in label_lower and "email" not in label_lower:
+            continue
+        value = str(approved_fields.get(label, "")).strip()
+        value_digits = re.sub(r"\D", "", value)
+        if value_digits and len(value_digits) >= 7 and value_digits in answer_digits:
+            return True
+        if value and value.casefold() in answer_lower:
+            return True
+    return False
+
+
+# Marks a citation that was added ONLY to back the appended support-contact
+# block, not any claim the answer itself makes. camelCase like the other keys
+# RetrievedDocument.to_source() emits ("documentVersion", "sectionTitle"), and
+# named after the "support_contact_supplemented" response-metadata key so the
+# block, its metadata and its citation read as one feature. Citations stay a
+# flat list of dicts - this is a field on a source, not a new collection - so
+# every existing caller that iterates them keeps working unchanged.
+SUPPORT_CONTACT_SUPPLEMENT_CITATION_FIELD = "supportContactSupplement"
+
+
+def _add_citation_if_absent(citations: list, source: dict) -> list:
+    """Append ``source`` only when no existing citation already carries its URI."""
+    if any(existing.get("uri") == source.get("uri") for existing in citations):
+        return list(citations)
+    return [*citations, source]
+
+
 DIRECTORY_DETAIL_TERMS = re.compile(
     r"\b(address|office|business\s+hours?|office\s+hours?|telephone|phone|email|website|contact|sponsor)\b",
     re.IGNORECASE,
@@ -200,6 +631,190 @@ CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
 )
 
 
+# Diagnostic capture for offline evaluation (scripts/run_benchmark.py).
+#
+# Off by default, and nothing in the API turns it on. While it is off none of
+# the capture code runs and response metadata is exactly what it was. The
+# benchmark enables it in its own process so each turn's response carries a
+# "diagnostic_capture" record: what retrieval returned, what the output
+# validator found, the answer handed to numeric repair, and what repair
+# removed and why. A single-run comparison could not tell generation variance
+# from a repair removal, because none of that was recorded.
+#
+# Recording only. It never changes an answer, a citation or a repair decision,
+# and the key is in neither ChatResponse's public API metadata nor its cache
+# value.
+DIAGNOSTIC_CAPTURE_ENABLED = False
+DIAGNOSTIC_CAPTURE_VERSION = 1
+_DIAGNOSTIC_CAPTURE: ContextVar[dict[str, Any] | None] = ContextVar("askvera_diagnostic_capture", default=None)
+_CAPTURED_DOCUMENT_METADATA = (
+    "section_id", "parent_section_id", "access_scope", "document_type", "parent_bound_child",
+    "ingestion_id", "logical_document_id", "content_hash",
+)
+_CAPTURED_RETRIEVAL_METADATA = (
+    "provider", "candidate_count", "evidence_selector_applied", "evidence_selector_confidence",
+    "evidence_selector_rejected", "top_source_directly_answers", "parent_bound_children",
+    "conversation_intent", "conversation_subtype", "intent_confidence", "client_action",
+    "global_documents_searched", "strong_local_match", "explicit_section_reference",
+    "generation_lookup",
+    "retrieval_rank_lists", "candidate_section_ids", "evidence_selector_candidate_section_ids",
+    "evidence_selector_selected_ranks",
+)
+
+
+def _captured_issues(result: ValidationResult) -> list[dict[str, object]]:
+    return [
+        {"code": issue.code, "severity": issue.severity.value, "field": issue.field, "message": issue.message[:500]}
+        for issue in result.issues
+    ]
+
+
+def _record_capture_failure(capture: dict[str, Any], stage: str) -> None:
+    """Log a failed recording and note it in the capture; the response goes on unchanged."""
+    LOGGER.exception("diagnostic_capture_failed", stage=stage)
+    capture.setdefault("errors", []).append(stage)
+
+
+def _record_diagnostic_retrieval(stage: str, retrieval_result: RetrievalResult | None) -> None:
+    """Append one retrieval to the current turn's capture, when capture is on.
+
+    Never raises: a recording failure is logged and noted, never delivered.
+    """
+    capture = _DIAGNOSTIC_CAPTURE.get()
+    if capture is None or retrieval_result is None:
+        return
+    try:
+        _append_diagnostic_retrieval(capture, stage, retrieval_result)
+    except Exception:  # noqa: BLE001 - diagnostic recording must never break a response
+        _record_capture_failure(capture, stage)
+
+
+def _append_diagnostic_retrieval(capture: dict[str, Any], stage: str, retrieval_result: RetrievalResult) -> None:
+    metadata = retrieval_result.metadata or {}
+    sources = metadata.get("candidate_sources")
+    capture["retrievals"].append({
+        "stage": stage,
+        "confidence": retrieval_result.confidence,
+        "documents": [
+            {
+                "id": document.id,
+                "source": document.source,
+                "country": document.country,
+                "language": document.language,
+                "score": document.score,
+                **{key: document.metadata[key] for key in _CAPTURED_DOCUMENT_METADATA if key in document.metadata},
+            }
+            for document in retrieval_result.documents
+        ],
+        "metadata": {key: metadata[key] for key in _CAPTURED_RETRIEVAL_METADATA if key in metadata},
+        # The selector's candidates as the provider reports them. "section" is
+        # parent_section_id when there is one, so a child candidate cannot be
+        # told apart from its parent here. None means no list was exposed.
+        "candidate_sections": [
+            {key: source.get(key) for key in ("section", "country", "uri", "score")}
+            for source in sources
+            if isinstance(source, dict)
+        ] if isinstance(sources, list) else None,
+    })
+
+
+def _record_diagnostic_validation(
+    chat_response: ChatResponse,
+    result: ValidationResult,
+    outcome: str,
+    numeric_repair: dict[str, Any] | None = None,
+) -> None:
+    """Append one output validation, and any numeric repair it attempted, when capture is on.
+
+    Never raises: removal_diagnostics re-runs claim extraction, and a failure
+    there or anywhere in recording is logged and noted, never delivered.
+    """
+    capture = _DIAGNOSTIC_CAPTURE.get()
+    if capture is None:
+        return
+    try:
+        _append_diagnostic_validation(capture, chat_response, result, outcome, numeric_repair)
+    except Exception:  # noqa: BLE001 - diagnostic recording must never break a response
+        _record_capture_failure(capture, f"validation:{outcome}")
+
+
+def _append_diagnostic_validation(
+    capture: dict[str, Any],
+    chat_response: ChatResponse,
+    result: ValidationResult,
+    outcome: str,
+    numeric_repair: dict[str, Any] | None,
+) -> None:
+    repair_record = None
+    if numeric_repair is not None:
+        repaired_result = numeric_repair.get("result")
+        repair_record = {
+            "removed_numeric_claims": list(numeric_repair["removed"]),
+            # Each figure the validator could not ground, and whether the
+            # evidence contains it at all: absent means the model invented it,
+            # present means a real figure that subject matching rejected.
+            "removal_reasons": [
+                {**diagnostic, "reason": "unsupported_numeric_claim"}
+                for diagnostic in removal_diagnostics(chat_response.answer or "", numeric_repair["documents"])
+            ],
+            "answer_after_repair": numeric_repair["answer"],
+            "post_repair_issues": _captured_issues(repaired_result) if repaired_result is not None else None,
+            "accepted": outcome == "numeric_repair_accepted",
+        }
+    capture["validations"].append({
+        "answer_before_validation": chat_response.answer,
+        "issues": _captured_issues(result),
+        "critical": result.has_critical(),
+        "outcome": outcome,
+        "numeric_repair": repair_record,
+    })
+
+
+def _record_diagnostic_raw_answer(text: str) -> None:
+    """Keep the model's own answer, before any editor touches it, when capture is on.
+
+    pre_repair_answer is taken after citation separation, directory
+    restoration, PII scrubbing and placeholder clean-up, so a sentence one of
+    those removed was indistinguishable from one the model never wrote.
+    Never raises, and never changes what is delivered.
+    """
+    capture = _DIAGNOSTIC_CAPTURE.get()
+    if capture is None:
+        return
+    try:
+        capture.setdefault("raw_model_answers", []).append(str(text or ""))
+    except Exception:  # noqa: BLE001 - diagnostic recording must never break a response
+        _record_capture_failure(capture, "raw_model_answer")
+
+
+@lru_cache(maxsize=1)
+def _load_public_market_place_names() -> tuple[str, ...]:
+    names: set[str] = set()
+    aliases = _localized_market_names()
+    for market in [*load_market_config().get("markets", []), *load_global_directory_markets()]:
+        code = str(market.get("code") or "").upper()
+        names.add(str(market.get("name") or "").strip())
+        names.update(str(alias).strip() for alias in aliases.get(code, []))
+    return tuple(sorted(name for name in names if name))
+
+
+def _public_market_place_names() -> tuple[str, ...]:
+    """Configured market names in every configured language.
+
+    A generated answer names the user's market ("here in Canada") and, for
+    international sponsoring, the destination market. Comprehend labels those
+    bare names ADDRESS, and the masked token then made the placeholder
+    clean-up delete the whole line, policy figure included. A missing or
+    malformed config degrades to the previous behaviour (nothing preserved)
+    and is not cached, so a later request retries it.
+    """
+    try:
+        return _load_public_market_place_names()
+    except Exception:  # noqa: BLE001 - config trouble must not break PII scrubbing
+        LOGGER.exception("public_market_place_names_unavailable")
+        return ()
+
+
 class ConsentRequiredError(Exception):
     """Raised when a chat request has not accepted the current legal terms."""
 
@@ -243,6 +858,26 @@ class AIOrchestrator:
 
     def handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
         """Run the existing chat flow and return response data."""
+        if not DIAGNOSTIC_CAPTURE_ENABLED:
+            return self._handle_chat(body, correlation_id)
+        from app.retrieval.opensearch_sections import disable_rank_list_capture, enable_rank_list_capture
+
+        token = _DIAGNOSTIC_CAPTURE.set(
+            {"version": DIAGNOSTIC_CAPTURE_VERSION, "retrievals": [], "validations": [], "errors": []}
+        )
+        rank_list_token = enable_rank_list_capture()
+        try:
+            response = self._handle_chat(body, correlation_id)
+            capture = _DIAGNOSTIC_CAPTURE.get()
+        finally:
+            disable_rank_list_capture(rank_list_token)
+            _DIAGNOSTIC_CAPTURE.reset(token)
+        # Attached after the turn was persisted and counted, with the same
+        # answer and citations: recording must not change what was delivered.
+        return self._replace_answer(response, response.answer, {"diagnostic_capture": capture})
+
+    def _handle_chat(self, body: ChatRequest, correlation_id: str) -> ChatResponse:
+        """The chat flow itself; handle_chat adds optional diagnostic capture around it."""
         LOGGER.info(
             "ai_orchestrator_request_started",
             correlation_id=correlation_id,
@@ -331,11 +966,14 @@ class AIOrchestrator:
             )
 
         cache_key = build_cache_key(request_query, body.country, body.language, body.role)
-        cached_response = self._cached_response(cache_key, body, correlation_id, scrubbed_input)
+        cached_response = self._cached_response(
+            cache_key, body, correlation_id, scrubbed_input, resolved_request=request_query
+        )
         if cached_response:
             return cached_response
 
         retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        _record_diagnostic_retrieval("question", retrieval_result)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
             retrieval_query,
             retrieval_result,
@@ -385,6 +1023,7 @@ class AIOrchestrator:
                 correlation_id,
                 retrieval_result=retrieval_result,
             )
+        _record_diagnostic_raw_answer(model_response.text)
 
         if model_response.finish_reason == "guardrail_intervened":
             return self.response_builder.fallback(
@@ -434,6 +1073,7 @@ class AIOrchestrator:
             correlation_id,
             user_question=body.message,
             country=body.country,
+            resolved_request=request_query,
         )
         chat_response = self._validate_response(
             chat_response,
@@ -491,6 +1131,7 @@ class AIOrchestrator:
         *,
         user_question: str,
         country: str = "",
+        resolved_request: str = "",
     ) -> ChatResponse:
         """Restore approved directory fields, then enforce outbound PII safety."""
         citation_cleaned = separate_verified_citations(chat_response.answer, retrieval_result.documents)
@@ -520,6 +1161,7 @@ class AIOrchestrator:
                 completed_answer,
                 directory_field_sets,
                 user_question,
+                language=language,
             )
             restored_fields = [*restored_requested_fields, *restored_fields]
         if restored_fields:
@@ -600,6 +1242,15 @@ class AIOrchestrator:
                 {"directory_source_contradiction_corrected": True},
             )
 
+        chat_response = self._apply_support_contact_supplement(
+            chat_response,
+            retrieval_result,
+            resolved_request,
+            user_question,
+            country,
+            language,
+        )
+
         safe_answer = scrub_pii(
             chat_response.answer,
             correlation_id,
@@ -610,6 +1261,7 @@ class AIOrchestrator:
                 *(document.content for document in retrieval_result.documents),
             ],
             allowed_name_texts=[user_question],
+            allowed_location_texts=_public_market_place_names(),
         )
         if safe_answer != chat_response.answer:
             chat_response = self._replace_answer(chat_response, safe_answer, {"response_pii_scrubbed": True})
@@ -633,12 +1285,111 @@ class AIOrchestrator:
                 {"unresolved_pii_placeholders_removed": True},
             )
         if not chat_response.answer.strip():
-            chat_response = self._replace_answer(
+            refusal = self._replace_answer(
                 chat_response,
                 self._insufficient_evidence_message(language, user_question),
                 {"empty_after_output_cleanup": True, "fallback": True},
             )
+            # The refusal states no policy fact, so it cites no source. Keeping
+            # the citations built for the emptied answer presented a policy
+            # passage as the source of "the documents do not contain enough
+            # information".
+            chat_response = ChatResponse(
+                answer=refusal.answer,
+                citations=[],
+                suggestions=refusal.suggestions,
+                cards=refusal.cards,
+                confidence=refusal.confidence,
+                metadata=refusal.metadata,
+                correlation_id=refusal.correlation_id,
+            )
         return chat_response
+
+    def _apply_support_contact_supplement(
+        self,
+        chat_response: ChatResponse,
+        retrieval_result: RetrievalResult,
+        resolved_request: str,
+        user_question: str,
+        country: str,
+        language: str = "en",
+    ) -> ChatResponse:
+        """Append an approved support-contact block when the answer recommends care.
+
+        Only ever echoes fields already present on exactly one GLOBAL
+        directory record whose ``record_country`` matches a market actually
+        named in the resolved request (or the session market, when the
+        request names none). Never falls back to "first directory record",
+        never fires for a refusal/fallback/guardrail answer, and never
+        duplicates a phone or email already quoted in the answer.
+
+        ``language`` is the request language ``_secure_and_complete_response``
+        already resolved for this turn - the same value the rest of that
+        method's steps use. It selects the block's field LABELS from the
+        reviewed table in :mod:`utils.directory_fields`; it never translates,
+        adds or alters a field VALUE, and any language without a reviewed
+        table (including "en") keeps the record's own English labels.
+
+        The block is separated from the answer by a blank line, and the
+        record's citation - when the supplement is what introduced it - is
+        marked ``supportContactSupplement`` so a reader can tell a source
+        cited only for an appended contact detail from one that backs a claim
+        the answer actually makes. The marker is camelCase to match the other
+        source keys (``documentVersion``, ``sectionTitle``) and named after
+        the existing ``support_contact_supplemented`` metadata key. A record
+        the answer *already* cites backs the answer too, so that citation is
+        deliberately left unmarked. Citations stay a flat list of dicts.
+        """
+        if _support_contact_response_is_ineligible(chat_response) or not _CARE_CONTACT_RECOMMENDATION_RE.search(
+            chat_response.answer or ""
+        ):
+            return chat_response
+
+        lookup_text = resolved_request or user_question or ""
+        target_names = _resolve_support_contact_target_names(lookup_text, country)
+        if not target_names:
+            return chat_response
+
+        document = _find_matching_support_contact_record(retrieval_result.documents, target_names)
+        if document is None:
+            return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
+
+        approved_fields = _support_contact_approved_fields(document)
+        if not approved_fields:
+            return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
+
+        supplement = build_support_contact_supplement(
+            chat_response.answer,
+            approved_fields,
+            True,
+            hours_requested=bool(re.search(r"\bhours?\b", lookup_text, re.IGNORECASE)),
+            language=language,
+        )
+        if not supplement:
+            return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
+        block, added_labels = supplement
+
+        if _support_contact_already_quoted(chat_response.answer, approved_fields, added_labels):
+            return chat_response
+
+        completed_answer = f"{chat_response.answer.strip()}\n\n{block}"
+        # Marked on a copy, never on the document's own ``to_source()`` output:
+        # the same record may be cited elsewhere in this response for a reason
+        # that has nothing to do with this block.
+        supplement_source = {**document.to_source(), SUPPORT_CONTACT_SUPPLEMENT_CITATION_FIELD: True}
+        citations = _add_citation_if_absent(chat_response.citations, supplement_source)
+        return ChatResponse(
+            answer=completed_answer,
+            citations=citations,
+            suggestions=chat_response.suggestions,
+            cards=chat_response.cards,
+            confidence=chat_response.confidence,
+            metadata={
+                **chat_response.metadata,
+                "support_contact_supplemented": {"labels": added_labels, "record_id": document.id},
+            },
+            correlation_id=chat_response.correlation_id,
+        )
 
     @staticmethod
     def _replace_answer(
@@ -663,6 +1414,7 @@ class AIOrchestrator:
         body: ChatRequest,
         correlation_id: str,
         session_input: str = "",
+        resolved_request: str = "",
     ) -> ChatResponse | None:
         """Read and revalidate a cached response before returning it."""
         cache_started = perf_counter()
@@ -683,7 +1435,9 @@ class AIOrchestrator:
                 "outputTokensSaved": saved_output_tokens,
             },
         )
-        response = self._cached_response_value(cached, body, correlation_id, cache_type="exact")
+        response = self._cached_response_value(
+            cached, body, correlation_id, cache_type="exact", resolved_request=resolved_request
+        )
         return response
 
     def _cached_response_value(
@@ -693,6 +1447,7 @@ class AIOrchestrator:
         correlation_id: str,
         *,
         cache_type: str,
+        resolved_request: str = "",
     ) -> ChatResponse | None:
         if not cached:
             return None
@@ -706,6 +1461,7 @@ class AIOrchestrator:
             correlation_id,
             user_question=body.message,
             country=body.country,
+            resolved_request=resolved_request,
         )
         chat_response = self._validate_response(
             chat_response, body, correlation_id, retrieval_result=evidence
@@ -776,6 +1532,7 @@ class AIOrchestrator:
             body,
             correlation_id,
             cache_type="semantic",
+            resolved_request=retrieval_query,
         )
         if not response or response.metadata.get("cache") != "semantic":
             return response, cached, duration_ms
@@ -941,14 +1698,20 @@ class AIOrchestrator:
             return user_message
 
         anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        # An explicit new directory market replaces the anchor's market; the
+        # topic still carries. Live 2026-09-12 (W7): "What about delivery cost
+        # for Gambia?" after a Mali question kept "in Mali" here, retrieval
+        # targeted ['Gambia', 'Mali'] and the evidence gate approved both records.
+        anchor = self._replace_directory_target(anchor, user_message)
         if not anchor:
-            # Every candidate was an instruction rather than a question, so there
-            # is nothing that was answered to anchor against.
+            # Every candidate was an instruction rather than a question (or named
+            # only the replaced market), so there is nothing left to anchor against.
             return user_message
         if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
             # A topic-shift follow-up ("what about Kenya?") introduces a new
             # subject that a bare anchor substitution would silently drop.
-            # Keep both the prior topic and the new subject for retrieval.
+            # Keep the prior topic with the new subject for retrieval; any market
+            # the new subject replaced has already been removed from the anchor.
             contextual_query = f"{anchor} {user_message}".strip()
         elif anchor != user_message:
             # Context must never replace the question currently being asked.
@@ -986,16 +1749,43 @@ class AIOrchestrator:
     def _follow_up_carries_own_intent(self, user_message: str) -> bool:
         """True for an interrogative follow-up that requests no new content.
 
-        Deliberately conservative and English-only: it must read as a question and
-        must not name a thing to produce. A message that fails any check keeps the
-        anchor, which is the safer direction.
+        Deliberately conservative: it must read as a question and must not name a
+        thing to produce. A message that fails any check keeps the anchor, which is
+        the safer direction. Besides English, only a localized topic follow-up
+        ("Und die Lieferkosten?", "Hoe zit het met de verzendkosten?") qualifies, as
+        its English twin does (W14b); the market ellipsis "En voor Uganda?" keeps the
+        anchor exactly like "And for Uganda?".
         """
         normalized = " ".join((user_message or "").lower().split())
         if not normalized:
             return False
-        # An explicit question mark is required. Opening with an auxiliary verb is
-        # not enough: "do it anyway" opens with one and continues an instruction.
-        if not normalized.endswith("?") or not QUESTION_OPENERS.match(normalized):
+        message = " ".join(user_message.split())
+        if (
+            self._localized_follow_up_shape(message) in {"topic", "topic_shift"}
+            and message.endswith("?")
+            and not CONTENT_REQUEST_TERMS.search(message)
+            and not LOCALIZED_CONTENT_REQUEST_PATTERN.search(" ".join(_follow_up_tokens(message)))
+        ):
+            return True
+        # A bare field ellipsis ("And the shipping?") names a directory field and
+        # nothing else, so it is judged on its own words even though "and" is not
+        # a QUESTION_OPENERS word. "And for Uganda?" names a market instead and
+        # keeps the anchor; "And the shipping, write it anyway?" is caught by
+        # CONTENT_REQUEST_TERMS/CONTINUATION_TERMS below.
+        if (
+            normalized.endswith("?")
+            and self._is_directory_field_follow_up(message)
+            and not CONTENT_REQUEST_TERMS.search(normalized)
+            and not CONTINUATION_TERMS.search(normalized)
+        ):
+            return True
+        # An auxiliary opener needs an explicit question mark: "do it anyway" opens
+        # with one and continues an instruction. A wh-opener reads as a question
+        # without one, so "How much would those products cost" is not judged on
+        # the unsafe question it was anchored to for retrieval.
+        if not QUESTION_OPENERS.match(normalized):
+            return False
+        if not normalized.endswith("?") and not WH_QUESTION_OPENERS.match(normalized):
             return False
         if CONTINUATION_TERMS.search(normalized):
             return False
@@ -1052,15 +1842,171 @@ class AIOrchestrator:
         if not normalized:
             return False
         word_count = len(normalized.split())
-        return word_count <= 14 and self._contains_follow_up_marker(normalized)
+        message = " ".join(user_message.split())
+        if word_count <= 14 and CONTINUATION_TERMS.search(normalized):
+            return True
+        if (
+            word_count <= FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS
+            and not find_market_mentions(message)
+            and not find_shared_office_record_countries(message)
+            and not self._is_directory_field_follow_up(message)
+            and AMBIGUOUS_DIRECTORY_TOPIC_TERMS.search(normalized)
+        ):
+            return False
+        if (
+            word_count <= FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS
+            and not find_market_mentions(message)
+            and not find_shared_office_record_countries(message)
+            and self._is_directory_field_follow_up(message)
+            and self._names_unrecognised_place(message)
+        ):
+            return False
+        if word_count <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        # Continuations such as "write the income claim anyway?" intentionally
+        # retain the prior action for governance, including when they mention an
+        # otherwise ambiguous directory topic.
+        if self._localized_follow_up_shape(message):
+            return True
+        user_messages = self._user_messages_from_history(history)
+        if self._is_clarification_reply(message):
+            # Attach only to a real preceding question; otherwise keep the reply
+            # as it is and let the normal path ask for what is missing.
+            return bool(self._latest_context_anchor(user_messages))
+        if self._is_directory_field_follow_up(message):
+            return bool(self._inherited_directory_target(user_messages))
+        return False
+
+    def _is_directory_field_follow_up(self, message: str) -> bool:
+        """A short request for one directory field that names no market or policy."""
+        normalized = " ".join((message or "").split())
+        if not normalized or len(normalized.split()) > FOLLOW_UP_DIRECTORY_FIELD_MAX_WORDS:
+            return False
+        if (
+            find_market_mentions(normalized)
+            or POLICY_WORD.search(normalized)
+            or LOCALIZED_POLICY_PATTERN.search(normalized)
+            or self._is_instruction_message(normalized)
+        ):
+            return False
+        return bool(FOLLOW_UP_DIRECTORY_FIELD_TERMS.search(normalized))
+
+    def _is_clarification_reply(self, message: str) -> bool:
+        """A short statement supplying a detail ("I live in Arizona.", "45 days ago")."""
+        normalized = " ".join((message or "").split())
+        if not normalized or "?" in normalized or len(normalized.split()) > CLARIFICATION_REPLY_MAX_WORDS:
+            return False
+        if CONTENT_REQUEST_TERMS.search(normalized) or self._is_instruction_message(normalized):
+            return False
+        return bool(CLARIFICATION_REPLY.match(normalized))
+
+    def _inherited_directory_target(self, user_messages: list[str]) -> set[str]:
+        """Return the one market the latest relevant USER turn named, or nothing.
+
+        Walks back over dependent turns only. A substantive turn with no market
+        ("What is the return policy?") ends the walk, so a topic switch stops
+        inheritance; a turn naming two markets is ambiguous and inherits nothing.
+        Refused instructions are skipped, and assistant turns are never read.
+        This selects a directory target only; policy authority stays the request
+        market and is enforced later by the evidence gate.
+        """
+        for message in reversed(user_messages):
+            if self._is_instruction_message(message):
+                continue
+            markets = set(find_market_mentions(self._answered_clause_of(message)))
+            if markets:
+                return markets if len(markets) == 1 else set()
+            if not self._is_context_dependent_message(message):
+                return set()
+        return set()
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
-        return self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS)
+        return self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS) or self._is_market_ellipsis(
+            normalized_message
+        )
 
     def _contains_topic_shift_marker(self, normalized_message: str) -> bool:
         """Match markers that introduce a new subject alongside a reference cue."""
-        return self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
+        return (
+            self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
+            or self._is_market_ellipsis(normalized_message)
+            or self._localized_follow_up_shape(normalized_message) in {"market", "topic_shift"}
+        )
+
+    def _localized_follow_up_shape(self, message: str) -> str:
+        """Name the non-English follow-up shape ``message`` opens with, or return "" (W14).
+
+        "market" for "En voor Oeganda?", "topic_shift" for "Hoe zit het met
+        Oeganda?" and "topic" for "En de minimale bestelling?". Only the start of
+        a short message counts; see LOCALIZED_FOLLOW_UP_CONNECTORS for the limits.
+        Detection only: the history path that follows is the English one, unchanged.
+        """
+        tokens = _follow_up_tokens(message)
+        if not tokens or len(tokens) > 14:
+            return ""
+        names_market = bool(find_market_mentions(message) or find_shared_office_record_countries(message))
+        # The first word that is not an article or preposition decides: Danish "os"
+        # is a stop word, Portuguese "os" an article ("E para os Estados Unidos?").
+        first_content = next((token for token in tokens[2:] if token not in LOCALIZED_FOLLOW_UP_FUNCTION_WORDS), "")
+        if (
+            tokens[:2] in LOCALIZED_FOLLOW_UP_CONNECTORS
+            and 2 < len(tokens) <= FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS
+            and first_content not in LOCALIZED_FOLLOW_UP_STOP_WORDS
+            and names_market
+        ):
+            return "market"
+        for language, openers in LOCALIZED_TOPIC_SHIFT_OPENERS.items():
+            for opener in openers:
+                size = len(_follow_up_tokens(opener))
+                if tokens[:size] != _follow_up_tokens(opener) or not self._is_short_follow_up_tail(tokens[size:]):
+                    continue
+                if not names_market and self._names_unrecognised_place(message):
+                    return ""
+                if (
+                    language in LOCALIZED_INFLECTED_NAME_LANGUAGES
+                    and not names_market
+                    and any(word[:1].isupper() for word in _follow_up_tokens(message, casefold=False)[size:])
+                ):
+                    return ""
+                return "topic_shift"
+        if message.rstrip().endswith("?"):
+            for opener_tokens in LOCALIZED_TOPIC_ELLIPSIS_OPENERS:
+                size = len(opener_tokens)
+                if tokens[:size] != opener_tokens or not self._is_short_follow_up_tail(tokens[size:]):
+                    continue
+                tail = " ".join(tokens[size:])
+                if (
+                    LOCALIZED_DIRECTORY_FIELD_PATTERN.search(tail)
+                    and not LOCALIZED_POLICY_PATTERN.search(tail)
+                    and (names_market or not self._names_unrecognised_place(message))
+                ):
+                    return "topic"
+        return ""
+
+    def _names_unrecognised_place(self, message: str) -> bool:
+        """A capitalised word right after a place preposition ("Och i Stockholm?", "E a Roma?")."""
+        words = _follow_up_tokens(message, casefold=False)
+        return any(
+            word.casefold() in LOCALIZED_PLACE_PREPOSITIONS and following[:1].isupper()
+            for word, following in zip(words[1:], words[2:])
+        )
+
+    def _is_short_follow_up_tail(self, tail: tuple[str, ...]) -> bool:
+        """One or two content words after a follow-up opener, none a question word or pronoun."""
+        if len(tail) > LOCALIZED_FOLLOW_UP_MAX_TAIL:
+            return False
+        content = [word for word in tail if word not in LOCALIZED_FOLLOW_UP_FUNCTION_WORDS]
+        return 0 < len(content) <= LOCALIZED_FOLLOW_UP_MAX_CONTENT and not any(
+            word in LOCALIZED_FOLLOW_UP_STOP_WORDS for word in content
+        )
+
+    def _is_market_ellipsis(self, message: str) -> bool:
+        """A short "And for Guinea?" that swaps only the market (FOLLOW_UP_MARKET_ELLIPSIS)."""
+        normalized = " ".join((message or "").split())
+        if len(normalized.split()) > FOLLOW_UP_MARKET_ELLIPSIS_MAX_WORDS or not FOLLOW_UP_MARKET_ELLIPSIS.match(normalized):
+            return False
+        return bool(find_market_mentions(normalized) or find_shared_office_record_countries(normalized))
 
     def _matches_marker(self, normalized_message: str, markers: tuple[str, ...]) -> bool:
         for marker in markers:
@@ -1096,8 +2042,24 @@ class AIOrchestrator:
             if self._is_context_dependent_message(message):
                 later_messages.append(message)
                 continue
-            return self._carry_forward_market_shift(self._answered_clause_of(message), later_messages)
+            anchor = self._carry_forward_market_shift(self._answered_clause_of(message), later_messages)
+            return self._carry_forward_clarifications(anchor, later_messages)
         return ""
+
+    def _carry_forward_clarifications(self, anchor: str, later_messages: list[str]) -> str:
+        """Keep details the user supplied for the anchor question, oldest first.
+
+        TC-053..055: "What is the return policy?" -> "I am a Preferred Customer in
+        the U.S." -> "I bought it 45 days ago." The middle reply is skipped as
+        context-dependent, and dropping it answers the last turn for nobody in
+        particular. Only the user's own clarification replies are kept.
+        """
+        if not anchor:
+            return anchor
+        for message in reversed(later_messages):
+            if self._is_clarification_reply(message) and message not in anchor:
+                anchor = f"{anchor} {message}"
+        return anchor
 
     def _carry_forward_market_shift(self, anchor: str, later_messages: list[str]) -> str:
         """Keep a market named after the anchor, so the subject cannot revert.
@@ -1116,13 +2078,13 @@ class AIOrchestrator:
 
         `later_messages` is newest-first, so the most recent market shift wins.
 
-        The shifting turn is appended rather than substituted into the anchor.
-        find_market_mentions returns market codes, not the surface names as
-        written, so replacing "Belgium" with "Germany" would need a reverse
-        code-to-name mapping in whichever language the reader used. This mirrors
-        _build_retrieval_query's existing handling of an immediate topic shift,
-        which keeps both the prior topic and the new subject for the same
-        reason, and leaves market scoping to retrieval and evidence approval.
+        The shifting turn is appended, and the market it replaced is removed
+        from the anchor, so the topic carries but only the new market is
+        targeted. Appending alone kept both names: live 2026-09-12, after "What
+        about delivery cost for Gambia?" the next turn still reached the
+        directory target extractor with Mali alongside Gambia. The removal works
+        on the reader's own wording (see _without_market_names), so no reverse
+        code-to-name mapping is needed in whichever language they used.
         """
         if not anchor:
             return anchor
@@ -1130,8 +2092,181 @@ class AIOrchestrator:
         for message in later_messages:
             markets = find_market_mentions(message)
             if markets and markets != anchor_markets:
-                return f"{anchor} {message}".strip()
+                return f"{self._replace_directory_target(anchor, message)} {message}".strip()
         return anchor
+
+    def _replace_directory_target(self, anchor: str, message: str) -> str:
+        """Remove from ``anchor`` each directory market that ``message`` replaced.
+
+        The agreed rule: an explicit new directory target replaces the old one,
+        and the field or topic carries forward. A market the message names again
+        stays, so a comparison ("How does Gambia's delivery cost compare with
+        Mali?") keeps both, and a message naming no market changes nothing.
+        Countries reached through a shared office count as markets on both sides.
+
+        This selects the directory target only. Policy authority is untouched:
+        the evidence gate still judges the request market.
+        """
+        if not anchor:
+            return anchor
+        new_codes = find_market_mentions(message)
+        new_records = find_shared_office_record_countries(message)
+        if not new_codes and not new_records:
+            return anchor
+        stale_codes = find_market_mentions(anchor) - new_codes
+        stale_records = find_shared_office_record_countries(anchor) - new_records
+        if not stale_codes and not stale_records:
+            return anchor
+        return self._without_market_names(anchor, stale_codes, stale_records)
+
+    def _without_market_names(self, text: str, codes: set[str], records: set[str]) -> str:
+        """Delete the longest word spans that name only ``codes`` or ``records``.
+
+        Each candidate span is confirmed with the same matchers retrieval uses,
+        so localized aliases and multi-word names work, and a longer name that
+        merely contains a stale one ("Equatorial Guinea" when Guinea is stale)
+        is left alone. Candidates are tried longest-first (by word count, then
+        leftmost start) so a fully configured name is removed as one span
+        before any shorter alias contained inside it is even considered - a
+        shorter alias standalone in the catalog (e.g. "Reunion" inside
+        "Reunion Islands", "Congo" inside "Republic of Congo") can no longer
+        jump the queue and strand the rest of the name. A leading place
+        connector ("in", "naar", "au") and a trailing possessive go with the
+        name. Returns "" when nothing substantive is left.
+        """
+        catalog = [*load_market_config()["markets"], *load_global_directory_markets()]
+        names = [str(market.get("name") or "") for market in catalog]
+        names.extend(name for aliases in _localized_market_names().values() for name in aliases)
+        names.extend(name for office in load_shared_offices() for name in office["serves"])
+        name_words: set[str] = set()
+        exact_names: set[str] = set()
+        longest = 1
+        for name in names:
+            normalized_name = _normalize_market_text(name)
+            tokens = normalized_name.split()
+            name_words.update(tokens)
+            if normalized_name:
+                exact_names.add(normalized_name)
+            longest = max(longest, len(tokens))
+
+        words = list(re.finditer(r"[^\W_]+", text, flags=re.UNICODE))
+        removed = [False] * len(words)
+        spans: list[tuple[int, int]] = []
+        for length in range(longest, 0, -1):
+            for start in range(len(words) - length + 1):
+                end = start + length
+                if any(removed[start:end]):
+                    continue
+                if any(_normalize_market_text(word.group()) not in name_words for word in words[start:end]):
+                    continue
+                surface = text[words[start].start():words[end - 1].end()]
+                # find_market_mentions checks containment, not equality ("a
+                # turkey" contains configured name "turkey"), so a span is only
+                # trusted once it is itself a full configured name - never a
+                # name plus stray neighbouring words picked up by the longest-
+                # first search before the exact single-word span is tried.
+                if _normalize_market_text(surface) not in exact_names:
+                    continue
+                if not self._reads_as_market_reference(text, words[start].start(), words[end - 1].end()):
+                    continue
+                found_codes = find_market_mentions(surface)
+                found_records = find_shared_office_record_countries(surface)
+                if (found_codes or found_records) and found_codes <= codes and found_records <= records:
+                    spans.append((words[start].start(), words[end - 1].end()))
+                    removed[start:end] = [True] * length
+        if not spans:
+            return text
+
+        pieces: list[str] = []
+        cursor = 0
+        for span_start, span_end in self._with_compound_market_references(text, spans):
+            pieces.append(REPLACED_MARKET_LEAD_IN.sub("", text[cursor:span_start]))
+            possessive = REPLACED_MARKET_POSSESSIVE.match(text, span_end)
+            cursor = possessive.end() if possessive else span_end
+        pieces.append(text[cursor:])
+        joined = self._without_stray_parens("".join(pieces))
+        cleaned = re.sub(r"\s+([?.!,;:])", r"\1", re.sub(r"\s+", " ", joined)).strip(" ,;:")
+        return cleaned if re.search(r"[^\W_]", cleaned, flags=re.UNICODE) else ""
+
+    @staticmethod
+    def _without_stray_parens(text: str) -> str:
+        """Drop any "(" or ")" left unbalanced by a removed market span.
+
+        A configured name can carry its own parenthetical ("Cote d'Ivoire
+        (Ivory Coast)"); the word-span removal above only reaches the letters
+        of the name, so an opening or closing paren immediately outside the
+        last removed word can survive alone. An empty "()" left behind (both
+        parens survive, nothing between them) is dropped the same way.
+        """
+        stack: list[int] = []
+        drop: set[int] = set()
+        for index, character in enumerate(text):
+            if character == "(":
+                stack.append(index)
+            elif character == ")":
+                if stack:
+                    stack.pop()
+                else:
+                    drop.add(index)
+        drop.update(stack)
+        if drop:
+            text = "".join(character for index, character in enumerate(text) if index not in drop)
+        return re.sub(r"\(\s*\)", "", text)
+
+    def _reads_as_market_reference(self, text: str, span_start: int, span_end: int) -> bool:
+        """True when a span spelling a market name is written as that market in ``text``.
+
+        find_market_mentions casefolds, so "a turkey" matches Turkey (W8 review:
+        "Can I ship a turkey to Mali?" lost "turkey"). A name in a cased script
+        is capitalised; a caseless script has nothing to check, and neither does
+        text written without a single capital, where every span counts as the
+        clean base read it (Fable W8b note 1: "is mali open on saturdays?" kept
+        Mali; a kept stale market misroutes retrieval, a lost ordinary word does
+        not). Otherwise a lower-case span counts only when a place connector
+        leads into it ("office hours in kenya", "van mali", "au mali"), a
+        possessive follows ("mali's"), or it closes a "what about" clause
+        ("What about the netherlands?"). W8 review finding 1: a capital
+        anywhere in the text used to reject every lower-case span.
+        """
+        first = text[span_start]
+        if first.isupper() or not first.islower():
+            return True
+        if not any(character.isupper() for character in text):
+            return True
+        before = text[:span_start]
+        if REPLACED_MARKET_LEAD_IN.search(before) or REPLACED_MARKET_POSSESSIVE.match(text, span_end):
+            return True
+        return bool(REPLACED_MARKET_QUESTION_LEAD_IN.search(before) and REPLACED_MARKET_CLAUSE_END.match(text, span_end))
+
+    def _with_compound_market_references(self, text: str, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        """Widen removed spans to the whole compound reference they sit in, in order.
+
+        A removed name inside a shared office's compound record name
+        ("Kenya/East Africa") takes the whole record name with it, and names
+        joined only by a slash ("Mali/Senegal") are removed as one, so no "/"
+        fragment is left (W8 review: "office hours /East Africa?").
+        """
+        compounds: list[tuple[int, int]] = []
+        for office in load_shared_offices():
+            parts = [part.split() for part in str(office["record_country"]).split("/")]
+            if len(parts) < 2 or not all(parts):
+                continue
+            pattern = r"\s*/\s*".join(r"\s+".join(re.escape(word) for word in part) for part in parts)
+            compounds.extend(
+                match.span()
+                for match in re.finditer(rf"(?<![^\W_]){pattern}(?![^\W_])", text, flags=re.IGNORECASE | re.UNICODE)
+            )
+        widened: list[tuple[int, int]] = []
+        for start, end in sorted(spans):
+            for compound_start, compound_end in compounds:
+                if compound_start <= start and end <= compound_end:
+                    start, end = compound_start, compound_end
+                    break
+            if widened and (widened[-1][1] >= start or re.fullmatch(r"\s*/\s*", text[widened[-1][1]:start])):
+                widened[-1] = (widened[-1][0], max(widened[-1][1], end))
+            else:
+                widened.append((start, end))
+        return widened
 
     def _is_instruction_message(self, message: str) -> bool:
         """True for a bare instruction to produce content, which is never context.
@@ -1174,7 +2309,13 @@ class AIOrchestrator:
         normalized = " ".join(user_message.lower().split())
         if not normalized:
             return False
-        return len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized)
+        if len(normalized.split()) <= 14 and self._contains_follow_up_marker(normalized):
+            return True
+        if self._localized_follow_up_shape(" ".join(user_message.split())):
+            return True
+        # Field follow-ups and clarification replies cannot be retrieved on their
+        # own words either, so the anchor walk passes over them to the question.
+        return self._is_directory_field_follow_up(user_message) or self._is_clarification_reply(user_message)
 
     def _user_messages_from_history(self, history: str) -> list[str]:
         """Extract prior user messages from compact session history."""
@@ -1520,6 +2661,7 @@ class AIOrchestrator:
         except Exception:  # noqa: BLE001 - best-effort addition, must never break the fallback path
             LOGGER.exception("office_contact_lookup_failed", correlation_id=correlation_id)
             return None
+        _record_diagnostic_retrieval("office_contact_lookup", directory_result)
 
         record = next(
             (
@@ -2014,6 +3156,7 @@ class AIOrchestrator:
         # Recorded before any repair attempt, so ValidationHealth reflects what
         # the model produced rather than what repair rescued.
         record_validation_outcome(has_critical=result.has_critical())
+        numeric_repair_attempt: dict[str, Any] | None = None
         if result.has_critical():
             critical_codes = {
                 str(issue.code).upper()
@@ -2030,10 +3173,18 @@ class AIOrchestrator:
                     chat_response.answer,
                     retrieval_result.documents,
                 )
+                numeric_repair_attempt = {
+                    "answer": repaired_answer,
+                    "removed": removed_numbers,
+                    "documents": retrieval_result.documents,
+                    "result": None,
+                }
                 if repaired_answer and repaired_answer != chat_response.answer:
                     repaired_response = ChatResponse(
                         answer=repaired_answer,
-                        citations=chat_response.citations,
+                        citations=self._citations_after_repair(
+                            chat_response, repaired_answer, model_response, retrieval_result, body, correlation_id
+                        ),
                         suggestions=chat_response.suggestions,
                         cards=chat_response.cards,
                         confidence=chat_response.confidence,
@@ -2055,6 +3206,7 @@ class AIOrchestrator:
                             correlation_id=correlation_id,
                         )
                     )
+                    numeric_repair_attempt["result"] = repaired_result
                     if not repaired_result.has_critical():
                         # Sections are logged alongside the removed figures so a
                         # reviewer can check the removal against the evidence
@@ -2082,6 +3234,9 @@ class AIOrchestrator:
                             ],
                         )
                         record_numeric_repair(len(removed_numbers))
+                        _record_diagnostic_validation(
+                            chat_response, result, "numeric_repair_accepted", numeric_repair_attempt
+                        )
                         return self._with_validation_metadata(repaired_response, repaired_result)
             failure_layer = self._validation_failure_layer(result)
             LOGGER.warning(
@@ -2096,6 +3251,7 @@ class AIOrchestrator:
                     if issue.severity.value.upper() == "CRITICAL"
                 ],
             )
+            _record_diagnostic_validation(chat_response, result, "critical_fallback", numeric_repair_attempt)
             return self._with_validation_metadata(
                 self.response_builder.fallback(
                     self._insufficient_evidence_message(body.language, body.message),
@@ -2104,7 +3260,48 @@ class AIOrchestrator:
                 ),
                 result,
             )
+        _record_diagnostic_validation(chat_response, result, "no_critical_issue")
         return self._with_validation_metadata(chat_response, result)
+
+    def _citations_after_repair(
+        self,
+        chat_response: ChatResponse,
+        repaired_answer: str,
+        model_response: ModelResponse | None,
+        retrieval_result: RetrievalResult,
+        body: ChatRequest,
+        correlation_id: str,
+    ) -> list[dict[str, object]]:
+        """Citations for an answer numeric repair has just shortened.
+
+        Citations were chosen from the model's text before repair deleted
+        sentences from it, so a model answer's citations are chosen again for
+        the text the reader receives. Fallback, refusal, narrowing and other
+        controlled copy keeps the citations it was built with (normally none):
+        re-choosing them would attach policy passages to a refusal whose
+        numeric addendum repair removed.
+
+        Choosing citations must never fail the answer. On any error the
+        citations built before repair are kept and the error is logged.
+        """
+        metadata = chat_response.metadata or {}
+        if (
+            metadata.get("fallback")
+            or metadata.get("failure_layer")
+            or metadata.get("response_source", "model") != "model"
+        ):
+            return chat_response.citations
+        try:
+            return self.response_builder.reconcile_citations(
+                built_answer=model_response.text if model_response is not None else chat_response.answer,
+                delivered_answer=repaired_answer,
+                citations=chat_response.citations,
+                retrieval_result=retrieval_result,
+                session_country=body.country,
+            )
+        except Exception:  # noqa: BLE001 - citation choice is best-effort and must never break the answer
+            LOGGER.exception("citation_reconcile_failed", correlation_id=correlation_id)
+            return chat_response.citations
 
     def _validation_failure_layer(self, result: ValidationResult) -> str:
         """Classify critical validation failures for diagnostics."""

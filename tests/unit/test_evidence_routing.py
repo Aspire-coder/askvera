@@ -19,8 +19,7 @@ from services.market_config import get_countries, load_policy_locales
 def test_routes_configured_english_greeting_without_retrieval() -> None:
     assert classify_intent("Hello!", "en") == "assistant_meta"
     greeting = assistant_meta_response("Hello!", "en") or ""
-    assert "AskVera" in greeting
-    assert "policy questions" in greeting
+    assert greeting == "Hi! What can I help you with?"
     assert "products" not in greeting
     assert "ordering" not in greeting
 
@@ -104,7 +103,7 @@ def test_routes_thanks_with_trailing_words_not_just_the_bare_phrase() -> None:
     ):
         assert classify_intent(message, "en") == "assistant_meta", message
         response = assistant_meta_response(message, "en") or ""
-        assert response == "Anytime! I'm here if anything else comes up."
+        assert response == "You're welcome!"
 
 
 def test_routes_thanks_with_trailing_words_across_configured_locales() -> None:
@@ -169,7 +168,7 @@ def test_routes_configured_greeting_even_when_widget_language_differs() -> None:
     """A visitor may greet in another configured language without changing locale."""
     assert classify_intent("Hola", "en-US") == "assistant_meta"
     response = assistant_meta_response("Hola", "en-US") or ""
-    assert response.startswith("Hi there")
+    assert response.startswith("Hi!")
 
 
 def test_wider_typo_tolerance_is_off_by_default_for_capability_phrases() -> None:
@@ -202,7 +201,7 @@ def test_routes_bounded_social_typos_without_fuzzy_policy_routing() -> None:
 def test_routes_wellbeing_question_without_retrieval() -> None:
     assert classify_intent("How are you?", "en") == "assistant_meta"
     response = assistant_meta_response("How are you?", "en") or ""
-    assert "doing well" in response.lower()
+    assert "here to help" in response.lower()
     assert "products" not in response
     assert "ordering" not in response
 
@@ -210,7 +209,7 @@ def test_routes_wellbeing_question_without_retrieval() -> None:
 def test_composed_greeting_and_wellbeing_question_uses_reviewed_small_talk() -> None:
     assert classify_intent("Hello, how are you?", "en") == "assistant_meta"
     response = assistant_meta_response("Hello, how are you?", "en") or ""
-    assert "doing well" in response.lower()
+    assert "here to help" in response.lower()
 
 
 def test_composed_small_talk_allows_a_safe_joiner() -> None:

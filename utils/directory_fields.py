@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections.abc import Iterable
 
@@ -21,10 +22,114 @@ _SELF_REFERENTIAL_VALUE_RE = re.compile(
     r"^(?:see|as|same as)\s+above$",
     re.IGNORECASE,
 )
+
+
+# --- B1: one requested-field-set helper reused by removal and restoration ---
+#
+# The old code detected "the one field the question asked about" with an
+# if/elif chain, so a compound request such as "phone and email" only ever
+# matched the first branch (phone) and treated email as unrequested. A single
+# small vocabulary of canonical field keys - each with its own "is this field
+# named in the question" pattern and its own "does this directory label mean
+# this field" pattern - lets both removal and restoration agree on what was
+# actually asked for, including every compound combination, without either
+# function guessing from a single first match.
+_FIELD_REQUEST_PATTERNS: dict[str, re.Pattern[str]] = {
+    "phone": re.compile(r"\b(?:phone|telephone)\b", re.IGNORECASE),
+    "email": re.compile(r"\b(?:email|e-mail)\b", re.IGNORECASE),
+    "website": re.compile(r"\b(?:website|web\s*site|url)\b", re.IGNORECASE),
+    "address": re.compile(r"\b(?:address|located|location)\b", re.IGNORECASE),
+    "business_hours": re.compile(r"\b(?:business|office)\s+hours?\b|\bhours?\b", re.IGNORECASE),
+    "payment_methods": re.compile(r"\bpayment\s+methods?\b", re.IGNORECASE),
+    "delivery_cost": re.compile(r"\bdelivery\s+(?:cost|charge|fee)s?\b", re.IGNORECASE),
+    "delivery_time": re.compile(
+        r"\bdelivery\s+time\b|\blead\s+time\b|\bhow\s+long\b[^.?!]*\bdeliver", re.IGNORECASE
+    ),
+}
+# Order phone is a qualifier of the phone request, not an independent field:
+# "office phone" must exclude it, while "office and order phone" or any
+# mention of "order" alongside phone/telephone must include it.
+_ORDER_PHONE_REQUEST_RE = re.compile(r"\border\b", re.IGNORECASE)
+
+# How each canonical field's directory label is recognised, reused for both
+# stripping an unrequested "Label: value" line and restoring a requested one
+# from the approved record. Order matters when testing a label against these:
+# order_phone must be tried before phone so "Telephone for Orders" is not
+# absorbed by phone's broader pattern.
+_FIELD_LABEL_PATTERNS: dict[str, re.Pattern[str]] = {
+    "order_phone": re.compile(r"^(?:telephone\s+for\s+orders|order\s*phone(?:\s*\d+)?)$", re.IGNORECASE),
+    "phone": re.compile(
+        r"^(?:telephone(?:\s+office)?|phone(?:\s*\d+)?)$", re.IGNORECASE
+    ),
+    "email": re.compile(r"^(?:email|e-mail)$", re.IGNORECASE),
+    "website": re.compile(r"^(?:website|web\s*site|url)$", re.IGNORECASE),
+    "address": re.compile(
+        r"^(?:(?:office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+)?address)$", re.IGNORECASE
+    ),
+    "business_hours": re.compile(
+        r"^business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?$", re.IGNORECASE
+    ),
+    "payment_methods": re.compile(r"^payment\s+methods?(?:\s+accepted)?$", re.IGNORECASE),
+    "delivery_cost": re.compile(r"^delivery\s+(?:cost|charge|fee)s?$", re.IGNORECASE),
+    "delivery_time": re.compile(r"^(?:average\s+)?(?:delivery|lead)\s+time$", re.IGNORECASE),
+    # "fax" is not a *requestable* field (no _FIELD_REQUEST_PATTERNS entry),
+    # so adding it here cannot change what remove_unrequested_directory_fields
+    # or restore_missing_requested_directory_fields treat as requested/allowed
+    # - it exists only so restore_missing_directory_contacts can look up a
+    # localized label for a fax line it appends (W20 follow-up).
+    "fax": re.compile(r"^fax(?:\s*\d+)?$", re.IGNORECASE),
+}
+# Fragments (no anchors) used only to build the "this label line is allowed to
+# stay" negative lookahead in remove_unrequested_directory_fields. Phone must
+# exclude "telephone for orders" here even when order_phone is not part of
+# the current allowed set - a prefix match against "phone" would otherwise
+# also (wrongly) protect the order-phone line's "telephone" prefix.
+_FIELD_ALLOWED_LINE_FRAGMENTS: dict[str, str] = {
+    "order_phone": r"telephone\s+for\s+orders|order\s*phone(?:\s*\d+)?",
+    "phone": r"telephone(?!\s+for\s+orders)(?:\s+office)?|phone(?:\s*\d+)?",
+    "email": r"email|e-mail",
+    "website": r"website|web\s*site|url",
+    "address": r"(?:office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+)?address",
+    "business_hours": r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?",
+    "payment_methods": r"payment\s+methods?(?:\s+accepted)?",
+    "delivery_cost": r"delivery\s+(?:cost|charge|fee)s?",
+    "delivery_time": r"(?:average\s+)?(?:delivery|lead)\s+time",
+}
+
+
+def _requested_directory_field_set(question: str) -> set[str] | None:
+    """Return the canonical fields a question confidently names, or ``None``.
+
+    ``None`` means the request was not confidently understood - the caller
+    must not strip or guess anything in that case, rather than destructively
+    acting on a first guessed match the way the old if/elif chain did.
+    """
+    text = question or ""
+    requested: set[str] = set()
+    for key, pattern in _FIELD_REQUEST_PATTERNS.items():
+        if pattern.search(text):
+            requested.add(key)
+    if "phone" in requested and _ORDER_PHONE_REQUEST_RE.search(text):
+        requested.add("order_phone")
+    if not requested:
+        return None
+    return requested
+
+
+def _label_canonical_field(label: str) -> str | None:
+    """Map a parsed directory label to its canonical field key, if any."""
+    normalized = " ".join((label or "").split())
+    for key in ("order_phone", "phone", "email", "website", "address",
+                "business_hours", "payment_methods", "delivery_cost", "delivery_time", "fax"):
+        if _FIELD_LABEL_PATTERNS[key].search(normalized):
+            return key
+    return None
+
+
 _INLINE_FIELD_RE = re.compile(
     r"^(?P<label>business\s+hours\s+(?:office|product\s+(?:centre|center))|"
     r"telephone(?:\s+(?:for\s+orders|office))?|phone(?:\s*\d+)?|"
-    r"office\s*(?:&|and)\s*product\s+center\s+address|"
+    r"office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+address|"
     r"address|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)"
     r"\s*[:#-]?\s+(?P<value>.+)$",
     re.IGNORECASE,
@@ -111,6 +216,8 @@ def restore_missing_directory_contacts(
     answer: str,
     field_sets: Iterable[dict[str, object]],
     question: str = "",
+    *,
+    language: str = "en",
 ) -> tuple[str, list[str]]:
     """Restore exact contacts from the highest-ranked directory record.
 
@@ -120,6 +227,18 @@ def restore_missing_directory_contacts(
     answer already states that same labeled field with a different value -
     a mangled number, a dropped digit, a stale placeholder - that line is
     corrected in place instead of leaving it wrong and appending a duplicate.
+
+    ``language`` renders a newly APPENDED field's label (never a corrected
+    one - see below) using the same reviewed table as
+    :func:`build_support_contact_supplement`
+    (:data:`_SUPPORT_CONTACT_LABEL_TRANSLATIONS`); the default ``"en"`` and
+    any language without a table keep output byte-identical to calling this
+    function without the argument. A line already present in the answer
+    under its own label - whether the record's English label or a label the
+    model already wrote in the answer's language, e.g. "Téléphone commandes"
+    - is matched and deduplicated purely by VALUE (see ``_value_is_present``
+    below), so it is corrected in place with its existing label untouched,
+    never re-labeled and never duplicated by this translation.
     """
     original = (answer or "").strip()
     if _asks_only_for_a_non_contact_field(question):
@@ -175,11 +294,42 @@ def restore_missing_directory_contacts(
         return original, []
 
     if missing:
-        exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
+        # See build_support_contact_supplement's matching comment: the
+        # widget's renderer merges consecutive plain lines into one run-on
+        # paragraph, so more than one appended field must be bulleted.
+        if len(missing) == 1:
+            label, value = missing[0]
+            exact_fields = f"{_translated_contact_label(label, language)}: {value}"
+        else:
+            exact_fields = "\n".join(
+                f"- {_translated_contact_label(label, language)}: {value}" for label, value in missing
+            )
         separator = "\n\n" if corrected.strip() else ""
         corrected = f"{corrected}{separator}{exact_fields}"
 
-    return corrected, [*corrected_labels, *(label for label, _ in missing)]
+    return corrected, [
+        *corrected_labels,
+        *(_translated_contact_label(label, language) for label, _ in missing),
+    ]
+
+
+def _translated_contact_label(label: str, language: str) -> str:
+    """Look up ``label``'s localized text in :data:`_SUPPORT_CONTACT_LABEL_TRANSLATIONS`.
+
+    Falls back to ``label`` itself - the record's own (always-English) text
+    - when ``language`` has no reviewed table, or when this particular label
+    has no canonical field mapping (:func:`_label_canonical_field`) or no
+    entry for it in the language's table. Never used for a label already
+    present in the answer (see :func:`restore_missing_directory_contacts`),
+    only for one about to be newly appended.
+    """
+    table = _SUPPORT_CONTACT_LABEL_TRANSLATIONS.get((language or "").strip().lower())
+    if not table:
+        return label
+    canonical = _label_canonical_field(label)
+    if canonical and canonical in table:
+        return table[canonical]
+    return label
 
 
 def _replace_labeled_line_value(text: str, label: str, value: str) -> tuple[str, int]:
@@ -195,19 +345,19 @@ def restore_missing_requested_directory_fields(
     field_sets: Iterable[dict[str, object]],
     question: str,
 ) -> tuple[str, list[str]]:
-    """Restore the exact structured directory field explicitly requested.
+    """Restore the exact structured directory field(s) explicitly requested.
 
     Directory prompts can contain a complete field while the generated answer
-    accidentally leaves its value blank. Only the requested field is eligible
-    here, and only from the highest-ranked record, so unrelated fields and
-    neighboring countries cannot be appended.
+    accidentally leaves its value blank. Only fields the question confidently
+    names are eligible, and only from the highest-ranked (primary) record, so
+    unrelated fields and neighboring countries can never be appended. A
+    request naming several fields (e.g. "payment methods and delivery cost")
+    restores each one found in the primary record and silently skips any
+    field the record does not have - it never invents the missing one.
     """
     original = (answer or "").strip()
-    question_text = (question or "").casefold()
-    requested_patterns: list[re.Pattern[str]] = []
-    if re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
-        requested_patterns.append(re.compile(r"^business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?$", re.IGNORECASE))
-    if not requested_patterns:
+    requested = _requested_directory_field_set(question)
+    if not requested:
         return original, []
 
     primary_fields = next((fields for fields in field_sets if fields), {})
@@ -215,7 +365,10 @@ def restore_missing_requested_directory_fields(
     for raw_label, raw_value in primary_fields.items():
         label = str(raw_label).strip()
         value = str(raw_value).strip()
-        if not label or not value or not any(pattern.search(label) for pattern in requested_patterns):
+        if not label or not value:
+            continue
+        canonical = _label_canonical_field(label)
+        if canonical is None or canonical not in requested:
             continue
         if not _value_is_present(original, value):
             missing.append((label, value))
@@ -249,6 +402,62 @@ def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> 
 
 _DANGLING_LEAD_END = re.compile(
     r"(?:,\s*)?\b(?:the|a|an|and|or|with|for|to|at|in|of|from|that)\s*$",
+    re.IGNORECASE,
+)
+# --- W20-1: a connector word left dangling when its field is removed ------
+#
+# "You can reach the office by telephone at +226 ... during \nBusiness Hours
+# Office: 08:00 am - 17:00 pm." has its unrequested "Business Hours Office:
+# ..." line removed below (see remove_unrequested_directory_fields), but the
+# sentence's own lead-in word introducing that field - "during" - sits on
+# the line *before* it and is not part of that removed line, so it was left
+# dangling ("... during \nPlease note: ..."). Applied only as a post-pass
+# after a removal actually happened, and only when the connector is the very
+# last thing on its own line (so "...during office hours: 09.00-17.00" - the
+# object of "during" is still there - is left exactly alone).
+#
+# Documented limitation (W20 follow-up, intentionally not changed): the
+# mandatory `\s+` after the connector word means this only fires when some
+# trailing whitespace still separates the connector from the end of the
+# line - i.e. the shape produced by removing a field that sat on its own
+# following line, as in the example above. A connector immediately abutting
+# the end of the line with no whitespace at all ("...during" with nothing
+# after it, not even a trailing space) is not recognised and is left as is.
+_DANGLING_FIELD_CONNECTOR_RE = re.compile(
+    r"(?:,\s*)?\b(?:during|from|between|on|at|for|in|with)\s+(?:the\s+)?$",
+    re.IGNORECASE,
+)
+
+
+def _strip_dangling_field_connectors(text: str) -> str:
+    """Drop a connector word left with nothing after it on its own line."""
+    lines = text.split("\n")
+    for index, line in enumerate(lines):
+        if _DANGLING_FIELD_CONNECTOR_RE.search(line):
+            lines[index] = _DANGLING_FIELD_CONNECTOR_RE.sub("", line).rstrip()
+    return "\n".join(lines)
+
+
+# --- W20-2: a label the removal above cannot see because it has no value --
+#
+# Restoring a missing contact (restore_missing_directory_contacts) can
+# append a fully labelled "Label: value" line for a field the model had
+# already started but never finished - leaving its own valueless heading
+# ("Office & Product Centre", no colon, nothing after it) untouched
+# elsewhere in the answer. When that field is not actually requested, the
+# freshly appended value line is removed again by the pattern above, but the
+# earlier bare heading - lacking a colon - never matched that pattern and
+# survives alone. This intentionally looser pattern (address optional,
+# either "center" or "centre") exists only to find such a *valueless*
+# leftover heading at the very end of the answer so it can be dropped too;
+# it is never used to remove a label that still has its value.
+_BARE_DIRECTORY_LABEL_RE = re.compile(
+    r"^\**(?:"
+    r"office\s*(?:&|and)\s*product\s+cent(?:er|re)(?:\s+address)?|"
+    r"telephone\s+for\s+orders|telephone(?:\s+office)?|phone(?:\s*\d+)?|"
+    r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|"
+    r"address|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?"
+    r")\**$",
     re.IGNORECASE,
 )
 _SCAFFOLDING_LEAD = re.compile(
@@ -297,9 +506,69 @@ def _remove_field_sentences(answer: str, pattern: re.Pattern) -> tuple[str, int]
     return re.sub(r"\n{3,}", "\n\n", repaired), len(spans)
 
 
-def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str, bool]:
-    """Remove extra labelled directory fields when one field was requested."""
+def _strip_trailing_bare_directory_label(text: str, protected: set[str]) -> str:
+    """Drop a directory field label left dangling with no value at the end.
+
+    A label is only ever useful attached to its value. If everything after a
+    heading-only label (no colon, nothing following it) has already been
+    removed - see :data:`_BARE_DIRECTORY_LABEL_RE` - the bare heading itself
+    is dropped along with the blank line that led into it, rather than left
+    standing alone. Never touches a label still holding its value, and never
+    touches one named in ``protected`` (e.g. an explicitly kept supplemental
+    contact label).
+    """
+    stripped = (text or "").rstrip()
+    if not stripped:
+        return text or ""
+    last_break = stripped.rfind("\n")
+    last_line = stripped[last_break + 1 :]
+    candidate = last_line.strip()
+    if candidate.casefold() in protected:
+        return stripped
+    if _BARE_DIRECTORY_LABEL_RE.match(candidate):
+        stripped = stripped[:last_break] if last_break != -1 else ""
+    return stripped.rstrip()
+
+
+_ORPHANED_BULLET_LINE_RE = re.compile(r"^[ \t]*(?:[-*][ \t]*)+$")
+
+
+def _strip_orphaned_bullet_lines(text: str) -> str:
+    """Drop bullet markers left with nothing after them on their own line.
+
+    Bulleting a contact block's fields (see :func:`build_support_contact_supplement`
+    and :func:`restore_missing_directory_contacts`) lets each survive as its own
+    row in the widget's renderer instead of collapsing into one run-on
+    paragraph. When one of those fields turns out to be unrequested, the
+    removal pattern below matches "Label: value" through its trailing
+    newline - the "- " marker sits before that match, outside it, and is
+    left standing. Removing that newline can also merge two such orphaned
+    markers onto the very same line (one field's leftover "- " immediately
+    followed by the next field's own "- ", becoming "- -"), which is why
+    this matches one-or-more repeated markers, not just one. A real bulleted
+    item, however short its text, is left completely alone.
+    """
+    lines = (text or "").split("\n")
+    kept = [line for line in lines if not _ORPHANED_BULLET_LINE_RE.match(line)]
+    return "\n".join(kept)
+
+
+def remove_unrequested_directory_fields(
+    answer: str,
+    question: str,
+    *,
+    keep_labels: Iterable[str] = (),
+) -> tuple[str, bool]:
+    """Remove extra labelled directory fields when only some were requested.
+
+    ``keep_labels`` names exact labels (as they appear in the answer, e.g.
+    ``"Office Phone"``) that must never be removed even though the question
+    does not name their field - used to protect an explicitly approved
+    supplemental contact block (see :func:`build_support_contact_supplement`)
+    from being deleted again by this cleanup pass.
+    """
     question_text = (question or "").casefold()
+    protected = {str(label).strip().casefold() for label in keep_labels if str(label).strip()}
     # Remove only a standalone French orders sentence for a single-field request.
     if (re.search(r"\b(?:téléphone|numéro)\b", question_text)
             and re.search(r"\b(?:bureau|réception)\b", question_text)
@@ -313,17 +582,11 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
     if re.search(r"\b(all|every|complete)\s+(contact|directory)|\bcontact details?\b", question_text):
         return answer, False
 
-    if re.search(r"\b(phone|telephone)\b", question_text):
-        allowed = r"telephone(?!\s+for\s+orders)(?:\s+office)?|phone(?:\s*\d+)?"
-    elif re.search(r"\b(email|e-mail)\b", question_text):
-        allowed = r"email|e-mail"
-    elif re.search(r"\b(website|web site|url)\b", question_text):
-        allowed = r"website|web site|url"
-    elif re.search(r"\b(address|located|location)\b", question_text):
-        allowed = r"(?:office\s*(?:&|and)\s*product\s+center\s+)?address"
-    elif re.search(r"\b(business|office)\s+hours?\b|\bhours?\b", question_text):
-        allowed = r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?"
-    elif re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
+    # A dedicated minimum-order question is not one of the nine directory
+    # fields this helper set covers; it keeps its own narrow, unaffected path
+    # so an order-size answer still sheds unrelated payment/delivery/hours
+    # prose exactly as before.
+    if re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
         cleaned, replacements = _remove_field_sentences(
             answer or "",
             re.compile(
@@ -333,22 +596,529 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
             ),
         )
         return cleaned.strip(), replacements > 0
-    else:
+
+    requested = _requested_directory_field_set(question_text)
+    if not requested:
+        # The request is not confidently understood as naming a specific
+        # field - do not destructively strip anything based on a guess.
         return answer, False
+
+    allowed_parts = [_FIELD_ALLOWED_LINE_FRAGMENTS[key] for key in requested if key in _FIELD_ALLOWED_LINE_FRAGMENTS]
+    allowed = "|".join(allowed_parts) if allowed_parts else r"(?!)"
 
     labels = (
         r"telephone\s+for\s+orders|telephone(?:\s+office)?|phone(?:\s*\d+)?|"
         r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|"
-        r"office\s*(?:&|and)\s*product\s+center\s+address|address|fax|email|website"
+        r"office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+address|address|fax|email|website|"
+        r"payment\s+methods?(?:\s+accepted)?|delivery\s+(?:cost|charge|fee)s?|"
+        r"(?:average\s+)?(?:delivery|lead)\s+time"
     )
+
+    def _strip_unless_protected(match: re.Match[str]) -> str:
+        if match.group("label").strip().casefold() in protected:
+            return match.group(0)
+        return ""
+
+    # An unrequested label that sits inside a parenthetical aside within a
+    # sentence - "...at +223 44 90 05 41 (Business Hours: 08:00 am - 12:00
+    # pm)." - must not be handled by the line-wide removal below: cutting
+    # from "Business Hours:" to end-of-line leaves the sentence ending on an
+    # unmatched "(", which the output validator then flags as an incomplete
+    # answer (see tests/unit/test_demo_directory_field_parentheses.py). Remove
+    # the unrequested clauses of those asides first (every such label in the
+    # paragraph, not just the first - see _strip_unrequested_parenthetical),
+    # and let the generic line-start removal below continue to handle every
+    # other case exactly as before.
+    label_start_pattern = re.compile(
+        rf"(?<!\w)(?!{allowed}\b)(?P<label>{labels})\s*:", re.IGNORECASE,
+    )
+    # Work paragraph-by-paragraph (split on a blank line) rather than one
+    # line at a time: a parenthetical aside can itself wrap onto a second
+    # physical line ("(Business Hours: 08:00 am\n- 12:00 pm)"), and scanning
+    # only within a single line can never find that aside's true closing
+    # ")" - see tests/unit/test_demo_directory_field_parentheses.py. Stopping
+    # at a blank line keeps an unrelated later record from ever being treated
+    # as "inside" an earlier paren. (An aside whose own ")" only appears after
+    # a blank line is therefore treated as unclosed - a documented residual.)
+    paragraphs = re.split(r"(\n\s*\n)", answer or "")
+    paren_changes = 0
+    for index, chunk in enumerate(paragraphs):
+        if index % 2:
+            continue  # the blank-line separator itself; leave untouched
+        paragraphs[index], removed = _strip_unrequested_parenthetical(
+            chunk, label_start_pattern, protected, labels
+        )
+        paren_changes += removed
+    de_parenthesized = "".join(paragraphs)
+
     pattern = re.compile(
         rf"(?<!\w)(?!{allowed}\b)(?P<label>{labels})\s*:\s*[^\n]*(?:\n|$)",
         re.IGNORECASE,
     )
-    cleaned, replacements = pattern.subn("", answer or "")
+    cleaned, replacements = pattern.subn(_strip_unless_protected, de_parenthesized)
+
+    # Only "Label: value" lines are removed. This runs on every answer, and a
+    # sentence-level pass cut policy prose ("Returns are free, but the delivery
+    # cost is not refunded." became "Returns are free, but.") and split
+    # "09.00 am" at its dot (tests/unit/test_demo_directory_prose_preservation.py).
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, replacements > 0
+    changed = replacements > 0 or paren_changes > 0
+    if changed:
+        # W20-1/W20-2: a removal above can leave its own lead-in connector
+        # word dangling on the line before it, or (when a value line just
+        # restored was itself the thing removed) a valueless label heading
+        # dangling at the very end - see both helpers for the exact shapes.
+        # A bulleted field's own now-empty "- " marker is a third, distinct
+        # shape (see _strip_orphaned_bullet_lines) and is cleared before the
+        # bare-label check, so that check still sees the true last line.
+        cleaned = _strip_dangling_field_connectors(cleaned)
+        cleaned = _strip_orphaned_bullet_lines(cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        cleaned = _strip_trailing_bare_directory_label(cleaned, protected)
+    return cleaned, changed
+
+
+_PAREN_EVENT_RE = re.compile(r"[()\n]")
+_PAREN_CLAUSE_CHAR_RE = re.compile(r"[()\[\];,.!?\n]")
+# An abbreviation that introduces what follows ("(e.g. Fax: ...)") is never a
+# clause boundary, even before a label: splitting there would leave a bare,
+# meaningless "(e.g.)" once the unrequested clause after it is dropped.
+_PAREN_INTRODUCER_ABBREVIATION_RE = re.compile(
+    r"(?<![\w.])(?:e\.g|i\.e|cf|viz|vs|no)\.$", re.IGNORECASE,
+)
+# A short token ("Sat.", "ext.", "Mob.", "pm."), a dotted abbreviation
+# ("a.m.", "p.m.") or a known longer abbreviation is a continuation of the
+# value it sits in, not a sentence end - unless a directory label follows.
+_PAREN_SHORT_ABBREVIATION_RE = re.compile(
+    r"(?<![\w.])(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|"
+    r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+    r"ext|mob|tel|fax|st|rd|ave|dr|mr|mrs|ms|hr|hrs|min|etc|approx|"
+    r"(?:[^\W\d_]\.)+[^\W\d_])\.$",
+    re.IGNORECASE,
+)
+# "am."/"pm." (or "a.m."/"p.m.") close an hours value: a capitalised word
+# that follows them and is not a continuation word starts new prose.
+_PAREN_MERIDIEM_RE = re.compile(r"(?<![\w.])(?:a\.?m|p\.?m)\.$", re.IGNORECASE)
+_PAREN_NEXT_WORD_RE = re.compile(r"\s*([^\W\d_][\w'’-]*)")
+# Capitalised words that continue an hours/contact value after a "." rather
+# than starting new prose: "(Business Hours: 8-12. Saturday 9-1)" or
+# "(Business Hours: 8-12. Mobile 0722 123 456)" is one unrequested clause.
+_PAREN_CONTINUATION_WORDS = frozenset({
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
+    "weekdays", "weekends", "weekend",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    "mobile", "mob", "cell", "cellphone", "tel", "telephone", "phone", "whatsapp",
+    "ext", "extension", "sms", "hotline", "toll", "fax",
+    "closed", "open", "opening", "except", "excluding", "including", "holidays",
+    "holiday", "public", "lunch", "noon", "midnight", "am", "pm",
+    "and", "or", "to", "until", "till", "through",
+})
+
+
+def _is_paren_clause_boundary(
+    text: str, index: int, start: int, stop: int, label_follow_re: re.Pattern[str]
+) -> bool:
+    """Decide whether the ";", ",", ".", "!" or "?" at ``index`` ends a clause.
+
+    ";" always does. "," only does when another known directory label follows
+    (so "08:00 am - 12:00 pm, Monday-Friday" stays one value). "!"/"?" do when
+    followed by whitespace or the end of the aside. "." is the ambiguous one -
+    "9 a.m. - 5 p.m.", "Sat. 9-1", "ext. 12", "Mob. 0722 ..." all contain a
+    "." + space that is not a sentence end - so it only ends a clause when a
+    directory label follows it, or when what follows clearly starts new prose
+    (a capitalised word that is not a weekday, month or contact/hours
+    continuation word) and the "." does not close an abbreviation. When in
+    doubt the text stays in the same clause: for an unrequested clause that
+    means its whole value is removed rather than a fragment of it kept.
+    """
+    char = text[index]
+    if char == ";":
+        return True
+    if char in ",\n":
+        # A "Label: value" line inside a multi-line aside is its own clause.
+        return label_follow_re.match(text, index + 1, stop) is not None
+    following = index + 1
+    if following < stop and not text[following].isspace():
+        return False
+    if char != "." or following >= stop:
+        return True
+    window = max(start, index - 16)
+    if _PAREN_INTRODUCER_ABBREVIATION_RE.search(text, window, following):
+        return False
+    if label_follow_re.match(text, following, stop):
+        return True
+    if (not _PAREN_MERIDIEM_RE.search(text, window, following)
+            and _PAREN_SHORT_ABBREVIATION_RE.search(text, window, following)):
+        return False
+    word = _PAREN_NEXT_WORD_RE.match(text, following, stop)
+    if not word or not word.group(1)[:1].isupper():
+        return False
+    return word.group(1).rstrip(".").casefold() not in _PAREN_CONTINUATION_WORDS
+
+
+def _paren_clause_bounds(
+    text: str,
+    start: int,
+    stop: int,
+    child_spans: list[tuple[int, int]],
+    close_of: dict[int, int],
+    label_follow_re: re.Pattern[str],
+) -> list[tuple[int, int]]:
+    """Split ``text[start:stop]`` (an aside's inner text) into clause ranges.
+
+    Only characters at bracket depth 0 can end a clause. Already-processed
+    nested asides (``child_spans``) are skipped as atomic units, a matched
+    nested "(...)" or "[...]" raises the depth, and an unmatched stray "("
+    (an emoticon, a typo) does not - so it can never stop every later clause
+    boundary from being seen. The boundary character stays attached to the
+    clause before it, so a dropped clause takes its terminator with it.
+    """
+    bounds: list[tuple[int, int]] = []
+    clause_start = start
+    depth = 0
+    position = start
+    for span_start, span_stop in [*child_spans, (stop, stop)]:
+        for found in _PAREN_CLAUSE_CHAR_RE.finditer(text, position, span_start):
+            index = found.start()
+            char = text[index]
+            if char == "(":
+                if index in close_of:
+                    depth += 1
+            elif char == "[":
+                depth += 1
+            elif char in ")]":
+                if depth:
+                    depth -= 1
+            elif not depth and _is_paren_clause_boundary(text, index, start, stop, label_follow_re):
+                bounds.append((clause_start, index + 1))
+                clause_start = index + 1
+        position = span_stop
+    bounds.append((clause_start, stop))
+    return bounds
+
+
+def _rstrip_parts(parts: list[str], chars: str | None) -> None:
+    while parts:
+        stripped = parts[-1].rstrip(chars)
+        if stripped:
+            parts[-1] = stripped
+            return
+        parts.pop()
+
+
+def _render_paren_span(
+    text: str,
+    start: int,
+    stop: int,
+    kids: list[int],
+    nodes: list[list],
+    results: list[tuple[str | None, bool, str] | None],
+) -> str:
+    """Render ``text[start:stop]`` with its processed nested asides applied.
+
+    A kept aside is substituted with its rewritten "(...)". A dropped closed
+    aside is removed together with the spaces before it; a dropped unclosed
+    aside (which ran to the end of its line) also takes trailing whitespace
+    and re-terminates the sentence before it with "." when needed. A dropped
+    aside that carried one half of a "**" bold pair leaves one "**" at the
+    seam so the bold markers stay balanced.
+    """
+    parts: list[str] = []
+    position = start
+    seam = ""
+
+    def _append_text(piece: str) -> None:
+        nonlocal seam
+        if seam:
+            # The dropped aside's odd "**" paired with one right outside it:
+            # cancel that one instead of writing "****".
+            if parts and parts[-1].endswith("**"):
+                parts[-1] = parts[-1][:-2]
+            elif piece.lstrip(" \t").startswith("**"):
+                piece = piece.replace("**", "", 1)
+            else:
+                parts.append(seam)
+            seam = ""
+        parts.append(piece)
+
+    for kid in kids:
+        opener, kid_stop, _closed = nodes[kid]
+        _append_text(text[position:opener])
+        kept, closed, bold = results[kid]
+        if kept is not None:
+            _append_text(kept)
+        elif closed:
+            _rstrip_parts(parts, " \t")
+            seam = bold
+        else:
+            _rstrip_parts(parts, None)
+            seam = bold
+            if not parts or parts[-1][-1] not in ".!?":
+                _append_text(".")
+        position = kid_stop
+    _append_text(text[position:stop])
+    return "".join(parts)
+
+
+def _match_parens(text: str) -> dict[int, int]:
+    """Map every "(" that has a matching ")" to that ")" in one stack pass."""
+    close_of: dict[int, int] = {}
+    pending: list[int] = []
+    for event in _PAREN_EVENT_RE.finditer(text):
+        index = event.start()
+        if text[index] == "(":
+            pending.append(index)
+        elif text[index] == ")" and pending:
+            close_of[pending.pop()] = index
+    return close_of
+
+
+def _paren_label_owner(
+    open_stack: list[tuple[int, int]],
+    line_start: int,
+    extended_opener: dict[int, int],
+) -> tuple[int, bool] | None:
+    """Return ``(opener, closed)`` for the aside a label sits in, or ``None``.
+
+    ``open_stack`` holds the "(" still open at the label, each paired with the
+    innermost *matched* "(" at or below it. The innermost matched "(" wins;
+    otherwise the nearest unmatched "(" on the label's own line, taking a run
+    of directly adjacent unmatched "(((" together. A stray "(" on an earlier
+    line, or none at all, leaves the label to the caller's line-wide pass.
+    """
+    if not open_stack:
+        return None
+    innermost_matched = open_stack[-1][1]
+    if innermost_matched >= 0:
+        return innermost_matched, True
+    top = open_stack[-1][0]
+    if top < line_start:
+        return None
+    opener = extended_opener.get(top)
+    if opener is None:
+        level = len(open_stack) - 1
+        while level > 0:
+            below = open_stack[level - 1][0]
+            # Only a run of directly adjacent "((("; a separate stray such
+            # as the "(" of "Call :( (" keeps its own text.
+            if below < line_start or below + 1 != open_stack[level][0]:
+                break
+            level -= 1
+        opener = open_stack[level][0]
+        extended_opener[top] = opener
+    return opener, False
+
+
+def _assign_paren_owners(
+    text: str, label_starts: list[int], close_of: dict[int, int]
+) -> tuple[dict[int, list[int]], dict[int, bool], list[int]]:
+    """Assign each label start to its aside's opener in one linear sweep.
+
+    Also returns the newlines that sit outside every matched "(...)" - the
+    places an unclosed aside can end.
+    """
+    owned: dict[int, list[int]] = {}
+    closed_owner: dict[int, bool] = {}
+    extended_opener: dict[int, int] = {}
+    open_stack: list[tuple[int, int]] = []
+    depth0_newlines: list[int] = []
+    line_start = 0
+    label_index = 0
+    events = [event.start() for event in _PAREN_EVENT_RE.finditer(text)]
+    events.append(len(text))
+    for index in events:
+        while label_index < len(label_starts) and label_starts[label_index] < index:
+            owner = _paren_label_owner(open_stack, line_start, extended_opener)
+            if owner is not None:
+                owned.setdefault(owner[0], []).append(label_starts[label_index])
+                closed_owner[owner[0]] = owner[1]
+            label_index += 1
+        char = text[index : index + 1]
+        if char == "(":
+            innermost = index if index in close_of else (open_stack[-1][1] if open_stack else -1)
+            open_stack.append((index, innermost))
+        elif char == ")":
+            if open_stack:
+                open_stack.pop()
+        elif char == "\n":
+            if not open_stack or open_stack[-1][1] < 0:
+                depth0_newlines.append(index)
+            line_start = index + 1
+    return owned, closed_owner, depth0_newlines
+
+
+def _unclosed_aside_stop(text: str, opener: int, depth0_newlines: list[int]) -> int:
+    """An unclosed aside runs to the end of its line (before any "\\r\\n")."""
+    newline = bisect.bisect_right(depth0_newlines, opener)
+    if newline >= len(depth0_newlines):
+        return len(text)
+    stop = depth0_newlines[newline]
+    return stop - 1 if stop > opener + 1 and text[stop - 1] == "\r" else stop
+
+
+def _build_paren_nodes(
+    text: str,
+    owned: dict[int, list[int]],
+    closed_owner: dict[int, bool],
+    close_of: dict[int, int],
+    depth0_newlines: list[int],
+) -> tuple[list[list], list[list[int]], list[list[int]], list[int], list[int]]:
+    """Build the nesting tree of affected asides (in opener order)."""
+    nodes: list[list] = []
+    node_labels: list[list[int]] = []
+    for opener in sorted(owned):
+        closed = closed_owner[opener]
+        stop = close_of[opener] + 1 if closed else _unclosed_aside_stop(text, opener, depth0_newlines)
+        nodes.append([opener, stop, closed])
+        node_labels.append(owned[opener])
+
+    children: list[list[int]] = [[] for _ in nodes]
+    root_children: list[int] = []
+    order: list[int] = []
+    chain: list[int] = []
+    for node_index, (opener, stop, _closed) in enumerate(nodes):
+        while chain and nodes[chain[-1]][1] <= opener:
+            chain.pop()
+        if chain and stop > nodes[chain[-1]][1]:
+            continue  # not properly nested; leave that aside untouched
+        (children[chain[-1]] if chain else root_children).append(node_index)
+        chain.append(node_index)
+        order.append(node_index)
+    return nodes, node_labels, children, root_children, order
+
+
+def _append_bold_before_separators(piece: str) -> str:
+    body = piece.rstrip(" \t\r\n;,")
+    return body + "**" + piece[len(body):]
+
+
+def _prepend_bold_after_separators(piece: str) -> str:
+    body = piece.lstrip(" \t\r\n;,")
+    return piece[: len(piece) - len(body)] + "**" + body
+
+
+def _rewrite_paren_node(
+    text: str,
+    node_index: int,
+    tree: tuple[list[list], list[list[int]], list[list[int]]],
+    results: list[tuple[str | None, bool, str] | None],
+    close_of: dict[int, int],
+    label_follow_re: re.Pattern[str],
+) -> None:
+    """Drop the clauses of one aside that hold its own unrequested labels.
+
+    Nested affected asides must already have a result. A dropped run of
+    clauses that carried an odd number of "**" leaves one "**" at the seam:
+    after the kept text when that text has an unclosed bold, otherwise just
+    before the next kept clause - never "****".
+    """
+    nodes, node_labels, children = tree
+    opener, stop, closed = nodes[node_index]
+    kids = children[node_index]
+    bounds = _paren_clause_bounds(
+        text,
+        opener + 1,
+        stop - 1 if closed else stop,
+        [(nodes[kid][0], nodes[kid][1]) for kid in kids],
+        close_of,
+        label_follow_re,
+    )
+    labels_here = node_labels[node_index]
+    kept_parts: list[str] = []
+    kept_bold = 0
+    pending_bold = 0
+    kid_cursor = 0
+    for clause_start, clause_stop in bounds:
+        kid_end = kid_cursor
+        while kid_end < len(kids) and nodes[kids[kid_end]][0] < clause_stop:
+            kid_end += 1
+        piece = _render_paren_span(text, clause_start, clause_stop, kids[kid_cursor:kid_end], nodes, results)
+        kid_cursor = kid_end
+        label_at = bisect.bisect_left(labels_here, clause_start)
+        if label_at < len(labels_here) and labels_here[label_at] < clause_stop:
+            pending_bold ^= piece.count("**") & 1
+            continue
+        if not piece.strip(" \t\r\n;,"):
+            continue
+        if pending_bold and kept_bold & 1:
+            kept_parts[-1] = _append_bold_before_separators(kept_parts[-1])
+            kept_bold += 1
+        elif pending_bold:
+            piece = _prepend_bold_after_separators(piece)
+        pending_bold = 0
+        kept_parts.append(piece)
+        kept_bold += piece.count("**")
+    if pending_bold and kept_parts:
+        kept_parts[-1] = _append_bold_before_separators(kept_parts[-1])
+        pending_bold = 0
+
+    new_inner = "".join(kept_parts).strip()
+    new_inner = re.sub(r"^[;,]\s*", "", new_inner).rstrip(" ;,").strip()
+    if new_inner:
+        results[node_index] = ("(" + new_inner + ")", closed, "")
+        return
+    if closed:
+        # Take a now-empty enclosing "(...)" ("((Fax: 1))") with it rather
+        # than leaving "()" behind.
+        while opener > 0 and text[opener - 1] == "(" and close_of.get(opener - 1) == stop:
+            opener -= 1
+            stop += 1
+        nodes[node_index][0], nodes[node_index][1] = opener, stop
+    results[node_index] = (None, closed, "**" if pending_bold else "")
+
+
+def _strip_unrequested_parenthetical(
+    text: str, label_start_pattern: re.Pattern[str], protected: set[str], labels: str
+) -> tuple[str, int]:
+    """Remove only the unrequested labels' own clauses inside "(...)" asides.
+
+    Every unrequested, unprotected label in ``text`` (one paragraph) is
+    considered - a label at the start of a line, or one named in
+    ``keep_labels``, is skipped rather than ending the scan, so a later
+    parenthetical label in the same paragraph is still handled here (the
+    caller's end-of-line removal would otherwise cut it to a dangling "(").
+
+    Bracket matching is computed once, in one linear stack pass. A label
+    belongs to the innermost "(" before it that has a matching ")" after it;
+    if no enclosing "(" is matched, to the nearest unmatched "(" on the same
+    line (see :func:`_paren_label_owner`), with the aside running to the end
+    of that line. A stray "(" on an earlier line - "Prices (see below",
+    "Sorry :(" - therefore never swallows a later, real aside. Labels outside
+    any aside are left for the caller's line-wide removal.
+
+    Each affected aside is split into clauses (see
+    :func:`_paren_clause_bounds`); only clauses holding one of its own
+    unrequested labels are dropped, so a requested field or plain prose in
+    the same aside survives. If nothing meaningful survives, the whole aside
+    (and the spaces before it, and any now-empty enclosing "(...)") goes; an
+    unclosed aside that keeps something is closed with ")". Nested affected
+    asides are processed innermost-first.
+
+    Returns the rewritten text and the number of asides changed.
+    """
+    label_starts = [
+        found.start()
+        for found in label_start_pattern.finditer(text)
+        if found.group("label").strip().casefold() not in protected
+    ]
+    if not label_starts:
+        return text, 0
+    close_of = _match_parens(text)
+    owned, closed_owner, depth0_newlines = _assign_paren_owners(text, label_starts, close_of)
+    if not owned:
+        return text, 0
+    nodes, node_labels, children, root_children, order = _build_paren_nodes(
+        text, owned, closed_owner, close_of, depth0_newlines
+    )
+    label_follow_re = re.compile(rf"\s*(?:{labels})\s*:", re.IGNORECASE)
+    results: list[tuple[str | None, bool, str] | None] = [None] * len(nodes)
+    for node_index in reversed(order):
+        _rewrite_paren_node(text, node_index, (nodes, node_labels, children), results, close_of, label_follow_re)
+    return _render_paren_span(text, 0, len(text), root_children, nodes, results), len(order)
 
 
 # A minimum-order field value is a figure with at most a currency equivalent,
@@ -356,38 +1126,150 @@ def remove_unrequested_directory_fields(answer: str, question: str) -> tuple[str
 # the capture ran into rather than a value worth restoring.
 _MAX_RESTORED_VALUE_CHARS = 80
 
+# --- B2: minimum amount to start as an FBO --------------------------------
+#
+# The old capture used `[^.\n]+`, which stops at the *first* period - so a
+# decimal value like "9.440 TND" was truncated to "9" and everything after
+# the point was dropped. A period is only a genuine field boundary when it is
+# not itself part of a number (i.e. not immediately preceded AND followed by
+# a digit, as in "9.440"); `_scan_order_size_value` below walks the source
+# character by character to tell the two apart, rather than trying to encode
+# that distinction in one regex.
+_MINIMUM_WORD = r"min[ui]{1,2}mum|minimun"
+_ORDER_SIZE_QUESTION_RE = re.compile(
+    rf"\b(?:{_MINIMUM_WORD})\b[^.?!\n]*\b(?:orders?|amount|cc|size)\b"
+    rf"|\b(?:orders?|amount|cc)\b[^.?!\n]*\b(?:{_MINIMUM_WORD})\b"
+    r"|\border\s+size\b"
+    r"|\bhow\s+much\b[^.?!\n]*\b(?:start|begin|ordering|order)\b[^.?!\n]*\bfbo\b"
+    r"|\bhow\s+much\b[^.?!\n]*\bneed\b[^.?!\n]*\bstart\b"
+    r"|\b(?:smallest|least)\b[^.?!\n]*\border\b",
+    re.IGNORECASE,
+)
+# Rank qualification and the joining/registration fee are distinct fields
+# from the minimum order size, even though a question about either can also
+# contain the word "minimum" or "CC". Never answer one with the other.
+_RANK_QUALIFICATION_RE = re.compile(
+    r"\b(?:rank|qualify|qualification|supervisor|assistant\s+supervisor|manager|"
+    r"soaring\s+manager|executive)\b",
+    re.IGNORECASE,
+)
+_FEE_ONLY_RE = re.compile(r"\b(?:joining|registration|sign[- ]?up)\s+fee\b", re.IGNORECASE)
+_ONGOING_ORDER_QUESTION_RE = re.compile(
+    r"\bongoing\b|\bsubsequent\s+orders?\b|\breorder(?:ing)?\b|\brepeat\s+orders?\b|"
+    r"after\s+(?:the\s+)?first\s+order|\bcontinu\w*\s+(?:order|purchas\w*)\b",
+    re.IGNORECASE,
+)
+_PREFERRED_CUSTOMER_QUESTION_RE = re.compile(r"\bpreferred\s+customer\b", re.IGNORECASE)
+_FBO_ROLE_QUESTION_RE = re.compile(r"\bfbo\b|\bforever\s+business\s+owner\b|\bdistributor\b", re.IGNORECASE)
+
+_FIRST_ORDER_LABEL_RE = re.compile(r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*", re.IGNORECASE)
+_ONGOING_ORDER_LABEL_RE = re.compile(
+    r"(?:after\s+sponsorship|ongoing\s+(?:minimum\s+)?orders?|subsequent\s+orders?)\s*[:\-]\s*",
+    re.IGNORECASE,
+)
+_ORDER_SIZE_ROLE_HEADING_RE = re.compile(
+    r";\s*(?:preferred\s+customer|supervisor|assistant\s+supervisor|manager|home\s+office|fbo)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_order_size_question(question_text: str) -> bool:
+    """True only for a minimum-order-size request, never a fee or rank one."""
+    if _RANK_QUALIFICATION_RE.search(question_text) or _FEE_ONLY_RE.search(question_text):
+        return False
+    return bool(_ORDER_SIZE_QUESTION_RE.search(question_text))
+
+
+_ORDER_SIZE_ABBREVIATION_RE = re.compile(
+    r"(?<![^\W\d_])(?:excl|incl|approx|min|max|e\.g|i\.e|etc|vs)$",
+    re.IGNORECASE,
+)
+
+
+def _scan_order_size_value(source: str, label_pattern: re.Pattern[str]) -> str | None:
+    """Return the field value after ``label_pattern``, stopping at its true end.
+
+    A stop is: a newline; a semicolon immediately introducing a different
+    role's heading (so a decimal field followed by ``"; Preferred Customer:
+    ..."`` never absorbs the next role's text); or a period that is not part
+    of a number - i.e. not both immediately preceded and immediately followed
+    by a digit, which is what distinguishes a decimal point ("9.440") from an
+    ordinary sentence-ending period. Everything else, including an explicit
+    approximate-equivalent parenthetical such as "(around 750 MAD)" or
+    "(≈€65)", stays part of the value.
+    """
+    match = label_pattern.search(source or "")
+    if not match:
+        return None
+    text = source
+    start = match.end()
+    index = start
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\n":
+            break
+        if char == ".":
+            prev_digit = index > 0 and text[index - 1].isdigit()
+            next_digit = index + 1 < length and text[index + 1].isdigit()
+            # "€50,00 in products excl. VAT and excl. literature." - an
+            # abbreviation's period continues the value when more of the same
+            # line follows it.
+            continues_line = index + 1 < length and text[index + 1] not in "\r\n"
+            if not (prev_digit and next_digit) and not (
+                continues_line and _ORDER_SIZE_ABBREVIATION_RE.search(text, 0, index)
+            ):
+                break
+        elif char == ";" and _ORDER_SIZE_ROLE_HEADING_RE.match(text, index):
+            break
+        index += 1
+    value = " ".join(text[start:index].split()).strip().rstrip(",;")
+    return value or None
+
 
 def restore_missing_requested_order_size(
     answer: str,
     source_texts: Iterable[str],
     question: str,
 ) -> tuple[str, bool]:
-    """Restore an explicit minimum-order value when another FAQ row was selected."""
-    if not re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question or "", re.IGNORECASE):
+    """Restore an explicit minimum-order value when another FAQ row was selected.
+
+    Resolves whether the question asks about the first order or an ongoing
+    (subsequent) minimum and restores only the matching source field. Never
+    restores an FBO-labelled figure into a question that names only the
+    Preferred Customer role - the field is a different one and none of the
+    recognised source labels here carries a Preferred Customer figure.
+    """
+    question_text = question or ""
+    if not _is_order_size_question(question_text):
         return answer, False
+    if (_PREFERRED_CUSTOMER_QUESTION_RE.search(question_text)
+            and not _FBO_ROLE_QUESTION_RE.search(question_text)):
+        return answer, False
+
+    ongoing = bool(_ONGOING_ORDER_QUESTION_RE.search(question_text))
+    label_pattern = _ONGOING_ORDER_LABEL_RE if ongoing else _FIRST_ORDER_LABEL_RE
+    field_label = "After sponsorship" if ongoing else "Minimum order size FBO"
+
     corrected = answer or ""
     for source in source_texts:
-        match = re.search(
-            r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*(?P<value>[^.\n]+)",
-            source or "",
-            re.IGNORECASE,
-        )
-        if not match:
+        value = _scan_order_size_value(source or "", label_pattern)
+        if value is None:
             continue
-        value = " ".join(match.group("value").split()).strip()
-        # The capture runs to the next period or newline, so in a record whose
-        # minimum-order line continues into prose it swallows that prose too.
-        # Appending it as a sentence then ends the answer mid-phrase - which is
-        # how the Algeria answer came to end on the word "the", and be discarded
-        # whole by the output validator as structurally incomplete. A field
-        # value is short; a paragraph is not this function's to append.
+        # The scan stops at the field's true boundary, but a record with no
+        # boundary at all before the next real sentence (no period, no
+        # newline) still runs on into unrelated prose. Appending that as a
+        # sentence would end the answer mid-phrase - which is how the
+        # Algeria answer came to end on the word "the" and be discarded whole
+        # by the output validator as structurally incomplete. A field value
+        # is short; a paragraph is not this function's to append.
         if len(value) > _MAX_RESTORED_VALUE_CHARS:
             return corrected, False
-        if value and _normalize_for_comparison(value) not in _normalize_for_comparison(corrected):
-            separator = "\n\n" if corrected.strip() else ""
-            corrected = f"{corrected.strip()}{separator}Minimum order size FBO: {value}."
-            return corrected, True
-        return corrected, False
+        if _normalize_for_comparison(value) in _normalize_for_comparison(corrected):
+            return corrected, False
+        separator = "\n\n" if corrected.strip() else ""
+        corrected = f"{corrected.strip()}{separator}{field_label}: {value}."
+        return corrected, True
     return corrected, False
 
 
@@ -400,11 +1282,18 @@ def correct_directory_source_contradictions(
     changed = False
     for source in source_texts:
         source_text = source or ""
+        # Deliberately NOT re.DOTALL: `.` must not cross a newline here. A
+        # non-greedy `.*?` under DOTALL will happily bridge past an unrelated
+        # record boundary to the *nearest* "around/approximately CUR" phrase
+        # anywhere later in the string, pairing one country's CC value with
+        # another country's currency equivalent. Bounding the match to a
+        # single line/sentence keeps it to the record that actually states
+        # both the CC value and its equivalent together.
         order_match = re.search(
             r"(?P<cc>\d+(?:[.,]\d+)?\s*CC).*?(?:around|approximately)\s*"
             r"(?P<amount>[\d.,]+)\s*(?P<currency>[A-Z]{3})\b",
             source_text,
-            re.IGNORECASE | re.DOTALL,
+            re.IGNORECASE,
         )
         if order_match and re.search(re.escape(order_match.group("cc")), corrected, re.IGNORECASE):
             amount = order_match.group("amount")
@@ -415,7 +1304,7 @@ def correct_directory_source_contradictions(
                 rf"\g<1>{amount} {currency}",
                 corrected,
                 count=1,
-                flags=re.IGNORECASE | re.DOTALL,
+                flags=re.IGNORECASE,
             )
             changed = changed or replacements > 0
 
@@ -434,6 +1323,172 @@ def correct_directory_source_contradictions(
             changed = changed or replacements > 0
 
     return corrected, changed
+
+
+# --- B3: helpful customer-care contact block, without losing the answer ----
+
+# --- W20-3: localized labels for the supplemental contact block -----------
+#
+# The labels here are the ones this function can emit (see the "kind"
+# resolution below, plus "address"/"order_phone" kept for completeness since
+# a future caller may extend the picking logic to include them). The English
+# text always comes verbatim from the approved directory record itself - a
+# canonical global document - regardless of the answer's language, which is
+# correct for English answers but was also being appended, untranslated,
+# under French/German/Spanish (and other) answers. This table renders only
+# the LABEL in the answer's language; the VALUE that follows it is always
+# copied byte-for-byte from the approved record and is never touched here.
+# Reviewed translations; unknown languages, and "en" itself, fall back to the
+# record's own label text (see the ``language`` parameter below).
+#
+# W20 follow-up: "fax" was added (with a translation for every language
+# below) because restore_missing_directory_contacts - unlike
+# build_support_contact_supplement - can also append a Fax line (it restores
+# every contact field found in the record, not just phone/email/website/
+# hours), and that function now looks up this same table.
+_SUPPORT_CONTACT_LABEL_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "nl": {
+        "address": "Kantoor- en productcentrumadres",
+        "phone": "Telefoon kantoor",
+        "order_phone": "Telefoon voor bestellingen",
+        "email": "E-mail",
+        "website": "Website",
+        "business_hours": "Openingstijden",
+        "fax": "Fax",
+    },
+    "fr": {
+        "address": "Adresse du bureau et du centre de produits",
+        "phone": "Téléphone bureau",
+        "order_phone": "Téléphone pour commandes",
+        "email": "E-mail",
+        "website": "Site web",
+        "business_hours": "Heures d'ouverture",
+        "fax": "Fax",
+    },
+    "de": {
+        "address": "Adresse des Büro- und Produktcenters",
+        "phone": "Telefon Büro",
+        "order_phone": "Telefon für Bestellungen",
+        "email": "E-Mail",
+        "website": "Website",
+        "business_hours": "Geschäftszeiten",
+        "fax": "Fax",
+    },
+    "es": {
+        "address": "Dirección de la oficina y centro de productos",
+        "phone": "Teléfono de oficina",
+        "order_phone": "Teléfono para pedidos",
+        "email": "Correo electrónico",
+        "website": "Sitio web",
+        "business_hours": "Horario de oficina",
+        "fax": "Fax",
+    },
+    "it": {
+        "address": "Indirizzo dell'ufficio e centro prodotti",
+        "phone": "Telefono ufficio",
+        "order_phone": "Telefono per ordini",
+        "email": "E-mail",
+        "website": "Sito web",
+        "business_hours": "Orario d'ufficio",
+        "fax": "Fax",
+    },
+    "pt": {
+        "address": "Endereço do escritório e centro de produtos",
+        "phone": "Telefone do escritório",
+        "order_phone": "Telefone para pedidos",
+        "email": "E-mail",
+        "website": "Site",
+        "business_hours": "Horário de funcionamento",
+        "fax": "Fax",
+    },
+    "sv": {
+        "address": "Kontors- och produktcenteradress",
+        "phone": "Telefon kontor",
+        "order_phone": "Telefon för beställningar",
+        "email": "E-post",
+        "website": "Webbplats",
+        "business_hours": "Öppettider",
+        "fax": "Fax",
+    },
+}
+
+
+def build_support_contact_supplement(
+    answer: str,
+    approved_fields: dict[str, object],
+    recommends_customer_care: bool,
+    *,
+    hours_requested: bool = False,
+    language: str = "en",
+) -> tuple[str, list[str]] | None:
+    """Return a short supplemental contact block, or ``None``.
+
+    ``approved_fields`` must be the primary approved directory record - the
+    same "selected applicable record" contract used elsewhere in this module.
+    Returns ``None`` when the answer does not recommend customer care, or
+    when no approved contact exists in ``approved_fields`` at all: this is a
+    pure echo of already-approved fields and never invents a phone, email,
+    website or hours, never fetches from the web, and never exposes a
+    private contact.
+
+    At most one phone is kept (the office label and any international
+    prefix are preserved exactly as parsed - an order phone is never chosen
+    as the supplemental contact), at most one email or approved website, and
+    business hours only when ``hours_requested`` is true. The caller is
+    responsible for resolving which office is actually responsible for this
+    answer (home-market policy vs. a destination's serving office) before
+    passing that office's record here; this function does not choose between
+    records.
+
+    ``language`` renders each picked field's LABEL in that language from a
+    small reviewed table (see :data:`_SUPPORT_CONTACT_LABEL_TRANSLATIONS`)
+    instead of the record's own (always-English) label text. It never
+    translates, adds or alters a field VALUE - only which word introduces it.
+    The default ``"en"`` keeps output byte-identical to calling this function
+    without the argument at all, and any language this module does not have
+    a reviewed table for (including "en" itself) falls back to the record's
+    own label text.
+    """
+    if not recommends_customer_care or not approved_fields:
+        return None
+
+    label_table = _SUPPORT_CONTACT_LABEL_TRANSLATIONS.get((language or "").strip().lower())
+
+    picked: list[tuple[str, str]] = []
+    have_kind: set[str] = set()
+    for raw_label, raw_value in approved_fields.items():
+        label = str(raw_label).strip()
+        value = str(raw_value).strip()
+        if not label or not value or _is_self_referential_value(value):
+            continue
+        canonical = _label_canonical_field(label)
+        if canonical == "phone":
+            kind = "phone"
+        elif canonical in ("email", "website"):
+            kind = "contact_point"
+        elif canonical == "business_hours" and hours_requested:
+            kind = "business_hours"
+        else:
+            continue
+        if kind in have_kind:
+            continue
+        have_kind.add(kind)
+        if label_table and canonical in label_table:
+            label = label_table[canonical]
+        picked.append((label, value))
+
+    if not picked:
+        return None
+    # The widget's renderer only starts a new visual line at a blank line or
+    # a bullet marker; two "Label: value" lines joined by a single "\n" are
+    # merged into one run-on paragraph. A lone field reads fine as plain
+    # text, but two or more must be bulleted so each keeps its own row.
+    if len(picked) == 1:
+        label, value = picked[0]
+        block = f"{label}: {value}"
+    else:
+        block = "\n".join(f"- {label}: {value}" for label, value in picked)
+    return block, [label for label, _ in picked]
 
 
 def _is_field_label(value: str) -> bool:
