@@ -1880,6 +1880,15 @@ class OpenSearchSectionProvider:
                     selected_ids.add(row_id)
 
         if not selected:
+            LOGGER.info(
+                "opensearch_evidence_selector_no_selection",
+                correlation_id=correlation_id,
+                candidate_count=len(candidates),
+                ranks=ranks,
+                relevant_evidence=relevant_evidence,
+                top_rank_confidence=top_rank_confidence,
+                directly_answers_top_rank=directly_answers_top_rank,
+            )
             return rows
 
         remaining = [
