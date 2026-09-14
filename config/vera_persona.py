@@ -11,6 +11,12 @@ ROLE_CONTENT_SCOPES = {
     "compliance_officer": "Full policy, IDS, audit, and compliance reference content.",
 }
 
+# Keep enrollment availability separate from directory facts. A sponsoring
+# directory can retain a historical minimum-order field after a market stops
+# accepting new FBOs. Add a market here only when current approved policy
+# establishes that enrollment is unavailable.
+FBO_ENROLLMENT_UNAVAILABLE_MARKETS = frozenset({"US"})
+
 # Fallback copy keeps the same compliance boundaries, but says them in a
 # warmer, more helpful voice because these messages often become the whole
 # user-facing response.
@@ -53,3 +59,8 @@ FALLBACK_RESPONSES = {
 def role_scope_for(role: str) -> str:
     """Return the allowed content scope for a user role."""
     return ROLE_CONTENT_SCOPES.get(role, ROLE_CONTENT_SCOPES["new_prospect"])
+
+
+def fbo_enrollment_is_unavailable(country: str) -> bool:
+    """Return whether current approved policy blocks new FBO enrollment."""
+    return str(country or "").strip().upper() in FBO_ENROLLMENT_UNAVAILABLE_MARKETS

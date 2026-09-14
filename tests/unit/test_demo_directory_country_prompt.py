@@ -154,6 +154,39 @@ def test_fbo_policy_precedence_note_is_market_and_language_neutral(language: str
 
     assert "Evidence precedence for FBO enrollment" in prompt.user_prompt
     assert "Do not present a sponsoring-directory minimum-order field" in prompt.user_prompt
+    assert "Do not add a greeting, regulatory rationale" in prompt.user_prompt
+
+
+@pytest.mark.parametrize(
+    ("country", "language"),
+    [
+        ("CA", "fr"), ("AT", "de"), ("BE", "nl"), ("DK", "da"),
+        ("FI", "fi"), ("IT", "it"), ("KG", "ru"), ("NO", "no"),
+        ("RS", "sr"), ("SE", "sv"), ("GB", "en"),
+    ],
+)
+def test_fbo_policy_precedence_note_is_not_added_for_an_available_market(
+    country: str,
+    language: str,
+) -> None:
+    directory = _directory("sponsoring-001", "Example", record_country="Example")
+    directory.metadata["directory_fields"] = {"Minimum order size FBO": "50 EUR"}
+    result = RetrievalResult(
+        documents=[directory, _policy(country, "fbo-enrollment")],
+        citations=[],
+        confidence=0.95,
+        metadata={},
+    )
+    prompt = PromptBuilder().build(
+        user_question="Minimum order to become an FBO?",
+        conversation="",
+        country=country,
+        language=language,
+        role="new_prospect",
+        retrieval_result=result,
+    )
+
+    assert "Evidence precedence for FBO enrollment" not in prompt.user_prompt
 
 
 def test_italy_session_with_approved_burkina_faso_directory_record_gets_the_note() -> None:

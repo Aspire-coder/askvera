@@ -10,7 +10,7 @@ from app.metrics import STAGE_PROMPT_BUILD
 from app.metrics.pipeline import record_pipeline_metric
 from utils.directory_fields import format_directory_fields, parse_directory_fields
 from config import settings
-from config.vera_persona import role_scope_for
+from config.vera_persona import fbo_enrollment_is_unavailable, role_scope_for
 from services.market_config import (
     find_market_mentions,
     get_document_country_codes,
@@ -72,7 +72,7 @@ class PromptBuilder:
                 _foreign_directory_note(retrieval_result, country) if retrieved_documents is None else ""
             )
             fbo_eligibility_note = (
-                _fbo_eligibility_precedence_note(retrieval_result) if retrieved_documents is None else ""
+                _fbo_eligibility_precedence_note(retrieval_result, country) if retrieved_documents is None else ""
             )
             package = PromptPackage(
                 system_prompt=system_prompt,
@@ -300,7 +300,7 @@ def _foreign_directory_note(retrieval_result: RetrievalResult | None, country: s
     )
 
 
-def _fbo_eligibility_precedence_note(retrieval_result: RetrievalResult | None) -> str:
+def _fbo_eligibility_precedence_note(retrieval_result: RetrievalResult | None, country: str) -> str:
     """Keep current FBO enrollment policy ahead of directory order fields.
 
     Sponsoring directories can retain a historical minimum-order field while
@@ -308,7 +308,8 @@ def _fbo_eligibility_precedence_note(retrieval_result: RetrievalResult | None) -
     only for that mixed-evidence shape and deliberately contains no market or
     language-specific logic.
     """
-    if retrieval_result is None or not retrieval_result.documents:
+    if (retrieval_result is None or not retrieval_result.documents
+            or not fbo_enrollment_is_unavailable(country)):
         return ""
     has_fbo_order_field = False
     has_policy_evidence = False
@@ -327,5 +328,7 @@ def _fbo_eligibility_precedence_note(retrieval_result: RetrievalResult | None) -
         "Evidence precedence for FBO enrollment: if current approved policy evidence says a person "
         "cannot enroll, register, opt in, or become an FBO, state that restriction first. Do not present "
         "a sponsoring-directory minimum-order field as an available enrollment path, and do not append it "
-        "as a separate answer."
+        "as a separate answer. In that case, answer in one or two direct sentences: state the restriction "
+        "and that no current FBO minimum order applies. Do not add a greeting, regulatory rationale, "
+        "alternative-path discussion, contact details, or a closing question unless the reader asks for them."
     )

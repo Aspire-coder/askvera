@@ -47,7 +47,7 @@ from app.validation.validators.numeric_grounding_validator import (
     removal_diagnostics,
 )
 from config import settings
-from config.vera_persona import FALLBACK_RESPONSES
+from config.vera_persona import FALLBACK_RESPONSES, fbo_enrollment_is_unavailable
 from services.audit import write_audit_event
 from services.aws_clients import get_aws_clients
 from services.candidate_control import CandidateFlags, get_candidate_flags
@@ -1205,15 +1205,11 @@ class AIOrchestrator:
             )
             for document in retrieval_result.documents
         )
-        has_current_policy = any(
-            str(document.metadata.get("document_type") or "").lower() == "policy"
-            for document in retrieval_result.documents
-        )
         order_safe_answer, order_restored = restore_missing_requested_order_size(
             chat_response.answer,
             (document.content for document in retrieval_result.documents),
             user_question,
-            suppress_restore=has_fbo_order_field and has_current_policy,
+            suppress_restore=has_fbo_order_field and fbo_enrollment_is_unavailable(country),
         )
         # A restoration that leaves the answer structurally incomplete is worse
         # than the omission it fixes: the output validator discards the whole
