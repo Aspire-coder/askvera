@@ -28,12 +28,16 @@ FALLBACK_RESPONSES = {
     "income_claim": (
         "I can't share income projections or guarantees - that's not something I'm "
         "able to speak to. The official Income Disclosure Statement is the right place "
-        "for that kind of detail."
+        "for that kind of detail. Individual results may vary. Forever makes no "
+        "guarantees on income or success. The Forever Business Owner opportunity and "
+        "related incentives are not available to residents of the United States."
     ),
     "medical_claim": (
         "I'm not able to give medical advice or make claims about treating or curing "
         "anything. For anything health-related, a qualified healthcare professional is "
-        "really the right person to ask."
+        "really the right person to ask. Forever's products have not been evaluated by "
+        "the Food and Drug Administration and are not intended to diagnose, treat, "
+        "cure, or prevent any disease."
     ),
     "bedrock_error": (
         "Sorry about that - I'm having a brief technical hiccup reaching the knowledge "
