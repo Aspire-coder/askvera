@@ -19,7 +19,14 @@ from app.retrieval import RetrievalResult, RetrievedDocument
 ROOT = Path(__file__).parents[2]
 ROUTES = ROOT / "config" / "conversation_routes.json"
 TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
-ROUTES_REST_SHA256 = "1e7e6c39bf32b40b77f2293fde4f31e75411a6c6006c56b4940661bd29299003"
+# Updated 2026-09-14 for the Legal-supplied medical/income disclaimer sentences
+# (docs/legal/2026-09-07-WORDING_REVIEW_PACKET.md Ask B): every locale's
+# medical_claim and income_claim response gained an appended disclaimer
+# sentence. That is an intended, reviewed change to "the rest" of this file,
+# so the baseline digest below reflects it; anything else changing still
+# fails this test. Recomputed a second time the same day after fixing a
+# casing typo in the Russian income disclaimer ("Сша" -> "США").
+ROUTES_REST_SHA256 = "6d96b23fecb190e72e45afd435b63e155d0cbe12542509c41f663f27413a1f55"
 TEMPLATE_LATER_SHA256 = "739e46be1d5abece4c3dcadf63c724dd92dbfe6ef806c8bc17ab2af7ea5c5909"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
