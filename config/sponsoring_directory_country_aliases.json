@@ -1,0 +1,96 @@
+{
+  "version": "2026-09-14",
+  "description": "International Sponsoring Directory section-name aliases. The directory's own PDF section headings (International_Sponsoring_Directory.pdf, mirrored in metadata.record_country on the office_directory/international_sponsoring_directory records) sometimes use a different label for a market than markets.json's generic, ISO-code-based country name - because the PDF groups several countries under one office's heading (e.g. Eswatini/Swaziland/Botswana/... all under 'South Africa'), or because of historical spelling (Reunion vs the section's accented 'Réunion Island'). This table is sourced from the approved reference system prompt's 'Alias routing' section and 'The golden rule for overlaps' list: every key is a user-facing term from that list (plus the canonical section name itself), and every value is the exact record_country string the sponsoring directory extraction uses. It is consulted only to pick the sponsoring-directory target section name in find_sponsoring_directory_alias_countries()/_directory_target_country_names(); it is separate from markets.json and market_name_aliases.json (session country validation, policy-locale matching) and changes neither. A term not covered here still falls back to the existing generic market-code resolution, so no prior coverage is lost.",
+  "aliases": [
+    { "record_country": "Australia", "terms": ["Australia"] },
+    { "record_country": "Baltics", "terms": ["Baltics", "Latvia", "Riga", "Baltic states", "Vilnius"] },
+    { "record_country": "Bangladesh", "terms": ["Bangladesh", "Bangla"] },
+    { "record_country": "Brazil", "terms": ["Brazil", "Brasil"] },
+    { "record_country": "Central America", "terms": ["Central America"] },
+    { "record_country": "China", "terms": ["China", "Mainland China", "PRC", "Xiamen"] },
+    { "record_country": "Czech Republic", "terms": ["Czech Republic", "Czechia"] },
+    {
+      "record_country": "Democratic Rep. of Congo",
+      "terms": [
+        "Democratic Rep. of Congo", "Democratic Republic of Congo", "DRC", "DR Congo", "Congo",
+        "Congo-Kinshasa", "Zaire", "Republic of Congo", "Congo-Brazzaville"
+      ]
+    },
+    {
+      "record_country": "England",
+      "terms": ["England", "UK", "United Kingdom", "Britain", "Great Britain", "British", "Wales", "Warwick"]
+    },
+    { "record_country": "France", "terms": ["France", "Paris"] },
+    {
+      "record_country": "Guinea Bissau and Guinea Conakry",
+      "terms": [
+        "Guinea Bissau and Guinea Conakry", "Guinea Bissau", "Guinea Conakry", "Conakry", "Bissau"
+      ]
+    },
+    { "record_country": "Hong Kong", "terms": ["Hong Kong", "Macau", "Macao"] },
+    {
+      "record_country": "Ireland",
+      "terms": ["Ireland", "Northern Ireland", "Republic of Ireland", "Eire"]
+    },
+    { "record_country": "Israel", "terms": ["Israel"] },
+    {
+      "record_country": "Ivory Coast",
+      "terms": ["Ivory Coast", "Cote d'Ivoire", "Côte d'Ivoire", "Abidjan"]
+    },
+    {
+      "record_country": "Kenya/East Africa",
+      "terms": ["Kenya/East Africa", "East Africa", "Nairobi", "South Sudan", "Ethiopia"]
+    },
+    { "record_country": "Korea", "terms": ["Korea", "South Korea", "Republic of Korea", "Seoul"] },
+    { "record_country": "Luxemburg", "terms": ["Luxemburg", "Luxembourg"] },
+    { "record_country": "Mexico", "terms": ["Mexico"] },
+    {
+      "record_country": "Netherlands Benelux",
+      "terms": ["Netherlands Benelux", "Holland", "Netherlands", "Dutch", "Benelux"]
+    },
+    { "record_country": "New Zealand", "terms": ["New Zealand"] },
+    {
+      "record_country": "North America",
+      "terms": [
+        "North America", "USA", "US", "U.S.", "United States", "America", "American",
+        "Canada", "Canadian", "Arizona", "Scottsdale"
+      ]
+    },
+    { "record_country": "Panama", "terms": ["Panama"] },
+    {
+      "record_country": "Réunion Island",
+      "terms": [
+        "Réunion Island", "Reunion Island", "Reunion Islands", "Reunion", "La Reunion", "Réunion", "La Réunion"
+      ]
+    },
+    { "record_country": "Scandinavia", "terms": ["Scandinavia", "Nordics", "Nordic"] },
+    { "record_country": "Scotland", "terms": ["Scotland"] },
+    { "record_country": "Senegal", "terms": ["Senegal", "Mauritania"] },
+    { "record_country": "Slovak Republic", "terms": ["Slovak Republic", "Slovakia"] },
+    {
+      "record_country": "South Africa",
+      "terms": [
+        "South Africa", "Eswatini", "Swaziland", "Botswana", "Lesotho", "Namibia",
+        "Malawi", "Mozambique", "Zimbabwe", "Zambia"
+      ]
+    },
+    { "record_country": "Spain", "terms": ["Spain", "Andorra", "Gibraltar"] },
+    {
+      "record_country": "St Marteen & St Barthelemy",
+      "terms": ["St Marteen & St Barthelemy", "St Barth", "St Barthelemy", "Saint Barthelemy"]
+    },
+    {
+      "record_country": "St. Maarten",
+      "terms": ["St. Maarten", "Sint Maarten", "Saint Martin", "St Martin", "Martinique"]
+    },
+    { "record_country": "Turkey", "terms": ["Turkey", "Turkiye", "Türkiye"] },
+    {
+      "record_country": "United Arab Emirates",
+      "terms": [
+        "United Arab Emirates", "UAE", "Emirates", "Dubai", "Abu Dhabi", "Sharjah",
+        "Saudi Arabia", "KSA", "Saudi", "Oman", "Kuwait", "Qatar", "Jordan", "Bahrain",
+        "Lebanon", "Palestine", "Middle East"
+      ]
+    }
+  ]
+}

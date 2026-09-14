@@ -40,7 +40,12 @@ KENYA_EAST_AFRICA = "Kenya/East Africa"
 
 
 def _clear_config_caches() -> None:
-    for name in ("load_market_config", "load_global_directory_markets", "load_shared_offices"):
+    for name in (
+        "load_market_config",
+        "load_global_directory_markets",
+        "load_shared_offices",
+        "_sponsoring_directory_alias_groups",
+    ):
         loader = getattr(market_config, name, None)
         if loader is not None:
             loader.cache_clear()

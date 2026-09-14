@@ -15,6 +15,9 @@ DEFAULT_GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "config" / "global_directory_markets.json"
 )
 DEFAULT_POLICY_LOCALES_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "policy_locales.json"
+DEFAULT_SPONSORING_DIRECTORY_ALIASES_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "sponsoring_directory_country_aliases.json"
+)
 REQUIRED_MARKET_FIELDS = {"code", "name", "enabled", "defaultLanguage", "languages", "privacyVersion", "displayOrder"}
 REQUIRED_LANGUAGE_FIELDS = {"code", "name", "enabled"}
 
@@ -123,6 +126,228 @@ def find_shared_office_record_countries(message: str) -> set[str]:
                 continue
             record_countries.add(office["record_country"])
     return record_countries
+
+
+def _sponsoring_directory_aliases_path() -> Path:
+    return Path(
+        os.environ.get(
+            "SPONSORING_DIRECTORY_ALIASES_CONFIG_PATH",
+            DEFAULT_SPONSORING_DIRECTORY_ALIASES_CONFIG_PATH,
+        )
+    )
+
+
+@lru_cache(maxsize=1)
+def _sponsoring_directory_alias_groups() -> tuple[dict[str, Any], ...]:
+    """Load the raw ``record_country -> terms`` groups from
+    ``config/sponsoring_directory_country_aliases.json``.
+
+    Kept separate from ``load_sponsoring_directory_country_aliases()``, the
+    flattened ``term -> record_country`` map most callers (including that
+    function itself) actually want, so the raw per-group term lists stay
+    available to anything that needs them later. A missing or malformed
+    file fails open to an empty tuple, matching how the other market config
+    loaders degrade.
+    """
+    path = _sponsoring_directory_aliases_path()
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return ()
+    entries = payload.get("aliases") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        return ()
+    groups: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        record_country = str(entry.get("record_country") or "").strip()
+        terms = entry.get("terms")
+        if not record_country or not isinstance(terms, list):
+            continue
+        normalized_terms = frozenset(
+            normalized
+            for term in terms
+            if isinstance(term, str) and (normalized := _normalize_market_text(term))
+        )
+        if normalized_terms:
+            groups.append({"record_country": record_country, "terms": normalized_terms})
+    return tuple(groups)
+
+
+def load_sponsoring_directory_country_aliases() -> dict[str, str]:
+    """Return the International Sponsoring Directory's own section-name aliases.
+
+    A mapping of normalized user-facing term -> the exact ``record_country``
+    section name the directory extraction uses for it (e.g. "uk" ->
+    "England", "eswatini" -> "South Africa"). Sourced from
+    ``config/sponsoring_directory_country_aliases.json``, kept separate from
+    ``markets.json``/``market_name_aliases.json`` because the directory's PDF
+    section headings sometimes group or spell countries differently than the
+    generic, ISO-code-based market catalog does. Built fresh from
+    ``_sponsoring_directory_alias_groups()`` (which does the actual, cached
+    file read) each call, so it is never its own separately-cached snapshot.
+    """
+    aliases: dict[str, str] = {}
+    for group in _sponsoring_directory_alias_groups():
+        for term in group["terms"]:
+            aliases[term] = group["record_country"]
+    return aliases
+
+
+def _all_configured_market_names() -> frozenset[str]:
+    """Return every normalized market/alias name known to markets.json,
+    global_directory_markets.json and market_name_aliases.json.
+
+    Used only to keep a short sponsoring-directory alias term (e.g. "Guinea")
+    from matching inside an unrelated, longer configured market name that
+    happens to contain it (e.g. "Equatorial Guinea"); it never contributes a
+    resolved country itself. Deliberately not its own lru_cache: it is cheap
+    to recompute and both loaders it reads are already cached (and cleared)
+    on their own, so a test that swaps markets.json/global_directory_markets.json
+    and clears those caches is reflected here immediately, with no separate
+    cache of its own to go stale.
+    """
+    markets = [*load_market_config()["markets"], *load_global_directory_markets()]
+    localized = _localized_market_names()
+    names: set[str] = set()
+    for market in markets:
+        code = str(market.get("code") or "").upper()
+        for name in [str(market.get("name") or ""), *localized.get(code, [])]:
+            normalized_name = _normalize_market_text(name)
+            if normalized_name:
+                names.add(normalized_name)
+    return frozenset(names)
+
+
+def superseded_market_codes_for_alias_term(term: str) -> frozenset[str]:
+    """Return the market code(s), if any, that a sponsoring-alias TERM
+    itself (not the group it belongs to) also unambiguously names via the
+    ordinary, generic mechanism.
+
+    This is the whole basis for deciding which generic market name(s) a
+    matched alias term should replace in
+    ``_directory_target_section_names()`` (``opensearch_sections.py``):
+    replace a code's generic name only when the *exact term the alias table
+    matched* is itself independently recognized by ``find_market_mentions``
+    as naming that code - i.e. it is genuinely the same market under a
+    different spelling/bundling, not merely a short word that happens to
+    sit inside some unrelated longer name.
+
+    This is what keeps the England group's "United Kingdom" replacing GB
+    (``find_market_mentions("United Kingdom") == {"GB"}``) and the Guinea
+    Bissau and Guinea Conakry group's "Guinea Conakry" replacing GN
+    (``find_market_mentions("Guinea Conakry") == {"GN"}``), while a
+    same-message but textually different alias term never wrongly
+    supersedes an unrelated code: "China" (from the China group) resolves
+    only to CN, never to HK, even though a *localized* Hong Kong alias
+    happens to contain the substring "china" ("Hong Kong SAR China") -
+    ``find_market_mentions`` requires an exact whole-name match, so it
+    never makes that substring mistake either (review round 3: an earlier
+    catalog-name-containment approach here did, and lost a real co-mentioned
+    country - "China and Hong Kong offices", "American Samoa and the US",
+    "Netherlands Antilles and Holland" - each time a short alias term
+    happened to be a substring of an unrelated market's longer name).
+    """
+    return frozenset(find_market_mentions(term))
+
+
+# A bare 2-3 letter alias term is real evidence of a country only when it
+# opens the message or immediately follows one of these locative markers
+# ("in the US", "in US") - never as an ordinary pronoun/word ("send US the
+# address", "cost US to order", i.e. lowercased "us") and never inside an
+# unrelated phrase such as a currency mention ("US dollars", preceded by
+# "to", not "in"/"the"). find_market_mentions() already excludes short codes
+# entirely for this exact reason; this table cannot drop "US" outright (it is
+# the only way some messages name North America at all - e.g. "sign up in
+# the US"), so it gets this narrower, explicit safeguard instead.
+#
+# Known accepted residual (review round 3): a sentence-OPENING bare "Us"
+# ("Us, we order from Ghana", "Us and Poland") is indistinguishable, once
+# casefolded, from a genuine sentence-opening "US" ("US minimum order?").
+# There is no cheap, reliable signal to tell them apart post-normalization
+# (case is already gone by the time this text is seen), so the "opens the
+# message" branch below stays permissive and this residual is accepted
+# rather than guarded further.
+_SHORT_ALIAS_TERM_MAX_LEN = 3
+_SHORT_ALIAS_LOCATIVE_PRECEDERS = frozenset({"in", "the"})
+
+
+def _short_alias_term_is_located(padded_message: str, padded_name: str) -> bool:
+    """True when ANY occurrence of a bare, short alias term in
+    ``padded_message`` is preceded by a locative marker or opens the
+    message. Checks every occurrence, not just the first, so "Send us the
+    address; I am in the US" still matches on its second occurrence even
+    though its first does not.
+    """
+    start = 0
+    while True:
+        index = padded_message.find(padded_name, start)
+        if index == -1:
+            return False
+        prefix = padded_message[:index].rstrip(" ")
+        if not prefix:
+            return True
+        preceding_token = prefix.rsplit(" ", 1)[-1]
+        if preceding_token in _SHORT_ALIAS_LOCATIVE_PRECEDERS:
+            return True
+        start = index + 1
+
+
+def find_sponsoring_directory_alias_matches(message: str) -> set[tuple[str, str]]:
+    """Return ``(normalized_term, record_country)`` for every sponsoring
+    alias term this message actually contains textually.
+
+    This is the detailed form ``find_sponsoring_directory_alias_countries()``
+    (below) summarizes into just the matched ``record_country`` values.
+    ``_directory_target_section_names()`` in ``opensearch_sections.py``
+    needs the term itself, not only the group it resolved to, to decide
+    which generic market name(s) it may replace - see
+    ``superseded_market_codes_for_alias_term()``.
+
+    Every configured market/alias name (including the alias terms
+    themselves) is consumed longest-name-first, exactly as
+    ``find_market_mentions`` does, so a short alias term (e.g. "Guinea
+    Bissau") cannot match inside a longer, unrelated configured market name
+    that contains it (e.g. "Fooland Guinea Bissau"); matching only the
+    sponsoring alias terms lets this run even when the message names no
+    market of its own. A bare, short (<=3 letter) single-word term such as
+    "US" additionally requires ``_short_alias_term_is_located()`` - see its
+    docstring - so it cannot fire on the pronoun "us" or inside "US dollars".
+    """
+    aliases = load_sponsoring_directory_country_aliases()
+    if not aliases:
+        return set()
+    normalized_message = _normalize_market_text(message)
+    if not normalized_message:
+        return set()
+    padded_message = f" {normalized_message} "
+    consumption_names = sorted(_all_configured_market_names() | set(aliases), key=len, reverse=True)
+    matches: set[tuple[str, str]] = set()
+    for name in consumption_names:
+        padded_name = f" {name} "
+        if padded_name not in padded_message:
+            continue
+        record_country = aliases.get(name)
+        if (
+            record_country
+            and " " not in name
+            and len(name) <= _SHORT_ALIAS_TERM_MAX_LEN
+            and not _short_alias_term_is_located(padded_message, padded_name)
+        ):
+            record_country = None
+        if record_country:
+            matches.add((name, record_country))
+        padded_message = padded_message.replace(padded_name, " ")
+    return matches
+
+
+def find_sponsoring_directory_alias_countries(message: str) -> set[str]:
+    """Return the sponsoring directory section name(s) a message's country
+    terms resolve to. See ``find_sponsoring_directory_alias_matches()`` for
+    the per-term detail this summarizes."""
+    return {record_country for _term, record_country in find_sponsoring_directory_alias_matches(message)}
 
 
 def _policy_locales_path() -> Path:

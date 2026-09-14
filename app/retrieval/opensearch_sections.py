@@ -27,9 +27,11 @@ from services.knowledge_generations import (
 from services.market_config import (
     find_market_mentions,
     find_shared_office_record_countries,
+    find_sponsoring_directory_alias_matches,
     get_document_country_codes,
     load_global_directory_markets,
     load_market_config,
+    superseded_market_codes_for_alias_term,
 )
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
@@ -741,6 +743,83 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
     } | shared_record_countries
 
 
+def _directory_target_section_names(message: str, selected_country: str) -> set[str]:
+    """Return ``_directory_target_country_names()``'s result, with any country
+    named by the International Sponsoring Directory's own alias table
+    (``config/sponsoring_directory_country_aliases.json``) relabelled to that
+    table's section name instead of its generic, ISO-code-based market name.
+
+    The directory's own PDF section headings sometimes group or spell a
+    country differently than the generic catalog does (e.g. "UK" -> the
+    generic "United Kingdom" market, but the directory's own section is
+    "England"; "Eswatini" has no section of its own and is served by
+    "South Africa"'s). This layers that relabelling on top of
+    ``_directory_target_country_names()`` rather than replacing its result
+    wholesale: only the specific country/countries an alias term actually
+    matched are substituted (its own generic name removed, the alias table's
+    section name added); every other country the base function found stays
+    exactly as it was. A message naming two countries, only one of which the
+    alias table covers ("Compare Uganda and Dubai delivery times"), keeps
+    both - Uganda untouched, Dubai's "United Arab Emirates" replacing nothing
+    since Dubai/Saudi Arabia/etc. are not otherwise named markets here.
+
+    A matched alias term supersedes a market code's generic name only when
+    that exact term is *itself* unambiguously recognized by
+    ``find_market_mentions`` as naming that code
+    (``superseded_market_codes_for_alias_term()``) - i.e. it is genuinely
+    the same market under a different spelling/bundling ("United Kingdom" is
+    both an England-group term and GB's own configured name), never merely
+    a short word that happens to be a substring of some unrelated market's
+    longer name. Review round 3: an earlier, looser containment check here
+    (matching a term against ANY of a code's name/alias variants by
+    substring) lost a genuinely co-mentioned country whenever a matched
+    term happened to sit inside an unrelated code's longer name - "China"
+    (matched via the China alias group) is a substring of Hong Kong's own
+    localized "Hong Kong SAR China", "American" (from the North America
+    group) is a prefix of "American Samoa", "Netherlands" (from the
+    Netherlands Benelux group) is a prefix of "Netherlands Antilles" - each
+    wrongly deleted the second, unrelated country from a two-country
+    message. ``find_market_mentions`` never makes that mistake (it requires
+    an exact, unambiguous whole-name match), so deferring to it here avoids
+    reintroducing this bug through a different path.
+
+    This is a separate function, not a parameter on
+    ``_directory_target_country_names()``, so every other caller of that
+    function (there is currently one, the query planner's own-market-field
+    fallback in ``app/retrieval/providers.py``) keeps asking its original,
+    narrower question with no code change and no opt-out flag to remember -
+    only the real directory search below calls this one.
+    """
+    term_matches = find_sponsoring_directory_alias_matches(message)
+    if not term_matches:
+        return _directory_target_country_names(message, selected_country)
+    generic_names = _directory_target_country_names(message, selected_country)
+    if not find_market_mentions(message) and not find_shared_office_record_countries(message):
+        # No country was actually named by the generic mechanism (only by
+        # the alias table). Whatever `generic_names` holds - empty, or the
+        # base function's own "no country named" fallback to the session's
+        # *selected* market for contact/sponsoring wording - does not
+        # describe a country this message actually mentioned, so it must not
+        # survive alongside the alias table's real match (otherwise, e.g., a
+        # "St Barthelemy office phone?" question from a US-market session
+        # would wrongly keep "United States" next to "St Marteen & St
+        # Barthelemy").
+        generic_names = set()
+    catalog = [*load_market_config().get("markets", []), *load_global_directory_markets()]
+    code_name_variants: dict[str, set[str]] = {}
+    for market in catalog:
+        code = str(market.get("code") or "").upper()
+        name = str(market.get("name") or "")
+        if code and name:
+            code_name_variants.setdefault(code, set()).add(name)
+    result = set(generic_names)
+    for term, record_country in term_matches:
+        for code in superseded_market_codes_for_alias_term(term):
+            result.difference_update(code_name_variants.get(code, ()))
+        result.add(record_country)
+    return result
+
+
 def _record_country_filter(country_names: set[str]) -> dict[str, Any] | None:
     """Build a case-tolerant filter for explicitly requested global records."""
     names = sorted({_normalize_text(name) for name in country_names if _normalize_text(name)})
@@ -1334,7 +1413,7 @@ class OpenSearchSectionProvider:
             client = _client()
             search_messages = search_plan.queries
             global_search_message = ""
-            target_country_names = _directory_target_country_names(message, country)
+            target_country_names = _directory_target_section_names(message, country)
             text_hits: list[dict[str, Any]] = []
             vector_hits: list[dict[str, Any]] = []
             explicit_section_id = _section_reference(message)
