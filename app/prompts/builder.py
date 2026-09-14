@@ -282,17 +282,15 @@ def _foreign_directory_note(retrieval_result: RetrievalResult | None, country: s
             markets.append(market)
     if not markets:
         return ""
-    selected = market_display_name(session) or session
     plural = len(markets) > 1
     record = "records" if plural else "record"
     possessives = [f"{name}'s" for name in markets]
     return (
         f"{_DIRECTORY_NOTE_PREFIX}{'s' if plural else ''} for {_join_names(markets, 'and')}. "
         f"Use {'those' if plural else 'that'} {record} for the parts of the question about "
-        f"{_join_names(possessives, 'or')} office, contact, ordering or "
-        f"delivery details, stating only what the {record} {'contain' if plural else 'contains'}; do not "
-        f"decline those parts because the selected policy country is {selected}, and do not describe the "
-        f"reader's location. The {record} {'are' if plural else 'is'} directory information only, not "
-        f"company policy for {'those markets' if plural else 'that market'}, and "
-        f"{'give' if plural else 'gives'} no access to another market's policy."
+        f"{_join_names(possessives, 'or')} office, contact, ordering or delivery details, stating only what "
+        f"the {record} {'contain' if plural else 'contains'}. Begin directly with a simple introduction to the "
+        f"{_join_names(markets, 'and')} office directory. Do not mention the selected policy "
+        f"country, the reader's location, or a policy-scope disclaimer. The {record} {'do' if plural else 'does'} "
+        f"not grant access to another market's policy."
     )
