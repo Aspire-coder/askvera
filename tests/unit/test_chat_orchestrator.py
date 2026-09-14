@@ -665,6 +665,163 @@ def test_response_completion_does_not_append_contacts_without_a_citation(monkeyp
     assert "directory_contacts_restored" not in completed.metadata
 
 
+def test_response_completion_repairs_contacts_only_from_the_named_country(monkeypatch) -> None:
+    """Neighbouring global records cannot overwrite Ghana contact details."""
+    orchestrator = AIOrchestrator()
+    ghana = RetrievedDocument(
+        id="directory-ghana",
+        title="Forever Ghana",
+        content="",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        metadata={
+            "directory_kind": "international_sponsoring",
+            "record_country": "Ghana",
+            "directory_fields": {
+                "Telephone Office": "+233 (0) 302 799 340",
+                "Email": "info@flpgh.com",
+                "Address": "Accra, Ghana",
+            },
+        },
+    )
+    guinea = RetrievedDocument(
+        id="directory-guinea",
+        title="Forever Guinea Conakry",
+        content="",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        metadata={
+            "directory_kind": "international_sponsoring",
+            "record_country": "Guinea Conakry",
+            "directory_fields": {
+                "Telephone for Orders": "+224 625 80 66 70",
+                "Email": "contact@foreversenegal.com",
+                "Address": "Conakry, Guinea",
+            },
+        },
+    )
+    response = ChatResponse(
+        answer=(
+            "Telephone for Orders: +224 625 80 66 70\n"
+            "Email: contact@foreversenegal.com\n"
+            "Address: Conakry, Guinea"
+        ),
+        citations=[ghana.to_source(), guinea.to_source()],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={},
+        correlation_id="cid",
+    )
+    result = RetrievalResult(documents=[guinea, ghana], citations=response.citations, confidence=0.8)
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+
+    completed = orchestrator._secure_and_complete_response(
+        response,
+        result,
+        "en",
+        "cid",
+        user_question="What are the Ghana office contact details?",
+        country="US",
+    )
+
+    assert "+233 (0) 302 799 340" in completed.answer
+    assert "info@flpgh.com" in completed.answer
+    assert "+224 625 80 66 70" not in completed.answer
+    assert "contact@foreversenegal.com" not in completed.answer
+    assert "Conakry, Guinea" not in completed.answer
+    assert "Accra, Ghana" in completed.answer
+
+
+def test_directory_field_repair_resolves_session_alias_among_neighbouring_records() -> None:
+    north_america = RetrievedDocument(
+        id="directory-north-america",
+        title="Forever North America",
+        content="",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        metadata={
+            "directory_kind": "international_sponsoring",
+            "record_country": "North America",
+            "directory_fields": {"Email": "us@example.test"},
+        },
+    )
+    panama = RetrievedDocument(
+        id="directory-panama",
+        title="Forever Panama",
+        content="",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        metadata={
+            "directory_kind": "international_sponsoring",
+            "record_country": "Panama/Central America",
+            "directory_fields": {"Email": "panama@example.test"},
+        },
+    )
+
+    selected = chat_orchestrator._directory_field_sets_for_response(
+        [panama, north_america],
+        "What is the office email?",
+        "US",
+    )
+
+    assert selected == [{"Email": "us@example.test"}]
+
+
+def test_conflicting_directory_values_cannot_be_presented_as_one_definitive_answer(monkeypatch) -> None:
+    def singapore(document_id: str, value: str) -> RetrievedDocument:
+        return RetrievedDocument(
+            id=document_id,
+            title="Forever Singapore",
+            content=f"Welcome to Forever Singapore!\nMinimum order size FBO\n{value}",
+            source="s3://approved/global-directory.pdf",
+            country="GLOBAL",
+            language="en",
+            metadata={
+                "directory_kind": "international_sponsoring",
+                "record_country": "Singapore",
+            },
+        )
+
+    first = singapore("singapore-p87", "Each order must be a minimum of SGD25.")
+    second = singapore("singapore-p89", "Each order must be a minimum of SGD50.")
+    response = ChatResponse(
+        answer="The minimum order is SGD50.",
+        citations=[first.to_source(), second.to_source()],
+        suggestions=[],
+        cards=[],
+        confidence=0.8,
+        metadata={},
+        correlation_id="cid",
+    )
+    monkeypatch.setattr(chat_orchestrator, "scrub_pii", lambda text, *_, **__: text)
+
+    completed = AIOrchestrator()._secure_and_complete_response(
+        response,
+        RetrievalResult(documents=[first, second], citations=response.citations, confidence=0.8),
+        "en",
+        "cid",
+        user_question="What is the minimum order to become an FBO in Singapore?",
+        country="US",
+    )
+
+    assert completed.metadata["failure_layer"] == "directory_source_conflict"
+    assert completed.metadata["fallback"] is True
+    assert "SGD50" not in completed.answer
+
+
+def test_delivery_cost_is_not_classified_as_a_catalogue_price_request() -> None:
+    orchestrator = AIOrchestrator()
+
+    response = orchestrator._insufficient_evidence_message("en", "What is the delivery cost?")
+
+    assert response != chat_orchestrator.localized_conversation_response("catalogue_scope", "en")
+
+
 def test_cached_response_runs_country_aware_final_output_cleanup(monkeypatch) -> None:
     """Legacy cached placeholders cannot bypass the current output gate."""
     orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())

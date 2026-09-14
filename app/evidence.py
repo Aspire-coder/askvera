@@ -506,6 +506,16 @@ def mentions_out_of_corpus_topic(topic: str, message: str, language: str = "") -
     normalized = _normalize_text(message)
     if not normalized:
         return False
+    # Delivery and shipping charges are operational directory fields.  The
+    # catalogue term list intentionally contains the broad word "cost", so
+    # without this boundary a question such as "What is the delivery cost?"
+    # is refused before directory retrieval can run.
+    if topic == "catalogue" and re.search(
+        r"\b(?:delivery|shipping|courier)\s+(?:cost|charge|fee)s?\b",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return False
     routes = _conversation_routes()
     locale = _locale_key(language)
     terms: set[str] = set()

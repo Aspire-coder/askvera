@@ -171,7 +171,12 @@ class PromptBuilder:
                 f"Language: {document.language}",
             ]
             if directory_fields:
-                source_lines.extend(["Approved directory fields:", directory_fields])
+                source_lines.extend(
+                    [
+                        "Approved directory fields (evidence only; use only the field requested and never append this as a raw trailer):",
+                        directory_fields,
+                    ]
+                )
             if index == 1 and top_source_directly_answers is False:
                 source_lines.append(
                     "Note: this source is topically relevant but was flagged as not directly "

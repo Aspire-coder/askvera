@@ -55,6 +55,8 @@ def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
     # happen is worse than declining, and the prompt never said what the corpus
     # lacks. The budget still guards against drift; it is not a licence to grow.
     assert len(prompt.system_prompt) < 4400
+    assert "raw fields" in normalized_prompt
+    assert "For conflicts, cite both" in normalized_prompt
     assert "no product prices" in normalized_prompt.lower()
     assert "never offer to look them up" in normalized_prompt.lower()
     assert "complete response in that language" in normalized_prompt
@@ -167,7 +169,7 @@ def test_prompt_context_exposes_structured_directory_fields() -> None:
         retrieval_result=RetrievalResult(documents=[document], citations=[], confidence=0.9),
     )
 
-    assert "Approved directory fields:" in prompt.retrieved_context
+    assert "Approved directory fields (evidence only; use only the field requested and never append this as a raw trailer):" in prompt.retrieved_context
     assert "Physical Address: Londres No. 61, Torre A" in prompt.retrieved_context
     assert "Office Phone 1: 52 55 3300 9400" in prompt.retrieved_context
 

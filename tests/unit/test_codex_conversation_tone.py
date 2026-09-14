@@ -26,8 +26,10 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # so the baseline digest below reflects it; anything else changing still
 # fails this test. Recomputed a second time the same day after fixing a
 # casing typo in the Russian income disclaimer ("Сша" -> "США").
+# Updated 2026-09-14: the prompt now forbids raw field trailers and requires
+# explicit handling of conflicting directory and policy sources.
 ROUTES_REST_SHA256 = "6d96b23fecb190e72e45afd435b63e155d0cbe12542509c41f663f27413a1f55"
-TEMPLATE_LATER_SHA256 = "739e46be1d5abece4c3dcadf63c724dd92dbfe6ef806c8bc17ab2af7ea5c5909"
+TEMPLATE_LATER_SHA256 = "a599a86c86d9ad125b78ff4619218fb3f365e19ce1408009fdf9c5d05e81b5f4"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
     "wellbeing": "Thanks for asking! I'm here to help. What's on your mind?",

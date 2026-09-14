@@ -70,6 +70,7 @@ from services.market_config import (
     _normalize_market_text,
     find_market_mentions,
     find_probable_market_typo,
+    find_sponsoring_directory_alias_countries,
     find_shared_office_record_countries,
     load_global_directory_markets,
     load_market_config,
@@ -85,9 +86,11 @@ from utils.inline_citations import separate_verified_citations
 from utils.directory_fields import (
     build_support_contact_supplement,
     canonical_requested_order_size,
+    directory_field_conflicts,
     parse_directory_fields,
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
+    repair_labeled_directory_contacts,
     remove_unrequested_directory_fields,
     restore_missing_directory_contacts,
     restore_missing_requested_directory_fields,
@@ -508,6 +511,17 @@ def _resolve_support_contact_target_names(lookup_text: str, country: str) -> lis
     return [session_name] if session_name else []
 
 
+def _resolve_directory_field_target_names(lookup_text: str, country: str) -> list[str]:
+    """Resolve sponsoring-record aliases without widening support handoffs."""
+    explicit_aliases = sorted(find_sponsoring_directory_alias_countries(lookup_text))
+    explicit_targets = _resolve_support_contact_target_names(lookup_text, "")
+    if explicit_aliases or explicit_targets:
+        return list(dict.fromkeys([*explicit_aliases, *explicit_targets]))
+    session_name = market_display_name(country)
+    session_aliases = sorted(find_sponsoring_directory_alias_countries(session_name or ""))
+    return session_aliases or ([session_name] if session_name else [])
+
+
 def _directory_record_matches_a_target(record_country: str, target_names: list[str]) -> bool:
     """True only for a whole-segment/word match - never a region word (``East
     Africa``, ``Benelux``) or a country named only inside a record's body."""
@@ -530,7 +544,11 @@ def _find_matching_support_contact_record(documents: list, target_names: list[st
     for document in documents:
         if document.country != "GLOBAL":
             continue
-        if not (document.metadata.get("directory_kind") or document.metadata.get("directory_section")):
+        if not (
+            document.metadata.get("directory_kind")
+            or document.metadata.get("directory_section")
+            or isinstance(document.metadata.get("directory_fields"), dict)
+        ):
             continue
         record_country = str(document.metadata.get("record_country") or "").strip()
         if record_country and _directory_record_matches_a_target(record_country, target_names):
@@ -547,6 +565,58 @@ def _support_contact_approved_fields(document: Any) -> dict[str, object]:
     if isinstance(directory_fields_value, dict):
         return directory_fields_value
     return parse_directory_fields(document.content)
+
+
+def _directory_field_sets_for_response(
+    documents: list,
+    lookup_text: str,
+    country: str,
+) -> list[dict[str, object]]:
+    """Return fields from the one directory record allowed to repair an answer.
+
+    Retrieval can retain neighbouring records as supporting evidence.  They
+    must never become an answer trailer or a source for post-generation field
+    repair.  Prefer the uniquely matching country record; when the request
+    cannot resolve a country, permit repair only if retrieval itself contains
+    one directory record.  Ambiguity deliberately produces no repair.
+    """
+    matched_documents = _directory_documents_for_response(documents, lookup_text, country)
+    if len(matched_documents) != 1:
+        return []
+    return [_support_contact_approved_fields(matched_documents[0])]
+
+
+def _directory_documents_for_response(
+    documents: list,
+    lookup_text: str,
+    country: str,
+) -> list[Any]:
+    """Return only directory records matching the request's resolved market."""
+    candidates: list[Any] = []
+    for document in documents:
+        if document.country != "GLOBAL":
+            continue
+        if not (
+            document.metadata.get("directory_kind")
+            or document.metadata.get("directory_section")
+            or isinstance(document.metadata.get("directory_fields"), dict)
+        ):
+            continue
+        fields = _support_contact_approved_fields(document)
+        if fields:
+            candidates.append(document)
+
+    target_names = _resolve_directory_field_target_names(lookup_text, country)
+    matched = [
+        document
+        for document in candidates
+        if _directory_record_matches_a_target(str(document.metadata.get("record_country") or ""), target_names)
+    ]
+    if matched:
+        return matched
+    if len(candidates) == 1:
+        return candidates
+    return []
 
 
 def _support_contact_already_quoted(answer: str, approved_fields: dict[str, object], added_labels: list[str]) -> bool:
@@ -832,6 +902,8 @@ _ANSWER_EDIT_FLAGS = (
     "directory_order_size_restored",
     "directory_order_size_canonicalized",
     "directory_source_contradiction_corrected",
+    "directory_contact_fields_repaired",
+    "directory_source_conflict_detected",
     "response_pii_scrubbed",
     "contact_placeholder_actions",
     "unresolved_pii_placeholders_removed",
@@ -1140,20 +1212,29 @@ class AIOrchestrator:
         if citation_cleaned != chat_response.answer:
             chat_response = self._replace_answer(chat_response, citation_cleaned, {"inline_citations_separated": True})
         completed_answer, restored_fields = chat_response.answer, []
+        matched_directory_documents: list[Any] = []
         if chat_response.citations:
-            directory_field_sets = [
-                fields
-                for document in retrieval_result.documents
-                for fields in [
-                    document.metadata.get("directory_fields", {})
-                    if isinstance(document.metadata.get("directory_fields"), dict)
-                    else parse_directory_fields(document.content)
-                    if document.metadata.get("directory_kind")
-                    or document.metadata.get("directory_section")
-                    else {}
-                ]
-                if fields
-            ]
+            matched_directory_documents = _directory_documents_for_response(
+                retrieval_result.documents,
+                resolved_request or user_question,
+                country,
+            )
+            directory_field_sets = _directory_field_sets_for_response(
+                retrieval_result.documents,
+                resolved_request or user_question,
+                country,
+            )
+            if len(directory_field_sets) == 1:
+                completed_answer, contact_fields_repaired = repair_labeled_directory_contacts(
+                    completed_answer,
+                    directory_field_sets[0],
+                )
+                if contact_fields_repaired:
+                    chat_response = self._replace_answer(
+                        chat_response,
+                        completed_answer,
+                        {"directory_contact_fields_repaired": True},
+                    )
             completed_answer, restored_requested_fields = restore_missing_requested_directory_fields(
                 completed_answer,
                 directory_field_sets,
@@ -1271,6 +1352,39 @@ class AIOrchestrator:
                 source_safe_answer,
                 {"directory_source_contradiction_corrected": True},
             )
+
+        conflict_field_sets = [
+            _support_contact_approved_fields(document)
+            for document in matched_directory_documents
+        ]
+        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question)
+        if source_conflicts:
+            answer_folded = " ".join((chat_response.answer or "").casefold().split())
+            missing_values = [
+                value
+                for values in source_conflicts.values()
+                for value in values
+                if " ".join(value.casefold().split()) not in answer_folded
+            ]
+            if missing_values:
+                conflict_fallback = localized_conversation_response("insufficient_evidence", language) or (
+                    "I found conflicting approved information and cannot give one value as definitive."
+                )
+                chat_response = self._replace_answer(
+                    chat_response,
+                    conflict_fallback,
+                    {
+                        "directory_source_conflict_detected": sorted(source_conflicts),
+                        "fallback": True,
+                        "failure_layer": "directory_source_conflict",
+                    },
+                )
+            else:
+                chat_response = self._replace_answer(
+                    chat_response,
+                    chat_response.answer,
+                    {"directory_source_conflict_detected": sorted(source_conflicts)},
+                )
 
         chat_response = self._apply_support_contact_supplement(
             chat_response,

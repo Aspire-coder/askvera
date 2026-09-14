@@ -9,7 +9,8 @@ from collections.abc import Iterable
 
 _FIELD_LABEL_RE = re.compile(
     r"(?:country|name|address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
-    r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|fax|toll[ -]?free|mailbox|website|"
+    r"business\s+hours(?:\s+(?:office|product\s+(?:centre|center)))?|delivery\s+(?:cost|charge|fee)s?|"
+    r"minimum\s+order\s+size\s+fbo|fax|toll[ -]?free|mailbox|website|"
     r"contact|title|email|cell#?|territor(?:y|ies)|region|office|product center)$",
     re.IGNORECASE,
 )
@@ -129,7 +130,8 @@ def _label_canonical_field(label: str) -> str | None:
 _INLINE_FIELD_RE = re.compile(
     r"^(?P<label>business\s+hours\s+(?:office|product\s+(?:centre|center))|"
     r"telephone(?:\s+(?:for\s+orders|office))?|phone(?:\s*\d+)?|"
-    r"office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+address|"
+    r"office\s*(?:&|and)\s*product\s+cent(?:er|re)\s+address|delivery\s+(?:cost|charge|fee)s?|"
+    r"minimum\s+order\s+size\s+fbo|"
     r"address|fax(?:\s*\d+)?|toll[ -]?free|mailbox|website|email|cell#?)"
     r"\s*[:#-]?\s+(?P<value>.+)$",
     re.IGNORECASE,
@@ -378,6 +380,79 @@ def restore_missing_requested_directory_fields(
     exact_fields = "\n".join(f"{label}: {value}" for label, value in missing)
     separator = "\n\n" if original else ""
     return f"{original}{separator}{exact_fields}", [label for label, _ in missing]
+
+
+def repair_labeled_directory_contacts(
+    answer: str,
+    approved_fields: dict[str, object],
+) -> tuple[str, bool]:
+    """Replace or remove labeled contacts not supported by the resolved record.
+
+    Labels in generated prose do not always match the directory's label
+    exactly (for example ``Telephone for Orders`` versus ``Telephone Office``).
+    Exact-label repair therefore leaves wrong-country values behind.  This
+    pass compares canonical field kinds, preserves any already-approved value,
+    replaces an unambiguous mismatch, and removes a line when the resolved
+    record has no field of that kind.
+    """
+    approved_by_kind: dict[str, list[str]] = {}
+    for raw_label, raw_value in approved_fields.items():
+        kind = _label_canonical_field(str(raw_label))
+        value = str(raw_value).strip()
+        if kind in {"phone", "order_phone", "email", "website", "address", "fax"} and value:
+            approved_by_kind.setdefault(kind, []).append(value)
+
+    line_pattern = re.compile(
+        r"^(?P<indent>\s*(?:[-*]\s+)?)\**(?P<label>[^:#\n]{2,80}?)\**\s*[:#]\s*(?P<value>.+?)\s*$",
+        re.IGNORECASE,
+    )
+    changed = False
+    output: list[str] = []
+    for line in (answer or "").splitlines():
+        match = line_pattern.match(line)
+        kind = _label_canonical_field(match.group("label")) if match else None
+        if kind not in {"phone", "order_phone", "email", "website", "address", "fax"}:
+            output.append(line)
+            continue
+        approved_values = list(dict.fromkeys(approved_by_kind.get(kind, [])))
+        if any(_value_is_present(match.group("value"), value) for value in approved_values):
+            output.append(line)
+            continue
+        changed = True
+        if len(approved_values) == 1:
+            output.append(f'{match.group("indent")}{match.group("label").strip()}: {approved_values[0]}')
+        # No approved value, or several values with no safe way to choose:
+        # drop the unsupported line rather than exposing another record.
+
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip(), changed
+
+
+def directory_field_conflicts(
+    field_sets: Iterable[dict[str, object]],
+    question: str,
+) -> dict[str, list[str]]:
+    """Return distinct source values for requested fields that disagree."""
+    requested = _requested_directory_field_set(question) or set()
+    fbo_order_requested = bool(
+        re.search(r"\b(?:minimum|first)\s+order\b", question or "", re.IGNORECASE)
+        and re.search(r"\bfbo\b|business\s+owner", question or "", re.IGNORECASE)
+    )
+    values_by_kind: dict[str, dict[str, str]] = {}
+    for fields in field_sets:
+        for raw_label, raw_value in fields.items():
+            label = str(raw_label).strip()
+            value = str(raw_value).strip()
+            kind = _label_canonical_field(label)
+            if fbo_order_requested and re.search(r"minimum\s+order\s+size\s+fbo", label, re.IGNORECASE):
+                kind = "fbo_minimum_order"
+            if not value or kind is None or (kind not in requested and kind != "fbo_minimum_order"):
+                continue
+            values_by_kind.setdefault(kind, {}).setdefault(_normalize_for_comparison(value), value)
+    return {
+        kind: list(values.values())
+        for kind, values in values_by_kind.items()
+        if len(values) > 1
+    }
 
 
 def preserve_directory_role_labels(answer: str, source_texts: Iterable[str]) -> tuple[str, bool]:

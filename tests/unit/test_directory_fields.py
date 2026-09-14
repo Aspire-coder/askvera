@@ -61,6 +61,25 @@ def test_parses_multiline_directory_fields_without_mixing_next_label() -> None:
     assert fields["Business Hours Office"] == "09.00 am - 17.00 pm"
 
 
+def test_directory_fields_preserve_comma_decimal_delivery_amounts() -> None:
+    content = """Welcome to Forever Exampleland!
+    Delivery Cost
+    €2,50-€6,00 (excluding VAT)
+    """
+
+    fields = parse_directory_fields(content)
+
+    assert fields["Delivery Cost"] == "€2,50-€6,00 (excluding VAT)"
+
+
+def test_parses_fbo_minimum_from_content_without_structured_metadata() -> None:
+    fields = parse_directory_fields(
+        "Welcome to Forever Singapore!\nMinimum order size FBO\nEach order must be a minimum of SGD25."
+    )
+
+    assert fields["Minimum order size FBO"] == "Each order must be a minimum of SGD25."
+
+
 def test_restores_exact_missing_contact_fields_for_any_country() -> None:
     answer = "Voici le bureau approuve.\n\n**Office Email:** support@example.test"
     fields = {
