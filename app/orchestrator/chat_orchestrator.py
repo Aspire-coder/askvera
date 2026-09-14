@@ -264,12 +264,12 @@ LOCALIZED_DIRECTORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
     ),
     "fr": (
         "téléphone", "courriel", "adresse", r"site (?:web|internet)", "horaire", r"heures d ouverture",
-        "livraison", r"livrer\b", "expédition", r"expédier\b", "envoi", "paiement", r"payer\b",
+        "livraison", "livraision", r"livrer\b", "expédition", r"expédier\b", "envoi", "paiement", r"payer\b",
         r"commande\w* minim", r"minim\w* (?:de )?commande",
     ),
     "de": (
         "telefon", "adress", "anschrift", "webseite", "internetseite", "öffnungszeit", "oeffnungszeit",
-        "geschäftszeit", "geschaeftszeit", r"liefer(?:ung|kost|zeit|geb|dauer|n\b)", "versand", "zustell",
+        "geschäftszeit", "geschaeftszeit", r"liefer(?:ung|kost|zeit|geb|dauer|n\b|kots)", "versand", "zustell",
         "zahlung", "bezahl", r"zahlen\b", "mindestbestell", r"minim\w* bestell",
     ),
     "es": (

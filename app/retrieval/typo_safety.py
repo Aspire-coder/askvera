@@ -12,6 +12,16 @@ import re
 import unicodedata
 
 
+_SPLIT_REPAIR_PROTECTED_PARTS = frozenset(
+    {
+        "a", "an", "and", "are", "at", "be", "but", "by", "can", "do", "for",
+        "from", "have", "i", "in", "is", "it", "me", "my", "no", "not", "of",
+        "on", "or", "the", "to", "was", "we", "what", "with", "you",
+    }
+)
+_SEMANTIC_COLLISION_PAIRS = frozenset({frozenset({"shipping", "shopping"})})
+
+
 def _fold(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value or "").casefold()
     return "".join(character for character in decomposed if not unicodedata.combining(character))
@@ -68,6 +78,10 @@ def _token_is_repair(candidate: str, original: str) -> bool:
     return _damerau_levenshtein(candidate, original, max_distance) <= max_distance
 
 
+def _is_semantic_collision(candidate: str, original: str) -> bool:
+    return frozenset({candidate, original}) in _SEMANTIC_COLLISION_PAIRS
+
+
 def _joined_parts(token: str, planned_token_groups: list[list[str]]) -> list[str]:
     for group in planned_token_groups:
         for start in range(len(group)):
@@ -78,13 +92,43 @@ def _joined_parts(token: str, planned_token_groups: list[list[str]]) -> list[str
     return []
 
 
+def _split_repair(
+    tokens: list[str], raw_tokens: list[str], index: int, planned_tokens: list[str]
+) -> tuple[str, int] | None:
+    """Collapse two or three accidentally split fragments into one planned word."""
+    for size in (3, 2):
+        if index + size > len(tokens):
+            continue
+        joined = "".join(tokens[index : index + size])
+        if (
+            len(joined) < 5
+            or any(len(part) < 2 for part in tokens[index : index + size])
+            or any(part in _SPLIT_REPAIR_PROTECTED_PARTS for part in tokens[index : index + size])
+            or any(any(character.isdigit() for character in part) for part in tokens[index : index + size])
+            or any(
+                2 <= len(raw_part) <= 5 and raw_part.isupper() and raw_part.isalpha()
+                for raw_part in raw_tokens[index : index + size]
+            )
+        ):
+            continue
+        for candidate in planned_tokens:
+            if any(character.isdigit() for character in candidate):
+                continue
+            if not _is_semantic_collision(candidate, joined) and (candidate == joined or _token_is_repair(candidate, joined)):
+                return candidate, size
+    return None
+
+
 def _repair_token(token: str, planned_tokens: list[str]) -> str:
-    if len(token) < 5:
+    if len(token) < 4:
         return token
     candidates = {
         candidate
         for candidate in planned_tokens
-        if candidate != token and _token_is_repair(candidate, token)
+        if candidate != token
+        and _token_is_repair(candidate, token)
+        and not _is_semantic_collision(candidate, token)
+        and (len(token) >= 5 or abs(len(candidate) - len(token)) == 1)
     }
     if not candidates:
         return token
@@ -117,21 +161,33 @@ def safe_typo_ranking_queries(original: str, planned_queries: list[str], *, limi
 
     repaired_tokens: list[str] = []
     repaired = False
-    for index, token in enumerate(original_tokens):
+    index = 0
+    while index < len(original_tokens):
+        token = original_tokens[index]
         raw_token = raw_tokens[index]
         protected = any(character.isdigit() for character in token) or (
             2 <= len(raw_token) <= 5 and raw_token.isupper() and raw_token.isalpha()
         )
         if protected or token in planned_tokens:
             repaired_tokens.append(token)
+            index += 1
+            continue
+        split_repair = _split_repair(original_tokens, raw_tokens, index, planned_tokens)
+        if split_repair:
+            repaired_token, consumed = split_repair
+            repaired_tokens.append(repaired_token)
+            repaired = True
+            index += consumed
             continue
         parts = _joined_parts(token, planned_token_groups)
         if parts:
             repaired_tokens.extend(parts)
             repaired = True
+            index += 1
             continue
         repaired_token = _repair_token(token, planned_tokens)
         repaired_tokens.append(repaired_token)
         repaired = repaired or repaired_token != token
+        index += 1
 
     return [" ".join(repaired_tokens)] if repaired else []

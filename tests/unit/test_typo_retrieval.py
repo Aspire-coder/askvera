@@ -54,6 +54,21 @@ def _hit(identifier: str, title: str, score: float = 5.0) -> dict[str, object]:
             "conditions pour devenir Manager",
             "quelles sont les conditions pour devenir manager",
         ),
+        (
+            "What is the min imum oder size?",
+            "minimum order size",
+            "what is the minimum order size",
+        ),
+        (
+            "Quel est le montant min imum de com mande?",
+            "montant minimum de commande",
+            "quel est le montant minimum de commande",
+        ),
+        (
+            "Was ist die Lieferkotsen?",
+            "Lieferkosten",
+            "was ist die lieferkosten",
+        ),
     ],
 )
 def test_accepts_only_bounded_spelling_repairs(
@@ -77,6 +92,34 @@ def test_accepts_only_bounded_spelling_repairs(
     ],
 )
 def test_rejects_semantic_numeric_and_acronym_rewrites(original: str, candidate: str) -> None:
+    assert safe_typo_ranking_queries(original, [candidate]) == []
+
+
+def test_split_repair_does_not_merge_negation_into_a_different_word() -> None:
+    assert safe_typo_ranking_queries(
+        "I am not able to order",
+        ["notable order"],
+    ) == []
+
+
+def test_split_repair_does_not_merge_or_change_numeric_boundaries() -> None:
+    assert safe_typo_ranking_queries("What is the order 50?", ["order500"]) == []
+
+
+def test_split_repair_does_not_merge_uppercase_acronym_boundaries() -> None:
+    assert safe_typo_ranking_queries("What is service FPC?", ["servicefpc"]) == []
+
+
+@pytest.mark.parametrize(
+    ("original", "candidate"),
+    [
+        ("What are the shipping costs?", "shopping costs"),
+        ("What are the shopping costs?", "shipping costs"),
+    ],
+)
+def test_typo_repair_does_not_cross_shipping_shopping_semantic_collision(
+    original: str, candidate: str
+) -> None:
     assert safe_typo_ranking_queries(original, [candidate]) == []
 
 
