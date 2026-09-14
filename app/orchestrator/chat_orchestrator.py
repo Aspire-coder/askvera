@@ -830,6 +830,7 @@ _ANSWER_EDIT_FLAGS = (
     "directory_role_label_corrected",
     "unrequested_directory_fields_removed",
     "directory_order_size_restored",
+    "directory_order_size_canonicalized",
     "directory_source_contradiction_corrected",
     "response_pii_scrubbed",
     "contact_placeholder_actions",
