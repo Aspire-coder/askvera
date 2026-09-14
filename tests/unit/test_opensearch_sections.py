@@ -16,6 +16,7 @@ from app.retrieval.opensearch_sections import (
     _language_key,
     _outline_text_query,
     _parse_selector_decision,
+    _restore_dominant_directory_record,
     _selector_candidates,
     _scope_filter,
     _section_reference,
@@ -990,3 +991,240 @@ def test_explicit_unknown_directory_country_beats_selected_market() -> None:
     assert _directory_record_country_score(
         "What is Gambia's telephone number?", gambia, {"United States"}
     ) == 6.0
+
+
+def test_dominance_guard_restores_kyrgyzstan_shaped_directory_record() -> None:
+    """Mirrors the real 2026-09-14 production failure: a dominant,
+    country-matched Kyrgyzstan directory record (score 9.444) scored well
+    ahead of everything else (next-best 4.37), but the LLM selector's
+    reordered output put an unrelated, low-scoring US policy section first
+    instead. The guard must put the Kyrgyzstan record back on top."""
+    kyrgyzstan_row = {
+        "id": "kyrgyzstan-bonus-payment",
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Kyrgyzstan"},
+    }
+    us_policy_row = {"id": "us-policy-4-04-f", "document_type": "policy"}
+    other_row_a = {"id": "candidate-a", "document_type": "policy"}
+    other_row_b = {"id": "candidate-b", "document_type": "policy"}
+
+    raw_rows = [
+        (kyrgyzstan_row, 9.444),
+        (other_row_a, 4.37),
+        (other_row_b, 1.09),
+        (us_policy_row, 1.066),
+    ]
+    # The selector reordered candidates, demoting the dominant directory
+    # record to last place - exactly the real failure shape.
+    selector_rows = [
+        (us_policy_row, 1.066),
+        (other_row_b, 1.09),
+        (other_row_a, 4.37),
+        (kyrgyzstan_row, 9.444),
+    ]
+
+    restored = _restore_dominant_directory_record(
+        "How are foreign FBOs paid their bonus in Kyrgyzstan?",
+        raw_rows,
+        selector_rows,
+        {"Kyrgyzstan"},
+    )
+
+    assert restored[0][0]["id"] == "kyrgyzstan-bonus-payment"
+    # Everything else keeps the selector's own relative order.
+    assert [row.get("id") for row, _score in restored[1:]] == [
+        "us-policy-4-04-f",
+        "candidate-b",
+        "candidate-a",
+    ]
+
+
+def test_dominance_guard_does_not_fire_on_a_close_non_dominant_contest() -> None:
+    """When the top raw score does not clearly dominate the field (a normal,
+    close contest the selector is entitled to resolve on its own), the guard
+    must leave the selector's chosen order untouched."""
+    directory_row = {
+        "id": "close-directory-row",
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Uruguay"},
+    }
+    policy_row = {"id": "close-policy-row", "document_type": "policy"}
+
+    raw_rows = [(directory_row, 7.5), (policy_row, 6.0)]  # ratio ~1.25x, not dominant
+    # The selector reasonably chose the policy row instead.
+    selector_rows = [(policy_row, 6.0), (directory_row, 7.5)]
+
+    restored = _restore_dominant_directory_record(
+        "What is the phone number for Forever Uruguay?",
+        raw_rows,
+        selector_rows,
+        {"Uruguay"},
+    )
+
+    assert restored == selector_rows
+
+
+def test_dominance_guard_does_not_fire_without_a_genuine_country_match() -> None:
+    """A directory row that merely scores well generically - no genuine
+    target-country match bonus from `_directory_record_country_score` - must
+    never trigger the guard, even if its raw score dominates the field. This
+    is not a blanket 'always trust the top score' rule."""
+    generic_directory_row = {
+        "id": "generic-directory-row",
+        "document_type": "office_directory",
+        # No target_country_names supplied below, so this row can only ever
+        # earn the weak, generic lexical/acronym fallback score (<= 2.4),
+        # never the >= 6.0 genuine-match bonus the guard requires.
+        "metadata": {"record_country": "Someplace Unrelated"},
+    }
+    local_policy_row = {"id": "local-policy-row", "document_type": "policy"}
+
+    raw_rows = [(generic_directory_row, 9.0), (local_policy_row, 1.0)]
+    selector_rows = [(local_policy_row, 1.0), (generic_directory_row, 9.0)]
+
+    restored = _restore_dominant_directory_record(
+        "What are the office hours?",
+        raw_rows,
+        selector_rows,
+        None,
+    )
+
+    assert restored == selector_rows
+
+
+def test_dominance_guard_does_not_reorder_a_pinned_policy_over_directory_scope_question() -> None:
+    """Regression for the mixed sponsoring/policy-scope case pinned by
+    `tests/unit/test_mixed_sponsoring_policy_scope.py`: "What is the company
+    policy on sponsoring someone in Italy?" from an Austrian session must keep
+    the session's OWN policy first, with the Italy directory record second -
+    even though Italy is explicitly named and named-country matches reliably
+    earn a >= 6.0 country bonus that can make the directory row's raw score
+    dominate by more than 2x. The guard must not fire on this question at all:
+    it is a general company-policy question, not a request for directory
+    detail content."""
+    italy_directory_row = {
+        "id": "GLOBAL:sponsoring-italy",
+        "document_type": "international_sponsoring_directory",
+        "metadata": {"record_country": "Italy"},
+    }
+    austria_policy_row = {"id": "AT:4.01", "document_type": "policy"}
+
+    raw_rows = [(italy_directory_row, 9.0), (austria_policy_row, 1.0)]
+    # The selector correctly kept the session's own policy first, exactly as
+    # `test_mixed_sponsoring_policy_scope.py` pins.
+    selector_rows = [(austria_policy_row, 1.0), (italy_directory_row, 9.0)]
+
+    restored = _restore_dominant_directory_record(
+        "What is the company policy on sponsoring someone in Italy?",
+        raw_rows,
+        selector_rows,
+        {"Italy"},
+    )
+
+    assert restored == selector_rows
+
+
+def test_dominance_guard_returns_empty_rows_unchanged_when_selector_refused() -> None:
+    """When hardening is on and the selector deliberately returns `[]` (a
+    considered "no relevant evidence" refusal), the guard must never resurrect
+    a dominant raw candidate and turn that refusal into an answer."""
+    kyrgyzstan_row = {
+        "id": "kyrgyzstan-bonus-payment",
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Kyrgyzstan"},
+    }
+    raw_rows = [(kyrgyzstan_row, 9.444), ({"id": "other", "document_type": "policy"}, 1.0)]
+
+    restored = _restore_dominant_directory_record(
+        "How are foreign FBOs paid their bonus in Kyrgyzstan?",
+        raw_rows,
+        [],
+        {"Kyrgyzstan"},
+    )
+
+    assert restored == []
+
+
+def test_dominance_guard_finds_the_true_top_score_when_raw_rows_is_not_sorted() -> None:
+    """`raw_rows` is assigned after the optional Bedrock reranker may have
+    already reordered rows by semantic rank without changing their scores, so
+    the dominant directory row is not guaranteed to sit at index 0 (nor the
+    best-of-the-rest at index 1). The guard must derive both by score, not by
+    list position."""
+    kyrgyzstan_row = {
+        "id": "kyrgyzstan-bonus-payment",
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Kyrgyzstan"},
+    }
+    low_score_row = {"id": "low-score-row", "document_type": "policy"}
+    real_runner_up_row = {"id": "real-runner-up", "document_type": "policy"}
+
+    # A reranker put the dominant row at index 1 (not 0), and a lower-scoring
+    # row at index 0 - simulating semantic-rank reordering that never touches
+    # scores. The true best-of-the-rest (4.37) sits at index 2, not index 1.
+    raw_rows = [
+        (low_score_row, 0.5),
+        (kyrgyzstan_row, 9.444),
+        (real_runner_up_row, 4.37),
+    ]
+    selector_rows = [
+        (real_runner_up_row, 4.37),
+        (low_score_row, 0.5),
+        (kyrgyzstan_row, 9.444),
+    ]
+
+    restored = _restore_dominant_directory_record(
+        "How are foreign FBOs paid their bonus in Kyrgyzstan?",
+        raw_rows,
+        selector_rows,
+        {"Kyrgyzstan"},
+    )
+
+    assert restored[0][0]["id"] == "kyrgyzstan-bonus-payment"
+    assert [row.get("id") for row, _score in restored[1:]] == ["real-runner-up", "low-score-row"]
+
+
+def test_dominance_guard_fires_just_above_the_ratio_threshold() -> None:
+    """Boundary-pinning: 7.5 vs 3.73 is a ratio of ~2.0107x, just above the
+    2.0x threshold, so the guard must fire."""
+    directory_row = {
+        "id": "boundary-directory-row",
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Uruguay"},
+    }
+    policy_row = {"id": "boundary-policy-row", "document_type": "policy"}
+
+    raw_rows = [(directory_row, 7.5), (policy_row, 3.73)]
+    selector_rows = [(policy_row, 3.73), (directory_row, 7.5)]
+
+    restored = _restore_dominant_directory_record(
+        "What is the phone number for Forever Uruguay?",
+        raw_rows,
+        selector_rows,
+        {"Uruguay"},
+    )
+
+    assert restored[0][0]["id"] == "boundary-directory-row"
+
+
+def test_dominance_guard_does_not_fire_just_below_the_ratio_threshold() -> None:
+    """Boundary-pinning: 7.5 vs 3.77 is a ratio of ~1.9894x, just below the
+    2.0x threshold, so the guard must not fire."""
+    directory_row = {
+        "id": "boundary-directory-row",
+        "document_type": "office_directory",
+        "metadata": {"record_country": "Uruguay"},
+    }
+    policy_row = {"id": "boundary-policy-row", "document_type": "policy"}
+
+    raw_rows = [(directory_row, 7.5), (policy_row, 3.77)]
+    selector_rows = [(policy_row, 3.77), (directory_row, 7.5)]
+
+    restored = _restore_dominant_directory_record(
+        "What is the phone number for Forever Uruguay?",
+        raw_rows,
+        selector_rows,
+        {"Uruguay"},
+    )
+
+    assert restored == selector_rows

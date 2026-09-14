@@ -38,6 +38,7 @@ from utils.opensearch_fields import exact_term_query, exact_terms_query
 
 from .models import RetrievedDocument, RetrievalResult
 from .providers import (
+    DIRECTORY_OPERATIONAL_QUESTION_RE,
     DIRECTORY_POLICY_WORDING_RE,
     OWN_MARKET_DIRECTORY_FIELD_RE,
     RetrievalQueryPlan,
@@ -650,6 +651,159 @@ def _directory_record_country_score(
     if any(_character_overlap(token, compact_country) >= 0.72 for token in compact_message_tokens):
         return 1.6
     return 0.0
+
+
+# --- Deterministic post-selector dominance guard -----------------------
+#
+# 2026-09-14: two production deploy-canary runs, hours apart, both failed the
+# same case (kyrgyzstan-foreign-fbo-bonus-release-gate) with IDENTICAL scores
+# (document_scores [0.95, 1.066, 1.09, 9.444, 4.37]), the LLM evidence
+# selector reordering a dominant, country-matched global directory record
+# (score 9.444) behind an unrelated, low-scoring US policy section. The
+# 2026-09-07 audit (docs/audits/2026-09-07/SELECTOR_DEMOTES_MATCHING_DIRECTORY_RECORD.md)
+# had attributed this to LLM sampling and "fixed" it with
+# BEDROCK_CLASSIFIER_TEMPERATURE=0; tonight's evidence shows that only made
+# the wrong pick deterministic instead of intermittent. This guard restores
+# the pre-selector order in exactly that shape, without touching the
+# selector's prompt, its model call, or either scoring function.
+#
+# Fires only when ALL of:
+#   1. The question itself is asking for directory/contact/logistics detail
+#      content (`_directory_guard_topic_match`) - not merely a general
+#      "policy" or "sponsoring rules" question that happens to name a
+#      country. Review finding (2026-09-14): a named foreign country alone
+#      reliably earns +8.0 from `_directory_record_country_score`, which can
+#      produce >2x dominance even for "What is the company policy on
+#      sponsoring someone in Italy?" (an Austrian session) - a case where
+#      `tests/unit/test_mixed_sponsoring_policy_scope.py` pins that the
+#      session's OWN policy must stay first. This gate keeps the guard from
+#      ever firing on that shape of question.
+#   2. The single highest-scoring row in raw_rows (the candidates *before*
+#      the LLM selector reorders them) is a global directory row
+#      (GLOBAL_DIRECTORY_DOCUMENT_TYPES).
+#   3. That row's score reflects a genuine target-country match from
+#      `_directory_record_country_score` - the >= 6.0 branch that only
+#      awards points when `target_country_names` was supplied (a country was
+#      actually named/targeted) and it matched the record's own country
+#      metadata or the question text - never the generic acronym/lexical
+#      fallback branch (0.0-2.4) that runs when no country was targeted at
+#      all. This keeps the guard from ever firing on a directory row that
+#      merely scored well for unrelated reasons.
+#   4. Its score dominates the best-of-the-rest raw candidate by a wide,
+#      deliberately conservative margin. Calibration, from real numbers: the
+#      Kyrgyzstan failure showed 9.444 vs next-best 4.37 (ratio ~2.16x); the
+#      canary fixture's other directory-should-win cases (Uruguay, Belgium,
+#      Thailand, Algeria, New Zealand) all describe the same shape,
+#      a dominant record around 9-13 against ~1-4.7 for everything else.
+#      The thresholds below (ratio >= 2.0, absolute score >= 7.0) sit safely
+#      under that real signal - comfortably wide enough to catch genuine
+#      routs like this one, while nowhere near a normal close contest
+#      (ratio near 1) that the selector is legitimately allowed to resolve.
+#      "Highest-scoring" and "best-of-the-rest" are derived by score, not by
+#      list position: an optional Bedrock reranker (`rerank_rows`) can already
+#      have reordered `raw_rows` by semantic rank without changing scores, so
+#      index 0/1 are not reliably the top two.
+#   5. The selector's reordered `rows` does not already have that same row
+#      first - i.e. it actually got demoted.
+#
+# When it fires, the guard moves that one row back to the front of `rows`,
+# leaving every other candidate's relative order untouched.
+#
+# It never operates on an empty selector result: when hardening is on and the
+# selector deliberately returns `[]` (a considered "no relevant evidence"
+# refusal), that refusal must stay a refusal, never be turned into an answer
+# by resurrecting a raw candidate the selector never endorsed.
+_DIRECTORY_DOMINANCE_MIN_RATIO = 2.0
+_DIRECTORY_DOMINANCE_MIN_SCORE = 7.0
+_DIRECTORY_DOMINANCE_MIN_COUNTRY_BONUS = 6.0
+
+# Topical gate for the guard above: true only for a question actually asking
+# for directory/contact/logistics detail content. Built from the narrowest
+# existing "wants directory detail" signals in this codebase -
+# `_DIRECTORY_DETAIL_RE` (address/hours/email/office/phone/website/contact)
+# and `DIRECTORY_OPERATIONAL_QUESTION_RE` (imported from providers.py: minimum
+# order, delivery cost, lead time, payment methods, business hours, phone) -
+# plus "bonus", the Kyrgyzstan bug case's own wording ("How are foreign FBOs
+# paid their bonus in Kyrgyzstan?") and the same operational class as
+# `tests/fixtures/benchmark_cases.json`'s "Can a foreign FBO receive bonuses
+# from Forever Algeria?". A question using policy/rules wording
+# (`DIRECTORY_POLICY_WORDING_RE`) never matches, even when it also contains
+# one of these words, so "company policy on sponsoring" and "sponsoring
+# rules" keep resolving through the selector, never this guard.
+_DIRECTORY_GUARD_TOPIC_RE = re.compile(
+    _DIRECTORY_DETAIL_RE.pattern + r"|" + DIRECTORY_OPERATIONAL_QUESTION_RE.pattern + r"|\bbonus(?:es)?\b",
+    re.IGNORECASE,
+)
+
+
+def _directory_guard_topic_match(message: str) -> bool:
+    """True when the question wants directory/contact/logistics detail
+    content rather than a general policy/rules question naming a country."""
+    text = message or ""
+    if DIRECTORY_POLICY_WORDING_RE.search(text):
+        return False
+    return bool(_DIRECTORY_GUARD_TOPIC_RE.search(text))
+
+
+def _dominant_directory_row(
+    message: str,
+    raw_rows: list[tuple[dict[str, Any], float]],
+    target_country_names: set[str] | None,
+) -> tuple[dict[str, Any], float] | None:
+    """Return the top-scoring raw candidate if it is a decisively dominant,
+    country-matched global directory record answering a directory-detail
+    question; otherwise None. See the guard documentation above for the exact
+    thresholds and how they were calibrated."""
+    if not raw_rows:
+        return None
+    if not _directory_guard_topic_match(message):
+        return None
+    top_index, (top_row, top_score) = max(
+        enumerate(raw_rows), key=lambda indexed: indexed[1][1]
+    )
+    if top_row.get("document_type") not in GLOBAL_DIRECTORY_DOCUMENT_TYPES:
+        return None
+    if top_score < _DIRECTORY_DOMINANCE_MIN_SCORE:
+        return None
+    country_bonus = _directory_record_country_score(message, top_row, target_country_names)
+    if country_bonus < _DIRECTORY_DOMINANCE_MIN_COUNTRY_BONUS:
+        return None
+    rest_scores = [score for index, (_row, score) in enumerate(raw_rows) if index != top_index]
+    next_score = max(rest_scores, default=0.0)
+    if next_score > 0 and (top_score / next_score) < _DIRECTORY_DOMINANCE_MIN_RATIO:
+        return None
+    return top_row, top_score
+
+
+def _restore_dominant_directory_record(
+    message: str,
+    raw_rows: list[tuple[dict[str, Any], float]],
+    rows: list[tuple[dict[str, Any], float]],
+    target_country_names: set[str] | None,
+) -> list[tuple[dict[str, Any], float]]:
+    """Deterministically undo the selector demoting a dominant directory row.
+
+    Runs after `_select_evidence_rows` has reordered candidates. If the
+    single highest-scoring raw candidate is a decisively dominant,
+    country-matched global directory record answering a directory-detail
+    question (`_dominant_directory_row`) and the selector's output does not
+    already have it first, move it back to the front, leaving everything else
+    in the selector's chosen order. Does nothing when there is no such row,
+    it is already on top, or the selector deliberately returned no evidence
+    at all (`rows` empty) - a considered refusal must never be turned into an
+    answer by this guard.
+    """
+    if not rows:
+        return rows
+    dominant = _dominant_directory_row(message, raw_rows, target_country_names)
+    if dominant is None:
+        return rows
+    dominant_row, _dominant_score = dominant
+    dominant_id = str(dominant_row.get("id") or "")
+    if rows and str(rows[0][0].get("id") or "") == dominant_id:
+        return rows
+    remainder = [pair for pair in rows if str(pair[0].get("id") or "") != dominant_id]
+    return [dominant, *remainder]
 
 
 def _vector_query(message: str, country: str, language: str, *, scope: str = "locale") -> dict[str, Any]:
@@ -1511,6 +1665,21 @@ class OpenSearchSectionProvider:
         raw_rows = rows
         rows = self._select_evidence_rows(message, rows, correlation_id)
         selector_rejected = bool(raw_rows) and not rows and settings.OPENSEARCH_EVIDENCE_SELECTOR_ENABLED
+        # Deterministic guard: undo the selector demoting a dominant,
+        # country-matched global directory record (see the guard
+        # documentation above `_restore_dominant_directory_record`). Placed
+        # after `selector_rejected` is computed so that one field stays fixed
+        # at the selector's own original decision. Everything computed below
+        # from `rows[0][0]` - `selector_applied`, `selector_confidence`,
+        # `top_source_directly_answers`, and (through `selector_applied`)
+        # `strong_local_match` and the blended `confidence` - is NOT
+        # insulated from this guard: each reads the actual winning row's own
+        # dict keys, so if this guard changes which row is first, those
+        # fields honestly report whatever that row itself carries (e.g.
+        # `selector_applied` can flip True->False when the restored row was
+        # not one of the selector's own picks). That is intentional, not a
+        # bug: the row should report its own truth, not the selector's.
+        rows = _restore_dominant_directory_record(message, raw_rows, rows, target_country_names)
         rows = _bind_selected_parent_children(rows)
 
         eligible_rows = self._finalize_eligible_rows(rows)
