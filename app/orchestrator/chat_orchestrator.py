@@ -1211,48 +1211,14 @@ class AIOrchestrator:
         citation_cleaned = separate_verified_citations(chat_response.answer, retrieval_result.documents)
         if citation_cleaned != chat_response.answer:
             chat_response = self._replace_answer(chat_response, citation_cleaned, {"inline_citations_separated": True})
-        completed_answer, restored_fields = chat_response.answer, []
-        matched_directory_documents: list[Any] = []
-        if chat_response.citations:
-            matched_directory_documents = _directory_documents_for_response(
-                retrieval_result.documents,
-                resolved_request or user_question,
-                country,
-            )
-            directory_field_sets = _directory_field_sets_for_response(
-                retrieval_result.documents,
-                resolved_request or user_question,
-                country,
-            )
-            if len(directory_field_sets) == 1:
-                completed_answer, contact_fields_repaired = repair_labeled_directory_contacts(
-                    completed_answer,
-                    directory_field_sets[0],
-                )
-                if contact_fields_repaired:
-                    chat_response = self._replace_answer(
-                        chat_response,
-                        completed_answer,
-                        {"directory_contact_fields_repaired": True},
-                    )
-            completed_answer, restored_requested_fields = restore_missing_requested_directory_fields(
-                completed_answer,
-                directory_field_sets,
-                user_question,
-            )
-            completed_answer, restored_fields = restore_missing_directory_contacts(
-                completed_answer,
-                directory_field_sets,
-                user_question,
-                language=language,
-            )
-            restored_fields = [*restored_requested_fields, *restored_fields]
-        if restored_fields:
-            chat_response = self._replace_answer(
-                chat_response,
-                completed_answer,
-                {"directory_contacts_restored": restored_fields},
-            )
+        chat_response, matched_directory_documents = self._repair_directory_fields(
+            chat_response,
+            retrieval_result,
+            language,
+            user_question,
+            country,
+            resolved_request,
+        )
 
         role_safe_answer, role_label_corrected = preserve_directory_role_labels(
             chat_response.answer,
@@ -1353,38 +1319,12 @@ class AIOrchestrator:
                 {"directory_source_contradiction_corrected": True},
             )
 
-        conflict_field_sets = [
-            _support_contact_approved_fields(document)
-            for document in matched_directory_documents
-        ]
-        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question)
-        if source_conflicts:
-            answer_folded = " ".join((chat_response.answer or "").casefold().split())
-            missing_values = [
-                value
-                for values in source_conflicts.values()
-                for value in values
-                if " ".join(value.casefold().split()) not in answer_folded
-            ]
-            if missing_values:
-                conflict_fallback = localized_conversation_response("insufficient_evidence", language) or (
-                    "I found conflicting approved information and cannot give one value as definitive."
-                )
-                chat_response = self._replace_answer(
-                    chat_response,
-                    conflict_fallback,
-                    {
-                        "directory_source_conflict_detected": sorted(source_conflicts),
-                        "fallback": True,
-                        "failure_layer": "directory_source_conflict",
-                    },
-                )
-            else:
-                chat_response = self._replace_answer(
-                    chat_response,
-                    chat_response.answer,
-                    {"directory_source_conflict_detected": sorted(source_conflicts)},
-                )
+        chat_response = self._apply_directory_source_conflict_gate(
+            chat_response,
+            matched_directory_documents,
+            user_question,
+            language,
+        )
 
         chat_response = self._apply_support_contact_supplement(
             chat_response,
@@ -1448,6 +1388,106 @@ class AIOrchestrator:
                 correlation_id=refusal.correlation_id,
             )
         return chat_response
+
+    def _repair_directory_fields(
+        self,
+        chat_response: ChatResponse,
+        retrieval_result: RetrievalResult,
+        language: str,
+        user_question: str,
+        country: str,
+        resolved_request: str,
+    ) -> tuple[ChatResponse, list[Any]]:
+        """Repair requested fields using only the uniquely resolved record."""
+        if not chat_response.citations:
+            return chat_response, []
+
+        lookup_text = resolved_request or user_question
+        matched_documents = _directory_documents_for_response(
+            retrieval_result.documents,
+            lookup_text,
+            country,
+        )
+        field_sets = _directory_field_sets_for_response(
+            retrieval_result.documents,
+            lookup_text,
+            country,
+        )
+        completed_answer = chat_response.answer
+        if len(field_sets) == 1:
+            completed_answer, contacts_repaired = repair_labeled_directory_contacts(
+                completed_answer,
+                field_sets[0],
+            )
+            if contacts_repaired:
+                chat_response = self._replace_answer(
+                    chat_response,
+                    completed_answer,
+                    {"directory_contact_fields_repaired": True},
+                )
+
+        completed_answer, requested_fields = restore_missing_requested_directory_fields(
+            completed_answer,
+            field_sets,
+            user_question,
+        )
+        completed_answer, contact_fields = restore_missing_directory_contacts(
+            completed_answer,
+            field_sets,
+            user_question,
+            language=language,
+        )
+        restored_fields = [*requested_fields, *contact_fields]
+        if restored_fields:
+            chat_response = self._replace_answer(
+                chat_response,
+                completed_answer,
+                {"directory_contacts_restored": restored_fields},
+            )
+        return chat_response, matched_documents
+
+    def _apply_directory_source_conflict_gate(
+        self,
+        chat_response: ChatResponse,
+        matched_documents: list[Any],
+        user_question: str,
+        language: str,
+    ) -> ChatResponse:
+        """Prevent one duplicate directory value being presented as definitive."""
+        conflict_field_sets = [
+            _support_contact_approved_fields(document)
+            for document in matched_documents
+        ]
+        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question)
+        if not source_conflicts:
+            return chat_response
+
+        answer_folded = " ".join((chat_response.answer or "").casefold().split())
+        missing_values = [
+            value
+            for values in source_conflicts.values()
+            for value in values
+            if " ".join(value.casefold().split()) not in answer_folded
+        ]
+        if not missing_values:
+            return self._replace_answer(
+                chat_response,
+                chat_response.answer,
+                {"directory_source_conflict_detected": sorted(source_conflicts)},
+            )
+
+        conflict_fallback = localized_conversation_response("insufficient_evidence", language) or (
+            "I found conflicting approved information and cannot give one value as definitive."
+        )
+        return self._replace_answer(
+            chat_response,
+            conflict_fallback,
+            {
+                "directory_source_conflict_detected": sorted(source_conflicts),
+                "fallback": True,
+                "failure_layer": "directory_source_conflict",
+            },
+        )
 
     def _apply_support_contact_supplement(
         self,
