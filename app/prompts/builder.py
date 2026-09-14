@@ -293,8 +293,8 @@ def _foreign_directory_note(retrieval_result: RetrievalResult | None, country: s
         f"{_DIRECTORY_NOTE_PREFIX}{'s' if plural else ''} for {_join_names(markets, 'and')}. "
         f"Use {'those' if plural else 'that'} {record} for the parts of the question about "
         f"{_join_names(possessives, 'or')} office, contact, ordering or delivery details, stating only what "
-        f"the {record} {'contain' if plural else 'contains'}. Begin directly with a simple introduction to the "
-        f"{_join_names(markets, 'and')} office directory. Do not mention the selected policy "
+        f"the {record} {'contain' if plural else 'contains'}. Begin with the direct answer, not a greeting or "
+        f"a description of the directory. Do not mention the selected policy "
         f"country, the reader's location, or a policy-scope disclaimer. The {record} {'do' if plural else 'does'} "
         f"not grant access to another market's policy."
     )

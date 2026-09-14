@@ -125,7 +125,7 @@ def test_us_session_with_approved_gambia_directory_record_gets_the_note() -> Non
     assert len(notes) == 1
     note = notes[0]
     assert "record for Gambia." in note
-    assert "Begin directly with a simple introduction to the Gambia office directory" in note
+    assert "Begin with the direct answer, not a greeting or a description of the directory" in note
     assert "Do not mention the selected policy country" in note
     assert "United States" not in note
     assert "reader's location" in note
@@ -377,7 +377,7 @@ def test_note_is_scoped_to_the_record_details_and_its_contents() -> None:
     note = _note(prompt)
     assert "Use that record for the parts of the question about Gambia's office, contact, ordering or delivery" in note
     assert "stating only what the record contains" in note
-    assert "Begin directly with a simple introduction to the Gambia office directory" in note
+    assert "Begin with the direct answer, not a greeting or a description of the directory" in note
     assert "Do not mention the selected policy country" in note
     assert "does not grant access to another market's policy" in note
 
@@ -392,7 +392,7 @@ def test_two_foreign_records_read_as_plural() -> None:
     assert note.startswith(NOTE_MARKER + "s for Gambia and Guinea. Use those records for the parts of the question")
     assert "about Gambia's or Guinea's office, contact, ordering or delivery details" in note
     assert "stating only what the records contain" in note
-    assert "Begin directly with a simple introduction to the Gambia and Guinea office directory" in note
+    assert "Begin with the direct answer, not a greeting or a description of the directory" in note
     assert "do not grant access to another market's policy" in note
     assert "that record" not in note
 
