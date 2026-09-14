@@ -709,6 +709,61 @@ def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None
     assert OpenSearchSectionProvider()._select_evidence_rows("Question", rows, "cid") == rows
 
 
+def test_empty_selection_without_hardening_is_logged_and_preserves_rows(monkeypatch, caplog) -> None:
+    """When hardening is OFF and the model returns a parseable decision whose
+    selected_ranks is empty (or doesn't map to any candidate), the original
+    rows must still be returned unchanged - but this outcome must now be
+    observable in the logs, unlike before this change."""
+    import logging
+
+    class Runtime:
+        def converse(self, **_kwargs):
+            return {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "text": (
+                                    '{"relevant_evidence":false,"selected_ranks":[],'
+                                    '"top_rank_confidence":0.2,"directly_answers_top_rank":false,'
+                                    '"reason":"nothing clearly supports this"}'
+                                )
+                            }
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", False)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [({"id": "original", "metadata": {}, "content": "Approved evidence."}, 1.0)]
+
+    caplog.set_level(logging.INFO)
+    result = OpenSearchSectionProvider()._select_evidence_rows("Question", rows, "cid")
+
+    assert result == rows
+
+    matching = [r for r in caplog.records if r.getMessage() == "opensearch_evidence_selector_no_selection"]
+    assert len(matching) == 1
+    record = matching[0]
+    assert record.correlation_id == "cid"
+    assert record.context == {
+        "candidate_count": 1,
+        "ranks": [],
+        "relevant_evidence": False,
+        "top_rank_confidence": 0.2,
+        "directly_answers_top_rank": False,
+    }
+    assert not any(
+        r.getMessage() == "opensearch_evidence_selector_no_relevant_evidence" for r in caplog.records
+    )
+
+
 def test_selector_candidates_reserve_space_for_global_documents() -> None:
     locale_rows = [
         ({"id": f"locale-{index}", "access_scope": "country"}, 10.0 - index)
