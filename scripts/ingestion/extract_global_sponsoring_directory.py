@@ -12,7 +12,10 @@ from pathlib import Path
 from pypdf import PdfReader
 
 WELCOME_RE = re.compile(
-    r"(?im)^\s*Welcome\s+to\s+Forever\s+(?P<country>[^!\r\n]{2,100})!\s*$"
+    r"(?im)^\s*Welcome\s+to\s+Forever\s+(?P<country>[^!\r\n]{2,100}"
+    r"(?:\r?\n(?-i:(?:&[ \t]*)?[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]*"
+    r"(?:[ \t]+(?:(?:and|of|the|&)|[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’.-]*))*)"
+    r")?)!\s*$"
 )
 SAFE_ID_RE = re.compile(r"[^a-z0-9]+")
 
