@@ -7,6 +7,8 @@ recognise natural paraphrases or to distinguish first-order, ongoing,
 joining-fee and rank-qualification questions from one another.
 """
 
+import pytest
+
 from utils.directory_fields import (
     restore_missing_requested_order_size,
     correct_directory_source_contradictions,
@@ -273,3 +275,21 @@ def test_same_line_correction_still_applies() -> None:
     assert "around 750 MAD" in corrected
     assert "600 MAD" not in corrected
     assert changed is True
+
+
+@pytest.mark.parametrize("answer", [
+    "Individuals in the U.S. are prohibited from opting in as an FBO.",
+    "In Italia non e possibile iscriversi come FBO.",
+])
+def test_fbo_policy_conflict_never_restores_a_historical_order_size(answer: str) -> None:
+    source = "Minimum order size FBO: None."
+
+    corrected, restored = restore_missing_requested_order_size(
+        answer,
+        [source],
+        "What's the minimum order to become an FBO?",
+        suppress_restore=True,
+    )
+
+    assert restored is False
+    assert corrected == answer

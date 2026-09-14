@@ -1193,10 +1193,27 @@ class AIOrchestrator:
                 {"unrequested_directory_fields_removed": True},
             )
 
+        has_fbo_order_field = any(
+            bool(
+                (
+                    document.metadata.get("directory_fields")
+                    if isinstance(document.metadata.get("directory_fields"), dict)
+                    else parse_directory_fields(document.content)
+                    if document.metadata.get("directory_kind") or document.metadata.get("directory_section")
+                    else {}
+                ).get("Minimum order size FBO")
+            )
+            for document in retrieval_result.documents
+        )
+        has_current_policy = any(
+            str(document.metadata.get("document_type") or "").lower() == "policy"
+            for document in retrieval_result.documents
+        )
         order_safe_answer, order_restored = restore_missing_requested_order_size(
             chat_response.answer,
             (document.content for document in retrieval_result.documents),
             user_question,
+            suppress_restore=has_fbo_order_field and has_current_policy,
         )
         # A restoration that leaves the answer structurally incomplete is worse
         # than the omission it fixes: the output validator discards the whole

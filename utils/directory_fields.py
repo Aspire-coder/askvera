@@ -1161,6 +1161,15 @@ _ONGOING_ORDER_QUESTION_RE = re.compile(
 )
 _PREFERRED_CUSTOMER_QUESTION_RE = re.compile(r"\bpreferred\s+customer\b", re.IGNORECASE)
 _FBO_ROLE_QUESTION_RE = re.compile(r"\bfbo\b|\bforever\s+business\s+owner\b|\bdistributor\b", re.IGNORECASE)
+_FBO_ENROLLMENT_BLOCK_RE = re.compile(
+    r"(?:\b(?:prohibit(?:ed|s|ion)?|unavailable|not\s+available|cannot|can(?:not|'t)|"
+    r"no\s+longer\s+available)[^.\n]{0,160}\b(?:fbo|forever\s+business\s+owner|"
+    r"enroll(?:ment|ing)?|register(?:ing|ation)?|opt(?:ing)?\s+in|become)\b|"
+    r"\b(?:fbo|forever\s+business\s+owner|enroll(?:ment|ing)?|register(?:ing|ation)?|"
+    r"opt(?:ing)?\s+in|become)[^.\n]{0,160}\b(?:prohibit(?:ed|s|ion)?|unavailable|"
+    r"not\s+available|cannot|can(?:not|'t)|no\s+longer\s+available)\b)",
+    re.IGNORECASE,
+)
 
 _FIRST_ORDER_LABEL_RE = re.compile(r"minimum\s+order\s+size\s+fbo\s*[:\-]\s*", re.IGNORECASE)
 _ONGOING_ORDER_LABEL_RE = re.compile(
@@ -1231,6 +1240,8 @@ def restore_missing_requested_order_size(
     answer: str,
     source_texts: Iterable[str],
     question: str,
+    *,
+    suppress_restore: bool = False,
 ) -> tuple[str, bool]:
     """Restore an explicit minimum-order value when another FAQ row was selected.
 
@@ -1245,6 +1256,13 @@ def restore_missing_requested_order_size(
         return answer, False
     if (_PREFERRED_CUSTOMER_QUESTION_RE.search(question_text)
             and not _FBO_ROLE_QUESTION_RE.search(question_text)):
+        return answer, False
+    if suppress_restore:
+        return answer, False
+    # Generation has already applied current policy. A directory field may be
+    # historical, so never re-add it after the answer explicitly says FBO
+    # enrollment is restricted.
+    if _FBO_ENROLLMENT_BLOCK_RE.search(answer or ""):
         return answer, False
 
     ongoing = bool(_ONGOING_ORDER_QUESTION_RE.search(question_text))
