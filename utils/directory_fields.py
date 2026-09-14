@@ -1180,6 +1180,32 @@ _ORDER_SIZE_ROLE_HEADING_RE = re.compile(
     r";\s*(?:preferred\s+customer|supervisor|assistant\s+supervisor|manager|home\s+office|fbo)\b",
     re.IGNORECASE,
 )
+_FLAT_ORDER_SIZE_VALUE_RE = re.compile(
+    r"minimum\s+order\s+size\s+fbo\s*:?[ \t\r\n]*(?P<value>.{0,220}?)"
+    r"(?=\.(?=\s+(?:[A-Z�•]|$))|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_LOCALIZED_ORDER_SIZE_QUESTION_RE: dict[str, re.Pattern[str]] = {
+    "nl": re.compile(r"minim\w*\s*bestel|bestelminimum", re.IGNORECASE),
+    "fr": re.compile(r"commande\w*\s+minim|minim\w*\s+(?:de\s+)?commande", re.IGNORECASE),
+    "de": re.compile(r"mindestbestell|minim\w*\s+bestell", re.IGNORECASE),
+    "es": re.compile(r"pedido\w*\s+mínim|mínim\w*\s+(?:de\s+)?pedido", re.IGNORECASE),
+    "it": re.compile(r"ordin\w*\s+minim|minim\w*\s+(?:d |di )?ordin", re.IGNORECASE),
+    "da": re.compile(r"minimumsbestilling|minimumsordre|mindste\s+(?:bestilling|ordre)", re.IGNORECASE),
+    "fi": re.compile(r"vähimmäistilau|minimitilau", re.IGNORECASE),
+    "no": re.compile(r"minstebestilling|minsteordre|minste\s+(?:bestilling|ordre)", re.IGNORECASE),
+    "sv": re.compile(r"minsta\s+(?:beställning|order)|minimibeställning|minimiorder", re.IGNORECASE),
+    "ru": re.compile(r"минимальн\w*\s+(?:сумм\w*\s+)?заказ", re.IGNORECASE),
+    "sr": re.compile(r"minimaln\w*\s+(?:porudžbin|narudžbin)|минималн\w*\s+(?:поруджбин|наруџбин)", re.IGNORECASE),
+}
+_FBO_ORDER_SIZE_LABELS = {
+    "en": "Minimum order size FBO", "nl": "Minimale bestelling voor FBO",
+    "fr": "Commande minimum pour FBO", "de": "Mindestbestellwert für FBO",
+    "es": "Pedido mínimo para FBO", "it": "Ordine minimo per FBO",
+    "da": "Minimumsbestilling for FBO", "fi": "FBO:n vähimmäistilaus",
+    "no": "Minimumsbestilling for FBO", "sv": "Minimibeställning för FBO",
+    "ru": "Минимальный заказ для FBO", "sr": "Minimalna porudžbina za FBO",
+}
 
 
 def _is_order_size_question(question_text: str) -> bool:
@@ -1289,6 +1315,57 @@ def restore_missing_requested_order_size(
         corrected = f"{corrected.strip()}{separator}{field_label}: {value}."
         return corrected, True
     return corrected, False
+
+
+def canonical_requested_order_size(
+    source_texts: Iterable[str],
+    question: str,
+    *,
+    language: str = "en",
+) -> str | None:
+    """Return the sole requested FBO order field as a source-locked answer.
+
+    A directory record can contain a Starter Kit, application instructions,
+    delivery terms, and an explicit FBO minimum order. For a dedicated minimum
+    order question, the latter is the only requested fact. Returning its exact
+    field prevents a model from promoting a nearby price into the answer or
+    appending unrelated record details.
+    """
+    question_text = question or ""
+    locale = (language or "en").split("-", 1)[0].split("_", 1)[0].lower()
+    is_order_question = _is_order_size_question(question_text) or bool(
+        _LOCALIZED_ORDER_SIZE_QUESTION_RE.get(locale, re.compile(r"(?!)")).search(question_text)
+    )
+    if not is_order_question or _requested_directory_field_set(question_text):
+        return None
+    if (_PREFERRED_CUSTOMER_QUESTION_RE.search(question_text)
+            and not _FBO_ROLE_QUESTION_RE.search(question_text)):
+        return None
+    ongoing = bool(_ONGOING_ORDER_QUESTION_RE.search(question_text))
+    label_pattern = _ONGOING_ORDER_LABEL_RE if ongoing else _FIRST_ORDER_LABEL_RE
+    field_label = "After sponsorship" if ongoing else _FBO_ORDER_SIZE_LABELS.get(locale, _FBO_ORDER_SIZE_LABELS["en"])
+    candidates: list[str] = []
+    for source in source_texts:
+        source_text = source or ""
+        value = _scan_order_size_value(source_text, label_pattern)
+        if value is not None:
+            candidates.append(value)
+            continue
+        # Production directory sections are flattened into one line by the
+        # index. Match the same explicit FBO label there, ending at the next
+        # sentence/bullet rather than absorbing prices or delivery details.
+        if not ongoing:
+            candidates.extend(match.group("value") for match in _FLAT_ORDER_SIZE_VALUE_RE.finditer(source_text))
+    normalized: dict[str, str] = {}
+    for value in candidates:
+        cleaned = " ".join(value.split()).strip().rstrip(" .")
+        if cleaned and len(cleaned) <= _MAX_RESTORED_VALUE_CHARS:
+            normalized.setdefault(_normalize_for_comparison(cleaned), cleaned)
+    # A record with no explicit FBO field, or any disagreement between
+    # matching fields, is not safe to turn into a definitive user answer.
+    if len(normalized) != 1:
+        return None
+    return f"{field_label}: {next(iter(normalized.values()))}."
 
 
 def correct_directory_source_contradictions(

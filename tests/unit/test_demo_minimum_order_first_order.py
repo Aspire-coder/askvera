@@ -10,6 +10,7 @@ joining-fee and rank-qualification questions from one another.
 import pytest
 
 from utils.directory_fields import (
+    canonical_requested_order_size,
     restore_missing_requested_order_size,
     correct_directory_source_contradictions,
 )
@@ -293,3 +294,66 @@ def test_fbo_policy_conflict_never_restores_a_historical_order_size(answer: str)
 
     assert restored is False
     assert corrected == answer
+
+
+def test_dedicated_fbo_minimum_order_uses_only_the_explicit_directory_field() -> None:
+    source = (
+        "Minimum order size FBO: Each order must be a minimum of SGD25.\n"
+        "New sign up members need to buy a Starter Kit at the cost of SGD50.\n"
+        "Payment methods accepted: Credit card, bank transfer."
+    )
+
+    answer = canonical_requested_order_size(source.splitlines(), "What's the minimum order to become an FBO?")
+
+    assert answer == "Minimum order size FBO: Each order must be a minimum of SGD25."
+
+
+def test_flattened_index_record_uses_its_explicit_fbo_minimum_only() -> None:
+    source = (
+        "ORDERING PRODUCTS � Minimum order size FBO: Each order must be a minimum of SGD25. "
+        "Price list can be downloaded on www.forever.net.sg. � Delivery Cost: SGD12."
+    )
+
+    answer = canonical_requested_order_size([source], "What's the minimum order to become an FBO?")
+
+    assert answer == "Minimum order size FBO: Each order must be a minimum of SGD25."
+
+
+def test_conflicting_fbo_minimums_are_not_turned_into_an_answer() -> None:
+    sources = [
+        "Minimum order size FBO: Each order must be a minimum of SGD25.",
+        "Minimum order size FBO: Each order must be a minimum of SGD50.",
+    ]
+
+    assert canonical_requested_order_size(sources, "What's the minimum order to become an FBO?") is None
+
+
+@pytest.mark.parametrize(
+    ("language", "question", "label"),
+    [
+        ("en", "What's the minimum order to become an FBO?", "Minimum order size FBO"),
+        ("nl", "Wat is de minimale bestelling voor een FBO?", "Minimale bestelling voor FBO"),
+        ("fr", "Quelle est la commande minimum pour devenir FBO?", "Commande minimum pour FBO"),
+        ("de", "Was ist der Mindestbestellwert für einen FBO?", "Mindestbestellwert für FBO"),
+        ("es", "Cuál es el pedido mínimo para ser FBO?", "Pedido mínimo para FBO"),
+        ("it", "Qual è l'ordine minimo per diventare FBO?", "Ordine minimo per FBO"),
+        ("da", "Hvad er minimumsbestilling for en FBO?", "Minimumsbestilling for FBO"),
+        ("fi", "Mikä on FBO:n vähimmäistilaus?", "FBO:n vähimmäistilaus"),
+        ("no", "Hva er minstebestilling for en FBO?", "Minimumsbestilling for FBO"),
+        ("sv", "Vad är minsta beställning för en FBO?", "Minimibeställning för FBO"),
+        ("ru", "Какой минимальный заказ для FBO?", "Минимальный заказ для FBO"),
+        ("sr", "Koja je minimalna porudžbina za FBO?", "Minimalna porudžbina za FBO"),
+    ],
+)
+def test_canonical_fbo_minimum_order_is_localized_for_every_supported_language(
+    language: str,
+    question: str,
+    label: str,
+) -> None:
+    answer = canonical_requested_order_size(
+        ["Minimum order size FBO: 50 Case Credits."],
+        question,
+        language=language,
+    )
+
+    assert answer == f"{label}: 50 Case Credits."

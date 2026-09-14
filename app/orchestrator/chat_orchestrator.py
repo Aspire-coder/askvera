@@ -84,6 +84,7 @@ from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, Re
 from utils.inline_citations import separate_verified_citations
 from utils.directory_fields import (
     build_support_contact_supplement,
+    canonical_requested_order_size,
     parse_directory_fields,
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
@@ -1242,6 +1243,21 @@ class AIOrchestrator:
                 chat_response,
                 order_safe_answer,
                 {"directory_order_size_restored": True},
+            )
+
+        canonical_order_answer = (
+            None if fbo_enrollment_is_unavailable(country)
+            else canonical_requested_order_size(
+                (document.content for document in retrieval_result.documents),
+                user_question,
+                language=language,
+            )
+        )
+        if canonical_order_answer and canonical_order_answer != chat_response.answer:
+            chat_response = self._replace_answer(
+                chat_response,
+                canonical_order_answer,
+                {"directory_order_size_canonicalized": True},
             )
 
         source_safe_answer, source_contradiction_corrected = correct_directory_source_contradictions(
