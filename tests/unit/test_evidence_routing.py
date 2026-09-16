@@ -373,6 +373,279 @@ def test_raw_score_does_not_approve_very_low_confidence_evidence() -> None:
     assert decision.reason == "insufficient_approved_evidence"
 
 
+def test_selector_relevant_middle_band_approves_active_everywhere_section() -> None:
+    """Sec 15.01(b)(6): the selector picked this section (5 of 30 candidates)
+    and rated it 0.65 confident, but the provider only writes
+    `evidence_selector_confidence` when `directly_answers_top_rank` is True,
+    so this turn reaches `approve_evidence` with `top_source_directly_answers`
+    explicitly False and no populated selector confidence at all."""
+    document = RetrievedDocument(
+        id="us-policy-15-01-b-6",
+        title="US Policy - Section 15.01(b)(6)",
+        content=(
+            "15.01 Active Status. (b) A Distributor is considered Active in a "
+            "given calendar month only if, during that month, the Distributor "
+            "(6) maintains Active Status separately and independently in each "
+            "market in which the Distributor is enrolled; Active Status "
+            "achieved in one market does not confer or extend Active Status "
+            "in any other market."
+        ),
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=0.6,
+        metadata={"document_type": "policy", "section_id": "15.01(b)(6)"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.185,
+        metadata={
+            "evidence_selector_applied": True,
+            "top_source_directly_answers": False,
+        },
+    )
+
+    decision = approve_evidence(
+        "If I'm active here am I active everywhere?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is True
+    assert decision.reason == "approved_selector_relevant"
+    assert decision.evidence == [document]
+
+
+def test_selector_relevant_middle_band_approves_forfeiture_section() -> None:
+    """Sec 6.05: a year without qualifying, selector confidence 0.55."""
+    document = RetrievedDocument(
+        id="us-policy-6-05",
+        title="US Policy - Section 6.05",
+        content=(
+            "6.05 Forfeiture of Rank and Downline for Inactivity. If a "
+            "Distributor fails to qualify at any paid rank for twelve (12) "
+            "consecutive calendar months, the Distributor's previously "
+            "achieved rank is forfeited, the Distributor's position and "
+            "downline organization are subject to reassignment by the "
+            "Company, and any accrued but unpaid bonuses associated with the "
+            "forfeited rank are canceled."
+        ),
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=0.55,
+        metadata={"document_type": "policy", "section_id": "6.05"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.178,
+        metadata={
+            "evidence_selector_applied": True,
+            "top_source_directly_answers": False,
+        },
+    )
+
+    decision = approve_evidence(
+        "What happens if I go a whole year without qualifying?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is True
+    assert decision.reason == "approved_selector_relevant"
+
+
+def test_selector_relevant_middle_band_approves_new_enrollee_section() -> None:
+    """Sec 1.01(c)/(e): what continues for a Distributor enrolled three weeks ago."""
+    document = RetrievedDocument(
+        id="us-policy-1-01-c-e",
+        title="US Policy - Section 1.01(c) and (e)",
+        content=(
+            "1.01 Enrollment and Effective Dates. (c) A new Distributor's "
+            "Enrollment Agreement takes effect upon Company acceptance and "
+            "remains in effect on an annual basis unless earlier terminated "
+            "or not renewed. (e) All rights and obligations under this "
+            "Policies and Procedures, including the right to earn "
+            "commissions and bonuses, continue uninterrupted for the "
+            "duration of the enrollment term regardless of how recently the "
+            "Distributor enrolled."
+        ),
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=0.45,
+        metadata={"document_type": "policy", "section_id": "1.01(c)/(e)"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.166,
+        metadata={
+            "evidence_selector_applied": True,
+            "top_source_directly_answers": False,
+        },
+    )
+
+    decision = approve_evidence(
+        "I just signed up three weeks ago, does everything still apply to me?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is True
+    assert decision.reason == "approved_selector_relevant"
+
+
+def test_selector_relevant_middle_band_approves_compliance_contact_section() -> None:
+    """Sec 16.02(i): the compliance department phone number."""
+    document = RetrievedDocument(
+        id="us-policy-16-02-i",
+        title="US Policy - Section 16.02(i)",
+        content=(
+            "16.02 Company Contacts. Distributors may direct inquiries to "
+            "the following departments: ... (i) Compliance Department: "
+            "telephone (800) 555-0142, available Monday through Friday, "
+            "8:00 a.m. to 5:00 p.m. Mountain Time, for questions regarding "
+            "policy interpretation, complaints, or reported violations."
+        ),
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=0.35,
+        metadata={"document_type": "policy", "section_id": "16.02(i)"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.182,
+        metadata={
+            "evidence_selector_applied": True,
+            "top_source_directly_answers": False,
+        },
+    )
+
+    decision = approve_evidence(
+        "What's the phone number for the compliance department?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is True
+    assert decision.reason == "approved_selector_relevant"
+
+
+def test_selector_no_selection_is_not_rescued_by_middle_band() -> None:
+    """A turn where the selector chose nothing leaves `evidence_selector_applied`
+    unset - a corrupted query with genuinely bad evidence must stay refused,
+    not be rescued just because some document made it into the result set."""
+    document = RetrievedDocument(
+        id="us-policy-unrelated",
+        title="US policy",
+        content="Unrelated policy content that happened to be retrieved.",
+        source="s3://approved/us-policy.pdf",
+        country="US",
+        language="en",
+        score=0.4,
+        metadata={"document_type": "policy"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.15,
+        metadata={
+            "evidence_selector_applied": False,
+            "top_source_directly_answers": None,
+        },
+    )
+
+    decision = approve_evidence(
+        "a shall at a weekend market",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "insufficient_approved_evidence"
+
+
+def test_selector_relevant_global_directory_record_is_not_rescued_as_policy_answer() -> None:
+    """The selector may pick a global directory record as topically related
+    to a policy question, but a directory record must never stand in as the
+    answer to a policy question - the structural guard is independent of the
+    selector's own confidence signal."""
+    document = RetrievedDocument(
+        id="global-office-directory",
+        title="International Office Directory - US",
+        content="US Office: 123 Main St. Phone: (800) 555-0100.",
+        source="s3://approved/global-directory.pdf",
+        country="GLOBAL",
+        language="en",
+        score=0.5,
+        metadata={"access_scope": "global", "directory_section": "office"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.17,
+        metadata={
+            "evidence_selector_applied": True,
+            "top_source_directly_answers": False,
+        },
+    )
+
+    decision = approve_evidence(
+        "What happens if I go a whole year without qualifying?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "insufficient_approved_evidence"
+
+
+def test_selector_relevant_middle_band_still_blocks_cross_market_policy_request() -> None:
+    """The cross-market guard runs before any evidence is even considered, so
+    the middle-band rescue must never reach a request that names another
+    market's company policy."""
+    document = RetrievedDocument(
+        id="it-policy-15-01-b-6",
+        title="Italy Policy - Section 15.01(b)(6)",
+        content="Un Distributore e considerato Attivo separatamente in ogni mercato.",
+        source="s3://approved/it-policy.pdf",
+        country="IT",
+        language="it",
+        score=0.6,
+        metadata={"document_type": "policy", "section_id": "15.01(b)(6)"},
+    )
+    retrieval_result = RetrievalResult(
+        documents=[document],
+        citations=[document.to_source()],
+        confidence=0.185,
+        metadata={
+            "evidence_selector_applied": True,
+            "top_source_directly_answers": False,
+        },
+    )
+
+    decision = approve_evidence(
+        "What does the Italian company policy say about active status?",
+        retrieval_result,
+        "US",
+        "en",
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "cross_market_policy_request"
+
+
 def test_selector_verified_strong_local_match_can_approve_normalized_opensearch_score() -> None:
     """A selector-verified direct clause is not blocked by legacy score calibration."""
     document = RetrievedDocument(
