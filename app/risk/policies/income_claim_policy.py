@@ -3,7 +3,10 @@
 import re
 
 from app.risk.models import PolicyAction, RiskContext, RiskIssue, RiskLevel
-from app.risk.policies.income_claim_translations import contains_translated_income_claim
+from app.risk.policies.income_claim_translations import (
+    contains_translated_income_claim,
+    contains_translated_income_context,
+)
 from app.risk.rules import RiskPolicyMetadata
 from config.guardrail_topics import DENIED_TOPICS
 from services.guardrails import is_policy_safety_question
@@ -541,3 +544,19 @@ class IncomeClaimPolicy:
         guarantee = re.search(r"\bguarantee(?:d|s|ing)?\b", guarantee_text)
         earnings = _EARNINGS_MAIN_RE.search(message)
         return bool(guarantee and earnings)
+
+    def has_income_context(self, message: str) -> bool:
+        """Return whether a possible income route needs semantic confirmation.
+
+        Context is deliberately broader than a confirmed claim. It preserves
+        review for typical, projected, or personalised earnings questions while
+        allowing an obviously unrelated planner false positive to reach normal
+        knowledge retrieval.
+        """
+        normalized = (message or "").lower()
+        return bool(
+            self._contains_income_claim(normalized)
+            or _EARNINGS_MAIN_RE.search(normalized)
+            or _GAIN_OR_PRIZE_RE.search(normalized)
+            or contains_translated_income_context(normalized)
+        )

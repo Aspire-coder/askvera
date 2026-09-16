@@ -1019,3 +1019,20 @@ def contains_translated_income_claim(message: str) -> bool:
     if not GUARANTEE_RE.search(guarantee_text):
         return False
     return bool(earnings or MONEY_RE.search(searchable))
+
+
+def contains_translated_income_context(message: str) -> bool:
+    """True when text contains income-adjacent vocabulary needing semantic review.
+
+    This is intentionally broader than contains_translated_income_claim: a bare
+    earnings, money, recurring-gain, or lifestyle term is not enough to refuse,
+    but it is enough to keep an advisory income route for independent review.
+    """
+    text = fold(message)
+    searchable = FALSE_FRIEND_RE.sub(" ", text)
+    return bool(
+        PHRASE_RE.search(text)
+        or EARNINGS_RE.search(searchable)
+        or MONEY_RE.search(searchable)
+        or GAIN_RE.search(searchable)
+    )

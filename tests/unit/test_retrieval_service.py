@@ -743,6 +743,47 @@ def test_query_planner_preserves_confirmed_income_claim(monkeypatch) -> None:
     plan = _planned_retrieval_plan("Can this replace my salary?", "US", "en", "income-cid")
 
     assert plan.conversation_intent == "income_claim"
+    assert runtime.converse.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("question", "language"),
+    [
+        ("What would I make per year?", "en"),
+        ("What is the average FBO income?", "en"),
+        ("What do FBOs typically earn?", "en"),
+        ("Could I make enough to quit my job?", "en"),
+        ("Quel est le revenu moyen d’un FBO ?", "fr"),
+    ],
+)
+def test_income_adjacent_questions_keep_independent_semantic_review(
+    monkeypatch, question, language
+) -> None:
+    runtime = MagicMock()
+    runtime.converse.side_effect = [
+        {
+            "output": {
+                "message": {
+                    "content": [{
+                        "text": '{"queries":[],"document_scopes":[],"intent":"income_claim",'
+                        '"intent_confidence":0.99,"explicit_support_request":false}'
+                    }]
+                }
+            }
+        },
+        {"output": {"message": {"content": [{"text": '{"income_claim":true}'}]}}},
+    ]
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval_providers,
+        "get_aws_clients",
+        lambda: SimpleNamespace(bedrock_runtime=runtime),
+    )
+
+    plan = _planned_retrieval_plan(question, "US", language, "income-context-cid")
+
+    assert plan.conversation_intent == "income_claim"
+    assert runtime.converse.call_count == 2
 
 
 def test_query_planner_routes_assistant_capability_without_document_search(monkeypatch) -> None:

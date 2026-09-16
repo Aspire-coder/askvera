@@ -59,6 +59,30 @@ def test_income_claim_policy_still_flags_passive_income_with_bonus_terms() -> No
 
 
 @pytest.mark.parametrize("message", [
+    "What would I make per year?",
+    "What is the average FBO income?",
+    "What do FBOs typically earn?",
+    "Could I make enough to quit my job?",
+    "Quel est le revenu moyen d’un FBO ?",
+])
+def test_unconfirmed_income_context_is_kept_for_semantic_review(message) -> None:
+    policy = IncomeClaimPolicy()
+
+    assert policy.evaluate(_context(message)) == []
+    assert policy.has_income_context(message)
+
+
+@pytest.mark.parametrize("message", [
+    "What is Forever Living Products?",
+    "¿Qué es Forever Living Products?",
+    "Qu’est-ce que Forever Living Products ?",
+    "What is the return policy?",
+])
+def test_ordinary_questions_have_no_income_context(message) -> None:
+    assert not IncomeClaimPolicy().has_income_context(message)
+
+
+@pytest.mark.parametrize("message", [
     "Once you've earned a Sales Level, you keep it. Maintaining one status doesn't guarantee the other.",
     "Earning your sales rank does not guarantee Active status.",
     "You earn Active status monthly. This does not guarantee retention of another status.",

@@ -182,14 +182,38 @@ def _verified_conversation_intent(
         role="",
         correlation_id=correlation_id,
     )
-    if IncomeClaimPolicy().evaluate(context):
+    income_policy = IncomeClaimPolicy()
+    if income_policy.evaluate(context):
         return intent, False
-    # A model's semantic route is advisory.  The deterministic policy applies
-    # the approved, multilingual claim vocabulary consistently and is the
-    # authority for whether a request can be refused before retrieval.  Do not
-    # let a second model turn an ordinary policy or company question into an
-    # income refusal after that policy has found no claim signal.
-    return "knowledge", True
+    # No income-adjacent vocabulary means the planner's label is an obvious
+    # false positive and must not prevent retrieval. Ambiguous income-adjacent
+    # wording still receives the independent semantic check below.
+    if not income_policy.has_income_context(message):
+        return "knowledge", True
+    system_prompt = (
+        "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
+        "income or earnings outcome. Factual questions about published compensation, bonuses, discounts, "
+        "returns, purchases, rank qualifications, or company policy are not income claims. Apply the same "
+        "rule in every language. Do not answer the user. Return only JSON."
+    )
+    user_prompt = (
+        f"Requested language: {language}\nUser message:\n{message}\n\n"
+        'Return exactly: {"income_claim":true} or {"income_claim":false}.'
+    )
+    try:
+        response = runtime.converse(
+            modelId=settings.BEDROCK_MODEL_ARN,
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+            inferenceConfig={"maxTokens": settings.BEDROCK_SUPPORT_ROUTE_MAX_OUTPUT_TOKENS, "temperature": settings.BEDROCK_CLASSIFIER_TEMPERATURE},
+        )
+        text = response["output"]["message"]["content"][0].get("text", "")
+        json_match = re.search(r"\{.*\}", text.strip(), flags=re.S)
+        payload = json.loads(json_match.group(0) if json_match else text)
+        return (intent, False) if payload.get("income_claim") is True else ("knowledge", True)
+    except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        LOGGER.exception("income_intent_verification_failed", correlation_id=correlation_id)
+        return intent, False
 
 
 class RetrievalProvider(Protocol):
