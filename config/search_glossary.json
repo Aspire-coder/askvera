@@ -111,6 +111,29 @@
       "queries": ["Case Credit activity and Operating Company requirements", "personal Case Credits qualification", "active FBO requirements during qualification"]
     },
     {
+      "id": "case-credit-combine-across-operating-companies",
+      "country": ["*"],
+      "language": ["*"],
+      "triggers": [
+        "different countries",
+        "another country",
+        "other countries",
+        "across countries",
+        "multiple countries",
+        "combine case credit",
+        "combine case credits",
+        "combining case credits",
+        "case credits from different",
+        "case credits across",
+        "operating company"
+      ],
+      "queries": [
+        "Operating Company definition",
+        "4.01(e) Case Credits combined across Operating Companies to move up",
+        "Assistant Supervisor single Operating Company requirement"
+      ]
+    },
+    {
       "id": "bonus-qualification-rules",
       "country": ["*"],
       "language": ["*"],
