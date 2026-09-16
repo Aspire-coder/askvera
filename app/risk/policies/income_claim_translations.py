@@ -1036,3 +1036,78 @@ def contains_translated_income_context(message: str) -> bool:
         or MONEY_RE.search(searchable)
         or GAIN_RE.search(searchable)
     )
+
+
+# Fix A (2026-09-15, PR #154 follow-up): app/retrieval/providers.py bypasses
+# the independent semantic income check when has_income_context() finds
+# nothing, on the theory that absence of income vocabulary means the query
+# planner's "income_claim" label was a false positive. That theory only holds
+# for a language this module's word lists actually cover - for anything else,
+# "found nothing" just means our vocabulary has a gap, not that the message is
+# safe. is_covered_language() below is the gate the bypass must also pass.
+
+# Script ranges no covered language's vocabulary above (or English's, in
+# app/risk/policies/income_claim_policy.py) is written in. A message using one
+# of these scripts cannot match any covered word list regardless of the
+# request's declared language, so it must never let the bypass fire on an
+# empty has_income_context() result. Latin-script uncovered languages (Polish,
+# Turkish, Indonesian, Vietnamese, Swahili) cannot be caught this way, since
+# covered languages also use Latin script; those rely solely on the request's
+# declared language already being outside COVERED_LANGUAGES (see
+# is_covered_language() below). That is a real residual gap - a user typing an
+# uncovered Latin-script language under a widget whose declared language
+# happens to be a covered one would still bypass - documented honestly here
+# rather than papered over.
+_UNCOVERED_SCRIPT_RE = re.compile(
+    "["
+    "؀-ۿݐ-ݿࢠ-ࣿ"  # Arabic
+    "֐-׿"  # Hebrew
+    "ऀ-ॿ"  # Devanagari
+    "฀-๿"  # Thai
+    "Ͱ-Ͽἀ-῿"  # Greek
+    "぀-ヿ㐀-䶿一-鿿豈-﫿"  # CJK: Hiragana/Katakana/Han
+    "가-힯"  # Hangul
+    "]"
+)
+
+
+def has_uncovered_script(message: str) -> bool:
+    """True when the message contains a character from a script no covered
+    language's vocabulary uses. See _UNCOVERED_SCRIPT_RE above."""
+    return bool(_UNCOVERED_SCRIPT_RE.search(message or ""))
+
+
+# Languages whose income vocabulary above (or, for "en", in
+# app/risk/policies/income_claim_policy.py) has actually been reviewed for the
+# has_income_context() bypass in app/retrieval/providers.py's
+# _verified_conversation_intent. This must be updated by hand whenever
+# vocabulary is added or reviewed for a language - it is deliberately not
+# derived from LANGUAGES.keys(), because adding a language to LANGUAGES does
+# not by itself mean its coverage has been vetted as complete enough to
+# justify skipping the semantic check. "ru-latn" and "sr-cyrl" are
+# transliteration/script variants of the "ru"/"sr" vocabulary, not separate
+# request languages, so they are not listed here. This set matches every
+# locale config/conversation_routes.json currently ships (en, fr, es, de, nl,
+# it, da, fi, no, sr, sv, ru), plus "pt", whose vocabulary is reviewed above
+# even though no widget locale currently uses it.
+COVERED_LANGUAGES = frozenset({
+    "en", "fr", "es", "pt", "de", "nl", "it", "sv", "da", "no", "fi", "ru", "sr",
+})
+
+
+def is_covered_language(language: str, message: str) -> bool:
+    """True when app/retrieval/providers.py's bypass may trust an absence of
+    income vocabulary for this request.
+
+    Both conditions must hold: the request's own declared language is one
+    whose vocabulary was reviewed (COVERED_LANGUAGES), and the message itself
+    contains no character from a script no covered language uses
+    (has_uncovered_script) - a user can type any language regardless of the
+    widget's configured locale. This is deliberately conservative: on any
+    doubt it returns False, which only sends the message to the existing
+    independent semantic check rather than refusing it outright.
+    """
+    normalized = str(language or "").strip().lower().split("-")[0]
+    if normalized not in COVERED_LANGUAGES:
+        return False
+    return not has_uncovered_script(message)
