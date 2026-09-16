@@ -143,6 +143,53 @@ def test_generated_deletion_transposition_duplication_and_joined_variants(
     ]
 
 
+@pytest.mark.parametrize(
+    ("original", "candidate"),
+    [
+        (
+            "Can I have a stall at a weekend market?",
+            "what does the policy say a member shall do at a weekend market",
+        ),
+        (
+            "Is this the whole contract or are there other documents?",
+            "whether his contract is the whole agreement or there are other documents",
+        ),
+    ],
+)
+def test_correctly_spelled_word_is_not_swapped_for_a_policy_lookalike(
+    original: str, candidate: str
+) -> None:
+    """A near neighbour in the planner's wording is not evidence that the
+    user's own, correctly spelled word was a typo. ``stall``/``shall`` and
+    ``his``/``this`` are both one edit apart but neither edit has a shape
+    (keyboard-adjacent substitution/transposition on a long-enough word, or
+    dropping a letter that recurs elsewhere in the word) that looks like a
+    genuine typing slip, so the original wording must survive untouched.
+    """
+    assert safe_typo_ranking_queries(original, [candidate]) == []
+
+
+@pytest.mark.parametrize(
+    ("original", "candidate"),
+    [
+        ("Please fill out the form before the trial ends.", "please fill out the from before the trail ends"),
+        ("I would quite like to leave now.", "i would quiet like to leave now"),
+    ],
+)
+def test_short_word_transposition_is_not_treated_as_a_typo(
+    original: str, candidate: str
+) -> None:
+    """General-purpose regression: pick correct-word/lookalike pairs that are
+    not in any exception list (form/from, trial/trail, quite/quiet). Each
+    pair differs only by an adjacent-letter transposition, exactly like the
+    genuine typo cases this module must keep repairing (e.g. Mexcio/Mexico),
+    so the fix cannot rely on those pairs being individually blocked - it
+    must instead recognise that transposition between two short, independently
+    valid words is not, by itself, evidence of a misspelling.
+    """
+    assert safe_typo_ranking_queries(original, [candidate]) == []
+
+
 def test_typo_ranking_uses_safe_repair_without_changing_original_score() -> None:
     provider = OpenSearchSectionProvider()
     original = "How can I become a recognizd manager?"

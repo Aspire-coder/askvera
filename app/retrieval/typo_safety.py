@@ -21,6 +21,97 @@ _SPLIT_REPAIR_PROTECTED_PARTS = frozenset(
 )
 _SEMANTIC_COLLISION_PAIRS = frozenset({frozenset({"shipping", "shopping"})})
 
+# Physical QWERTY key neighbours (same-row neighbours plus the keys touching a
+# key diagonally on the row above/below), used only to decide whether a
+# single-character *substitution* looks like a plausible fat-finger slip.
+# This assumes a QWERTY-like physical layout. To support another layout
+# (AZERTY, Dvorak, a non-Latin keyboard, ...), build an equivalent adjacency
+# map for that layout's physical key positions and pass/select it instead of
+# hard-coding this table.
+_QWERTY_ADJACENCY: dict[str, frozenset[str]] = {
+    "q": frozenset("wa"),
+    "w": frozenset("qeas"),
+    "e": frozenset("wrsd"),
+    "r": frozenset("etdf"),
+    "t": frozenset("ryfg"),
+    "y": frozenset("tugh"),
+    "u": frozenset("yihj"),
+    "i": frozenset("uojk"),
+    "o": frozenset("ipkl"),
+    "p": frozenset("ol"),
+    "a": frozenset("qwsz"),
+    "s": frozenset("awedzx"),
+    "d": frozenset("serfxc"),
+    "f": frozenset("drtgcv"),
+    "g": frozenset("ftyhvb"),
+    "h": frozenset("gyujbn"),
+    "j": frozenset("huiknm"),
+    "k": frozenset("jiolm"),
+    "l": frozenset("kop"),
+    "z": frozenset("asx"),
+    "x": frozenset("zsdc"),
+    "c": frozenset("xdfv"),
+    "v": frozenset("cfgb"),
+    "b": frozenset("vghn"),
+    "n": frozenset("bhjm"),
+    "m": frozenset("njk"),
+}
+
+# A single-character substitution or an adjacent-character transposition is
+# just as easy to produce between two *different, independently valid*
+# English words (quite/quiet, form/from, trial/trail) as it is to produce as
+# an actual typo. Below this length the space of short real words is dense
+# enough that those "symmetric" edit shapes are not, by themselves, good
+# evidence of a misspelling; only a deletion/insertion that removes or adds
+# one occurrence of an already-repeated letter (see
+# ``_repeated_letter_edit``) is trusted at any length, because that shape is
+# directional and rare between two unrelated real words.
+_MIN_LENGTH_FOR_SYMMETRIC_REPAIR = 6
+
+
+def _keyboard_adjacent(left: str, right: str) -> bool:
+    return right in _QWERTY_ADJACENCY.get(left, frozenset())
+
+
+def _repeated_letter_edit(shorter: str, longer: str) -> bool:
+    """True if ``longer`` becomes ``shorter`` by dropping one occurrence of a
+    letter that still appears elsewhere in ``longer`` (not necessarily
+    adjacent to the dropped occurrence).
+
+    Typing a letter that already recurs in the word (recognized, order,
+    sponsoring, requirements, international, conditions) is where people
+    reliably drop or double a keystroke; that repetition is what makes the
+    edit look like a genuine slip rather than a coincidental near-miss with
+    an unrelated real word.
+    """
+    for index, letter in enumerate(longer):
+        if longer[:index] + longer[index + 1 :] == shorter and longer.count(letter) >= 2:
+            return True
+    return False
+
+
+def _looks_like_typo_shape(candidate: str, original: str) -> bool:
+    """Require the single edit between ``candidate`` and ``original`` to look
+    like a plausible typing slip, not merely a nearby word.
+    """
+    if len(candidate) == len(original):
+        diff_positions = [index for index in range(len(candidate)) if candidate[index] != original[index]]
+        if len(diff_positions) == 1:
+            if min(len(candidate), len(original)) < _MIN_LENGTH_FOR_SYMMETRIC_REPAIR:
+                return False
+            index = diff_positions[0]
+            return _keyboard_adjacent(candidate[index], original[index])
+        if len(diff_positions) == 2 and diff_positions[1] == diff_positions[0] + 1:
+            if min(len(candidate), len(original)) < _MIN_LENGTH_FOR_SYMMETRIC_REPAIR:
+                return False
+            first, second = diff_positions
+            return candidate[first] == original[second] and candidate[second] == original[first]
+        return False
+    shorter, longer = (candidate, original) if len(candidate) < len(original) else (original, candidate)
+    if len(longer) - len(shorter) != 1:
+        return False
+    return _repeated_letter_edit(shorter, longer)
+
 
 def _fold(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value or "").casefold()
@@ -114,7 +205,10 @@ def _split_repair(
         for candidate in planned_tokens:
             if any(character.isdigit() for character in candidate):
                 continue
-            if not _is_semantic_collision(candidate, joined) and (candidate == joined or _token_is_repair(candidate, joined)):
+            if not _is_semantic_collision(candidate, joined) and (
+                candidate == joined
+                or (_token_is_repair(candidate, joined) and _looks_like_typo_shape(candidate, joined))
+            ):
                 return candidate, size
     return None
 
@@ -129,6 +223,7 @@ def _repair_token(token: str, planned_tokens: list[str]) -> str:
         and _token_is_repair(candidate, token)
         and not _is_semantic_collision(candidate, token)
         and (len(token) >= 5 or abs(len(candidate) - len(token)) == 1)
+        and _looks_like_typo_shape(candidate, token)
     }
     if not candidates:
         return token
