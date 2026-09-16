@@ -5,20 +5,21 @@ APP_DIR="${APP_DIR:-/opt/askvera}"
 APP_USER="${APP_USER:-askvera}"
 SERVICE_NAME="${SERVICE_NAME:-askvera}"
 HEALTH_BASE_URL="${HEALTH_BASE_URL:-https://api.vera-api.xyz}"
-RUN_TESTS="${RUN_TESTS:-true}"
+RUN_TESTS="${RUN_TESTS:-false}"
 BRANCH="${BRANCH:-main}"
 STARTUP_HEALTH_ATTEMPTS="${STARTUP_HEALTH_ATTEMPTS:-15}"
 STARTUP_HEALTH_INTERVAL_SECONDS="${STARTUP_HEALTH_INTERVAL_SECONDS:-2}"
 
 usage() {
   cat <<USAGE
-Usage: sudo ./deployment/deploy.sh [--skip-tests]
+Usage: sudo ./deployment/deploy.sh [--with-tests]
 
 Environment overrides:
   APP_DIR=/opt/askvera
   APP_USER=askvera
   SERVICE_NAME=askvera
   HEALTH_BASE_URL=https://api.vera-api.xyz
+  RUN_TESTS=false
   BRANCH=main
   STARTUP_HEALTH_ATTEMPTS=15
   STARTUP_HEALTH_INTERVAL_SECONDS=2
@@ -27,8 +28,8 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skip-tests)
-      RUN_TESTS=false
+    --with-tests)
+      RUN_TESTS=true
       shift
       ;;
     -h|--help)
@@ -201,6 +202,41 @@ fi
 
 PREVIOUS_REV="$(sudo -u "${APP_USER}" git rev-parse HEAD)"
 
+# From here on, the working tree is about to move ahead of what is actually
+# running (loaded in memory by the current ${SERVICE_NAME} process). If the
+# script exits for ANY reason - a failing gate, an operator's Ctrl+C - before
+# a successful restart-and-health-check, the previous fast-forward must not
+# be left on disk: on 2026-09-16 exactly that happened, and a later reboot
+# had systemd start the new, ungated commit straight from disk.
+#
+# RESTART_ATTEMPTED tracks whether systemctl has already been asked to start
+# the new code. Before that point the running process is untouched, so
+# recovery is just "make the working tree match what is still running" - a
+# plain checkout, no restart. From that point on, an abort needs the same
+# full recovery as a canary/health failure, so it reuses rollback() below
+# rather than a second mechanism.
+#
+# This trap is deliberately disarmed (trap - EXIT ERR INT) in the two places
+# where the script already has its own, more specific handling for the exit:
+# right before it calls rollback() itself on a canary/health failure (so
+# that path is not rolled back twice), and right after the deploy succeeds
+# (so a clean exit does not "abort" a success).
+RESTART_ATTEMPTED=false
+
+handle_abort() {
+  local exit_code=$?
+  trap - EXIT ERR INT
+  if [[ "${RESTART_ATTEMPTED}" == "true" ]]; then
+    echo "Deploy aborted after restarting ${SERVICE_NAME}; rolling back to the previously running commit ${PREVIOUS_REV}." >&2
+    rollback "${PREVIOUS_REV}"
+  else
+    echo "Deploy aborted before ${SERVICE_NAME} was restarted. The running service is still serving ${PREVIOUS_REV} unaffected; reverting the working tree to match it so disk never gets ahead of what is running." >&2
+    sudo -u "${APP_USER}" git -C "${APP_DIR}" checkout "${PREVIOUS_REV}" || true
+  fi
+  exit "${exit_code}"
+}
+trap handle_abort EXIT ERR INT
+
 log "Fetching latest ${BRANCH}."
 sudo -u "${APP_USER}" git fetch origin "${BRANCH}"
 sudo -u "${APP_USER}" git checkout "${BRANCH}"
@@ -219,16 +255,31 @@ sudo -u "${APP_USER}" .venv/bin/python scripts/validate_config.py --load-ssm --r
 log "Applying ordered database migrations."
 sudo -u "${APP_USER}" .venv/bin/python scripts/run_db_migrations.py --load-ssm --apply
 
+# The full unit suite is NOT run here by default. The production host has
+# 912 MiB of RAM and no swap; running "pytest tests -q" for the whole suite
+# while the live service is also running has exhausted memory mid-run,
+# stalled the SSM agent, and dropped the operator's session (2026-09-16).
+#
+# It is also redundant here: the ".github/workflows/deploy.yml" workflow
+# ("ASK Vera CI") already runs "python -m pytest tests/unit -q" (plus
+# compileall, flake8, the security-regression check, cfn-lint, and the
+# retrieval canary in --validate-only mode) on every push and pull_request
+# to main, on a machine sized for it. Whatever commit reaches this script
+# has already had its unit tests run in CI.
+#
+# Do not "restore" this to always-on. An operator who genuinely needs the
+# suite run on this host can opt in with --with-tests or RUN_TESTS=true.
 if [[ "${RUN_TESTS}" == "true" ]]; then
-  log "Running tests."
+  log "Running tests (opted in via --with-tests/RUN_TESTS=true)."
   sudo -u "${APP_USER}" .venv/bin/python -m pytest tests -q
 else
-  log "Skipping tests by explicit request."
+  log "Skipping the unit suite on this host; CI (ASK Vera CI) already gated it on merge."
 fi
 
 sync_runtime_configuration
 
 log "Restarting ${SERVICE_NAME}."
+RESTART_ATTEMPTED=true
 systemctl restart "${SERVICE_NAME}"
 
 log "Running health checks."
@@ -236,9 +287,11 @@ if ! wait_for_local_health ||
   ! PUBLIC_URL="${HEALTH_BASE_URL}" bash "${APP_DIR}/deployment/healthcheck.sh" ||
   ! run_retrieval_canary; then
   echo "Health or retrieval-quality check failed after deploy." >&2
+  trap - EXIT ERR INT
   rollback "${PREVIOUS_REV}"
   exit 1
 fi
 
+trap - EXIT ERR INT
 DEPLOYED_REV="$(sudo -u "${APP_USER}" git rev-parse --short HEAD)"
 echo "Deployment complete. Deployed commit: ${DEPLOYED_REV}"
