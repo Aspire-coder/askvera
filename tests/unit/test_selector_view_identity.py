@@ -18,10 +18,12 @@ from app.retrieval.opensearch_sections import (
 )
 from config import settings
 
-# sha256 of the selector system prompt at fb22f38 + the approved 954b4f5c patch.
+# sha256 of the selector system prompt at fb22f38 + the approved 954b4f5c patch,
+# plus the deletion-marker-is-a-direct-answer guidance added for the deleted-
+# sections fix (a deliberate prompt change, reviewed and re-pinned here).
 _BASELINE_SYSTEM_PROMPT_SHA256 = {
-    False: "f5d276441aa1cd400879c0d03e0c1183fd9cc5beb524223e8bfd993eb6e9e50d",
-    True: "b717c80a22e6bcc813ec65bd1bb57d9b6c8356c5f746f6f04e162153c3522cf0",
+    False: "7d18e07f4f1621da2ff4ce1fbe5b2952a81529832e2d3c0a6afaa71e96ebe1b3",
+    True: "ed5335d15bb0459ae17932032ce69db50bdef885960576a3138b3060d08c03e9",
 }
 
 

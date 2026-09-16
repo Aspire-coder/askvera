@@ -349,6 +349,35 @@ def test_merge_hits_keeps_strongest_text_hit_for_same_section() -> None:
     assert rows[0][0]["section_title"] == "Original governing title"
 
 
+def test_deletion_marker_section_survives_the_score_floor_via_exact_match_boost(monkeypatch) -> None:
+    """The exact-section-id route in `retrieve()` boosts a matched hit's raw
+    score to at least 100 before merging (see the ``explicit_section_id``
+    branch). A deletion-marker section's body is only a short notice, not an
+    ordinary policy clause, so it must still end up ranked above an
+    unrelated, longer, higher-raw-BM25-score candidate once merged - the
+    exact match boost, not body length, is what should decide this."""
+    monkeypatch.setattr(settings, "SECTION_RETRIEVAL_MIN_SCORE", 0.05)
+    exact_hit = _hit("section-7", "", 100.0)
+    exact_hit["_source"]["section_id"] = "7"
+    exact_hit["_source"]["section_title"] = ""
+    exact_hit["_source"]["content"] = (
+        '7 Intentionally Deleted.\nThe contents page lists this section as "Additional Incentives".'
+    )
+    exact_hit["_source"]["search_text"] = exact_hit["_source"]["content"]
+    unrelated_hit = _hit("other-section", "Customer service contact", 40.0)
+    unrelated_hit["_source"]["section_id"] = "12.03"
+    unrelated_hit["_source"]["content"] = "Contact your sponsoring FBO or Regional Sales Director for support."
+    unrelated_hit["_source"]["search_text"] = unrelated_hit["_source"]["content"]
+
+    rows = OpenSearchSectionProvider()._merge_hits(
+        [exact_hit, unrelated_hit], [], "Section 7 - what does it say?"
+    )
+    eligible = OpenSearchSectionProvider()._finalize_eligible_rows(rows)
+
+    assert eligible
+    assert eligible[0][0]["id"] == "section-7"
+
+
 def test_hardened_ranking_prefers_governing_manager_requirement(monkeypatch) -> None:
     monkeypatch.setattr(settings, "OPENSEARCH_RETRIEVAL_HARDENING_ENABLED", True)
     direct = _hit("manager-requirement", "Manager is achieved by generating Case Credits", 2.0)
@@ -691,6 +720,35 @@ def test_selector_confidence_is_withheld_when_pick_is_not_a_direct_answer(monkey
     # the signal, so it must be threaded through even though the rescue
     # confidence above is deliberately withheld.
     assert selected[0][0]["evidence_selector_directly_answers"] is False
+
+
+def test_selector_prompt_tells_the_model_a_deletion_notice_is_a_direct_answer(monkeypatch) -> None:
+    """The evidence selector must not treat a deletion-marker candidate as
+    missing evidence: its system prompt has to say plainly that a section
+    stating it was deleted/removed/reserved IS the direct answer to a
+    question about what that section contains."""
+    captured: dict[str, object] = {}
+
+    class Runtime:
+        def converse(self, **kwargs):
+            captured["system"] = kwargs["system"][0]["text"]
+            return {
+                "output": {"message": {"content": [{"text": '{"selected_ranks":[1],"reason":"marker"}'}]}}
+            }
+
+    monkeypatch.setattr(settings, "OPENSEARCH_EVIDENCE_SELECTOR_ENABLED", True)
+    monkeypatch.setattr(
+        opensearch_sections,
+        "get_aws_clients",
+        lambda: type("Clients", (), {"bedrock_runtime": Runtime()})(),
+    )
+    rows = [({"id": "section-7", "metadata": {}, "content": "7 Intentionally Deleted."}, 1.0)]
+
+    OpenSearchSectionProvider()._select_evidence_rows("Section 7 - what does it say?", rows, "cid")
+
+    prompt = str(captured["system"]).lower()
+    assert "deleted" in prompt
+    assert "direct answer" in prompt
 
 
 def test_invalid_selector_output_preserves_original_ranking(monkeypatch) -> None:

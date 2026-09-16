@@ -11,7 +11,9 @@ import csv
 import json
 import re
 import sys
+import unicodedata
 from dataclasses import asdict, dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -22,6 +24,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.document_preflight import TABLE_GAP_RE, extract_pdf_page_text  # noqa: E402
+
+DELETION_MARKER_PHRASES_PATH = PROJECT_ROOT / "config" / "deletion_marker_phrases.json"
 
 
 # Policies commonly use a mix of top-level headings ("1 Introduction"),
@@ -61,6 +65,15 @@ HEADER_RE = re.compile(r"Company Policies and the Code of Professional Conduct R
 PAGE_NUMBER_RE = re.compile(r"(?m)^\s*\d+\s*$")
 WHITESPACE_RE = re.compile(r"[ \t]+")
 SAFE_FILENAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
+# A contents-page line naming a section by number and title, with a dotted
+# leader (or plain whitespace) running out to its page number - e.g.
+# " 7. Additional Incentives ........... 16". Deliberately independent of
+# SECTION_RE: a body heading and a TOC entry are allowed to disagree (that
+# disagreement is exactly what a deletion-marker section needs to surface),
+# so the same pattern must not be reused for both.
+TOC_ENTRY_RE = re.compile(
+    r"^\s*(?P<section>\d{1,2})\.?\s+(?P<title>[^\W\d_][^\n]*?)\s*(?:\.{2,}|\s{2,})\s*\d+\s*$"
+)
 MAX_SECTION_CHARS = 8_000
 # vnext (a smaller-chunk retrieval experiment) was retired 2026-09-01 after
 # the retrieval-comparison work found no evidence it improved answers and it
@@ -203,12 +216,83 @@ def _looks_like_contents_page(text: str) -> bool:
     )
 
 
+def _normalize_marker_text(value: str) -> str:
+    """Casefold, accent-fold and collapse a phrase for marker comparison."""
+    decomposed = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", value or "")).casefold()
+    folded = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return " ".join(folded.strip(" \t.!?;:").split())
+
+
+@lru_cache(maxsize=1)
+def _deletion_marker_phrases() -> frozenset[str]:
+    """Load configured deletion-marker phrases, normalized for comparison.
+
+    Sourced from ``config/deletion_marker_phrases.json`` (not hardcoded here)
+    so a market publishing this marker in another language only needs a
+    config entry - see that file's own comment for how to add one. Missing
+    or unreadable config falls back to the English phrase alone rather than
+    disabling detection entirely.
+    """
+    try:
+        with DELETION_MARKER_PHRASES_PATH.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        data = {"en": ["Intentionally Deleted"]}
+    phrases: set[str] = set()
+    for key, values in data.items():
+        if key.startswith("_") or not isinstance(values, list):
+            continue
+        for value in values:
+            normalized = _normalize_marker_text(str(value))
+            if normalized:
+                phrases.add(normalized)
+    return frozenset(phrases)
+
+
+def _is_deletion_marker_title(title: str) -> bool:
+    """True when ``title`` is (only) a configured deletion-marker phrase.
+
+    Generic by construction: it compares the whole title text against the
+    configured phrase set rather than recognizing any specific section
+    number, so it applies identically to every section, market and
+    language a phrase is configured for.
+    """
+    return _normalize_marker_text(title) in _deletion_marker_phrases()
+
+
+def _toc_section_titles(pages: list[tuple[int, str]]) -> dict[str, str]:
+    """Map a section number to the title a contents page prints for it.
+
+    Used only to detect and surface a mismatch: a document body that marks a
+    section as deleted while its own contents page still lists a
+    substantive title for that same number. That disagreement is a fact
+    about the source document, not an extraction error to quietly resolve.
+    """
+    titles: dict[str, str] = {}
+    for _page_number, text in pages:
+        if not _looks_like_contents_page(text):
+            continue
+        for line in text.splitlines():
+            match = TOC_ENTRY_RE.match(line)
+            if match and match.group("section") not in titles:
+                titles[match.group("section")] = match.group("title").strip()
+    return titles
+
+
 def _looks_like_section_heading(match: re.Match[str]) -> bool:
     if CLOCK_TIME_RE.match(match.group(0)):
         return False
     """Reject numbered prose while preserving language-neutral headings."""
     section_id = match.group("section")
     title = match.group("title").strip()
+    # A deletion marker ("7 Intentionally Deleted.") is a genuine heading
+    # even though it is short, lowercase and ends in a period - exactly the
+    # shape the checks below exist to reject for ordinary numbered prose.
+    # Recognizing it here, rather than adding a special case deeper in
+    # extraction, means every downstream step (paging, unique-id handling,
+    # oversized-section splitting) treats it like any other section.
+    if _is_deletion_marker_title(title):
+        return True
     if "." in section_id:
         return True
 
@@ -269,6 +353,7 @@ def extract_sections(
     full_text = "".join(full_text_parts)
     matches = list(_iter_section_matches(full_text))
     sections: list[PolicySection] = []
+    toc_titles = _toc_section_titles(all_pages)
 
     for index, match in enumerate(matches):
         start = match.start()
@@ -276,7 +361,28 @@ def extract_sections(
         body = full_text[start:end].strip()
         body = re.sub(r"\n{3,}", "\n\n", body)
 
-        if len(body) < min_chars:
+        is_deletion_marker = _is_deletion_marker_title(match.group("title").strip())
+        if is_deletion_marker:
+            # The marker line itself is the whole section: unlike an
+            # ordinary heading, it has no body of its own, so slicing to the
+            # next matched heading (as above) would instead pull in
+            # whatever unrelated text follows it - the next unmatched
+            # heading, an exhibit, or trailing boilerplate. Anchoring to the
+            # single matched line keeps the section to just the marker.
+            body = match.group(0).strip()
+            toc_title = toc_titles.get(match.group("section"))
+            # Only surface the contents page's title when it actually
+            # disagrees with the body - a contents page that also says
+            # "Intentionally Deleted" for this number is not a mismatch.
+            if toc_title and not _is_deletion_marker_title(toc_title):
+                body = f'{body}\nThe contents page lists this section as "{toc_title}".'
+
+        # A deletion-marker body is legitimately shorter than min_chars (the
+        # marker phrase alone is typically under 30 characters) - it must
+        # still be published as its own retrievable section rather than
+        # silently dropped, since "this section is deleted" is itself the
+        # correct, complete answer to a question naming that section.
+        if len(body) < min_chars and not is_deletion_marker:
             continue
 
         title = _normalize_title(_extend_title_to_sentence_boundary(match, body))

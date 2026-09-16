@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -431,3 +432,130 @@ def test_contents_pages_are_preserved_as_document_outline_chunks() -> None:
     assert outlines[0].section_id == "outline-page-1"
     assert outlines[0].chunk_type == "document_outline"
     assert "6 Leadership Bonus" in outlines[0].content
+
+
+# --- Deletion-marker sections -------------------------------------------
+#
+# A policy body can mark a numbered section as deliberately empty ("7
+# Intentionally Deleted."). Before this fix, such a section was either
+# dropped outright (a decimal id like "4.02" passed the heading check but
+# its ~25-char body missed the generic min_chars floor) or never became its
+# own section at all (a bare id like "7" failed the heading heuristic
+# because its title is short, lowercase and ends in a period - exactly the
+# shape that heuristic exists to reject for ordinary numbered prose - so the
+# marker text was absorbed into whatever section came before it). Either way
+# a question naming that section number found no chunk carrying its
+# section_id. These tests pin the fix: such a section is now its own
+# retrievable chunk, with a contents-page title mismatch folded in when the
+# document has one.
+
+_CONTENTS_PAGE = "\n".join(
+    [
+        "1. Introduction .......................................... 2",
+        "2. Definitions ............................................ 4",
+        "3. Preferred Customer ..................................... 5",
+        "4. Marketing Plan ......................................... 6",
+        "5. Manager Status ......................................... 8",
+        "6. Leadership Bonus ....................................... 9",
+        "7. Additional Incentives .................................. 10",
+    ]
+)
+
+
+def _body_pages_with_deletion_markers() -> list[tuple[int, str]]:
+    body = "\n".join(
+        [
+            "6 Leadership Bonus",
+            "Leadership bonus qualification depends on sustained downline volume "
+            "across several consecutive months of active sponsorship and sales.",
+            "7 Intentionally Deleted.",
+            "8 Manager Awards",
+            "Manager awards recognize sustained leadership performance across "
+            "multiple consecutive qualifying periods within the same calendar year.",
+        ]
+    )
+    return [(1, _CONTENTS_PAGE), (2, body)]
+
+
+def test_deletion_marker_section_is_extracted_as_its_own_retrievable_section() -> None:
+    sections = extractor.extract_sections(
+        Path("not-read.pdf"),
+        country="US",
+        language="en",
+        extracted_pages=_body_pages_with_deletion_markers(),
+    )
+    by_id = {section.section_id: section for section in sections}
+
+    assert "7" in by_id
+    assert by_id["7"].content.startswith("7 Intentionally Deleted.")
+
+
+def test_deletion_marker_section_surfaces_contents_page_title_mismatch() -> None:
+    sections = extractor.extract_sections(
+        Path("not-read.pdf"),
+        country="US",
+        language="en",
+        extracted_pages=_body_pages_with_deletion_markers(),
+    )
+    by_id = {section.section_id: section for section in sections}
+
+    assert "Additional Incentives" in by_id["7"].content
+    assert "Intentionally Deleted" in by_id["7"].content
+
+
+def test_normal_sections_around_a_deletion_marker_are_unaffected() -> None:
+    sections = extractor.extract_sections(
+        Path("not-read.pdf"),
+        country="US",
+        language="en",
+        extracted_pages=_body_pages_with_deletion_markers(),
+    )
+    by_id = {section.section_id: section for section in sections}
+
+    assert "downline volume" in by_id["6"].content
+    assert "Additional Incentives" not in by_id["6"].content
+    assert "leadership performance" in by_id["8"].content
+    assert by_id["8"].content.startswith("8 Manager Awards")
+
+
+def test_deletion_marker_without_a_contents_page_mismatch_stays_just_the_marker() -> None:
+    # No contents page at all, and no other numbered heading follows, so
+    # there is nothing to compare against or accidentally absorb.
+    text = "6 Leadership Bonus\nQualifying details for this section.\n7 Intentionally Deleted."
+    sections = extractor.extract_sections(
+        Path("not-read.pdf"), country="US", language="en", extracted_pages=[(1, text)]
+    )
+    by_id = {section.section_id: section for section in sections}
+
+    assert by_id["7"].content == "7 Intentionally Deleted."
+
+
+def test_deletion_marker_title_detection_is_case_and_punctuation_insensitive() -> None:
+    assert extractor._is_deletion_marker_title("Intentionally Deleted.")
+    assert extractor._is_deletion_marker_title("INTENTIONALLY DELETED")
+    assert extractor._is_deletion_marker_title("  intentionally   deleted  ")
+    assert not extractor._is_deletion_marker_title("Intentionally left the company.")
+    assert not extractor._is_deletion_marker_title("Manager Awards")
+
+
+def test_deletion_marker_detection_is_configurable_for_another_language(monkeypatch, tmp_path) -> None:
+    """A non-English deletion phrase works once it is added to config - no code change."""
+    config_path = tmp_path / "deletion_marker_phrases.json"
+    config_path.write_text(
+        json.dumps({"es": ["Eliminado Intencionalmente"]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(extractor, "DELETION_MARKER_PHRASES_PATH", config_path)
+    extractor._deletion_marker_phrases.cache_clear()
+    try:
+        assert extractor._is_deletion_marker_title("Eliminado Intencionalmente.")
+        assert not extractor._is_deletion_marker_title("Intentionally Deleted.")
+
+        text = "6 Estado del Gerente\nDetalles de calificacion.\n7 Eliminado Intencionalmente."
+        sections = extractor.extract_sections(
+            Path("not-read.pdf"), country="ES", language="es", extracted_pages=[(1, text)]
+        )
+        by_id = {section.section_id: section for section in sections}
+        assert by_id["7"].content == "7 Eliminado Intencionalmente."
+    finally:
+        extractor._deletion_marker_phrases.cache_clear()

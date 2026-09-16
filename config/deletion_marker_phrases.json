@@ -1,0 +1,4 @@
+{
+  "_comment": "Canonical per-language phrase(s) a policy document uses to mark a section as deliberately empty (e.g. renumbered out, reserved, or removed by a later revision). Matching in scripts/ingestion/extract_policy_sections.py is casefold- and accent-insensitive and ignores surrounding punctuation/whitespace, so one canonical spelling per language covers every capitalization actually seen in a document ('Intentionally Deleted.', 'INTENTIONALLY DELETED'). To support another market's document, add its language code here with the exact phrase that market's policy uses for this marker (e.g. \"es\": [\"Eliminado Intencionalmente\"], \"fr\": [\"Supprime Intentionnellement\"]) - no code change is needed.",
+  "en": ["Intentionally Deleted"]
+}
