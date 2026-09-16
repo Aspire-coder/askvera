@@ -2106,8 +2106,10 @@ class AIOrchestrator:
 
     def _contains_follow_up_marker(self, normalized_message: str) -> bool:
         """Match follow-up words as complete phrases, never inside policy terms."""
-        return self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS) or self._is_market_ellipsis(
-            normalized_message
+        return (
+            self._matches_marker(normalized_message, FOLLOW_UP_CONTEXT_MARKERS)
+            or self._is_market_ellipsis(normalized_message)
+            or self._is_market_only_ellipsis(normalized_message)
         )
 
     def _contains_topic_shift_marker(self, normalized_message: str) -> bool:
@@ -2192,6 +2194,40 @@ class AIOrchestrator:
             return False
         return bool(find_market_mentions(normalized) or find_shared_office_record_countries(normalized))
 
+    def _is_market_only_ellipsis(self, message: str) -> bool:
+        """A bare market swap with no marker word ("For Gambia?", "Gambia?", "Und Gambia?").
+
+        _contains_topic_shift_marker only fires on a recognised marker word
+        ("about", "and in", "hoe zit het met", ...), so a reader who drops the
+        marker and simply names the new market - "For Gambia?", or just
+        "Gambia?" - was falling through unwelded (live 2026-09-15 review: the
+        earlier topic disappeared from the anchor for a follow-up two turns
+        later). This is the same shift, just missing the marker.
+
+        The boundary is drawn on how little is left once the market name is
+        removed (via _without_market_names, the same span matcher retrieval
+        trusts), not on an English preposition list - "for"/"in"/"and" happen
+        to vanish for English readers, but the check itself is the leftover's
+        substance, so "Und Gambia?" clears it in German too. What is left is
+        judged against LOCALIZED_FOLLOW_UP_FUNCTION_WORDS, the same multilingual
+        article/preposition/conjunction set _is_short_follow_up_tail uses: if
+        every remaining word is one of those, nothing substantive survives and
+        the turn is a bare ellipsis. A real question keeps a content word -
+        "Does this policy apply to me if I live in Canada?" leaves "does this
+        policy apply to me if I live in" after Canada is removed, which is not
+        a function-word-only remainder - so it is never treated as an
+        ellipsis here, matching the exclusion _carry_forward_market_shift
+        already documents.
+        """
+        markets = find_market_mentions(message)
+        records = find_shared_office_record_countries(message)
+        if not markets and not records:
+            return False
+        remainder = self._without_market_names(message, markets, records)
+        if not remainder:
+            return True
+        return all(token in LOCALIZED_FOLLOW_UP_FUNCTION_WORDS for token in _follow_up_tokens(remainder))
+
     def _matches_marker(self, normalized_message: str, markers: tuple[str, ...]) -> bool:
         for marker in markers:
             escaped_marker = re.escape(marker).replace(r"\ ", r"\s+")
@@ -2269,11 +2305,31 @@ class AIOrchestrator:
         directory target extractor with Mali alongside Gambia. The removal works
         on the reader's own wording (see _without_market_names), so no reverse
         code-to-name mapping is needed in whichever language they used.
+
+        Only a genuine market/topic-shift ellipsis qualifies as the shifting
+        turn whose full text is welded on - whether it carries a marker word
+        ("What about Germany?", "And in Uganda?", via _contains_topic_shift_marker)
+        or drops the marker and simply names the market ("For Gambia?",
+        "Gambia?", via _is_market_only_ellipsis). A later message that merely differs in named market but is itself a
+        complete, separately-answered question - "Does this policy apply to me
+        if I live in Canada?" is a full question, not a bare market swap - must
+        not be spliced in whole. Confirmed live 2026-09-15 (correlation id
+        4cb3d453-9629-492d-81bd-5c1be4ddbf31): a US session asked about FBOs,
+        then "Does this policy apply to me if I live in Canada?", then "Is this
+        the whole contract or are there other documents?". The third turn's
+        anchor walk skipped the Canada question (it only contains the reference
+        marker "this", not a topic-shift marker) and welded its full text onto
+        the FBO anchor anyway, because the old check fired on any differing
+        market. Retrieval then targeted Canada's directory record on a question
+        that named no market at all, and the US company-policy sections that
+        should have answered it were never retrieved.
         """
         if not anchor:
             return anchor
         anchor_markets = find_market_mentions(anchor)
         for message in later_messages:
+            if not self._contains_topic_shift_marker(message.lower()) and not self._is_market_only_ellipsis(message):
+                continue
             markets = find_market_mentions(message)
             if markets and markets != anchor_markets:
                 return f"{self._replace_directory_target(anchor, message)} {message}".strip()
