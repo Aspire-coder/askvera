@@ -173,3 +173,32 @@ def test_production_glossary_has_no_english_only_entries() -> None:
         if entry.get("language") != ["*"]
     ]
     assert non_wildcard == []
+
+
+def test_combine_case_credits_across_countries_pulls_definition_and_rule(monkeypatch) -> None:
+    """P050 (build 98e93cd, 2026-09-16): a question about combining Case
+    Credits across countries retrieved 4.01(e) (the rule) without the
+    Operating Company definition, and the model invented a definition of
+    its own to justify a wrong opening verdict. The glossary entry
+    ``case-credit-combine-across-operating-companies`` exists so this
+    question's real wording also retrieves the definition alongside the
+    governing rule.
+    """
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_ENABLED", True)
+    monkeypatch.setattr(settings, "OPENSEARCH_GLOSSARY_QUERY_LIMIT", 4)
+    glossary.load_glossary.cache_clear()
+
+    queries = glossary.glossary_queries(
+        "Can I combine case credits from different countries to move up?", "US", "en"
+    )
+
+    assert any("operating company definition" in query.lower() for query in queries)
+    assert any("4.01(e)" in query for query in queries)
+
+    other_phrasings = [
+        "Can I combine Case Credits with another country?",
+        "Can I combine case credits across countries?",
+        "If I have Case Credits in multiple countries, can I combine them?",
+    ]
+    for message in other_phrasings:
+        assert glossary.glossary_queries(message, "US", "en") == queries
