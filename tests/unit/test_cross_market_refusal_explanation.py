@@ -7,8 +7,8 @@ from app.retrieval.models import RetrievalResult
 
 def _orchestrator_stub():
     return SimpleNamespace(
-        _insufficient_evidence_message=lambda language, message="": (
-            AIOrchestrator._insufficient_evidence_message(None, language, message)
+        _insufficient_evidence_message=lambda language, message="", country="": (
+            AIOrchestrator._insufficient_evidence_message(None, language, message, country)
         )
     )
 

@@ -28,7 +28,13 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # casing typo in the Russian income disclaimer ("Сша" -> "США").
 # Updated 2026-09-14: the prompt now forbids raw field trailers and requires
 # explicit handling of conflicting directory and policy sources.
-ROUTES_REST_SHA256 = "6d96b23fecb190e72e45afd435b63e155d0cbe12542509c41f663f27413a1f55"
+# Updated 2026-09-16: the US test plan requires that a declined question also
+# offers Customer Care contact. insufficient_evidence gained an appended
+# sentence carrying the existing [PHONE] placeholder token (en, fr, es, de,
+# nl - the locales that already carry reviewed copy for this key); the
+# remaining configured locales continue to translate the English source on
+# demand and pick up the new sentence automatically.
+ROUTES_REST_SHA256 = "aa0853656c074a722eca5da549ef98801077bfcefd4f100bdf66f759c2670dce"
 TEMPLATE_LATER_SHA256 = "a599a86c86d9ad125b78ff4619218fb3f365e19ce1408009fdf9c5d05e81b5f4"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
