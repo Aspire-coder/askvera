@@ -193,6 +193,34 @@ def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str
     # only for diagnostics and retrieval-quality monitoring.
     approved = bool(current_document and enough_score)
     reason = "approved" if approved else "insufficient_approved_evidence"
+
+    if not approved and current_document and documents:
+        # Middle tier: the evidence selector actually looked at this
+        # candidate set and chose to select this evidence, but explicitly
+        # rated the top pick as topically relevant rather than a direct
+        # answer (`top_source_directly_answers is False` - see
+        # opensearch_sections._select_evidence_rows). That is a real,
+        # selector-verified signal, distinct from a raw lexical score, and
+        # today it never reaches `enough_score`: `evidence_selector_confidence`
+        # is only populated by the provider when the selector's own
+        # `directly_answers_top_rank` was True, so this middle band is
+        # otherwise invisible here. Rescuing it still requires:
+        #   - the selector to have actually selected evidence for this turn
+        #     (`evidence_selector_applied`) - a turn where the selector chose
+        #     nothing (`opensearch_evidence_selector_no_selection`) leaves
+        #     this metadata False/unset and is never rescued;
+        #   - the leading evidence to be a current-locale, non-global
+        #     document - a global directory record must never stand in as
+        #     the answer to a policy question, even when the selector picked
+        #     it, so this check is independent of `_has_current_locale_document`
+        #     (which treats a non-"policy" global record as valid evidence).
+        selector_applied = bool(retrieval_result.metadata.get("evidence_selector_applied"))
+        top_source_directly_answers = retrieval_result.metadata.get("top_source_directly_answers")
+        leading_is_global = str(documents[0].metadata.get("access_scope") or "").lower() == "global"
+        if selector_applied and top_source_directly_answers is False and not leading_is_global:
+            approved = True
+            reason = "approved_selector_relevant"
+
     # The retrieval provider has already bounded this reviewed evidence set. Keeping
     # it intact avoids dropping the governing section merely because it ranked fourth
     # before the optional evidence selector is applied.
