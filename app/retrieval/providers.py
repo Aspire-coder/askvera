@@ -182,8 +182,14 @@ def _verified_conversation_intent(
         role="",
         correlation_id=correlation_id,
     )
-    if IncomeClaimPolicy().evaluate(context):
+    income_policy = IncomeClaimPolicy()
+    if income_policy.evaluate(context):
         return intent, False
+    # No income-adjacent vocabulary means the planner's label is an obvious
+    # false positive and must not prevent retrieval. Ambiguous income-adjacent
+    # wording still receives the independent semantic check below.
+    if not income_policy.has_income_context(message):
+        return "knowledge", True
     system_prompt = (
         "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
         "income or earnings outcome. Factual questions about published compensation, bonuses, discounts, "
