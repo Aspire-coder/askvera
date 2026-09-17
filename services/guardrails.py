@@ -72,12 +72,37 @@ def _phrase_expression(phrase: str) -> re.Pattern[str]:
     return re.compile(r"(?<!\w)" + r"\s+".join(words) + r"(?!\w)", flags=re.IGNORECASE)
 
 
+# Wording that carries a negation word without negating anything. "Not only can
+# you earn guaranteed income, you can retire early" asserts the claim twice over,
+# and "no doubt" and "without question" are intensifiers. Reading any of these as
+# a denial would let an affirmative claim through behind a one-word disguise, so
+# a negation match is only a real negation when it is not one of these.
+_FALSE_NEGATION_RE = re.compile(
+    r"(?:not|no)\s+(?:only|just|merely)(?!\w)"
+    r"|no\s+doubt(?!\w)"
+    r"|without\s+(?:a\s+)?(?:doubt|question)(?!\w)",
+    re.IGNORECASE,
+)
+
+
 def _is_denial(text: str, start: int) -> bool:
-    """True when the phrase at `start` sits in a clause that denies or forbids it."""
+    """True when the phrase at `start` sits in a clause that denies or forbids it.
+
+    A negation only counts when it actually reverses the clause. Quotation marks
+    are deliberately not consulted: quoting a claim is not rejecting it, and
+    deciding which side of a quotation the writer stands on is not something a
+    regex can establish. An explicit rejection that follows the quote instead of
+    preceding it is therefore still read as an assertion and refused, which is
+    the strict direction.
+    """
     clause_start = 0
     for boundary in _CLAUSE_BOUNDARY_RE.finditer(text, 0, start):
         clause_start = boundary.end()
-    return bool(_NEGATION_RE.search(text, clause_start, start))
+    for negation in _NEGATION_RE.finditer(text, clause_start, start):
+        if _FALSE_NEGATION_RE.match(text, negation.start()):
+            continue
+        return True
+    return False
 
 
 def _matches(topic: str, text: str, negation_aware: bool = False) -> bool:
@@ -165,6 +190,20 @@ def _matched_phrase(topic: str, text: str, negation_aware: bool = False) -> str:
     return ""
 
 
+def asserts_denied_claim(topic: str, text: str) -> bool:
+    """True when a generated answer affirmatively asserts a denied claim.
+
+    The clause-level reading of _matched_phrase, exposed for the risk layer so
+    that both enforcement points judge an answer by the same rule rather than
+    each carrying its own idea of what counts as a claim. Generated answers
+    only -- negation awareness is unsafe on user input, where a denial can be
+    a wrapper around a request.
+    """
+    if topic not in {"income_claim", "medical_claim"}:
+        return False
+    return _matched_phrase(topic, text, negation_aware=True) != ""
+
+
 def check_text(
     text: str,
     correlation_id: str,
@@ -174,18 +213,27 @@ def check_text(
 ) -> None:
     """Raise when text violates denied topics.
 
-    allow_claim_topics skips the medical and income claim topics only. It exists
-    for one case: the ANSWER to a reviewed policy-safety question necessarily
-    quotes the vocabulary that question asks about, so re-running the denied
-    phrase list over that answer blocks the very explanation the user asked for.
-    The caller must establish that context; off_topic is never skipped.
+    allow_claim_topics no longer skips a topic. It used to drop income_claim and
+    medical_claim outright for the ANSWER to a reviewed policy-safety question,
+    on the grounds that such an answer necessarily quotes the vocabulary the
+    question asks about. That reasoning is sound about the question and says
+    nothing about the answer: it trusted an entire generated answer because of
+    how the user had phrased their question, so an affirmative income guarantee
+    sitting inside that answer had nothing left to catch it.
 
-    is_generated_answer enables negation awareness, so an answer stating that
-    there is no guaranteed income is not read as claiming one. It must stay
-    false for user input, where a denial can be a wrapper around a request.
+    Every topic is now always checked. What distinguishes an explanation from an
+    assertion is the clause-level negation awareness below, which reads the
+    answer's own text: "Forever prohibits promising guaranteed income" denies the
+    claim in the clause that contains it and passes, while "you will earn
+    guaranteed income" asserts it and is refused, whatever the question was.
+    The parameter is retained so that both enforcement layers keep receiving the
+    one gated value GovernanceEngine computes (see RiskEngine.evaluate, which
+    uses it to reach asserts_denied_claim).
+
+    is_generated_answer enables that negation awareness. It must stay false for
+    user input, where a denial can be a wrapper around a request.
     """
-    topics = ["off_topic"] if allow_claim_topics else ["income_claim", "medical_claim", "off_topic"]
-    for topic in topics:
+    for topic in ("income_claim", "medical_claim", "off_topic"):
         phrase = _matched_phrase(topic, text, negation_aware=is_generated_answer)
         if phrase:
             # The phrase is logged because "guardrail_blocked, topic=income_claim"

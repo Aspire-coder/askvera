@@ -40,26 +40,27 @@ class GovernanceEngine:
     ) -> GovernanceDecision:
         """Evaluate text through risk policies and guardrail provider.
 
-        allow_claim_topics, when is_generated_answer is also true, exempts
-        the CLAIM-TOPIC medical_claim and income_claim topics on BOTH
-        enforcement points: the regex risk policies (medical_claim,
-        income_claim -- see RiskPolicyMetadata.is_claim_topic) and the
-        guardrail provider's own claim-topic check. An answer that explains
-        a reviewed compliance rule is not refused for containing the
-        vocabulary of the rule it explains. Every other risk policy and
-        guardrail topic, off_topic included, still runs unchanged.
+        allow_claim_topics does not skip anything. Combined with
+        is_generated_answer it produces one value, suppress_claim_topics, and
+        that single value reaches both enforcement points -- the risk policies
+        and the guardrail provider -- so the two cannot disagree about what
+        counts as a claim.
 
-        is_generated_answer is the gate, applied once to suppress_claim_topics
-        so the same value reaches both enforcement points. This keeps the
-        exemption an answer-side exemption only: allow_claim_topics can only
-        be set by the orchestrator's answer-side governance pass, which
-        always pairs it with is_generated_answer=True, but the gate is
-        enforced here too so neither enforcement point can be exempted on a
-        user-input pass even if a caller ever set allow_claim_topics without
-        is_generated_answer. Ungating the provider forward specifically
-        would matter: medical_claim's risk action is WARN, not REFUSE, so
-        the provider is the only thing that ever refuses a medical claim,
-        and an ungated forward would exempt user input outright.
+        What it buys is a clause-level reading of the text rather than the
+        substring match the claim-topic policies do on their own: an answer
+        that denies or forbids the claim in the clause naming it passes, and
+        an answer that asserts it is refused however the question was phrased.
+        The earlier design skipped the claim-topic policies outright for the
+        answer pass, which trusted a whole generated answer on the strength of
+        how the user had phrased the question; an affirmative income guarantee
+        inside such an answer then had nothing left to catch it.
+
+        The is_generated_answer gate keeps this answer-side only. The
+        orchestrator's answer pass always sets both flags together, but the
+        gate is enforced here so the user-input pass can never be exempted
+        even if a caller ever set allow_claim_topics alone -- a denial in
+        front of a request is a wrapper, not a disclaimer. off_topic and every
+        policy not marked is_claim_topic run unconditionally on both passes.
         """
         started = perf_counter()
         success = False

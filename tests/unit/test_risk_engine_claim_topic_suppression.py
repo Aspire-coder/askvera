@@ -1,12 +1,19 @@
-"""Unit tests for RiskEngine's allow_claim_topics suppression.
+"""Unit tests for RiskEngine's allow_claim_topics handling.
 
-RiskContext.allow_claim_topics skips policies whose metadata marks
-is_claim_topic (medical_claim, income_claim) so a governance pass over a
-generated answer that explains a reviewed policy is not refused for using
-the vocabulary of the rule it explains. Every other policy -- including
-country_support and input_length, which stand in for "everything that is
-not a claim topic" since off_topic has no risk policy at all -- must keep
-running regardless of the flag.
+RiskContext.allow_claim_topics does not skip a policy. Every policy always
+runs; the flag only lets a CLAIM-TOPIC policy (medical_claim, income_claim)
+forgive text that denies or forbids the claim in the clause naming it, which
+is what an explanation of a reviewed rule looks like. Text that asserts the
+claim keeps its issue and is refused.
+
+The claim-topic policies match by plain substring, so they cannot themselves
+tell an explanation from an assertion; the clause reading in
+services.guardrails.asserts_denied_claim can, and is the same rule the
+guardrail provider applies, so the two enforcement layers cannot disagree.
+
+Every other policy -- including country_support and input_length, which stand
+in for "everything that is not a claim topic" since off_topic has no risk
+policy at all -- runs regardless of the flag.
 """
 
 from app.risk.engine import RiskEngine, default_policies
@@ -31,9 +38,10 @@ def test_medical_and_income_policies_are_marked_as_claim_topics() -> None:
     assert IncomeClaimPolicy.metadata.is_claim_topic is True
 
 
-def test_engine_suppresses_income_claim_when_allow_claim_topics_is_set() -> None:
+def test_engine_forgives_an_income_claim_the_text_itself_denies() -> None:
+    """A disclaimer names the claim in order to deny it, and must not be refused."""
     engine = RiskEngine(default_policies())
-    message = "Can I get guaranteed income with this business?"
+    message = "Section 16.02(k) prohibits promising guaranteed income to a prospect."
 
     refused = engine.evaluate(_context(message))
     assert refused.should_refuse() is True
@@ -44,7 +52,17 @@ def test_engine_suppresses_income_claim_when_allow_claim_topics_is_set() -> None
     assert not any(issue.code == "INCOME_CLAIM_RISK" for issue in exempted.issues)
 
 
-def test_engine_suppresses_medical_claim_when_allow_claim_topics_is_set() -> None:
+def test_engine_still_refuses_an_income_claim_the_text_asserts() -> None:
+    """The flag is not a pass for the whole text -- this is the residual gap closed."""
+    engine = RiskEngine(default_policies())
+    message = "You will earn guaranteed income of $5,000 a month."
+
+    exempted = engine.evaluate(_context(message, allow_claim_topics=True))
+    assert exempted.should_refuse() is True
+    assert any(issue.code == "INCOME_CLAIM_RISK" for issue in exempted.issues)
+
+
+def test_engine_forgives_a_medical_claim_the_text_itself_denies() -> None:
     engine = RiskEngine(default_policies())
     message = "Explaining 16.02(j): we may not say our products cure or treat disease."
 
@@ -53,6 +71,14 @@ def test_engine_suppresses_medical_claim_when_allow_claim_topics_is_set() -> Non
 
     exempted = engine.evaluate(_context(message, allow_claim_topics=True))
     assert not any(issue.code == "MEDICAL_CLAIM_RISK" for issue in exempted.issues)
+
+
+def test_engine_still_flags_a_medical_claim_the_text_asserts() -> None:
+    engine = RiskEngine(default_policies())
+    message = "The aloe drink cures arthritis."
+
+    exempted = engine.evaluate(_context(message, allow_claim_topics=True))
+    assert any(issue.code == "MEDICAL_CLAIM_RISK" for issue in exempted.issues)
 
 
 def test_allow_claim_topics_does_not_affect_unrelated_policies() -> None:
