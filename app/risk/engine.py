@@ -12,10 +12,18 @@ class RiskEngine:
         self.policies = policies or []
 
     def evaluate(self, context: RiskContext) -> RiskDecision:
-        """Run all enabled policies against the context."""
+        """Run all enabled policies against the context.
+
+        context.allow_claim_topics skips policies whose metadata marks them
+        is_claim_topic (medical_claim, income_claim). Every other policy,
+        off_topic included -- off_topic has no risk policy at all -- still
+        runs unconditionally.
+        """
         decision = RiskDecision()
         for policy in self.policies:
             if not policy.metadata.enabled:
+                continue
+            if context.allow_claim_topics and policy.metadata.is_claim_topic:
                 continue
             for issue in policy.evaluate(context):
                 decision.add_issue(issue)

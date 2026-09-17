@@ -40,12 +40,31 @@ class GovernanceEngine:
     ) -> GovernanceDecision:
         """Evaluate text through risk policies and guardrail provider.
 
-        allow_claim_topics is forwarded to the guardrail provider only; risk
-        policies still run unchanged, so a refusing policy still refuses.
+        allow_claim_topics, when is_generated_answer is also true, exempts
+        the CLAIM-TOPIC medical_claim and income_claim topics on BOTH
+        enforcement points: the regex risk policies (medical_claim,
+        income_claim -- see RiskPolicyMetadata.is_claim_topic) and the
+        guardrail provider's own claim-topic check. An answer that explains
+        a reviewed compliance rule is not refused for containing the
+        vocabulary of the rule it explains. Every other risk policy and
+        guardrail topic, off_topic included, still runs unchanged.
+
+        is_generated_answer is the gate, applied once to suppress_claim_topics
+        so the same value reaches both enforcement points. This keeps the
+        exemption an answer-side exemption only: allow_claim_topics can only
+        be set by the orchestrator's answer-side governance pass, which
+        always pairs it with is_generated_answer=True, but the gate is
+        enforced here too so neither enforcement point can be exempted on a
+        user-input pass even if a caller ever set allow_claim_topics without
+        is_generated_answer. Ungating the provider forward specifically
+        would matter: medical_claim's risk action is WARN, not REFUSE, so
+        the provider is the only thing that ever refuses a medical claim,
+        and an ungated forward would exempt user input outright.
         """
         started = perf_counter()
         success = False
         decision: GovernanceDecision | None = None
+        suppress_claim_topics = allow_claim_topics and is_generated_answer
         try:
             risk_decision = self.risk_engine.evaluate(
                 RiskContext(
@@ -54,6 +73,7 @@ class GovernanceEngine:
                     language=language,
                     role=role,
                     correlation_id=correlation_id,
+                    allow_claim_topics=suppress_claim_topics,
                 )
             )
             if risk_decision.should_refuse():
@@ -77,7 +97,7 @@ class GovernanceEngine:
                     country=country,
                     language=language,
                     correlation_id=correlation_id,
-                    allow_claim_topics=allow_claim_topics,
+                    allow_claim_topics=suppress_claim_topics,
                     is_generated_answer=is_generated_answer,
                 )
             except Exception as exc:
