@@ -10,7 +10,7 @@ Authority: the user's direct instruction of 2026-09-18. The handoff pointers in
 | Name | Commit | What it is |
 |---|---|---|
 | B0 | `5b1d33f` | `origin/main` (PR #160 merged). |
-| B1 | `d7b9747` | B0 plus four open branches, all in this project's ownership lanes, merged locally (not pushed): `fix/history-is-not-evidence-20260916`, `fix/fallback-offers-customer-care-20260916`, `fix/policy-question-not-a-claim-20260917`, `fix/income-bypass-coverage-and-market-config-20260915`. Textually clean. `income_claim_policy.py` and `config/vera_persona.py` auto-merged and need the full suite to confirm. |
+| B1 | `d7b9747` | B0 plus four open branches, all in this project's ownership lanes, merged locally (not pushed): `fix/history-is-not-evidence-20260916`, `fix/fallback-offers-customer-care-20260916`, `fix/policy-question-not-a-claim-20260917`, `fix/income-bypass-coverage-and-market-config-20260915`. Textually clean. `income_claim_policy.py` and `config/vera_persona.py` auto-merged. **Verified:** full `tests/unit` + `tests/governance` passed on B1 (`-x`, exit 0, 2026-09-18). |
 
 **Production uncertainty.** B0 was requested for deployment on 2026-09-17, but
 this session never saw a completed deploy or a live `git log` from the host.
