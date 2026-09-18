@@ -686,7 +686,6 @@
         }
       ],
       "needs_live": false,
-      "xfail_reason": "FINDING: utils/directory_fields.py:660-671 (remove_unrequested_directory_fields) has a dedicated, unconditional path for any question matching r'\\b(minimum|ordering|order)\\b.*\\b(order|size)\\b|\\border\\s+size\\b': it strips every payment-methods/delivery-cost/delivery-time/business-hours sentence from the answer, per the comment at line 660-663 ('an order-size answer still sheds unrelated payment/delivery/hours prose exactly as before'). It does not check whether the SAME question also names one of those fields (here, 'and what payment methods do they accept?'), so a genuinely two-part order-size-and-payment-methods question always loses the payment-methods half, even though a correct two-part answer was given. Suspected layer: utils/directory_fields.py minimum-order-question branch (Lane C ownership per TASK_BOARD.md; matches task B3 'Two-part question' on the board; not fixed here per file-boundary rules).",
       "notes": "Confirms the post-processing layer will destroy a correct two-part answer regardless of what the live model generates, so this is a defect independent of task B3's generation-composition question."
     },
     {

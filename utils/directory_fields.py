@@ -658,15 +658,39 @@ def remove_unrequested_directory_fields(
         return answer, False
 
     # A dedicated minimum-order question is not one of the nine directory
-    # fields this helper set covers; it keeps its own narrow, unaffected path
-    # so an order-size answer still sheds unrelated payment/delivery/hours
-    # prose exactly as before.
+    # fields this helper set covers; it keeps its own narrow, mostly-unaffected
+    # path so an order-size-ONLY answer still sheds unrelated payment/delivery/
+    # hours prose exactly as before.
+    #
+    # MULTIPART-001 (regression pack, 2026-09-18): "What is the minimum order
+    # for an FBO in Kenya, and what payment methods do they accept?" lost its
+    # payment-methods sentence, because this branch stripped
+    # payment/delivery/hours sentences unconditionally, without checking
+    # whether the SAME question also requested one of them. Reuse the
+    # existing requested-field detection (_requested_directory_field_set,
+    # already built from the module's per-field regexes - no new phrases
+    # added) so a field the question itself names is never stripped here,
+    # while an order-size-only question keeps shedding every other field
+    # exactly as before.
     if re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
+        order_size_requested = _requested_directory_field_set(question_text) or set()
+        order_size_field_patterns = {
+            "payment_methods": r"payment\s+methods?\s+accepted",
+            "delivery_cost": r"delivery\s+cost|delivery\s+charge",
+            "delivery_time": r"average\s+lead\s+time",
+            "business_hours": r"business\s+hours?",
+        }
+        unrequested_fragments = [
+            fragment
+            for key, fragment in order_size_field_patterns.items()
+            if key not in order_size_requested
+        ]
+        if not unrequested_fragments:
+            return (answer or "").strip(), False
         cleaned, replacements = _remove_field_sentences(
             answer or "",
             re.compile(
-                r"(?:payment\s+methods?\s+accepted|delivery\s+cost|delivery\s+charge|"
-                r"average\s+lead\s+time|business\s+hours?)[^.!?]*(?:[.!?]|$)\s*",
+                rf"(?:{'|'.join(unrequested_fragments)})[^.!?]*(?:[.!?]|$)\s*",
                 re.IGNORECASE,
             ),
         )

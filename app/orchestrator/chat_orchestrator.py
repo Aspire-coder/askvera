@@ -81,7 +81,13 @@ from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_p
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
-from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
+from utils.exceptions import (
+    BedrockServiceError,
+    BedrockTimeoutError,
+    LowConfidenceError,
+    LowConfidenceThresholdError,
+    RetrievalMissError,
+)
 from utils.inline_citations import separate_verified_citations
 from utils.directory_fields import (
     build_support_contact_supplement,
@@ -1046,7 +1052,34 @@ class AIOrchestrator:
         if cached_response:
             return cached_response
 
-        retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        try:
+            retrieval_result = self.retriever.retrieve(
+                retrieval_query, body.country, body.language, body.role, correlation_id
+            )
+        except (BotoCoreError, ClientError, ConnectionError, TimeoutError, OSError) as exc:
+            # C5 (conversation-quality task board): this call was previously
+            # unguarded, so a retrieval-backend outage (timeout, connection
+            # refused, auth/signing failure) raised straight out of
+            # handle_chat with no ChatResponse at all - not even the wrong
+            # wording, no wording, and no session-turn persistence, since the
+            # exception propagated before append_session_turn ever runs.
+            # A dependency being unreachable is not the same situation as the
+            # documents genuinely lacking the answer (failure_layer
+            # "evidence_gate"/"low_confidence"), so it gets its own
+            # "dependency_unavailable" layer and the reviewed "bedrock_error"
+            # copy - honest about a technical problem, not a confident denial
+            # that the information isn't available.
+            LOGGER.exception("retrieval_dependency_unavailable", correlation_id=correlation_id)
+            return self._validate_response(
+                self.response_builder.fallback(
+                    localized_conversation_response("bedrock_error", body.language)
+                    or FALLBACK_RESPONSES["bedrock_error"],
+                    correlation_id,
+                    metadata={"failure_layer": "dependency_unavailable"},
+                ),
+                body,
+                correlation_id,
+            )
         _record_diagnostic_retrieval("question", retrieval_result)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
             retrieval_query,
@@ -1092,6 +1125,43 @@ class AIOrchestrator:
                     self._insufficient_evidence_message(body.language, body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
+                ),
+                body,
+                correlation_id,
+                retrieval_result=retrieval_result,
+            )
+        except (BedrockTimeoutError, BedrockServiceError):
+            # Deliberately narrow. generate() can also raise ConfigurationError,
+            # which is a deploy defect rather than a transient outage: telling
+            # the user "try again in a moment" would be false and would hide
+            # the defect, so it still propagates to the route's error envelope.
+            # GuardrailBlockedError must never be relabelled as a technical
+            # hiccup either, which a broad AskVeraError catch would have done.
+            #
+            # C5: model_router.generate can also fail with a dependency error
+            # that is NOT a LowConfidenceError (e.g. BedrockTimeoutError,
+            # BedrockServiceError - raised when Bedrock itself times out or
+            # errors, not when the model simply lacked evidence). Previously
+            # this propagated straight out of handle_chat, past every
+            # ChatResponse-producing path, and was only ever caught (if at
+            # all) by api/routes.py's `except AskVeraError` - which returns a
+            # completely different response SHAPE (a `success: false` error
+            # envelope with an HTTP error status) instead of an ordinary chat
+            # answer. That means it never ran through response_builder or
+            # output validation, was never persisted to session history
+            # (append_session_turn runs after this call, in _handle_chat),
+            # and never carried a metadata.failure_layer at all - so a caller
+            # that only inspects failure_layer (or a Lane G regression case
+            # expecting a normal chat turn) sees nothing. Route it through
+            # the same fallback path used for every other failure kind
+            # instead, with its own distinct layer name.
+            LOGGER.exception("model_dependency_unavailable", correlation_id=correlation_id)
+            return self._validate_response(
+                self.response_builder.fallback(
+                    localized_conversation_response("bedrock_error", body.language)
+                    or FALLBACK_RESPONSES["bedrock_error"],
+                    correlation_id,
+                    metadata={"failure_layer": "dependency_unavailable"},
                 ),
                 body,
                 correlation_id,
