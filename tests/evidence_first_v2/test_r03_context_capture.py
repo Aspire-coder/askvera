@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import random
+import re
 import sys
+import unicodedata
 
 import pytest
 
@@ -521,6 +524,323 @@ def test_direct_market_mention_alone_keeps_context_without_trusted_market_swap()
     assert "Tanzania" not in query
     assert query.endswith(follow_up)
     assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_nfd_input_does_not_corrupt_the_substitution_span() -> None:
+    """R03 correction 9 BLOCKER (Fable on correction 8).
+
+    `_follow_up_raw_tokens` and `_follow_up_tokens` were tokenized
+    independently and assumed to stay index-aligned. NFD input broke that:
+    a combining accent is not a word character, so "hän" (NFD: h, a,
+    COMBINING DIAERESIS, n) split into "ha" and "n" in the raw array while
+    the folded array still saw one token "han" - every later index built
+    from one array and read from the other pointed at the wrong word. The
+    reproduced symptom was a wrong, TRUSTED substitution: the retrieval
+    query gained a stray "Uganda" token instead of replacing "ugandassa".
+    Tokenizing once, with spans, makes this structurally impossible.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = unicodedata.normalize("NFD", "Entä jos hän asuu ugandassa?")
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-nfd-input",
+    )
+
+    assert "Uganda" in query
+    assert "ugandassa" not in query
+    assert "Tanzania" not in query
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+def test_nfkd_expanding_character_does_not_crash_or_misalign() -> None:
+    """R03 correction 9 BLOCKER (Fable on correction 8).
+
+    "½" NFKD-decomposes into three characters ("1", a fraction slash, "2"),
+    two of which are word characters - so the (now-removed) accent-stripped
+    array grew by one token relative to the raw array, and every later
+    index read past the end of the shorter one. The reproduced symptom was
+    an IndexError raised out of `_resolve_finnish_anaphoric`, reachable from
+    `handle_chat` with no handling on that path. It must neither crash nor
+    silently corrupt the query.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän on ½ vuotta ugandassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-nfkd-expanding-character",
+    )
+
+    assert "Uganda" in query
+    assert "Tanzania" not in query
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        # A ligature ("ﬁ") NFKD-decomposes to two ASCII letters.
+        "Entä jos hän asuu ugandassa ja ﬁrmassa?",
+        # Fullwidth letters (a CJK input-method compatibility form) NFKD-decompose
+        # to their ASCII equivalents.
+        "Ｅｎｔä jos hän asuu ugandassa?",
+        # A Roman numeral NFKD-decomposes to several ASCII letters.
+        "Entä jos hän asuu ugandassa Ⅷ?",
+    ],
+)
+def test_other_compatibility_characters_do_not_crash(follow_up: str) -> None:
+    """R03 correction 9 BLOCKER - the other compatibility-character examples
+
+    named in the review (a ligature, full-width letters), plus a Roman
+    numeral for a third independent case. None of these must raise.
+    """
+    orchestrator = AIOrchestrator()
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-other-compatibility-chars",
+    )
+
+
+def test_unicode_fuzz_never_crashes_and_only_changes_substituted_spans() -> None:
+    """R03 correction 9 BLOCKER - a fuzz loop over mixed Unicode insertions,
+
+    in both NFC and NFD form, asserting only that nothing raises. (The
+    stronger claim - the query changes only at the substituted span - is
+    exercised directly by the span-based rewrite in
+    `_canonicalize_finnish_anaphoric_market`, which slices the ORIGINAL
+    message around each resolved span rather than re-deriving text; this
+    loop is the adversarial input-coverage half of that guarantee.)
+    """
+    orchestrator = AIOrchestrator()
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+    base = "Entä jos hän asuu nyt ugandassa mutta työskentelee tiimissä?"
+    compatibility_characters = ["½", "¼", "Ⅷ", "ﬁ", "ﬂ", "ｅ", "Ａ", "①", "⁄", "́", "﻿"]
+    random.seed(2026_09_18)
+
+    for _ in range(200):
+        characters = list(base)
+        for _ in range(random.randint(0, 4)):
+            position = random.randrange(len(characters))
+            characters.insert(position, random.choice(compatibility_characters))
+        variant = "".join(characters)
+        for form in ("NFC", "NFD"):
+            text = unicodedata.normalize(form, variant)
+            orchestrator._build_retrieval_query_with_provenance(
+                text, history, "r03", session_id="r03-c9-fuzz",
+            )
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän asuu ugandassakin?",
+        "Entä jos hän asuu ugandassako?",
+        "Entä jos hän asuu Ugandassakin?",
+        "Entä jos hän asuu ugandassaan?",
+        "Entä jos hän edustaa ugandaa?",
+        "Entä jos hän asuu ugandana?",
+    ],
+)
+def test_unsupported_case_forms_of_a_configured_market_are_not_trusted(follow_up: str) -> None:
+    """R03 correction 9 SHOULD-FIX (i) (Fable on correction 8).
+
+    A clitic ("-kin"/"-ko"), the inessive-possessive ("-ssaan"), partitive
+    ("ugandaa") or essive ("ugandana") form of a CONFIGURED market used to
+    give ``resolved, code=None, reason=no_place_evidence`` - i.e. fully
+    trusted, keeping Tanzania - because none of these forms matched the old
+    plain case-ending test. The new market-stem prefix check recognizes all
+    of them as a real market in an unsupported form, so the follow-up keeps
+    context but is never trusted.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c9-unsupported-market-form",
+    )
+
+    assert prior in query
+    # The query is unchanged (never substituted), so it still contains the
+    # ORIGINAL unsupported form verbatim - never the bare display name
+    # "Uganda" as its own word, which would mean a (wrong) substitution ran.
+    assert query.endswith(follow_up)
+    assert not re.search(r"(?<!\w)Uganda(?!\w)", query)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän ei ole ostanut mitään 24 kuukauteen?",
+        "Entä jos hän on sääntöjen mukaan johtaja?",
+        "Entä jos hän maksaa tilille?",
+        "Entä jos hän nousee tasolle?",
+        "Entä jos hän ostaa sen jälkeen?",
+        "Entä jos hän vierailee toimistossa?",
+        "Entä jos hän asioi netissä?",
+    ],
+)
+def test_ordinary_case_marked_nouns_outside_residence_context_are_trusted(follow_up: str) -> None:
+    """R03 correction 9 SHOULD-FIX (over-fire) (Fable on correction 8).
+
+    None of these tokens ("kuukauteen", "johtaja"-adjacent "mukaan",
+    "tilille", "tasolle", "jälkeen", "toimistossa", "netissä") name a
+    configured market or sit near a residence/location verb, so under the
+    old plain case-ending residue test they made a realistic, ordinary
+    follow-up ``unresolved`` for no real reason - the trusted path was
+    unreachable. None of these is a place candidate any more.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c9-ordinary-noun-trusted",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän on narniassa?",
+        "Entä jos hän on nyt narniassa töissä?",
+    ],
+)
+def test_olla_forms_govern_a_locative_complement_as_a_weak_location_verb(follow_up: str) -> None:
+    """R03 correction 10 (Fable review of correction 9, commit 6f87124).
+
+    Correction 9's residence/location verb vocabulary left out olla ("to
+    be") entirely, which is the single most common way to say someone IS
+    somewhere. That wrongly promoted "Entä jos hän on atlantisissa?" and an
+    unrecognised-place probe like "on narniassa?" to a TRUSTED resolved
+    follow-up keeping Tanzania - an unknown place upgraded into trusted
+    resolution of the prior market, which R03 forbids. Olla now counts as a
+    weak location verb for an inessive/adessive complement, so an unknown
+    place after "on" keeps context but is never trusted.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c10-olla-locative-complement",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_weak_residence_verb_multimodifier_complement_stays_unresolved_with_no_id() -> None:
+    """R03 correction 9 acceptance check B2: "Entä jos hän työskentelee nyt
+
+    pysyvästi atlantisissa?" is a residence/location-verb complement (the
+    WEAK stem "työskentel-"), so it must stay ``unresolved`` with no
+    ``prior_user_turn_id`` - never standalone, never trusted.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän työskentelee nyt pysyvästi atlantisissa?"
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c9-b2-weak-verb-multimodifier",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_finnish_anaphoric_asking_about_finland_stays_safely_standalone() -> None:
+    """R03 correction 9 acceptance check: "…asuu Suomessa?" must stay safely
+
+    standalone. "Suomessa" is capitalized and not a configured single-word
+    inessive alias (the configured name is "Finland"), so it is an
+    unrecognised capitalized place candidate - standalone, exactly like any
+    other unrecognised capitalized place.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän asuu Suomessa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-finland-standalone",
+    )
+
+    assert query == follow_up
+    assert "Tanzania" not in query
+    assert provenance == {"provenance": "runtime", "status": "not_dependent"}
+
+
+def test_negation_window_covers_the_perfect_tense_auxiliary() -> None:
+    """R03 correction 9 NOTE 4 (Fable on correction 8).
+
+    "Entä jos hän ei ole asunut ugandassa?" ("what if he has NOT lived in
+    Uganda") used to resolve Uganda as trusted, because the negation check
+    only looked at the token immediately after "ei" and missed the perfect
+    tense's "ole" auxiliary sitting between "ei" and "asunut". The widened
+    negation window reaches past "ole" to the residence-verb stem.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän ei ole asunut ugandassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-negation-perfect-tense",
+    )
+
+    assert query == follow_up
+    assert "Tanzania" not in query
+    assert "Uganda" not in query
+    assert provenance == {"provenance": "runtime", "status": "not_dependent"}
+
+
+def test_repeated_resolved_market_is_substituted_at_every_occurrence() -> None:
+    """R03 correction 9 NOTE 5 (Fable on correction 8).
+
+    Substitution used to be ``count=1``, so a second occurrence of the same
+    exact resolved form was left untouched. Substitution is now by exact
+    span for every occurrence collected during resolution.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän asuu ugandassa ja työskentelee myös ugandassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-repeated-market-both-spans",
+    )
+
+    assert query.count("Uganda") == 2
+    assert "ugandassa" not in query
+    assert "Tanzania" not in query
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+def test_topic_shift_marker_reads_the_precomputed_finnish_decision() -> None:
+    """R03 correction 9 NOTE 6 (Fable on correction 8).
+
+    `_contains_topic_shift_marker` used to re-derive the Finnish decision
+    from the already-canonicalized, lowercased message instead of reading
+    the decision already computed (and acted on) for the original message.
+    This exercises that path end to end: a message whose earned-trust
+    decision is ``resolved`` with a market swap must still merge with the
+    anchor as a topic-shift follow-up (proving the precomputed decision, not
+    a fresh recomputation on the post-substitution text, drives the merge).
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän asuu ugandassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c9-topic-shift-precomputed-decision",
+    )
+
+    assert query == "How does Forever pay bonuses to FBOs who live outside the country? Entä jos hän asuu Uganda?"
+    assert provenance["status"] == "resolved_dependent_follow_up"
 
 
 def test_audit_mode_rejects_a_multiturn_pack_before_running_the_audit(monkeypatch, tmp_path, capsys) -> None:

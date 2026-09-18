@@ -244,12 +244,18 @@ exact bytes, LF, one final LF; manifest was 463 bytes):
   multi-word inessive form such as "Etelä-Afrikassa" is not modeled). A
   multi-word market can only be recognized in its direct/nominative spelling
   via `find_market_mentions`, never in an inflected form.
-- **Negation scope is adjacency-only.** `_FINNISH_RESIDENCE_NEGATION_TOKENS`
-  only fires when the negation word is immediately followed by the
-  residence-verb token ("ei asu"); a negation separated by an intervening
-  word ("ei enää asu") is not recognized and would still be scored as a
-  plain (non-negated) residence claim. Documented rather than widened, to
-  keep the negation rule a narrow, auditable adjacency check.
+- **Negation scope is a bounded window, not full-sentence.**
+  `_FINNISH_RESIDENCE_NEGATION_TOKENS` fires when the negation word is
+  followed, within `_FINNISH_NEGATION_WINDOW` (2) tokens, by a residence or
+  location verb stem. **Correction 9 update:** this note originally (and
+  incorrectly) said "ei enää asu" was unhandled - it was already covered
+  even under correction 8's narrower adjacency check, since "enää" is
+  itself one of the negation tokens and the residence-verb token followed
+  it one position later. What correction 8 actually missed was the perfect
+  tense's auxiliary ("ei ole asunut", the verb two tokens after "ei") - see
+  the correction 9 section below. A negation separated by more than the
+  2-token window (an intervening adverb between "ei"/"ole" and the verb) is
+  still not recognized and would be scored as a plain, non-negated claim.
 - **Function-word list is closed and hand-picked.** It was grown only from
   forms that actually appear in this configured follow-up's existing tests
   and reproductions, not a general Finnish stop-word list. A new connector
@@ -259,6 +265,13 @@ exact bytes, LF, one final LF; manifest was 463 bytes):
   deployment occurred. Local tests prove decision correctness for the
   reproduced and probed inputs, not live ranking, answer quality, or release
   readiness.
+
+See `docs/evidence_first_v2/R03-CORRECTION-9-TOKENIZATION-AND-RESIDUE.md` for
+the correction that followed this one (a tokenization blocker and a
+redefinition of place residue), which supersedes several details above -
+most importantly the tokenization approach and the residue definition. This
+file is kept as the historical record of correction 8's own design and is
+not hand-edited further; read correction 9's handoff for the current state.
 
 Send this exact snapshot to a fresh Sol review, then Astra final review.
 Stop after review; R04 remains paused.
