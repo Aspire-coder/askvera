@@ -1400,11 +1400,35 @@ def _extract_claims(answer: str) -> list[MeasurableClaim]:
     return claims
 
 
+# A spelled-out number immediately before a parenthesised figure ("five (5)
+# working days") is the common legal/policy convention of restating a number
+# in digits, not a footnote or citation marker - "(5)" here is exactly the
+# kind of timing figure this validator must still stage-check, the same as
+# any other. Without this, "Approval takes five (5) working days." against a
+# source stating "Delivery takes five (5) working days." was never even
+# extracted as a claim, so the process-stage mismatch (approval borrowing
+# delivery's number) went uncaught (Fable Phase 2 review, finding 3c). Kept
+# deliberately small and English-only for now: broadening it to every
+# covered language is future work, not part of this fix.
+_SPELLED_OUT_NUMBER_WORDS = frozenset({
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    "hundred",
+})
+
+
+def _preceded_by_spelled_out_number(answer: str, open_index: int) -> bool:
+    """True when the "(" (or "[") at ``open_index`` is right after a spelled-out number word."""
+    word_match = re.search(r"[^\W\d_]+\s*$", answer[:open_index])
+    return bool(word_match and word_match.group(0).strip().casefold() in _SPELLED_OUT_NUMBER_WORDS)
+
+
 def _is_structural_reference(answer: str, start: int, end: int) -> bool:
     """Ignore presentation numbers that are not measurable factual claims."""
     before = answer[start - 1 : start] if start else ""
     after = answer[end : end + 1]
-    if before in {"[", "("} and after in {"]", ")"}:
+    if before in {"[", "("} and after in {"]", ")"} and not _preceded_by_spelled_out_number(answer, start - 1):
         return True
 
     line_start = answer.rfind("\n", 0, start) + 1

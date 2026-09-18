@@ -118,3 +118,115 @@ def test_empty_text_returns_no_sentences() -> None:
 
 def test_single_sentence_no_trailing_punctuation() -> None:
     assert split_sentences("No terminal punctuation here") == ["No terminal punctuation here"]
+
+
+# --- Fable Phase 2 review corrections -------------------------------------
+#
+# Findings 1 and 4: a bare newline was not a unit boundary unless preceded by
+# terminal punctuation, and a lone capital-letter-plus-dot ("C.", "A.", "No.")
+# was always read as an abbreviation/initial regardless of what followed it.
+# See docs/conversation-quality/phase2/FRAGMENT_AUDIT.md for the full writeup.
+
+
+def test_bare_newline_is_a_boundary_even_with_no_preceding_punctuation() -> None:
+    """No "." "!" or "?" appears anywhere in this text; only the newlines mark units."""
+    text = "Telephone Office: +254 20 2026869\nEmail: info@foreverea.com\nWebsite: www.foreverea.com"
+    assert split_sentences(text) == [
+        "Telephone Office: +254 20 2026869",
+        "Email: info@foreverea.com",
+        "Website: www.foreverea.com",
+    ]
+
+
+def test_bare_newline_boundary_does_not_split_a_url_or_email_across_lines() -> None:
+    """A newline is a real boundary, but it never falls INSIDE a protected email/URL span."""
+    text = "Contact support@example.com\nfor help."
+    assert split_sentences(text) == ["Contact support@example.com", "for help."]
+
+
+def test_heading_line_is_its_own_unit_and_does_not_swallow_the_next_line() -> None:
+    text = "## Bonus\nDistributors receive a bonus."
+    assert split_sentences(text) == ["## Bonus", "Distributors receive a bonus."]
+
+
+def test_bullet_lines_are_each_their_own_unit() -> None:
+    text = "- First claim here.\n- Second claim here."
+    assert split_sentences(text) == ["- First claim here.", "- Second claim here."]
+
+
+def test_lone_initial_before_a_period_is_an_ordinary_sentence_end() -> None:
+    """A single "C." or "A." with no second initial nearby is a real sentence end -
+    not part of a "J. R. Smith"-style chain. Fable Phase 2 review, finding 4:
+    the earlier, blanket single-letter rule merged "Take Vitamin C." into
+    whatever sentence followed it."""
+    assert split_sentences("Take Vitamin C. Delivery takes 5 days.") == [
+        "Take Vitamin C.",
+        "Delivery takes 5 days.",
+    ]
+    assert split_sentences("Use Form A. Delivery takes 5 days.") == [
+        "Use Form A.",
+        "Delivery takes 5 days.",
+    ]
+
+
+def test_initial_chain_of_two_still_stays_whole_before_an_uppercase_name() -> None:
+    """The positive control for the rule above: TWO OR MORE initials in a row are
+    still read as one unit, unlike the lone-initial case."""
+    assert split_sentences("Contact J. R. Smith about the order.") == [
+        "Contact J. R. Smith about the order."
+    ]
+
+
+def test_plain_abbreviation_before_an_uppercase_word_is_terminal() -> None:
+    """A plain abbreviation ("No", "Dec") is non-terminal only when a digit or a
+    lowercase letter follows - never before an uppercase word. Fable Phase 2
+    review, finding 4: "Is the fee refundable? No. Delivery takes 5 days."
+    must split after "No.", not merge it into the sentence that follows."""
+    assert split_sentences("Is the fee refundable? No. Delivery takes 5 days.") == [
+        "Is the fee refundable?",
+        "No.",
+        "Delivery takes 5 days.",
+    ]
+    assert split_sentences("Send it by Dec. Delivery takes 5 days.") == [
+        "Send it by Dec.",
+        "Delivery takes 5 days.",
+    ]
+
+
+def test_plain_abbreviation_before_a_digit_or_lowercase_word_is_still_non_terminal() -> None:
+    """Positive control: the forward-continuation half of the same rule is
+    unchanged for the shapes it was designed for."""
+    assert split_sentences("The fee is approx. 999 USD for this tier.") == [
+        "The fee is approx. 999 USD for this tier."
+    ]
+    assert split_sentences("See policy Nr. 4.02 for the fee schedule.") == [
+        "See policy Nr. 4.02 for the fee schedule."
+    ]
+
+
+def test_dotted_compound_abbreviation_protects_both_of_its_own_dots() -> None:
+    """"e.g." and "z.B." each carry TWO dots (one internal, one final); both must
+    stay non-terminal. Fable Phase 2 review, finding 4: these compound entries
+    in ABBREVIATIONS could never actually match through the plain trailing-word
+    lookup (which only ever sees the letters after the LAST internal dot), so
+    they were previously protected only by accident, through the old blanket
+    single-letter initial rule this fix removes."""
+    text = "Bring identification, e.g. a passport, to the office."
+    assert split_sentences(text) == [text]
+    text_de = "Manche Unterlagen, z.B. ein Ausweis, werden benötigt."
+    assert split_sentences(text_de) == [text_de]
+
+
+def test_st_louis_now_splits_matching_base_behaviour_not_a_regression() -> None:
+    """"St." before an uppercase proper noun ("St. Louis") now splits, per the
+    coordinator's rule that a plain abbreviation is terminal before an
+    uppercase word. This is NOT a regression versus base (commit dbc6a7a):
+    base's own abbreviation guard, ``\\b(?:[^\\W\\d_]\\.){2,}``, only ever
+    matched a run of single-LETTER-dot pairs ("J.R.", "z.B."), never a
+    multi-letter word like "St" followed by one dot - so base already split
+    "St. Louis" into two sentences; this restores that same behaviour rather
+    than changing it."""
+    assert split_sentences("Take the train to St. Louis for the conference.") == [
+        "Take the train to St.",
+        "Louis for the conference.",
+    ]

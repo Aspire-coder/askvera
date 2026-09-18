@@ -117,13 +117,41 @@ _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 # matches a number that merely follows whitespace mid-sentence.
 _LIST_MARKER_RE = re.compile(r"(?:^|\n)[ \t]*\(?\d{1,3}\)?$")
 
-# An initial: a single uppercase letter standing alone as its own "word"
-# immediately before the candidate dot ("J. R. Smith"). Distinguished from a
-# sentence-initial word by requiring the character before that letter to be
-# whitespace, the start of text, or another initial's dot.
-_INITIAL_RE = re.compile(r"(?:^|[\s(])[A-Za-z]$")
+# A chain of two or more single-letter initials ("J. R." before "Smith"). A
+# LONE single letter before a dot ("Take Vitamin C.", "Use Form A.") is an
+# ordinary sentence end, not an initial - only a run of two or more counts,
+# per the Fable Phase 2 review (finding 4): treating any bare capital-plus-dot
+# as an initial merged a correct short neighbour sentence into whatever was
+# deleted after it ("Is the fee refundable? No. Delivery takes 5 days."
+# collapsed to "Is the fee refundable?" once the unsupported "5" sentence was
+# removed, because "No." was misread as continuing rather than ending).
+# Anchored so the first letter of the chain must start a "word" (preceded by
+# whitespace, an opening paren, or the start of text), and requires whitespace
+# between chain members so this never matches a contiguous compound like
+# "e.g." or "z.B." (those are handled as dotted abbreviations instead).
+_INITIAL_CHAIN_RE = re.compile(r"(?:^|(?<=[\s(]))[A-Za-z]\.(?:[ \t]+[A-Za-z]\.)+")
 
 _OPENING_QUOTE_CHARS = "\"'‘“«‹"
+
+# Abbreviations that themselves contain an internal "." ("e.g", "z.b") need a
+# different match than a plain abbreviation: the trailing-word lookup below
+# only ever sees the letters after the LAST internal dot, so "e.g" could never
+# be recognised at either of its own two dots. Matched as a literal compound,
+# case-insensitively, with the module's own trailing dot appended - so this
+# finds "e.g." and "z.B." (or any case) as one span, and BOTH of its dots (the
+# internal one and the final one) are read as non-terminal, unconditionally.
+_DOTTED_ABBREVIATIONS = frozenset(term for term in ABBREVIATIONS if "." in term)
+_PLAIN_ABBREVIATIONS = frozenset(term for term in ABBREVIATIONS if "." not in term)
+_DOTTED_ABBREVIATION_RE = (
+    re.compile(
+        r"(?<![^\W\d_])(?:"
+        + "|".join(re.escape(term) for term in sorted(_DOTTED_ABBREVIATIONS, key=len, reverse=True))
+        + r")\.",
+        re.IGNORECASE,
+    )
+    if _DOTTED_ABBREVIATIONS
+    else None
+)
 
 
 def _spans_containing(pattern: re.Pattern[str], text: str) -> list[tuple[int, int]]:
@@ -134,20 +162,60 @@ def _inside_any(position: int, spans: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
-def _abbreviation_before(text: str, index: int) -> bool:
-    """True when the word ending immediately before ``index`` is a known abbreviation."""
+def _plain_abbreviation_before(text: str, index: int) -> bool:
+    """True when the word ending immediately before ``index`` is a known plain abbreviation."""
     word_match = re.search(r"[^\W\d_]+$", text[:index])
     if not word_match:
         return False
-    return word_match.group(0).casefold() in ABBREVIATIONS
+    return word_match.group(0).casefold() in _PLAIN_ABBREVIATIONS
 
 
-def _initial_before(text: str, index: int) -> bool:
-    return bool(_INITIAL_RE.search(text[:index]))
+def _dotted_abbreviation_dot(text: str, index: int) -> bool:
+    """True when the "." at ``index`` is one of the two dots of a compound abbreviation.
+
+    Handles "e.g.", "z.B." and similar entries whose own text contains an
+    internal "." - the plain trailing-word lookup above can never see these,
+    because the internal dot breaks the word it is looking for in half. Kept
+    unconditional (no "what follows" check): both the internal dot and the
+    final dot of a matched compound are always non-terminal, in every case,
+    exactly as the rest of this module already treats it as one fixed idiom.
+    """
+    if _DOTTED_ABBREVIATION_RE is None:
+        return False
+    return any(
+        start <= index < end for start, end in _spans_containing(_DOTTED_ABBREVIATION_RE, text)
+    )
+
+
+def _initial_chain_dot(text: str, index: int) -> bool:
+    """True when the "." at ``index`` belongs to a chain of two or more initials.
+
+    A lone "C." or "A." is an ordinary sentence end (see ``_INITIAL_CHAIN_RE``);
+    only a run such as "J. R." counts, and every dot inside that run - not
+    only the first - is non-terminal.
+    """
+    return any(start <= index < end for start, end in _spans_containing(_INITIAL_CHAIN_RE, text))
+
+
+def _forward_continuation(text: str, index: int) -> bool:
+    """True when a digit or a lowercase letter follows ``index``, skipping spaces/tabs only.
+
+    A newline never counts as a continuation - finding 1 of the Fable Phase 2
+    review made a bare newline an unconditional unit boundary, and an
+    abbreviation on one line must not reach across it to swallow the next.
+    """
+    rest = text[index:]
+    stripped = rest.lstrip(" \t")
+    if not stripped or stripped[0] == "\n":
+        return False
+    first_char = stripped[0]
+    if first_char.isdigit():
+        return True
+    return unicodedata.category(first_char) == "Ll"
 
 
 def abbreviation_or_initial_before(text: str, index: int) -> bool:
-    """True when the "." at ``index`` sits right after a known abbreviation or a single initial.
+    """True when the "." at ``index`` sits right after a known abbreviation or an initial chain.
 
     Exposed for editors that need this one check without adopting this
     module's fuller ``sentence_boundaries`` boundary rule (which also
@@ -163,8 +231,26 @@ def abbreviation_or_initial_before(text: str, index: int) -> bool:
     followed it. This function answers only "is this period read as
     abbreviation punctuation, not a sentence end", leaving what follows to
     the caller's own boundary logic.
+
+    Two rules, tightened after the Fable Phase 2 review (finding 4) found the
+    earlier, simpler version merging a correct short neighbour sentence into
+    whatever was deleted after it:
+
+    1. A single capital letter before a dot is an abbreviation/initial only
+       as part of a chain of two or more ("J. R. Smith") or a fixed dotted
+       compound ("e.g.", "z.B."). A LONE "C." or "A." is an ordinary sentence
+       end - "Take Vitamin C. Delivery takes 5 days." must still split there.
+    2. A plain (non-dotted) abbreviation such as "No", "Nr" or "Dec" is
+       non-terminal only when the next token starts with a digit or a
+       lowercase letter ("approx. 999", "Nr. 999 ..."). Before an uppercase
+       word it is terminal: "Is the fee refundable? No. Delivery takes 5
+       days." must split after "No.", not merge into "Delivery ...".
     """
-    return _abbreviation_before(text, index) or _initial_before(text, index)
+    if _dotted_abbreviation_dot(text, index):
+        return True
+    if _initial_chain_dot(text, index):
+        return True
+    return _plain_abbreviation_before(text, index) and _forward_continuation(text, index + 1)
 
 
 def _is_list_marker(text: str, index: int) -> bool:
@@ -225,14 +311,27 @@ def sentence_boundaries(text: str) -> list[int]:
             if _numeric_span(text, last_char_index if last_char == "." else start):
                 continue
             if last_char == "." and (
-                _abbreviation_before(text, last_char_index)
-                or _initial_before(text, last_char_index)
+                abbreviation_or_initial_before(text, last_char_index)
                 or _is_list_marker(text, last_char_index)
             ):
                 continue
         if _followed_by_sentence_start(text, end):
             boundaries.append(end)
-    return boundaries
+    # A bare newline is always its own unit boundary, independent of any
+    # preceding terminal punctuation. Without this, a label-style directory
+    # answer ("Telephone Office: +254 20 2026869\nEmail: info@example.com")
+    # has no "." or "!" or "?" anywhere in it, so the whole block was read as
+    # one sentence - and once a downstream editor removed one line from it
+    # (a directory-field filter, a numeric repair), the citation-matching
+    # comparison in app/response/builder.py found none of the merged text and
+    # dropped every citation for the answer (Fable Phase 2 review, finding 1).
+    # The same merge let a markdown heading ("## Bonus") swallow the claim
+    # sentence that followed it on the next line, hiding that sentence from
+    # app/evidence_contract.py's grounding check (finding 2).
+    for match in re.finditer(r"\n", text):
+        if not _inside_any(match.start(), protected_spans):
+            boundaries.append(match.end())
+    return sorted(set(boundaries))
 
 
 def is_sentence_boundary(text: str, end: int) -> bool:
