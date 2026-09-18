@@ -192,14 +192,14 @@ change to `app/orchestrator/chat_orchestrator.py` or
 `app/retrieval/opensearch_sections.py` could add them without changing this
 script's manifest or output schema:
 
-- **`RetrievalResult.availability`** (`RetrievalAvailability` enum) is
-  computed by `RetrievalService.retrieve` and by
-  `OpenSearchSectionProvider.retrieve`, but `_CAPTURED_RETRIEVAL_METADATA` in
-  `app/orchestrator/chat_orchestrator.py` does not copy it into diagnostic
-  capture.
-- **`search_channel_failures`** (`RetrievalResult.metadata`) is populated by
-  `OpenSearchSectionProvider.retrieve` per failed channel, but is likewise not
-  in `_CAPTURED_RETRIEVAL_METADATA`.
+- **Resolved (coordinator, 2026-09-18, c482728):** `RetrievalResult.availability`
+  (R02: available / degraded / unavailable) and the provider's
+  `failed_search_channels` are now written into the orchestrator's diagnostic
+  record for each retrieval (`_append_diagnostic_retrieval`; diagnostic only).
+  The capture reports them as `retrieval_availability` and
+  `search_channel_failures`, from the question-stage retrieval. "unavailable"
+  in those two fields means no retrieval was recorded (for example, an early
+  clarification), not a provider outage.
 - **A "directory target" distinct from `runtime_scope_intent`.** Today
   `runtime_scope_intent`/`authorized_policy_market` (V2-10's contract) are the
   only trusted scope fields exposed; there is no separate field naming which
