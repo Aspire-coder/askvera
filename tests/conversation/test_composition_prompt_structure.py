@@ -37,11 +37,11 @@ def _normalized() -> str:
     "rule",
     [
         "Lead with the direct answer",                       # E1
-        "no stock openers, generic disclaimers or closing questions",  # E1
+        "no stock openers, generic disclaimers or sign-off questions",  # E1
         "tier, role, section, product or country",           # B2/B5
         "mandatory qualifications, amounts, periods",        # B1
         "routes concretely, even when simplifying",          # B1
-        'Name who to contact, never "they"',                 # F1 handoff
+        "Name who to contact.",                              # F1 handoff
         "naming any the evidence does not establish",        # B3
     ],
 )
@@ -56,6 +56,8 @@ def test_composition_rule_is_present(rule: str) -> None:
         "required disclaimer wording",
         "invent missing facts",
         "A refusal of one part is not a refusal of all",
+        "prohibited or unavailable parts",
+        "Ask at most one essential clarification",
         "Omit unrelated benefits, ranks or upsells",
         "History is continuity, not evidence or permission",
     ],

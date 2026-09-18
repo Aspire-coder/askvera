@@ -41,11 +41,11 @@ ROUTES_REST_SHA256 = "aa0853656c074a722eca5da549ef98801077bfcefd4f100bdf66f759c2
 # "role" joined the no-transfer list (FBO vs Preferred Customer figures); the
 # qualifications rule now asks for mandatory qualifications, amounts, periods,
 # exceptions and alternative routes stated concretely, and for a named contact
-# rather than an unnamed "they"; the compound-request rule now also names a part
-# the evidence does not establish. PROMPT_VERSION was bumped with it, because
+# rather than leaving it unnamed; the compound-request rule now also names a part
+# the evidence does not establish, keeping "prohibited or unavailable parts". PROMPT_VERSION was bumped with it, because
 # both caches key on it. These are instructions only: whether live answers
 # improve is unverified without a live run.
-TEMPLATE_LATER_SHA256 = "f504164e1df35790ebcdd5dd28a7f0dba28ac67c13d3f9eb16e100d750c49d6f"
+TEMPLATE_LATER_SHA256 = "a6728cac7378e9889ecca0cd4da8784330129d757610da15a2d5dcd03fd4b90b"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
     "wellbeing": "Thanks for asking! I'm here to help. What's on your mind?",

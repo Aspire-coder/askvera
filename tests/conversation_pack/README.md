@@ -59,27 +59,53 @@ interpreter. No network, no live model, no installs.
 **`expected_outcome`** (per turn): `answer`, `clarify`, `refuse-scope`,
 `refuse-country-restriction`, `missing-evidence`, `dependency-failure`.
 
-**`needs_live`** — `true` means the offline mechanism cannot honestly judge
-the case (it depends on real model composition: does the model actually say
-X, in language Y, splitting a two-part question correctly). These are run
-and skipped, never faked. Full needs-live list, with reasons in `cases.json`:
+**`needs_live`** — `true` means the offline mechanism cannot judge the
+*whole* case, because part of it depends on real model composition (does the
+model actually say X, in language Y, and split a two-part question
+correctly?). Such a case is handled in one of three ways, and a PASS on it is
+**never** evidence that production answers correctly:
+
+- **Skipped outright** (`TYPO-001/002`): nothing honest can be checked offline.
+- **Premise check, then skipped** (`UNKNOWN-001/002`): the runner verifies
+  that the source fixture really lacks the fact, and then skips. That check
+  would pass whatever AskVera answered, so it is reported as a skip, not a
+  pass. (Corrected after independent review. An earlier version reported
+  these as passes.)
+- **Offline half asserted** (`US-POLICY-001/002`, `LANGUAGE-SELECTOR-SWITCH-001`,
+  `GUARDRAIL-MISFIRE-001/002/003`): a real deterministic layer is checked,
+  such as the evidence gate, retrieval-query inheritance or governance. The
+  test passes when that layer behaves, and the live half stays unverified.
+
+Full needs-live list, with reasons in `cases.json`:
 
 | Case | Why it needs a live run |
 |---|---|
 | `US-POLICY-001`, `US-POLICY-002` | Whether the model states the FLP-identity fact and withholds the unrelated income disclaimer is generation composition (task C1 on TASK_BOARD.md); offline only confirms the evidence gate doesn't block/misroute it. |
 | `LANGUAGE-SELECTOR-SWITCH-001` | Offline confirms the topic is kept across a mid-session language-selector change; whether the response text is actually produced in the new language depends on live prompt/model composition (TASK_BOARD.md item A6). |
 | `TYPO-001`, `TYPO-002` | Typo tolerance lives in `app/retrieval/typo_safety.py` and the OpenSearch scoring pipeline (Codex-owned, `app/retrieval/**`), which needs a real search backend. A fake retriever keyed by exact fixture selection would fake a pass by construction. |
-| `MULTIPART-001` | The offline half (post-processing must not destroy an already-correct two-part answer) is asserted directly — and currently fails; see Findings. Whether the live model actually *composes* both parts of a two-part question in the first place (task B3) needs a real generation run and is flagged separately. |
 | `UNKNOWN-001`, `UNKNOWN-002` | Offline confirms the retrieved evidence contains no basis for the forbidden fact (structural grounding check). Whether the live answer actually states the gap honestly instead of inventing something needs a real generation run. |
 | `GUARDRAIL-MISFIRE-001/002/003` | Offline confirms the governance layer does not block the question. The actual defect these controls target (the model volunteering an unrelated disclaimer/refusal anyway, task C1/C2) is a generation-composition behavior. |
 
-## Findings (confirmed defects, `xfail(strict=True)`)
+## Findings and their disposition
 
-One case is pinned as a reproduced, confirmed defect rather than a
-needs-live unknowns — the offline mechanism itself demonstrates the bug
-deterministically, with no model involved. They will flip to a visible,
-unexpected pass (and fail the build via `strict=True`) the moment the
-underlying code is fixed.
+The pack found one real defect and one wrong expectation. Neither is an open
+xfail any more.
+
+### `MULTIPART-001`: fixed
+
+- **Question**: "What is the minimum order for an FBO in Kenya, and what
+  payment methods do they accept?", paired with an already-correct two-part
+  scripted answer.
+- **Defect**: the minimum-order branch of `remove_unrequested_directory_fields`
+  (`utils/directory_fields.py`) deleted the payment-methods sentence without
+  checking whether the same question had asked for it.
+- **Fix**: that branch now keeps any field the question itself requests, via
+  `_requested_directory_field_set`. A bare "hours" (a duration, as in "within
+  48 hours") does not count as asking for business hours. An order-size-only
+  question still sheds every other field. See
+  `tests/conversation/test_order_size_field_keeping.py`.
+- **Still needs a live run**: whether the model composes both parts in the
+  first place (task B3).
 
 ### `CONTACT-KENYA-001`: expectation corrected, not a defect
 
@@ -101,30 +127,6 @@ itself to be wrong and corrected it.
   and correctly drops the order number. `_ORDER_PHONE_REQUEST_RE` treating
   "order" as a request for the order line is the right behaviour for both
   questions.
-
-### `MULTIPART-001`
-- **Case**: "What is the minimum order for an FBO in Kenya, and what
-  payment methods do they accept?" — with an already-correct, two-part
-  scripted model answer (`$100 worth of products when joining ... Mpesa`).
-- **Expected**: post-processing preserves both parts of the answer.
-- **Actual**: the payment-methods sentence is deleted; only the
-  minimum-order sentence survives.
-- **Suspected layer**: `utils/directory_fields.py:660-671`. The dedicated
-  minimum-order-question branch of `remove_unrequested_directory_fields`
-  matches `r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b"`
-  and then unconditionally strips every
-  payment-methods/delivery-cost/delivery-time/business-hours sentence "so
-  an order-size answer still sheds unrelated payment/delivery/hours prose
-  exactly as before" (comment at 660-663) — without checking whether the
-  *same* question also explicitly names one of those fields. Any
-  two-part question that includes an order-size clause always loses the
-  other half's content at this layer, independent of what the model
-  generated.
-- **Related task**: TASK_BOARD.md B3 ("Two-part question... both parts
-  answered, or the unestablished part named"). This finding shows the
-  post-processing layer will destroy a correct two-part answer even before
-  task B3's generation-composition question is reached.
-- **Lane C ownership**; not fixed here per this lane's file boundary.
 
 ## Coverage
 

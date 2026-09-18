@@ -279,6 +279,10 @@ def _run_absent_fact_check(params: dict) -> None:
         f"fixture already contains {params['forbidden_substring']!r}; "
         "the absent-fact check is only meaningful when the source evidence omits it"
     )
+    # This checks the case's premise (the fixture lacks the fact), not the
+    # product: it would pass whatever AskVera answered. Report it as a skip so
+    # it is never counted as behavioural evidence (Fable review, 2026-09-18).
+    pytest.skip("premise verified (source omits the fact); whether the answer invents it needs a live run")
 
 
 def _run_role_bound_fact_absent(params: dict) -> None:
@@ -296,6 +300,8 @@ def _run_role_bound_fact_absent(params: dict) -> None:
                 f"source line {line!r} ties {params['figure_marker']!r} to "
                 f"{params['role_marker']!r}; the role-bound-fact-absent check no longer holds"
             )
+    # Premise only, as above: it would pass whatever AskVera answered.
+    pytest.skip("premise verified (no source line binds the figure to the role); the answer needs a live run")
 
 
 def _run_governance_allowed(params: dict) -> None:

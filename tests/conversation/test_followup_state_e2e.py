@@ -206,12 +206,17 @@ def _run(
 
 
 def test_a1_office_or_order_phone_follow_up_keeps_kenya_and_uses_the_fresh_record(monkeypatch) -> None:
-    """Fail-before shape: a model that reuses the *previous turn's* office number
-    instead of the freshly retrieved one would leak stale/incorrect data. Here
-    the fresh record's office number is deliberately different from what the
-    realistic prior answer stated (simulating an updated source), and the
-    fake model is scripted the way a grounded generation actually behaves:
-    it answers from the retrieved record, not from memory of the old answer.
+    """Retrieval re-runs for Kenya on the follow-up. Mocked/local behaviour.
+
+    What this proves: the follow-up reaches retrieval again, anchored to Kenya,
+    and post-processing delivers the scripted answer without reinserting the
+    previous turn's number.
+
+    What it does NOT prove (independent review, 2026-09-18): that a real model
+    prefers the fresh record over the stale number in history. The fake model
+    is scripted to use the fresh number, so the two answer assertions are
+    decided by the script rather than by AskVera. Grounding against the
+    history is covered by the A8 test, through the real validator pipeline.
     """
     history = _history(("What is the Kenya office phone number and email?", KENYA_PRIOR_ANSWER))
     updated_kenya = KENYA_CONTENT.replace("+254 20 2026869 / +254 20 2026873", "+254 20 5551234")
@@ -483,9 +488,11 @@ def test_a7_the_other_one_after_two_named_markets_does_not_silently_answer_for_o
     for a brief clarification. Because `_build_retrieval_query` /
     `_build_request_query` are single-writer (owned by the coordinator, see
     docs/conversation-quality/TASK_BOARD.md and this worktree's task prompt),
-    the fix is delivered as a patch file for the coordinator to apply rather
-    than an edit here - see
-    docs/conversation-quality/patches/laneA-other-one-clarification.patch.
+    Lane A proposed a patch; the coordinator rejected it. It matched "the
+    other one" with an English regex and returned a refusal rather than a
+    clarification. The general fix needs an unresolved-reference signal from
+    the intent planner; see
+    docs/conversation-quality/codex-requests/A7-unresolved-reference.md.
     """
     history = _history(
         ("What is the delivery cost in Kenya?", "Delivery to Kenya costs $3 within the country."),

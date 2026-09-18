@@ -82,6 +82,7 @@ from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
 from utils.exceptions import (
+    AwsServiceError,
     BedrockServiceError,
     BedrockTimeoutError,
     LowConfidenceError,
@@ -1056,19 +1057,26 @@ class AIOrchestrator:
             retrieval_result = self.retriever.retrieve(
                 retrieval_query, body.country, body.language, body.role, correlation_id
             )
-        except (BotoCoreError, ClientError, ConnectionError, TimeoutError, OSError) as exc:
-            # C5 (conversation-quality task board): this call was previously
-            # unguarded, so a retrieval-backend outage (timeout, connection
-            # refused, auth/signing failure) raised straight out of
-            # handle_chat with no ChatResponse at all - not even the wrong
-            # wording, no wording, and no session-turn persistence, since the
-            # exception propagated before append_session_turn ever runs.
-            # A dependency being unreachable is not the same situation as the
-            # documents genuinely lacking the answer (failure_layer
-            # "evidence_gate"/"low_confidence"), so it gets its own
-            # "dependency_unavailable" layer and the reviewed "bedrock_error"
-            # copy - honest about a technical problem, not a confident denial
-            # that the information isn't available.
+        except (AwsServiceError, BotoCoreError, ClientError, ConnectionError, TimeoutError, OSError):
+            # C5: a dependency failure that escapes retrieval raised straight out
+            # of handle_chat, with no answer and no persisted turn. It now gets
+            # the localized bedrock_error copy under its own layer, because an
+            # unreachable dependency is not the same as documents that lack the
+            # answer ("evidence_gate"/"low_confidence").
+            #
+            # LIMITATION (Fable review, 2026-09-18): this catches only what
+            # escapes the provider. AwsServiceError is the embedding path
+            # (services/embeddings.py). A real OpenSearch outage never reaches
+            # here: OpenSearchSectionProvider.retrieve catches OpenSearchException
+            # itself and returns an empty result, which is delivered as missing
+            # evidence, and RetrievalHealth records success. Fixing that needs
+            # the provider to surface the failure. That provider is Codex-owned;
+            # see docs/conversation-quality/codex-requests/C5-retrieval-outage-masked-as-no-evidence.md.
+            #
+            # MONITORING: a failure caught here is an HTTP 200 fallback. It
+            # counts toward fallback_by_layer{dependency_unavailable} and the
+            # HighFallbackRate alarm, not the request error rate (HighErrorRate).
+            # That trade-off is pending the user's approval.
             LOGGER.exception("retrieval_dependency_unavailable", correlation_id=correlation_id)
             return self._validate_response(
                 self.response_builder.fallback(
@@ -1131,6 +1139,12 @@ class AIOrchestrator:
                 retrieval_result=retrieval_result,
             )
         except (BedrockTimeoutError, BedrockServiceError):
+            # MONITORING: this used to reach the route as HTTP 504/502 and count
+            # toward HighErrorRate. It is now an HTTP 200 fallback counted
+            # toward fallback_by_layer{dependency_unavailable} and
+            # HighFallbackRate (35%, 2x15 min, 20-delivery floor), so a Bedrock
+            # outage on a quiet deployment may not page. Pending user approval.
+            #
             # Deliberately narrow. generate() can also raise ConfigurationError,
             # which is a deploy defect rather than a transient outage: telling
             # the user "try again in a moment" would be false and would hide

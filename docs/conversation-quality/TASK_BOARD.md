@@ -10,7 +10,7 @@ Authority: the user's direct instruction of 2026-09-18. The handoff pointers in
 | Name | Commit | What it is |
 |---|---|---|
 | B0 | `5b1d33f` | `origin/main` (PR #160 merged). |
-| B1 | `d7b9747` | B0 plus four open branches, all in this project's ownership lanes, merged locally (not pushed): `fix/history-is-not-evidence-20260916`, `fix/fallback-offers-customer-care-20260916`, `fix/policy-question-not-a-claim-20260917`, `fix/income-bypass-coverage-and-market-config-20260915`. Textually clean. `income_claim_policy.py` and `config/vera_persona.py` auto-merged. **Verified:** full `tests/unit` + `tests/governance` passed on B1 (`-x`, exit 0, 2026-09-18). |
+| B1 | `d7b9747` | B0 plus four open branches, all in this project's ownership lanes, merged locally (not pushed): `fix/history-is-not-evidence-20260916`, `fix/fallback-offers-customer-care-20260916`, `fix/policy-question-not-a-claim-20260917`, `fix/income-bypass-coverage-and-market-config-20260915`. Textually clean. `income_claim_policy.py` and `config/vera_persona.py` auto-merged. Full `tests/unit` + `tests/governance` on B1 reached `[100%]` under `-x` with no failures section. (Correction: the recorded "exit 0" was `tail`'s exit code, not pytest's. The candidate run below captured pytest's own exit code.) |
 
 **Production uncertainty.** B0 was requested for deployment on 2026-09-17, but
 this session never saw a completed deploy or a live `git log` from the host.
@@ -64,29 +64,29 @@ Status values: `todo`, `active`, `repro-confirmed`, `no-defect-pinned`,
 
 | ID | Task | Acceptance | Lane | Status |
 |---|---|---|---|---|
-| A1 | Kenya office-or-order follow-up | Kenya kept; numbers come from re-retrieved source, never from history | A | no-defect-pinned (e2e) |
+| A1 | Kenya office-or-order follow-up | Kenya kept; numbers from re-retrieved source | A | no-defect-pinned. Retrieval re-run is real; answer numbers are scripted |
 | A2 | "And the office hours?" | office context kept | A | no-defect-pinned (e2e) |
 | A3 | Explicit new place | old place not inherited | A | no-defect-pinned (e2e) |
 | A4 | Cross-conversation isolation | no state, cache identity or facts shared | A | no-defect-pinned (real memory session store) |
 | A5 | Topic change | irrelevant context released | A | no-defect-pinned (e2e) |
-| A6 | Language switch (selector change mid-session) | topic kept, response language follows the new selection | A | no-defect-pinned (deterministic text only; model language needs live) |
-| A7 | Ambiguous follow-up | brief clarification when unresolvable | A | repro-confirmed, OPEN: strict xfail; Codex request `codex-requests/A7-unresolved-reference.md` |
+| A6 | Language switch (selector) | topic kept, language follows | A | no-defect-pinned for deterministic text; model language needs live |
+| A7 | Ambiguous follow-up | brief clarification | A | OPEN: strict xfail; Codex request `A7-unresolved-reference.md` |
 | A8 | Hallucinated prior answer | cannot become evidence | A | no-defect-pinned (real validator pipeline) |
-| B1 | Manager qualification completeness | supported requirements stated, not "specific requirements apply" | B | todo |
-| B2 | Minimum order FBO vs Preferred Customer | both distinguished when both are supported | B | todo |
-| B3 | Two-part question | both parts answered, or the unestablished part named | B | todo |
-| B4 | Delivery vs approval timing | never conflated | B | todo |
-| B5 | Adjacent-role figure loss | a valid figure survives an adjacent role clause | B | todo |
-| B6 | Post-validator remnant | still grammatical and useful | B | todo |
-| E1 | Natural, concise answers | direct first sentence, no filler, no added model call | B | todo |
-| C1 | Company-identity income disclaimer | "What is Forever Living Products?" gets no income disclaimer | C | todo |
-| C2 | Purchase and returns guardrail misfire | no unrelated guardrail | C | todo |
-| C3 | Unsupported fact invented | honest limitation | C | todo |
-| C4 | Supported fact refused | answered | C | todo |
-| C5 | Five failure kinds worded distinctly | scope, country restriction, missing evidence, ambiguity, dependency | C (wording) / coordinator (orchestrator wiring) | todo |
-| D1 | Verified contact presentation | right type, country and topic; exact digits; no duplicate; none invented | C | todo |
-| F1 | Recovery: timeout, empty, central claim rejected, empty source, unresolved "they" | coherent and honest; dependency failure kept separate from refusal | C | todo |
-| G1 | Conversation regression pack | every category in the brief, paraphrases and negative controls, honestly labelled | G | implemented: 26 cases; 1 expectation corrected; MULTIPART-001 open finding (routed to Lane C) |
+| B1 | Manager qualification completeness | concrete requirements stated | B | prompt rule; needs live |
+| B2 | FBO vs Preferred Customer minimum order | both distinguished | B | prompt rule (needs live) + ROLE-CHANGE-001 deterministic guard |
+| B3 | Two-part question | both parts, or gap named | B/C | IMPLEMENTED: post-processing no longer deletes a requested part (MULTIPART-001); prompt rule names the gap (needs live) |
+| B4 | Delivery vs approval timing | never conflated | B | OPEN: Lane B's rule dropped to hold the prompt budget; no deterministic reproduction found |
+| B5 | Adjacent-role figure loss | figure survives | B | IMPLEMENTED: numeric validator frees a plural acronym subject; wrong figures still flagged |
+| B6 | Post-validator remnant | grammatical and useful | B/C | PARTIAL: decimal-time remnant ("00 am - 19.00 pm.") fixed; no general audit done |
+| E1 | Natural, concise answers | direct first sentence, no filler | B | prompt rule; needs live |
+| C1 | Company-identity income disclaimer | none | C | no-defect-pinned at intent and governance; model prose needs live |
+| C2 | Purchase and returns guardrail misfire | none | C | no-defect-pinned at intent and governance; model prose needs live |
+| C3 | Unsupported fact invented | honest limitation | C | diagnosis only: no clear workbook case (`laneC-c3-c4-diagnosis.md`) |
+| C4 | Supported fact refused | answered | C | diagnosis only: points to retrieval/evidence approval (Codex); several cited cases were fixed before this project |
+| C5 | Five failure kinds worded distinctly | accurate per kind | C/coord | PARTIAL: Bedrock timeouts and escaping retrieval/embedding errors fixed; a real OpenSearch outage is still reported as missing evidence (Codex request `C5-retrieval-outage-masked-as-no-evidence.md`) |
+| D1 | Verified contact presentation | right type/country; exact; none invented | C | no-defect-pinned (6 tests) |
+| F1 | Recovery | coherent and honest | C/coord | PARTIAL: dependency failures as C5; unnamed-"they" handled as a prompt rule (needs live); empty answer and central-claim rejection already routed to fallback (not re-audited) |
+| G1 | Conversation regression pack | all categories, honest labels | G | IMPLEMENTED: 27 cases; one expectation corrected; one finding fixed; premise-only checks now report as skips |
 
 ## Initial Priority A reproduction (coordinator, query layer, 2026-09-18)
 
@@ -140,6 +140,18 @@ owns composition long-term. Recorded for the final handoff; not blocking.
 - Lane C's `_drop_dangling_pronoun_handoffs`: an English-only fourteenth
   post-editor that deletes the reader's next step. Moved to Lane B as a
   composition rule.
+
+## Independent review (Fable, 2026-09-18, on a3d965f) and disposition
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| 1 | The retrieve() catch cannot fire for a real OpenSearch outage; the provider swallows it and it is reported as missing evidence | blocker for the C5 claim | Claim corrected. `AwsServiceError` (the embedding path) added and tested; limitation documented in code; Codex request filed |
+| 2 | Bedrock failures move from HighErrorRate to HighFallbackRate, undisclosed | should-fix | Disclosed in code at both catch sites; on the user approval queue |
+| 3 | A bare "hours" (a duration) kept an unrequested business-hours sentence | should-fix | Fixed: only "business/office hours" counts inside the order-size branch. Also fixed the "09.00" sentence split; tests fail before and pass after |
+| 4 | Stale docs and docstrings (patch files, xfail state, board) | should-fix | Fixed |
+| 5 | Needs-live cases reported PASS; premise-only checks were vacuous; ROLE-CHANGE-001 blessed an unsourced answer | note | Premise checks now skip; README states what a pass means; ROLE-CHANGE-001 scripted answer is now an honest gap |
+| 6 | Prompt wording: "closing questions" vs clarification; lost "unavailable"; `never "they"` | note | "sign-off questions"; "prohibited or unavailable parts" restored; handoff rule is now "Name who to contact." (4383 chars, inside budget) |
+| 7 | Unused `as exc`; A1 answer assertions are decided by the scripted model | note | Removed; A1 docstring states what it does and does not prove |
 
 ## Blockers
 

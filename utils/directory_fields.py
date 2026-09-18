@@ -98,6 +98,9 @@ _FIELD_ALLOWED_LINE_FRAGMENTS: dict[str, str] = {
 }
 
 
+_EXPLICIT_BUSINESS_HOURS_RE = re.compile(r"\b(?:business|office)\s+hours?\b", re.IGNORECASE)
+
+
 def _requested_directory_field_set(question: str) -> set[str] | None:
     """Return the canonical fields a question confidently names, or ``None``.
 
@@ -674,6 +677,14 @@ def remove_unrequested_directory_fields(
     # exactly as before.
     if re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
         order_size_requested = _requested_directory_field_set(question_text) or set()
+        # _FIELD_REQUEST_PATTERNS["business_hours"] also accepts a bare "hours",
+        # which is right for a directory-field question ("What are the hours?")
+        # but not here: "the minimum order if I need it within 48 hours" names a
+        # duration, not the office's hours (Fable review, 2026-09-18). Inside
+        # this branch only the explicit business/office form counts - the same
+        # alternative that pattern already carries, not a new phrase.
+        if "business_hours" in order_size_requested and not _EXPLICIT_BUSINESS_HOURS_RE.search(question_text):
+            order_size_requested.discard("business_hours")
         order_size_field_patterns = {
             "payment_methods": r"payment\s+methods?\s+accepted",
             "delivery_cost": r"delivery\s+cost|delivery\s+charge",
@@ -690,7 +701,10 @@ def remove_unrequested_directory_fields(
         cleaned, replacements = _remove_field_sentences(
             answer or "",
             re.compile(
-                rf"(?:{'|'.join(unrequested_fragments)})[^.!?]*(?:[.!?]|$)\s*",
+                # A "." only ends the sentence when whitespace or the end
+                # follows it, so "09.00 am - 19.00 pm" is removed whole instead
+                # of leaving the remnant "00 am - 19.00 pm." (Fable review).
+                rf"(?:{'|'.join(unrequested_fragments)})(?:[^.!?]|[.!?](?!\s|$))*(?:[.!?]|$)\s*",
                 re.IGNORECASE,
             ),
         )

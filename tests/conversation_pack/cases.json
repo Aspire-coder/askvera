@@ -473,7 +473,7 @@
           },
           {
             "question": "Is there a minimum first order for a Preferred Customer in Kenya?",
-            "scripted_answer": "Yes, a first order is required when signing up as a Preferred Customer.",
+            "scripted_answer": "The Kenya record does not state a minimum first order for a Preferred Customer.",
             "must_contain": [],
             "must_not_contain": ["$100"]
           }
@@ -686,7 +686,7 @@
         }
       ],
       "needs_live": false,
-      "notes": "Confirms the post-processing layer will destroy a correct two-part answer regardless of what the live model generates, so this is a defect independent of task B3's generation-composition question."
+      "notes": "Was a confirmed finding: post-processing deleted the payment-methods half of a correct two-part answer. Fixed in utils/directory_fields.py (remove_unrequested_directory_fields now keeps a field the same question requests); now an ordinary pass. Whether the live model composes both parts in the first place (task B3) still needs a live run."
     },
     {
       "id": "UNKNOWN-001",

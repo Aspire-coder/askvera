@@ -1,51 +1,28 @@
-"""C5 (re-check, end-to-end): a dependency failure (retrieval backend down,
-model provider down) must get its OWN distinct, honest wording - never the
-same "documents don't contain enough information" denial used for genuinely
-missing evidence, and never no wording at all.
+"""C5: a dependency failure gets its own honest wording. Mocked/local behaviour.
 
-Reproduced end-to-end (2026-09-18) by calling the real
-AIOrchestrator.handle_chat with the offline harness pattern (fake retriever/
-router/validator/governance/session, no live model or AWS calls):
+Driven through the real AIOrchestrator.handle_chat with fake retriever,
+router, validator, governance and session functions. No live model or AWS
+call is made, and nothing here proves production behaviour.
 
-(a) self.retriever.retrieve(...) in _handle_scrubbed_chat
-    (app/orchestrator/chat_orchestrator.py, ~line 1049) was completely
-    unguarded. A retrieval-backend outage (BotoCoreError/ClientError/
-    ConnectionError/TimeoutError/OSError) raised straight out of
-    handle_chat with NO ChatResponse at all - not even the wrong wording,
-    literally nothing delivered, and the turn was never persisted to
-    session history (append_session_turn runs later in _handle_chat, after
-    the exception already propagated).
+Before this change (reproduced 2026-09-18):
+(a) a dependency error escaping retriever.retrieve() raised straight out of
+    handle_chat. No answer was delivered and the turn was not persisted.
+(b) BedrockTimeoutError / BedrockServiceError from generate() reached the
+    route's AskVeraError handler as an HTTP 504/502 error envelope with no
+    failure_layer.
 
-(b) self.model_router.generate(...) (~line 1078) only caught
-    LowConfidenceError. BedrockTimeoutError/BedrockServiceError (raised by
-    app/models/bedrock_provider.py when Bedrock itself times out or errors -
-    both AskVeraError subclasses, NEITHER a LowConfidenceError) propagated
-    past this call, past handle_chat, and were only ever caught - if the
-    caller happened to be api/routes.py - by its bare `except AskVeraError`,
-    which returns a `success: false` HTTP error ENVELOPE (a completely
-    different response shape than every other outcome in this file), never
-    runs response_builder or output validation, and carries no
-    metadata.failure_layer at all.
+Now both return the localized bedrock_error copy under
+failure_layer=dependency_unavailable, distinct from missing evidence (c) and
+from a policy-country restriction (d). ConfigurationError is deliberately not
+converted (see the negative control at the end).
 
-By contrast, missing evidence (c) and a policy-country restriction (d) both
-already return an ordinary ChatResponse with distinct wording and
-failure_layer "evidence_gate" (see the same test file's assertions on (c)/
-(d) for that baseline).
-
-The orchestrator is coordinator-only, so the fix is delivered as a unified
-diff at docs/conversation-quality/patches/laneC-failure-wording.patch (not
-applied to app/orchestrator/chat_orchestrator.py in this worktree). It:
-- wraps the retrieve() call and returns the reviewed "bedrock_error" copy
-  with failure_layer="dependency_unavailable" on a dependency exception;
-- adds a second `except AskVeraError` clause after `except LowConfidenceError`
-  around model_router.generate(), routing to the same fallback path and
-  failure_layer.
-
-These tests are written against the CURRENT (unpatched) orchestrator and
-therefore currently FAIL, pinning the live defect; they are expected to pass
-once the coordinator applies the patch. tests (c)-(f) alongside them pass
-today and are included so the full six-situation picture is visible in one
-file, per the coordinator's request to re-check C5 end-to-end.
+WHAT THESE TESTS DO NOT SHOW: the fake retrievers RAISE. The production
+OpenSearch provider does not. It catches OpenSearchException itself and
+returns an empty result, so a real OpenSearch outage is still delivered as
+missing evidence. That half of C5 is open and needs a provider change; see
+docs/conversation-quality/codex-requests/C5-retrieval-outage-masked-as-no-evidence.md.
+The embedding path does raise (AwsServiceError), and
+test_a2_embedding_outage_gets_a_dependency_answer covers it.
 """
 
 from __future__ import annotations
@@ -233,3 +210,19 @@ def test_configuration_error_is_not_disguised_as_a_transient_hiccup() -> None:
 
     with pytest.raises(ConfigurationError):
         _handle(_RetrieverWithEvidence(), _RouterRaisesConfigurationError(), "How do I qualify as a Recognized Manager?")
+
+
+class _RetrieverRaisesEmbeddingOutage:
+    """What services/embeddings.py raises when Bedrock embeddings are unreachable."""
+
+    def retrieve(self, *_args, **_kwargs):
+        from utils.exceptions import AwsServiceError
+
+        raise AwsServiceError("Embedding generation failed.")
+
+
+def test_a2_embedding_outage_gets_a_dependency_answer() -> None:
+    """The one retrieval dependency failure that really does escape the provider."""
+    response = _handle(_RetrieverRaisesEmbeddingOutage(), _RouterOk(), "What is the minimum order for Kenya?")
+    assert response.metadata.get("failure_layer") == "dependency_unavailable"
+    assert "technical hiccup" in response.answer.lower()
