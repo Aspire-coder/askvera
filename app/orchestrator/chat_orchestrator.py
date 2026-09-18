@@ -11,9 +11,10 @@ from typing import Any
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.metrics.health import record_validation_outcome
-from app.metrics.responses import record_delivered_response, record_numeric_repair
+from app.metrics.responses import record_delivered_response, record_dependency_unavailable, record_numeric_repair
 from app.models.responses import ModelResponse
 from app.orchestrator.compound_requests import separate_question_and_command
+from app.orchestrator.dependency_contract import dependency_component_for_exception
 from app.operations import pipeline_trace_store
 from app.models.router import ModelRouter, model_router
 from app.evidence import (
@@ -1037,6 +1038,97 @@ class AIOrchestrator:
             "mixed_intent": True, "refused_part_count": 1,
         })
 
+    def _dependency_unavailable_response(
+        self,
+        body: ChatRequest,
+        correlation_id: str,
+        component: str,
+        *,
+        retrieval_result: RetrievalResult | None = None,
+        retrieval_availability: str | None = None,
+    ) -> ChatResponse:
+        """Build the shared dependency_unavailable fallback and record its metric.
+
+        One place that builds this fallback shape (the localized bedrock_error
+        copy under failure_layer=dependency_unavailable) and one place that
+        records the DependencyUnavailable metric for it -- exactly once per
+        call. Used today by the retrieve() and generate() dependency catches
+        below, both of which have only a raised exception to go on (no R02
+        availability value), so they leave `retrieval_availability` unset and
+        this method records the metric's `availability` dimension as
+        "exception". At integration, Codex's two R02 routing sites (for
+        RetrievalAvailability.UNAVAILABLE, and DEGRADED with no usable final
+        evidence after country-scope reapproval) call this same method with a
+        real `retrieval_availability` value ("unavailable"/"degraded"), which
+        is then also recorded on the response's own metadata as
+        `retrieval_availability` for anyone inspecting the delivered answer.
+        """
+        record_dependency_unavailable(component, retrieval_availability or "exception")
+        metadata: dict[str, Any] = {"failure_layer": "dependency_unavailable"}
+        if retrieval_availability:
+            metadata["retrieval_availability"] = retrieval_availability
+        return self._validate_response(
+            self.response_builder.fallback(
+                localized_conversation_response("bedrock_error", body.language)
+                or FALLBACK_RESPONSES["bedrock_error"],
+                correlation_id,
+                metadata=metadata,
+            ),
+            body,
+            correlation_id,
+            retrieval_result=retrieval_result,
+        )
+
+    def _retrieve_or_dependency_response(
+        self, retrieval_query: str, body: ChatRequest, correlation_id: str,
+    ) -> tuple[RetrievalResult | None, ChatResponse | None]:
+        """Run retrieval, surfacing an escaping dependency exception as a fallback.
+
+        Returns ``(retrieval_result, None)`` on success (including a result
+        that is empty, or DEGRADED-but-usable once Codex's R02 provider
+        contract is integrated -- this method does not inspect
+        `RetrievalResult.availability` at all; that routing belongs to
+        Codex's own orchestrator hook, added at integration, not here).
+        Returns ``(None, response)`` only when `retrieve()` itself raised one
+        of the recognized dependency exceptions. Callers must check the
+        second element and return it immediately without using the first.
+
+        INTEGRATION NOTE: Codex's concurrent evidence-first-v2 change wraps
+        this same ``retriever.retrieve(...)`` call in a try/finally that sets
+        and resets a rank-list context token. That try/finally belongs inside
+        this method, around the call below.
+        """
+        try:
+            retrieval_result = self.retriever.retrieve(
+                retrieval_query, body.country, body.language, body.role, correlation_id
+            )
+        except (AwsServiceError, BotoCoreError, ClientError, ConnectionError, TimeoutError, OSError) as exc:
+            # C5: a dependency failure that escapes retrieval raised straight out
+            # of handle_chat, with no answer and no persisted turn. It now gets
+            # the localized bedrock_error copy under its own layer, because an
+            # unreachable dependency is not the same as documents that lack the
+            # answer ("evidence_gate"/"low_confidence").
+            #
+            # LIMITATION (Fable review, 2026-09-18): this catches only what
+            # escapes the provider. AwsServiceError is the embedding path
+            # (services/embeddings.py). A real OpenSearch outage never reaches
+            # here: it is now covered instead by Codex's R02
+            # RetrievalResult.availability contract, routed at the
+            # integration layer, not by this except clause. See
+            # docs/conversation-quality/codex-requests/C5-retrieval-outage-masked-as-no-evidence.md.
+            #
+            # MONITORING: a failure caught here is an HTTP 200 fallback. It
+            # counts toward fallback_by_layer{dependency_unavailable} and the
+            # HighFallbackRate alarm, not the request error rate (HighErrorRate).
+            # That trade-off is pending the user's approval.
+            LOGGER.exception("retrieval_dependency_unavailable", correlation_id=correlation_id)
+            response = self._dependency_unavailable_response(
+                body, correlation_id, dependency_component_for_exception(exc),
+            )
+            return None, response
+        _record_diagnostic_retrieval("question", retrieval_result)
+        return retrieval_result, None
+
     def _handle_scrubbed_chat(
         self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
     ) -> ChatResponse:
@@ -1064,42 +1156,11 @@ class AIOrchestrator:
         if cached_response:
             return cached_response
 
-        try:
-            retrieval_result = self.retriever.retrieve(
-                retrieval_query, body.country, body.language, body.role, correlation_id
-            )
-        except (AwsServiceError, BotoCoreError, ClientError, ConnectionError, TimeoutError, OSError):
-            # C5: a dependency failure that escapes retrieval raised straight out
-            # of handle_chat, with no answer and no persisted turn. It now gets
-            # the localized bedrock_error copy under its own layer, because an
-            # unreachable dependency is not the same as documents that lack the
-            # answer ("evidence_gate"/"low_confidence").
-            #
-            # LIMITATION (Fable review, 2026-09-18): this catches only what
-            # escapes the provider. AwsServiceError is the embedding path
-            # (services/embeddings.py). A real OpenSearch outage never reaches
-            # here: OpenSearchSectionProvider.retrieve catches OpenSearchException
-            # itself and returns an empty result, which is delivered as missing
-            # evidence, and RetrievalHealth records success. Fixing that needs
-            # the provider to surface the failure. That provider is Codex-owned;
-            # see docs/conversation-quality/codex-requests/C5-retrieval-outage-masked-as-no-evidence.md.
-            #
-            # MONITORING: a failure caught here is an HTTP 200 fallback. It
-            # counts toward fallback_by_layer{dependency_unavailable} and the
-            # HighFallbackRate alarm, not the request error rate (HighErrorRate).
-            # That trade-off is pending the user's approval.
-            LOGGER.exception("retrieval_dependency_unavailable", correlation_id=correlation_id)
-            return self._validate_response(
-                self.response_builder.fallback(
-                    localized_conversation_response("bedrock_error", body.language)
-                    or FALLBACK_RESPONSES["bedrock_error"],
-                    correlation_id,
-                    metadata={"failure_layer": "dependency_unavailable"},
-                ),
-                body,
-                correlation_id,
-            )
-        _record_diagnostic_retrieval("question", retrieval_result)
+        retrieval_result, dependency_response = self._retrieve_or_dependency_response(
+            retrieval_query, body, correlation_id
+        )
+        if dependency_response is not None:
+            return dependency_response
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
             retrieval_query,
             retrieval_result,
@@ -1181,16 +1242,8 @@ class AIOrchestrator:
             # the same fallback path used for every other failure kind
             # instead, with its own distinct layer name.
             LOGGER.exception("model_dependency_unavailable", correlation_id=correlation_id)
-            return self._validate_response(
-                self.response_builder.fallback(
-                    localized_conversation_response("bedrock_error", body.language)
-                    or FALLBACK_RESPONSES["bedrock_error"],
-                    correlation_id,
-                    metadata={"failure_layer": "dependency_unavailable"},
-                ),
-                body,
-                correlation_id,
-                retrieval_result=retrieval_result,
+            return self._dependency_unavailable_response(
+                body, correlation_id, "generation", retrieval_result=retrieval_result,
             )
         _record_diagnostic_raw_answer(model_response.text)
 

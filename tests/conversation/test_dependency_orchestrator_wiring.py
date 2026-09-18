@@ -1,54 +1,19 @@
 """Mocked-dependency tests for the DependencyUnavailable metric wiring.
 
-SOME TESTS BELOW REQUIRE laneE-dependency-wiring.patch
----------------------------------------------------------
-This file exercises `AIOrchestrator.handle_chat` on THIS branch, where
-`app/orchestrator/chat_orchestrator.py` has NOT been edited (Lane E may not
-write that file; see docs/conversation-quality/TASK_BOARD.md Phase 2 file
-ownership). The three `test_metric_fires_once_for_*` cases assert that
-`record_dependency_unavailable` was actually called with a specific
-(component, availability) pair -- that call does not exist anywhere on this
-branch, so those three are marked `xfail(strict=True, reason="needs
-laneE-dependency-wiring.patch")` and are expected to XFAIL here. Once the
-coordinator applies `docs/conversation-quality/phase2/patches/
-laneE-dependency-wiring.patch` (which wires that call into both existing
-dependency catches), those three flip to passing and the `xfail` marker must
-come off.
+Drives `AIOrchestrator.handle_chat` with the orchestrator wiring integrated:
+the coordinator applied docs/conversation-quality/phase2/patches/
+laneE-dependency-wiring.patch. The three `test_metric_fires_once_for_*`
+cases were strict xfails on the Lane E branch and pass here.
 
-SCOPE NOTE: an earlier version of this file also had a fourth gated test for
-a `metadata["provider_unavailable"]` result flag. That design is withdrawn
-in favor of Codex's accepted R02 contract (`RetrievalResult.availability`),
-which lives in Codex's worktree, not this project's base, and is routed by
-Codex's own orchestrator hook at integration -- not by anything in this
-patch or this test file. See docs/conversation-quality/codex-requests/
-C5-retrieval-outage-masked-as-no-evidence.md.
+The negative tests (the metric must NOT fire for missing evidence, low
+confidence, a ConfigurationError or a guardrail block) were trivially true
+before the wiring existed. They are meaningful only now that the metric is
+actually called.
 
-Every other test in this file asserts the metric's *negative* space (must
-NOT fire for missing evidence, low confidence, a ConfigurationError, or a
-guardrail block) and the *existing, already-merged* localized dependency
-copy for the generate()-path Bedrock catch. Those hold true on this branch
-today -- the metric simply never fires at all yet, so "does not fire" is
-trivially satisfied -- and must keep holding true after the patch, so they
-are deliberately NOT marked xfail: a regression in either direction should
-fail this file both before and after integration.
-
-Proof the three gated tests flip once the patch is applied: run, from a
-scratch copy of this worktree with the patch applied,
-
-    git apply docs/conversation-quality/phase2/patches/laneE-dependency-wiring.patch
-    <PYTHON> -m pytest tests/conversation/test_dependency_orchestrator_wiring.py \
-        -p no:cacheprovider --basetemp <scratch-basetemp> -rA
-
-and confirm the three `test_metric_fires_once_for_*` cases show XPASS
-(strict, so an unexpected pass fails the run unless the `xfail` marker is
-removed there) while every other test in the file still shows PASSED. See
-the Lane E handoff for the exact commands and their captured output.
-
-No live model or AWS call is made anywhere in this file: retriever, router,
-governance, validator and session plumbing are all fakes, exactly like
-tests/conversation/test_intent_dependency_failures_are_distinct.py, which
-this file complements (that file pins the *user-facing wording*; this file
-pins the *metric*).
+Not covered here: Codex's R02 `RetrievalResult.availability` routing. It
+lives in the Evidence-First V2 worktree and is combined at R11 integration,
+where its two routing sites must call `_dependency_unavailable_response`
+with a real availability value.
 """
 
 from __future__ import annotations
@@ -66,8 +31,6 @@ from config import settings
 from services import session as session_module
 from utils.exceptions import AwsServiceError, BedrockTimeoutError, ConfigurationError, RetrievalMissError
 from utils.validators import ChatRequest
-
-XFAIL = pytest.mark.xfail(strict=True, reason="needs laneE-dependency-wiring.patch")
 
 
 class _FakeGovernance:
@@ -171,14 +134,12 @@ class _RouterRaisesConfigurationError:
         raise ConfigurationError("BEDROCK_MODEL_ID is not configured yet.")
 
 
-@XFAIL
 def test_metric_fires_once_for_bedrock_timeout(recorded_calls):
     response = _handle(_RetrieverWithEvidence(), _RouterRaisesBedrockTimeout(), "How do I qualify as a Recognized Manager?")
     assert response.metadata.get("failure_layer") == "dependency_unavailable"
     assert recorded_calls == [("generation", "exception")]
 
 
-@XFAIL
 def test_metric_fires_once_for_escaping_aws_service_error(recorded_calls):
     """The embedding path (services/embeddings.py) escapes retrieve() as
     AwsServiceError; component must be "embedding", not "retrieval"."""
@@ -187,7 +148,6 @@ def test_metric_fires_once_for_escaping_aws_service_error(recorded_calls):
     assert recorded_calls == [("embedding", "exception")]
 
 
-@XFAIL
 def test_metric_fires_once_for_escaping_boto_core_error(recorded_calls):
     response = _handle(_RetrieverRaisesBotoCoreError(), _RouterOk(), "What is the minimum order for Kenya?")
     assert response.metadata.get("failure_layer") == "dependency_unavailable"
