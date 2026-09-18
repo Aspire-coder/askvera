@@ -432,6 +432,16 @@ def _extract_retrieval_rank_lists(diagnostic_capture: dict[str, Any] | None) -> 
     return None
 
 
+def _question_retrieval_field(diagnostic_capture: dict[str, Any] | None, key: str) -> Any:
+    """Return `key` from the question-stage retrieval record, or "unavailable" if none was recorded."""
+    if not diagnostic_capture:
+        return "unavailable"
+    for retrieval in diagnostic_capture.get("retrievals", []):
+        if retrieval.get("stage") == "question" and key in retrieval:
+            return retrieval[key]
+    return "unavailable"
+
+
 def _extract_ingestion_ids(diagnostic_capture: dict[str, Any] | None) -> list[str]:
     if not diagnostic_capture:
         return []
@@ -529,12 +539,12 @@ def run_one_case(
             "ingestion_ids": _extract_ingestion_ids(diagnostic_capture) or "unavailable",
             "index_name": getattr(getattr(orchestrator.retriever, "provider", None), "index_name", "unavailable"),
         },
-        # RetrievalResult.availability and the provider's search_channel_failures
-        # are not currently copied into diagnostic capture's retrieval metadata
-        # allowlist (`_CAPTURED_RETRIEVAL_METADATA` in
-        # app/orchestrator/chat_orchestrator.py); see R09_CAPTURE_PLAN.md.
-        "retrieval_availability": "unavailable",
-        "search_channel_failures": "unavailable",
+        # R02 provider state from the orchestrator's diagnostic record of the
+        # question retrieval: "available", "degraded" or "unavailable", plus the
+        # failed channels. "unavailable" here only means no retrieval was
+        # recorded (e.g. an early clarification), not a provider outage.
+        "retrieval_availability": _question_retrieval_field(diagnostic_capture, "availability"),
+        "search_channel_failures": _question_retrieval_field(diagnostic_capture, "failed_search_channels"),
         "candidates_and_ranks": rank_lists if rank_lists is not None else "unavailable",
         "selector": {
             "outcome": (rank_lists or {}).get("selector_outcome"),

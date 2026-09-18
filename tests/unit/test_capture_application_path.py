@@ -25,7 +25,7 @@ from app.governance.models import GovernanceAction, GovernanceDecision
 from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
-from app.retrieval.models import RetrievedDocument, RetrievalResult
+from app.retrieval.models import RetrievalAvailability, RetrievedDocument, RetrievalResult
 from config import settings
 from scripts import capture_application_path as tool
 from services import session as session_module
@@ -281,6 +281,38 @@ def test_capture_of_a_first_turn_case_is_not_dependent():
 
     assert record["context_resolution"] == {"provenance": "runtime", "status": "not_dependent"}
     assert record["resolved_query"] == "What is the office phone number?"
+
+
+def test_capture_records_available_retrieval_with_no_failed_channels():
+    """R02 provider state reaches the capture row (coordinator, 2026-09-18)."""
+    orchestrator = _orchestrator()
+    case = tool._runtime_fields(_case("available", message="What is the service fee?"))
+
+    record = tool.run_one_case(orchestrator, case, correlation_id="test-corr", capture_final_answer=False)
+
+    assert record["retrieval_availability"] == "available"
+    assert record["search_channel_failures"] == []
+
+
+def test_capture_records_degraded_retrieval_and_its_failed_channels():
+    orchestrator = _orchestrator()
+    base = orchestrator.retriever.retrieve
+
+    def degraded(message: str, *args: object, **kwargs: object) -> RetrievalResult:
+        result = base(message, *args, **kwargs)
+        return RetrievalResult(
+            documents=result.documents, citations=result.citations, confidence=result.confidence,
+            metadata={**result.metadata, "failed_search_channels": ["global_text"]},
+            availability=RetrievalAvailability.DEGRADED,
+        )
+
+    orchestrator.retriever.retrieve = degraded  # type: ignore[method-assign]
+    case = tool._runtime_fields(_case("degraded", message="What is the service fee?"))
+
+    record = tool.run_one_case(orchestrator, case, correlation_id="test-corr", capture_final_answer=False)
+
+    assert record["retrieval_availability"] == "degraded"
+    assert record["search_channel_failures"] == ["global_text"]
 
 
 def test_call_counts_include_at_least_one_generation_call_per_case():

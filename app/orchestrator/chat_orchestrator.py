@@ -945,6 +945,10 @@ def _append_diagnostic_retrieval(capture: dict[str, Any], stage: str, retrieval_
     capture["retrievals"].append({
         "stage": stage,
         "confidence": retrieval_result.confidence,
+        # R02 provider state, so a capture can tell a completed empty search
+        # from a partial or total outage (R09). Diagnostic only; nothing reads it.
+        "availability": getattr(getattr(retrieval_result, "availability", None), "value", None),
+        "failed_search_channels": list(metadata.get("failed_search_channels") or []),
         "documents": [
             {
                 "id": document.id,
