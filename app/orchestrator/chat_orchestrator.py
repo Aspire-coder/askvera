@@ -200,6 +200,44 @@ def _follow_up_words(text: str) -> tuple[_FollowUpWord, ...]:
     )
 
 
+# R03 correction 11: the ONLY tokenizer used to decide the two trusted
+# Finnish shapes (T1/T2 - see `AIOrchestrator._resolve_finnish_anaphoric`).
+# It is `_follow_up_words` with ONE difference: an internal hyphen joins
+# rather than splits a token, so a hyphenated compound market name reads as
+# ONE token, never as its last component alone. That difference matters
+# exactly once, but matters a lot: "Pohjois-Koreassa" (North Korea) must
+# never be checked against a configured stem as bare "koreassa" (South
+# Korea) - the wrong-market bug an independent review found in correction
+# 10. Everything else about this tokenizer - one NFC-normalizing pass, a
+# raw span and its accent-stripped/casefolded form derived from that same
+# span - is identical to `_follow_up_words`, so the NFD/NFKD-expansion
+# blocker fixes there apply here unchanged.
+_FINNISH_SHAPE_TOKEN = re.compile(r"[^\W_]+(?:-[^\W_]+)*", re.UNICODE)
+
+
+def _finnish_shape_words(text: str) -> tuple[_FollowUpWord, ...]:
+    normalized = unicodedata.normalize("NFC", text or "")
+    return tuple(
+        _FollowUpWord(match.group(), _follow_up_unaccented(match.group()).casefold(), match.start(), match.end())
+        for match in _FINNISH_SHAPE_TOKEN.finditer(normalized)
+    )
+
+
+# A closed set of clitics grown only from forms actually seen (R03
+# correction 11 reviewer repros): "-kin" ("also/even") and "-ko" (the
+# question clitic) attach AFTER the case ending, so a locative-shaped token
+# can still be place-shaped once one is stripped off ("ugandassaKIN",
+# "suomessaKIN", "suomestaKIN"). Not a general Finnish clitic stripper.
+_FINNISH_CLITIC_SUFFIXES = ("kin", "ko")
+
+
+def _finnish_shape_strip_clitic(token: str) -> str:
+    for suffix in _FINNISH_CLITIC_SUFFIXES:
+        if len(token) > len(suffix) + 2 and token.endswith(suffix):
+            return token[: -len(suffix)]
+    return token
+
+
 def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Pattern[str]:
     """One pattern over space-joined follow-up tokens; each fragment matches from a word start.
 
@@ -298,6 +336,14 @@ _FINNISH_RESIDENCE_VERB_WINDOW = 3
 # (e.g. "Chad", "Cuba", "Mali", each 4 letters unaccented), but this floor
 # keeps an unrelated short word from accidentally sharing a market's prefix.
 _FINNISH_MARKET_STEM_MIN_LENGTH = 4
+# R03 correction 11 T1's closed temporal/aspectual adverb set - see the
+# longer note below. Defined here (ahead of the function-word set) because
+# every one of these adverbs is also, by construction, a function word: it
+# can appear inside the configured form without ever being place-shaped
+# residue.
+_FINNISH_TEMPORAL_ASPECTUAL_ADVERBS = frozenset(
+    {"nyt", "edelleen", "yha", "viela", "pysyvasti", "nykyaan", "jo", "taas"}
+)
 # Function words that appear in the configured "Entä jos hän..." form itself,
 # or as ordinary connectors/adverbs seen inside it, and must never be scored
 # as place-shaped residue even when their ending coincidentally matches a
@@ -309,12 +355,60 @@ _FINNISH_ANAPHORIC_FUNCTION_WORDS = frozenset(
     {
         "enta", "jos", "han", "hanen",
         "on", "ja", "mutta", "tai",
-        "nyt", "pysyvasti", "edelleen", "siella", "myos", "viela",
+        "siella", "myos",
         "tyoskentelee",
         "asuu", "asu",
+        *_FINNISH_TEMPORAL_ASPECTUAL_ADVERBS,
         *_FINNISH_RESIDENCE_NEGATION_TOKENS,
     }
 )
+# --- R03 correction 11: the two trusted shapes ------------------------------
+# The independent review of correction 10 found a fourth class of hole, all
+# the same root cause: residue detection over open-ended Finnish morphology
+# keeps missing new forms - negated "olla" ("ei ole ugandassa"), a clitic on
+# an UNCONFIGURED place ("asuu narniassakin"), verb-after-place word order
+# ("hän narniassa asuu"), an adverb long enough to push the verb outside the
+# old fixed window ("asuu nyt jo monta vuotta narniassa"), and a hyphenated
+# compound market name matching the WRONG market's stem ("Pohjois-Koreassa"
+# -> KR, South Korea). Chasing each new shape with another special case
+# cannot converge - Finnish morphology is open-ended. Correction 11 inverts
+# the default instead: trust (and market substitution) is granted ONLY when
+# the whole message fits one of two narrow, documented shapes -
+# `AIOrchestrator._finnish_market_swap_shape` (T1) or
+# `AIOrchestrator._finnish_non_place_shape` (T2), both read only from
+# `_resolve_finnish_anaphoric`. Every ``resolved`` outcome the OLD residue
+# detector below would still produce is re-gated against these two shapes
+# before it is returned; every OTHER outcome (``standalone``, ``unresolved``)
+# is unchanged, because none of the reviewer's new repros was ever wrongly
+# marked ``standalone`` or ``unresolved`` - only wrongly marked ``resolved``.
+# The cost asymmetry justifies the narrowing: a false ``unresolved`` only
+# costs V2 its trusted fallback ordering, while a false ``resolved`` can
+# retrieve the wrong market outright.
+#
+# T1 - market swap. "Entä jos hän" + an optional run of this closed
+# temporal/aspectual adverb set (NOT a place list) + a non-negated
+# residence/location verb from the existing vocabulary (any negation token
+# ANYWHERE in the message disqualifies T1 outright - correction 10's
+# negation-WINDOW arithmetic is gone, because an adverb can always push the
+# verb one token further than the last window size chosen) + an optional run
+# of the same adverbs + EXACTLY ONE configured-market inessive token, matched
+# as a WHOLE token (`_finnish_shape_words` keeps an internal hyphen inside one
+# token, so "Pohjois-Koreassa" can never match the stem "koreassa") +
+# an optional trailing clause built only from already-known function words
+# (e.g. "ja työskentelee siellä") + end punctuation.
+#
+# T2 - non-place follow-up (role or ordinary topic; context kept and
+# trusted, but nothing is substituted). "Entä jos hän" + content with NO
+# locative-case-bearing token at all (`_FINNISH_LOCATIVE_CASE_ENDING`,
+# checked on the bare token AND on the token with a clitic stripped, so
+# "narniassakin" is still caught even though the clitic suffix itself does
+# not end in a case ending), NO capitalised non-initial token, and NO
+# configured-market name stem. KNOWN LIMITATION: the same case-ending test
+# also flags an ordinary time illative ("...24 kuukauteen") and a handful of
+# unrelated words that happen to end in a doubled vowel plus "n" ("mukaan",
+# "jälkeen") - correction 11 accepts this as a false-negative-toward-safety
+# rather than special-casing each one, per the documented cost asymmetry;
+# see the R03-CORRECTION-11 handoff.
 
 
 class _FinnishAnaphoricResolution(NamedTuple):
@@ -2503,6 +2597,133 @@ class AIOrchestrator:
                     return True
         return False
 
+    def _finnish_market_swap_shape(self, message: str) -> tuple[str, tuple[tuple[int, int], ...]] | None:
+        """T1 (R03 correction 11): the ONLY shape trusted enough to swap markets.
+
+        "Entä jos hän" + an optional run of `_FINNISH_TEMPORAL_ASPECTUAL_ADVERBS`
+        + a non-negated residence/location verb from the existing vocabulary
+        (olla included - T1 always supplies an exact locative complement, so
+        the complement-shape restriction correction 10 put on olla does not
+        apply here) + an optional run of the same adverbs + EXACTLY ONE
+        configured-market inessive token, matched as a WHOLE token via
+        `_finnish_shape_words` (a hyphenated compound counts as one token) +
+        an optional trailing clause built only from `_FINNISH_ANAPHORIC_
+        FUNCTION_WORDS` + end punctuation. Returns the one market code and
+        the exact span to substitute, or ``None`` when the message does not
+        fit this shape at all - never a partial match.
+        """
+        words = _finnish_shape_words(message)
+        tokens = tuple(word.folded for word in words)
+        if any(token in _FINNISH_RESIDENCE_NEGATION_TOKENS for token in tokens):
+            return None
+        if len(tokens) < 5 or tokens[0] != "enta" or tokens[1] != "jos" or tokens[2] not in {"han", "hanen"}:
+            return None
+        index = 3
+        while index < len(tokens) and tokens[index] in _FINNISH_TEMPORAL_ASPECTUAL_ADVERBS:
+            index += 1
+        if index >= len(tokens):
+            return None
+        token = tokens[index]
+        is_verb = (
+            token in _FINNISH_OLLA_LOCATION_TOKENS
+            or token in _FINNISH_RESIDENCE_IDIOM_TOKENS
+            or any(token.startswith(stem) for stem in _FINNISH_RESIDENCE_VERB_STEMS)
+        )
+        if not is_verb:
+            return None
+        index += 1
+        while index < len(tokens) and tokens[index] in _FINNISH_TEMPORAL_ASPECTUAL_ADVERBS:
+            index += 1
+        if index >= len(tokens):
+            return None
+        code = self._finnish_inessive_market_codes().get(tokens[index])
+        if not code:
+            return None
+        span = (words[index].start, words[index].end)
+        index += 1
+        if any(token not in _FINNISH_ANAPHORIC_FUNCTION_WORDS for token in tokens[index:]):
+            return None
+        return code, (span,)
+
+    def _finnish_non_place_shape(self, message: str) -> bool:
+        """T2 (R03 correction 11): the ONLY shape trusted with no market to swap.
+
+        "Entä jos hän" + content with NO locative-case-bearing token at all -
+        checked on the bare token AND on the token with a clitic stripped
+        (`_finnish_shape_strip_clitic`), so "narniassakin" is still caught
+        even though the clitic suffix itself does not end in a case ending -
+        NO capitalised non-initial token, and NO configured-market name
+        stem. Anything else (a role, an ordinary topic, a negated claim with
+        no place) is trusted as a plain dependent follow-up with nothing to
+        substitute.
+        """
+        words = _finnish_shape_words(message)
+        tokens = tuple(word.folded for word in words)
+        if len(tokens) < 3 or tokens[0] != "enta" or tokens[1] != "jos" or tokens[2] not in {"han", "hanen"}:
+            return False
+        for index in range(3, len(tokens)):
+            token = tokens[index]
+            if words[index].raw[:1].isupper():
+                return False
+            if self._finnish_market_stem_prefix(token):
+                return False
+            if _FINNISH_LOCATIVE_CASE_ENDING.search(token):
+                return False
+            stripped = _finnish_shape_strip_clitic(token)
+            if stripped != token and _FINNISH_LOCATIVE_CASE_ENDING.search(stripped):
+                return False
+        return True
+
+    def _finnish_collect_residue_signals(
+        self, normalized_message: str, words: tuple[_FollowUpWord, ...], tokens: tuple[str, ...],
+    ) -> tuple[set[str], set[str], list[tuple[int, int]], bool, bool, bool]:
+        """The pre-correction-11 residue scan, unchanged, split out only to
+
+        keep `_resolve_finnish_anaphoric` itself readable. Returns
+        ``(codes, configured_codes, configured_spans, capitalized_unknown,
+        unaccounted_residue, strong_unknown_residence)`` - see the caller's
+        docstring for what each means.
+        """
+        codes: set[str] = set(find_market_mentions(normalized_message)) | set(
+            find_shared_office_record_countries(normalized_message)
+        )
+        configured_codes: set[str] = set()
+        configured_spans: list[tuple[int, int]] = []
+        capitalized_unknown = False
+        unaccounted_residue = False
+        strong_unknown_residence = False
+
+        for index in range(2, len(tokens)):
+            token = tokens[index]
+            if token in _FINNISH_ANAPHORIC_FUNCTION_WORDS:
+                continue
+            inessive_code = self._finnish_inessive_market_codes().get(token)
+            if inessive_code:
+                codes.add(inessive_code)
+                configured_codes.add(inessive_code)
+                configured_spans.append((words[index].start, words[index].end))
+                continue
+            if self._finnish_market_stem_prefix(token):
+                # A known market in an unsupported grammatical form - real,
+                # just not one we substitute; keep context untrusted.
+                unaccounted_residue = True
+                continue
+            if not _FINNISH_LOCATIVE_CASE_ENDING.search(token):
+                continue
+            if words[index].raw[:1].isupper():
+                capitalized_unknown = True
+                continue
+            tier = self._finnish_residence_verb_tier(tokens, index)
+            if tier == "strong":
+                unaccounted_residue = True
+                strong_unknown_residence = True
+            elif tier == "weak":
+                unaccounted_residue = True
+            # else: an ordinary case-marked noun with no market-stem prefix
+            # and no residence/location verb nearby is not a place candidate.
+
+        return codes, configured_codes, configured_spans, capitalized_unknown, unaccounted_residue, strong_unknown_residence
+
     def _resolve_finnish_anaphoric(self, message: str) -> _FinnishAnaphoricResolution:
         """Collect every place signal across the WHOLE message, then decide once.
 
@@ -2565,45 +2786,15 @@ class AIOrchestrator:
         words = _follow_up_words(message)
         tokens = tuple(word.folded for word in words)
         negation_scopes_residence = self._finnish_negation_scopes_residence(tokens)
-
         normalized_message = unicodedata.normalize("NFC", message or "")
-        codes: set[str] = set(find_market_mentions(normalized_message)) | set(
-            find_shared_office_record_countries(normalized_message)
-        )
-        configured_codes: set[str] = set()
-        configured_spans: list[tuple[int, int]] = []
-        capitalized_unknown = False
-        unaccounted_residue = False
-        strong_unknown_residence = False
-
-        for index in range(2, len(tokens)):
-            token = tokens[index]
-            if token in _FINNISH_ANAPHORIC_FUNCTION_WORDS:
-                continue
-            inessive_code = self._finnish_inessive_market_codes().get(token)
-            if inessive_code:
-                codes.add(inessive_code)
-                configured_codes.add(inessive_code)
-                configured_spans.append((words[index].start, words[index].end))
-                continue
-            if self._finnish_market_stem_prefix(token):
-                # A known market in an unsupported grammatical form - real,
-                # just not one we substitute; keep context untrusted.
-                unaccounted_residue = True
-                continue
-            if not _FINNISH_LOCATIVE_CASE_ENDING.search(token):
-                continue
-            if words[index].raw[:1].isupper():
-                capitalized_unknown = True
-                continue
-            tier = self._finnish_residence_verb_tier(tokens, index)
-            if tier == "strong":
-                unaccounted_residue = True
-                strong_unknown_residence = True
-            elif tier == "weak":
-                unaccounted_residue = True
-            # else: an ordinary case-marked noun with no market-stem prefix
-            # and no residence/location verb nearby is not a place candidate.
+        (
+            codes,
+            configured_codes,
+            configured_spans,
+            capitalized_unknown,
+            unaccounted_residue,
+            strong_unknown_residence,
+        ) = self._finnish_collect_residue_signals(normalized_message, words, tokens)
 
         if capitalized_unknown or len(codes) > 1 or strong_unknown_residence:
             return _FinnishAnaphoricResolution("standalone", None, (), "unknown_or_conflicting_place")
@@ -2611,12 +2802,27 @@ class AIOrchestrator:
             return _FinnishAnaphoricResolution("standalone", None, (), "negated_residence_claim")
         if unaccounted_residue:
             return _FinnishAnaphoricResolution("unresolved", None, (), "unaccounted_place_shaped_residue")
+        # R03 correction 11: every ``resolved`` outcome below is re-gated
+        # against the two trusted shapes (T1/T2) before it is returned. This
+        # is where the independent review's new holes actually closed - none
+        # of them was ever wrongly marked ``standalone`` or ``unresolved`` by
+        # the residue detection above; every one was wrongly marked
+        # ``resolved`` because the residue detection missed the place-shaped
+        # token entirely (a clitic on an unconfigured place, a word-order
+        # swap, an adverb outside the old fixed window) or, for the
+        # hyphenated-compound bug, because the OLD tokenizer split
+        # "Pohjois-Koreassa" into two tokens and matched the wrong market on
+        # the second half alone.
         if not codes:
-            return _FinnishAnaphoricResolution("resolved", None, (), "no_place_evidence")
+            if self._finnish_non_place_shape(message):
+                return _FinnishAnaphoricResolution("resolved", None, (), "t2_non_place_shape")
+            return _FinnishAnaphoricResolution("unresolved", None, (), "t2_shape_not_matched")
         if len(configured_codes) == 1 and configured_codes == codes:
-            return _FinnishAnaphoricResolution(
-                "resolved", next(iter(configured_codes)), tuple(configured_spans), "configured_inessive_form",
-            )
+            shape = self._finnish_market_swap_shape(message)
+            if shape is not None and shape[0] == next(iter(configured_codes)):
+                code, spans = shape
+                return _FinnishAnaphoricResolution("resolved", code, spans, "t1_market_swap_shape")
+            return _FinnishAnaphoricResolution("unresolved", None, (), "t1_shape_not_matched")
         # Exactly one code was collected, but it came only from a direct
         # market-name mention with no configured inessive (residence) support
         # behind it - a bare name mention is not itself a residence claim, so

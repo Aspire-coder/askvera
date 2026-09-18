@@ -60,6 +60,16 @@ def test_history_anchors_directory_scope_without_replacing_an_unresolved_place()
 
 
 def test_configured_language_follow_up_uses_only_its_own_stored_turn() -> None:
+    """R03 correction 11 CHANGE (was trusted at e3b399a/correction 7).
+
+    T2's ``no capitalised non-initial token`` rule (see the module docstring
+    on the trusted shapes) reads "Sponsored Recognized Manager" and
+    "Recognized Managereita" as capitalised non-initial tokens, exactly like
+    an unrecognised proper-noun place would read, so this follow-up no
+    longer earns T2's trust. It still keeps the prior turn as ordinary,
+    untrusted context (``unresolved``, no ``prior_user_turn_id``) - only the
+    provenance status changed, not which turn is retrieved.
+    """
     orchestrator = AIOrchestrator()
     prior = "Mitä Suomessa tapahtuu FBO:lle, joka ei ole ostanut mitään 36 kuukauteen?"
     follow_up = (
@@ -72,7 +82,7 @@ def test_configured_language_follow_up_uses_only_its_own_stored_turn() -> None:
 
     assert prior in query
     assert query.endswith(follow_up)
-    assert provenance["status"] == "resolved_dependent_follow_up"
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
     standalone, standalone_provenance = orchestrator._build_retrieval_query_with_provenance(
         follow_up, "", "r03", session_id="r03-finnish-new-session",
     )
@@ -482,9 +492,15 @@ def test_finnish_possessive_inessive_token_is_not_mistaken_for_illative_residue(
 
     like a short illative place form, but it is an inessive-possessive
     ending, not a place. The case-ending heuristic excludes an immediately
-    preceding "ss" for exactly this reason, so this configured-language role
-    follow-up (with no place at all) keeps its trusted dependent status
-    instead of being downgraded by a false-positive residue match.
+    preceding "ss" for exactly this reason, so "tiimissään" itself is still
+    correctly read as non-place.
+
+    R03 correction 11 CHANGE: the follow-up as a whole is no longer trusted,
+    though not because of "tiimissään" - the T2 shape's separate
+    ``no capitalised non-initial token`` rule reads "Sponsored Recognized
+    Manager" and "Recognized Managereita" as capitalised non-initial tokens
+    and withholds trust. Context is still kept (``unresolved``, no
+    ``prior_user_turn_id``) - only the provenance status changed.
     """
     orchestrator = AIOrchestrator()
     follow_up = (
@@ -499,7 +515,7 @@ def test_finnish_possessive_inessive_token_is_not_mistaken_for_illative_residue(
 
     assert prior in query
     assert query.endswith(follow_up)
-    assert provenance["status"] == "resolved_dependent_follow_up"
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 def test_direct_market_mention_alone_keeps_context_without_trusted_market_swap() -> None:
@@ -563,6 +579,13 @@ def test_nfkd_expanding_character_does_not_crash_or_misalign() -> None:
     an IndexError raised out of `_resolve_finnish_anaphoric`, reachable from
     `handle_chat` with no handling on that path. It must neither crash nor
     silently corrupt the query.
+
+    R03 correction 11 CHANGE: no longer trusted as a market swap. "vuotta"
+    ("years") sits between the verb and the place and is not one of T1's
+    closed temporal/aspectual adverbs, so the message no longer fits T1's
+    exact shape - it keeps context (``unresolved``) rather than substituting
+    Uganda. The point of this test - no crash, no misaligned span - still
+    holds and is asserted directly.
     """
     orchestrator = AIOrchestrator()
     follow_up = "Entä jos hän on ½ vuotta ugandassa?"
@@ -572,9 +595,9 @@ def test_nfkd_expanding_character_does_not_crash_or_misalign() -> None:
         follow_up, history, "r03", session_id="r03-c9-nfkd-expanding-character",
     )
 
-    assert "Uganda" in query
-    assert "Tanzania" not in query
-    assert provenance["status"] == "resolved_dependent_follow_up"
+    assert "Tanzania" in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 @pytest.mark.parametrize(
@@ -682,15 +705,26 @@ def test_unsupported_case_forms_of_a_configured_market_are_not_trusted(follow_up
         "Entä jos hän asioi netissä?",
     ],
 )
-def test_ordinary_case_marked_nouns_outside_residence_context_are_trusted(follow_up: str) -> None:
-    """R03 correction 9 SHOULD-FIX (over-fire) (Fable on correction 8).
+def test_ordinary_case_marked_nouns_outside_residence_context_are_unresolved(follow_up: str) -> None:
+    """R03 correction 9 SHOULD-FIX (over-fire) (Fable on correction 8);
+
+    R03 CORRECTION 11 CHANGE (was trusted from correction 9 through
+    correction 10).
 
     None of these tokens ("kuukauteen", "johtaja"-adjacent "mukaan",
-    "tilille", "tasolle", "jälkeen", "toimistossa", "netissä") name a
-    configured market or sit near a residence/location verb, so under the
-    old plain case-ending residue test they made a realistic, ordinary
-    follow-up ``unresolved`` for no real reason - the trusted path was
-    unreachable. None of these is a place candidate any more.
+    "tilille", "tasolle", "jälkeen", "toimistossa", "netissä") names a
+    configured market, so correction 9's narrower residue test correctly
+    stopped treating them as place candidates and correction 10 kept this
+    trusted. Correction 11 inverts the default: T2 (the only shape trusted
+    with no market to substitute) withholds trust from ANY locative-case-
+    shaped token, without asking whether a residence verb governs it, and
+    several of these words happen to end in the same illative-approximation
+    shape ("...een"/"...aan") as a real place, or in a genuine (but
+    non-residence) case ending ("-lle", "-ssa"). This is the documented,
+    accepted cost of the narrower default (see R03-CORRECTION-11): a false
+    ``unresolved`` only costs the trusted fallback ordering, so these fall
+    back to keeping context without being trusted, rather than being chased
+    with another special case.
     """
     orchestrator = AIOrchestrator()
     prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
@@ -701,7 +735,7 @@ def test_ordinary_case_marked_nouns_outside_residence_context_are_trusted(follow
 
     assert prior in query
     assert query.endswith(follow_up)
-    assert provenance["status"] == "resolved_dependent_follow_up"
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 @pytest.mark.parametrize(
@@ -799,25 +833,31 @@ def test_negation_window_covers_the_perfect_tense_auxiliary() -> None:
     assert provenance == {"provenance": "runtime", "status": "not_dependent"}
 
 
-def test_repeated_resolved_market_is_substituted_at_every_occurrence() -> None:
-    """R03 correction 9 NOTE 5 (Fable on correction 8).
+def test_repeated_market_mention_outside_the_t1_shape_stays_unresolved() -> None:
+    """R03 correction 9 NOTE 5 (Fable on correction 8) established that a
 
-    Substitution used to be ``count=1``, so a second occurrence of the same
-    exact resolved form was left untouched. Substitution is now by exact
-    span for every occurrence collected during resolution.
+    repeated occurrence of the same resolved market form should ALSO be
+    substituted, once substitution is trusted at all.
+
+    R03 CORRECTION 11 CHANGE: substitution is no longer trusted here at all.
+    T1 (the only shape trusted to swap a market) requires EXACTLY ONE
+    configured-market token, with everything after it drawn from the fixed
+    function-word vocabulary; a second literal "ugandassa" in the trailing
+    clause is not one of those function words, so the message no longer fits
+    T1's shape. It keeps the prior Tanzania anchor for ordinary, untrusted
+    context instead of substituting either occurrence.
     """
     orchestrator = AIOrchestrator()
     follow_up = "Entä jos hän asuu ugandassa ja työskentelee myös ugandassa?"
-    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
 
     query, provenance = orchestrator._build_retrieval_query_with_provenance(
-        follow_up, history, "r03", session_id="r03-c9-repeated-market-both-spans",
+        follow_up, _history(prior), "r03", session_id="r03-c9-repeated-market-both-spans",
     )
 
-    assert query.count("Uganda") == 2
-    assert "ugandassa" not in query
-    assert "Tanzania" not in query
-    assert provenance["status"] == "resolved_dependent_follow_up"
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 def test_topic_shift_marker_reads_the_precomputed_finnish_decision() -> None:
@@ -841,6 +881,150 @@ def test_topic_shift_marker_reads_the_precomputed_finnish_decision() -> None:
 
     assert query == "How does Forever pay bonuses to FBOs who live outside the country? Entä jos hän asuu Uganda?"
     assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+# --- R03 correction 11: the reviewer's correction-10 repros -----------------
+# Every case below used to resolve TRUSTED (either substituting the wrong
+# market, or keeping Tanzania trusted with no market to substitute) because
+# residue detection missed the specific Finnish shape. Correction 11 grants
+# trust only through the two narrow shapes (T1/T2); none of these fits
+# either one, so all of them now keep the prior anchor as ordinary,
+# untrusted context - never wrongly trusted, never the wrong market.
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän ei ole ugandassa?",
+        "Entä jos hän ei ole ollut ugandassa?",
+        "Entä jos hän ei ole koskaan asunut ugandassa?",
+    ],
+)
+def test_negated_olla_forms_are_never_trusted_regardless_of_gap(follow_up: str) -> None:
+    """A negated "to be" claim about a configured market used to resolve
+
+    TRUSTED to that market, because the windowed negation check (built for
+    "ei asu"/"ei ole asunut") never included olla's own stems and could
+    still be outrun by an adverb between the negation and the verb
+    ("koskaan" pushing "asunut" to offset 3). T1 now disqualifies on ANY
+    negation token anywhere in the message, with no window to outrun.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c11-negated-olla",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert "Uganda" not in query
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän asuu narniassakin?",
+        "Entä jos hän asuu suomessakin?",
+        "Entä jos hän asuu suomestakin?",
+    ],
+)
+def test_clitic_on_an_unconfigured_place_is_never_trusted(follow_up: str) -> None:
+    """A clitic ("-kin") on a place that names no configured market used to
+
+    resolve TRUSTED with no market to substitute (``no_place_evidence``),
+    because the clitic suffix itself does not end in a case ending, so the
+    old residue test never saw the token underneath as place-shaped. T2 now
+    strips this closed set of clitics before checking for a case ending, so
+    the stripped form ("narniassa", "suomessa", "suomesta") is still caught
+    as locative-case-bearing and withholds T2's trust.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c11-clitic-unconfigured-place",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_verb_after_place_word_order_is_never_trusted() -> None:
+    """T1 requires the verb to precede the place (as the configured form
+
+    always has it); "hän narniassa asuu" swaps that order, so the old
+    residue test's verb-window lookup (which only looked BACKWARD from the
+    place for a verb) still fired and resolved with no market to substitute
+    even though a real, unresolved place is sitting right there. T2's
+    locative-case check does not depend on word order at all and correctly
+    withholds trust.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän narniassa asuu?"
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c11-verb-after-place",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_adverb_gap_wider_than_the_old_fixed_window_is_never_trusted() -> None:
+    """"asuu nyt jo monta vuotta narniassa" separates the verb from the
+
+    unresolved place by four tokens, two of which ("monta", "vuotta") are
+    not adverbs at all - wider than the fixed verb/negation windows earlier
+    corrections tuned to the examples reviewed at the time. T1's sequential
+    adverb-then-verb-then-adverb-then-place shape has no window to outrun:
+    the first non-adverb, non-configured-place token ("monta") simply ends
+    the match, so this never reaches a trusted substitution.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän asuu nyt jo monta vuotta narniassa?"
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c11-adverb-gap",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_hyphenated_compound_name_never_matches_the_wrong_markets_stem() -> None:
+    """"Pohjois-Koreassa" (North Korea) used to resolve TRUSTED to KR (South
+
+    Korea), because the old tokenizer split the hyphenated compound into
+    "pohjois" and "koreassa", and "koreassa" alone is South Korea's
+    configured inessive form. `_finnish_shape_words` keeps an internal
+    hyphen inside one token for T1's purposes, so "pohjois-koreassa" is
+    checked (and rejected) as a WHOLE token against the configured map -
+    it is not equal to "koreassa" - and T1 fails to find any configured
+    place at all rather than silently matching the wrong market on half the
+    word.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän asuu Pohjois-Koreassa?"
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c11-hyphenated-compound",
+    )
+
+    assert prior in query
+    # The query is unchanged (never substituted), so it still contains the
+    # ORIGINAL compound verbatim - never a bare "Korea" display name on its
+    # own, which would mean a (wrong) substitution ran.
+    assert query.endswith(follow_up)
+    assert not re.search(r"(?<!\w)Korea(?!\w)", query)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 def test_audit_mode_rejects_a_multiturn_pack_before_running_the_audit(monkeypatch, tmp_path, capsys) -> None:
