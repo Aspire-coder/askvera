@@ -36,13 +36,14 @@ from types import SimpleNamespace
 
 import pytest
 from botocore.exceptions import ClientError
-from opensearchpy.exceptions import OpenSearchException
+from opensearchpy.exceptions import ConnectionTimeout
 
 from app.governance.models import GovernanceAction, GovernanceDecision
 from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
 from app.retrieval import opensearch_sections
+from app.retrieval.models import RetrievalAvailability
 from app.retrieval.opensearch_sections import OpenSearchSectionProvider
 from app.retrieval.providers import RetrievalQueryPlan
 from app.retrieval.service import RetrievalService
@@ -114,7 +115,7 @@ class _Client:
         self.bodies.append(json.dumps(body, sort_keys=True))
         kind = "vector" if "knn" in body.get("query", {}) else "text"
         if kind == self.fail_on:
-            raise OpenSearchException("stub search failure")
+            raise ConnectionTimeout(599, "stub search timeout", None)
         hits = self.vector_hits if kind == "vector" else self.text_hits
         if callable(hits):
             return {"hits": {"hits": hits(len(self.bodies))}}
@@ -301,6 +302,61 @@ def test_every_search_kind_is_labelled_weighted_and_leaves_retrieval_unchanged(m
     assert (lists["query_count"], lists["prefer_outline"], lists["include_global_documents"]) == (2, True, True)
 
 
+def test_capture_serializes_only_trusted_runtime_scope_and_resolved_follow_up_provenance(monkeypatch) -> None:
+    plan = RetrievalQueryPlan(
+        [QUESTION],
+        include_global_documents=True,
+        runtime_scope_intent={
+            "provenance": "runtime",
+            "intent": "international_sponsoring",
+            "decision_source": "deterministic_sponsoring_route",
+        },
+        authorized_policy_market="CA",
+    )
+    context_token = opensearch_sections.set_rank_list_context_resolution(
+        {
+            "provenance": "runtime",
+            "status": "resolved_dependent_follow_up",
+            "prior_user_turn_id": "history-user-2-0123456789abcdef",
+        }
+    )
+    try:
+        on, _, _ = _retrieve(monkeypatch, capture=True, plan=plan)
+    finally:
+        opensearch_sections.reset_rank_list_context_resolution(context_token)
+
+    lists = on.metadata["retrieval_rank_lists"]
+    assert lists["runtime_scope_intent"] == plan.runtime_scope_intent
+    assert lists["authorized_policy_market"] == "CA"
+    assert lists["context_resolution"] == {
+        "provenance": "runtime",
+        "status": "resolved_dependent_follow_up",
+        "prior_user_turn_id": "history-user-2-0123456789abcdef",
+    }
+    case = tool.capture_case_from_rank_lists(
+        json.loads(json.dumps(on.metadata)), case_id="provenance", question=QUESTION, country="CA", language="en",
+        required_sections=[],
+    )
+    assert case["runtime_scope_intent"] == plan.runtime_scope_intent
+    assert case["authorized_policy_market"] == "CA"
+    assert case["context_resolution"] == lists["context_resolution"]
+
+
+def test_capture_is_backward_compatible_when_new_runtime_provenance_is_absent(monkeypatch) -> None:
+    on, _, _ = _retrieve(monkeypatch, capture=True)
+    lists = on.metadata["retrieval_rank_lists"]
+    assert lists["runtime_scope_intent"] is None
+    assert lists["authorized_policy_market"] is None
+    assert lists["context_resolution"] is None
+    case = tool.capture_case_from_rank_lists(
+        json.loads(json.dumps(on.metadata)), case_id="legacy", question=QUESTION, country="CA", language="en",
+        required_sections=[],
+    )
+    assert case["runtime_scope_intent"] is None
+    assert case["authorized_policy_market"] is None
+    assert case["context_resolution"] is None
+
+
 def test_converted_lists_are_exactly_the_hits_production_merged(monkeypatch) -> None:
     """Replaying the captured lists with the rows' text reproduces the live merged order."""
     seen: dict = {}
@@ -375,9 +431,12 @@ def test_an_opensearch_failure_keeps_the_lists_captured_before_it(monkeypatch) -
     off, _, _ = _retrieve(monkeypatch, capture=False, fail_on="vector")
     on, _, _ = _retrieve(monkeypatch, capture=True, fail_on="vector")
 
-    assert off.metadata == {"provider": "opensearch_section"}
+    assert off.availability is RetrievalAvailability.DEGRADED
+    assert off.metadata["failed_search_channels"] == ["vector"]
+    assert off.documents, "the healthy text channel remains usable"
     _assert_retrieval_unchanged(on, off)
-    assert set(on.metadata) == {"provider", "retrieval_rank_lists", "evidence_selector_candidate_section_ids", "evidence_selector_selected_ranks"}
+    assert on.availability is RetrievalAvailability.DEGRADED
+    assert on.metadata["failed_search_channels"] == ["vector"]
     assert [search["kind"] for search in on.metadata["retrieval_rank_lists"]["searches"]] == ["text"]
 
 
@@ -721,6 +780,15 @@ def _mutations():
         "section-disagrees": lambda m: search(m)["hits"][0].__setitem__(0, "99.99"),
         "selector-candidate-out-of-range": lambda m: lists(m).update(selector_candidates=[999]),
         "selected-ranks-strings": lambda m: lists(m).update(selector_selected_ranks=["1"]),
+        "untrusted-scope-intent": lambda m: lists(m).update(runtime_scope_intent={"provenance": "pack", "intent": "directory", "decision_source": "deterministic_directory_route"}),
+        "unknown-scope-intent": lambda m: lists(m).update(runtime_scope_intent={"provenance": "runtime", "intent": "other", "decision_source": "deterministic_directory_route"}),
+        "mismatched-intent-source": lambda m: lists(m).update(runtime_scope_intent={"provenance": "runtime", "intent": "directory", "decision_source": "planner_global_scope_only"}),
+        "scope-intent-extra-key": lambda m: lists(m).update(runtime_scope_intent={"provenance": "runtime", "intent": "policy", "decision_source": "deterministic_policy_route", "extra": True}),
+        "malformed-policy-market": lambda m: lists(m).update(authorized_policy_market="CAN"),
+        "context-without-prior-turn": lambda m: lists(m).update(context_resolution={"provenance": "runtime", "status": "resolved_dependent_follow_up"}),
+        "context-prior-turn-without-resolution": lambda m: lists(m).update(context_resolution={"provenance": "runtime", "status": "not_dependent", "prior_user_turn_id": "not-allowed"}),
+        "context-raw-message-id": lambda m: lists(m).update(context_resolution={"provenance": "runtime", "status": "resolved_dependent_follow_up", "prior_user_turn_id": "What is the return policy?"}),
+        "context-extra-key": lambda m: lists(m).update(context_resolution={"provenance": "runtime", "status": "unresolved", "extra": "not-allowed"}),
     }
 
 

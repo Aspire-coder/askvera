@@ -1,12 +1,13 @@
 """AI chat orchestration for AskVera."""
 
+import hashlib
 import re
 import unicodedata
 from contextvars import ContextVar
 from dataclasses import replace
 from functools import lru_cache
 from time import perf_counter
-from typing import Any
+from typing import Any, NamedTuple
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -39,7 +40,7 @@ from app.response.quality import (
     unsupported_requested_years,
 )
 from app.retrieval import RetrievalService, confidence_from_sources, retrieval_service
-from app.retrieval.models import RetrievalResult
+from app.retrieval.models import RetrievalAvailability, RetrievalResult
 from app.retrieval.cache_evidence import restore_evidence, serialize_evidence
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
@@ -169,6 +170,18 @@ def _follow_up_tokens(text: str, *, casefold: bool = True) -> tuple[str, ...]:
     return tuple(re.findall(r"[^\W_]+", unaccented.casefold() if casefold else unaccented, flags=re.UNICODE))
 
 
+def _follow_up_raw_tokens(text: str) -> tuple[str, ...]:
+    """Word tokens exactly as written (accents kept), aligned 1:1 by index with
+
+    `_follow_up_tokens`: removing combining accents never merges or splits a
+    word, so the Nth raw token here is always the Nth accent-stripped token
+    there. Used only where the ORIGINAL surface text must be found again in
+    the message, e.g. to substitute a display name for the exact accented
+    span a reader typed.
+    """
+    return tuple(re.findall(r"[^\W_]+", text or "", flags=re.UNICODE))
+
+
 def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Pattern[str]:
     """One pattern over space-joined follow-up tokens; each fragment matches from a word start.
 
@@ -182,6 +195,72 @@ def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Patt
 
 def _follow_up_token_set(*phrases: str) -> frozenset[str]:
     return frozenset(token for phrase in phrases for token in _follow_up_tokens(phrase))
+
+
+# --- Finnish "Entä jos hän..." earned-trust place resolution ---------------
+# R03 correction 8 (earned trust): a single decision function collects every
+# place signal across the WHOLE message before deciding anything, rather than
+# trusting by default the moment one supporting token is seen. See
+# `AIOrchestrator._resolve_finnish_anaphoric` for the decision itself.
+#
+# One documented, closed grammatical set: the Finnish inner-locative and
+# directional case endings, matched on a whole accent-stripped, casefolded
+# token (never a substring of a longer word). This is a case-ending SHAPE
+# test, not a place list, so it generalizes to any noun-like token: inessive
+# (-ssa "in"), elative (-sta "from"), adessive (-lla "at/with"), ablative
+# (-lta "from at"), allative (-lle "to"), and a short illative approximated
+# as either a doubled vowel followed by "n" (e.g. "Ugandaan") or a stem-final
+# "h" plus vowel plus "n" (e.g. "maahan"). The doubled-vowel branch excludes
+# an immediately preceding "ss" so the inessive-possessive form "-ssaan"/
+# "-sseen" (e.g. "tiimissään" -> unaccented "tiimissaan") is not mistaken for
+# illative case.
+# Known limitation: this is an approximation of Finnish morphology (matched
+# on accent-stripped text, so ä/ö are not distinguished from a/o), not a full
+# morphological analyzer; see the R03 correction 8 handoff for others.
+_FINNISH_LOCATIVE_CASE_ENDING = re.compile(
+    r"(?:ssa|sta|lla|lta|lle)$|(?<!ss)([aeiouy])\1n$|h[aeiouy]n$",
+)
+# A small closed negation set that can invert the meaning of the residence
+# verb immediately after it ("ei asu" = "does not live"). Kept as a fixed
+# grammatical list so it is never grown ad hoc for one phrase.
+_FINNISH_RESIDENCE_NEGATION_TOKENS = frozenset({"ei", "eika", "enaa"})
+# The bounded Finnish residence verb this follow-up form cares about ("asuu"
+# = lives; "asu" is its negated stem, as in "ei asu").
+_FINNISH_RESIDENCE_VERB_TOKENS = frozenset({"asuu", "asu"})
+# Function words that appear in the configured "Entä jos hän..." form itself,
+# or as ordinary connectors/adverbs seen inside it, and must never be scored
+# as place-shaped residue even when their ending coincidentally matches a
+# case ending (e.g. "edelleen" ends like a short illative; "siellä" ends like
+# an adessive). This is a closed list grown only from forms actually seen in
+# this configured follow-up, not a general Finnish stop-word list.
+_FINNISH_ANAPHORIC_FUNCTION_WORDS = frozenset(
+    {
+        "enta", "jos", "han", "hanen",
+        "on", "ja", "mutta", "tai",
+        "nyt", "pysyvasti", "edelleen", "siella", "myos", "viela",
+        "tyoskentelee",
+        *_FINNISH_RESIDENCE_VERB_TOKENS,
+        *_FINNISH_RESIDENCE_NEGATION_TOKENS,
+    }
+)
+
+
+class _FinnishAnaphoricResolution(NamedTuple):
+    """The one earned-trust result: both query construction and provenance
+
+    read this and only this - neither recomputes the underlying evidence.
+    ``decision`` is one of ``resolved`` (safe to trust as a dependent
+    follow-up; ``code`` names the one market to substitute, or is ``None``
+    when no place evidence exists at all), ``standalone`` (untrusted enough
+    that the current message must not borrow the prior anchor at all), or
+    ``unresolved`` (keep the prior anchor for retrieval, but never mark it as
+    a trusted resolved follow-up or attach a prior-turn ID).
+    """
+
+    decision: str
+    code: str | None
+    place: str
+    reason: str
 
 
 # W14: the same short follow-up shapes in every conversation language. Offline
@@ -1080,24 +1159,34 @@ class AIOrchestrator:
         )
 
     def _retrieve_or_dependency_response(
-        self, retrieval_query: str, body: ChatRequest, correlation_id: str,
+        self,
+        retrieval_query: str,
+        body: ChatRequest,
+        correlation_id: str,
+        *,
+        context_resolution: dict[str, str] | None = None,
     ) -> tuple[RetrievalResult | None, ChatResponse | None]:
         """Run retrieval, surfacing an escaping dependency exception as a fallback.
 
-        Returns ``(retrieval_result, None)`` on success (including a result
-        that is empty, or DEGRADED-but-usable once Codex's R02 provider
-        contract is integrated -- this method does not inspect
-        `RetrievalResult.availability` at all; that routing belongs to
-        Codex's own orchestrator hook, added at integration, not here).
-        Returns ``(None, response)`` only when `retrieve()` itself raised one
-        of the recognized dependency exceptions. Callers must check the
-        second element and return it immediately without using the first.
+        Returns ``(retrieval_result, None)`` on success, including an empty
+        result or a DEGRADED one; availability routing (R02) happens later in
+        `_route_or_approve_evidence`, after country-scope reapproval. Returns
+        ``(None, response)`` only when `retrieve()` itself raised one of the
+        recognized dependency exceptions. Callers must check the second element
+        and return it immediately without using the first.
 
-        INTEGRATION NOTE: Codex's concurrent evidence-first-v2 change wraps
-        this same ``retriever.retrieve(...)`` call in a try/finally that sets
-        and resets a rank-list context token. That try/finally belongs inside
-        this method, around the call below.
+        `context_resolution` is the runtime follow-up provenance from
+        `_build_retrieval_query_with_provenance` (R03). It is attached to this
+        request's rank-list capture for the duration of the call only, and is
+        diagnostic: it never changes what is retrieved. The token is reset in
+        `finally`, so it is also reset when a dependency failure returns early.
         """
+        from app.retrieval.opensearch_sections import (
+            reset_rank_list_context_resolution,
+            set_rank_list_context_resolution,
+        )
+
+        context_token = set_rank_list_context_resolution(context_resolution)
         try:
             retrieval_result = self.retriever.retrieve(
                 retrieval_query, body.country, body.language, body.role, correlation_id
@@ -1126,6 +1215,8 @@ class AIOrchestrator:
                 body, correlation_id, dependency_component_for_exception(exc),
             )
             return None, response
+        finally:
+            reset_rank_list_context_resolution(context_token)
         _record_diagnostic_retrieval("question", retrieval_result)
         return retrieval_result, None
 
@@ -1139,7 +1230,9 @@ class AIOrchestrator:
         if chat_response:
             return chat_response
         history = get_session_history(body.sessionId, correlation_id)
-        retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
+        retrieval_query, context_resolution = self._build_retrieval_query_with_provenance(
+            scrubbed_input, history, correlation_id, session_id=body.sessionId,
+        )
         request_query = self._build_request_query(scrubbed_input, retrieval_query, history)
         governance_decision = self._evaluate_governance(
             self._governance_text(scrubbed_input, request_query), body, correlation_id
@@ -1157,7 +1250,7 @@ class AIOrchestrator:
             return cached_response
 
         retrieval_result, dependency_response = self._retrieve_or_dependency_response(
-            retrieval_query, body, correlation_id
+            retrieval_query, body, correlation_id, context_resolution=context_resolution,
         )
         if dependency_response is not None:
             return dependency_response
@@ -2001,6 +2094,7 @@ class AIOrchestrator:
                 **(retrieval_result.metadata or {}),
                 "evidence_contract": {"status": "accepted", "evidence_ids": list(contract.evidence_ids)},
             },
+            availability=retrieval_result.availability,
         )
         LOGGER.info(
             "evidence_contract_accepted",
@@ -2024,15 +2118,36 @@ class AIOrchestrator:
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
         """Return the substantive question used to retrieve follow-up evidence."""
+        query, _context = self._build_retrieval_query_with_provenance(user_message, history, correlation_id)
+        return query
+
+    @staticmethod
+    def _prior_user_turn_capture_id(session_id: str, position: int, message: str) -> str:
+        """Return an opaque ID for the actual compact-history turn selected."""
+        if not session_id:
+            return ""
+        digest = hashlib.sha256(f"{session_id}\x00{position}\x00{message}".encode("utf-8")).hexdigest()
+        return f"history-user-{position + 1}-{digest[:16]}"
+
+    def _build_retrieval_query_with_provenance(
+        self, user_message: str, history: str, correlation_id: str, *, session_id: str = "",
+    ) -> tuple[str, dict[str, str]]:
+        """Build retrieval text plus runtime-only dependent-follow-up provenance."""
         user_message = self._normalize_malformed_spacing(user_message, correlation_id)
         if not self._needs_history_context(user_message, history):
-            return user_message
+            return user_message, {"provenance": "runtime", "status": "not_dependent"}
+        ambiguous_finnish_context = self._has_ambiguous_finnish_lowercase_complement(user_message)
+        user_message = self._canonicalize_finnish_anaphoric_market(user_message)
 
         user_messages = self._user_messages_from_history(history)
         if not user_messages:
-            return user_message
+            return user_message, {"provenance": "runtime", "status": "unresolved"}
 
-        anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        anchor_source = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        anchor_position = max(
+            (index for index, value in enumerate(user_messages) if value == anchor_source), default=-1
+        )
+        anchor = anchor_source
         # An explicit new directory market replaces the anchor's market; the
         # topic still carries. Live 2026-09-12 (W7): "What about delivery cost
         # for Gambia?" after a Mali question kept "in Mali" here, retrieval
@@ -2041,7 +2156,7 @@ class AIOrchestrator:
         if not anchor:
             # Every candidate was an instruction rather than a question (or named
             # only the replaced market), so there is nothing left to anchor against.
-            return user_message
+            return user_message, {"provenance": "runtime", "status": "unresolved"}
         if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
             # A topic-shift follow-up ("what about Kenya?") introduces a new
             # subject that a bare anchor substitution would silently drop.
@@ -2059,7 +2174,13 @@ class AIOrchestrator:
             original_length=len(user_message),
             contextual_length=len(contextual_query),
         )
-        return contextual_query
+        if ambiguous_finnish_context:
+            return contextual_query, {"provenance": "runtime", "status": "unresolved"}
+        context = {"provenance": "runtime", "status": "resolved_dependent_follow_up"}
+        prior_turn_id = self._prior_user_turn_capture_id(session_id, anchor_position, anchor_source)
+        if prior_turn_id:
+            context["prior_user_turn_id"] = prior_turn_id
+        return contextual_query, context
 
     def _governance_text(self, user_message: str, request_query: str) -> str:
         """Return the text governance judges: the action being requested NOW.
@@ -2176,8 +2297,11 @@ class AIOrchestrator:
         normalized = " ".join(user_message.lower().split())
         if not normalized:
             return False
-        word_count = len(normalized.split())
         message = " ".join(user_message.split())
+        word_count = len(normalized.split())
+        if self._is_finnish_anaphoric_follow_up(message):
+            decision, _code, _reason = self._finnish_anaphoric_trust_decision(message)
+            return decision != "standalone"
         if word_count <= 14 and CONTINUATION_TERMS.search(normalized):
             return True
         if (
@@ -2269,6 +2393,198 @@ class AIOrchestrator:
             self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
             or self._is_market_ellipsis(normalized_message)
             or self._localized_follow_up_shape(normalized_message) in {"market", "topic_shift"}
+            or (
+                self._is_finnish_anaphoric_follow_up(normalized_message)
+                and self._finnish_anaphoric_trust_decision(normalized_message)[0] != "standalone"
+            )
+        )
+
+    @staticmethod
+    def _is_finnish_anaphoric_follow_up(message: str) -> bool:
+        """Recognize the configured Finnish ``Entä jos hän...`` follow-up form.
+
+        This is intentionally a grammar-bound reference signal, not a country,
+        role, or topic rule. The third-person Finnish pronoun makes the prior
+        user turn necessary, unlike a new standalone ``Entä jos haluan...``
+        question. The normal no-history and unrecognised-place guards still
+        run before this can affect retrieval.
+        """
+        tokens = _follow_up_tokens(message)
+        return (
+            4 <= len(tokens) <= 18
+            and tokens[:2] == ("enta", "jos")
+            and bool({"han", "hanen"}.intersection(tokens))
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _finnish_inessive_market_codes() -> dict[str, str]:
+        """Map safe configured ``-ssa`` place forms to one market code only.
+
+        Keys are normalized EXACTLY like the message tokens they are matched
+        against: accent-stripped, then whitespace/casefold-normalized. Earlier
+        corrections normalized only the casing, so an accented configured name
+        (e.g. a market whose alias contains "ä"/"ö") built a key that could
+        never match its own accent-stripped token; this generalizes the fix to
+        every accented single-word name instead of special-casing one market.
+        """
+        candidates: dict[str, set[str]] = {}
+        aliases = _localized_market_names()
+        for market in [*load_market_config()["markets"], *load_global_directory_markets()]:
+            code = str(market.get("code") or "").upper()
+            if not code:
+                continue
+            for name in [market.get("name"), *aliases.get(code, [])]:
+                normalized_name = _normalize_market_text(_follow_up_unaccented(str(name or "")))
+                if normalized_name and " " not in normalized_name:
+                    candidates.setdefault(f"{normalized_name}ssa", set()).add(code)
+        return {
+            form: next(iter(codes))
+            for form, codes in candidates.items()
+            if len(codes) == 1
+        }
+
+    @staticmethod
+    def _is_finnish_location_phrase(tokens: tuple[str, ...], place_index: int) -> bool:
+        """Match the bounded Finnish residence-verb cue plus an optional ``nyt`` gap.
+
+        Deliberately narrow: only the residence verb ("asuu"/its negated stem
+        "asu") makes an UNKNOWN terminal place strong enough to go standalone.
+        A market-association verb such as "on" or "työskentelee" is not
+        residence and is left to the ordinary residue accounting instead.
+        """
+        if place_index != len(tokens) - 1 or place_index < 1:
+            return False
+        preceding = tokens[place_index - 1]
+        if preceding == "nyt":
+            if place_index < 2:
+                return False
+            preceding = tokens[place_index - 2]
+        return preceding in _FINNISH_RESIDENCE_VERB_TOKENS
+
+    def _resolve_finnish_anaphoric(self, message: str) -> _FinnishAnaphoricResolution:
+        """Collect every place signal across the WHOLE message, then decide once.
+
+        Evidence, collected exhaustively before any decision is made:
+
+        1. exact configured inessive forms, matched on whole normalized
+           tokens (``_finnish_inessive_market_codes``);
+        2. direct market mentions and shared-office record countries, matched
+           over the ENTIRE message with the same matcher the rest of the
+           system uses (``find_market_mentions``/``find_shared_office_record_
+           countries``), which already understands multi-word names such as
+           "United States" or "South Africa" - a former blocker was scanning
+           these per token, so a multi-word name was invisible; and
+        3. place-shaped residue: any token carrying a Finnish inner-locative
+           or directional case ending (``_FINNISH_LOCATIVE_CASE_ENDING``), or
+           any capitalized token (that is not a known function word) with
+           that ending, that is not accounted for by a code collected above.
+
+        A market is trusted (``resolved`` with a ``code``) only when exactly
+        one code was collected, it came from the supported configured
+        inessive form, every place-shaped token is accounted for by that same
+        market, and no negation from the closed
+        ``_FINNISH_RESIDENCE_NEGATION_TOKENS`` set scopes the residence verb.
+        A follow-up with no place evidence at all is also trusted, with no
+        market to substitute (a plain dependent question, e.g. a role
+        follow-up). Everything else is not trusted: a capitalized unknown
+        place, more than one competing code, or an unknown place directly
+        asserted as the residence ("asuu X") fails closed as ``standalone``
+        (the safe direction - never guess a market); an accounted-for
+        negated residence claim also fails closed as ``standalone``, since
+        trusting it would assert the opposite of what was said. Any other
+        unaccounted-for place-shaped residue keeps the prior anchor for
+        retrieval but is recorded as ``unresolved`` - never a trusted
+        resolved follow-up.
+        """
+        tokens = _follow_up_tokens(message)
+        original_tokens = _follow_up_tokens(message, casefold=False)
+        raw_tokens = _follow_up_raw_tokens(message)
+        negation_scopes_residence = any(
+            token in _FINNISH_RESIDENCE_NEGATION_TOKENS
+            and index + 1 < len(tokens)
+            and tokens[index + 1] in _FINNISH_RESIDENCE_VERB_TOKENS
+            for index, token in enumerate(tokens)
+        )
+
+        codes: set[str] = set(find_market_mentions(message)) | set(find_shared_office_record_countries(message))
+        configured_codes: set[str] = set()
+        configured_place = ""
+        capitalized_unknown = False
+        unaccounted_residue = False
+        strong_unknown_residence = False
+
+        for index in range(2, len(tokens)):
+            token = tokens[index]
+            if token in _FINNISH_ANAPHORIC_FUNCTION_WORDS:
+                continue
+            inessive_code = self._finnish_inessive_market_codes().get(token)
+            if inessive_code:
+                codes.add(inessive_code)
+                configured_codes.add(inessive_code)
+                configured_place = raw_tokens[index]
+                continue
+            if not _FINNISH_LOCATIVE_CASE_ENDING.search(token):
+                continue
+            if original_tokens[index][:1].isupper():
+                capitalized_unknown = True
+            else:
+                unaccounted_residue = True
+                if self._is_finnish_location_phrase(tokens, index):
+                    strong_unknown_residence = True
+
+        if capitalized_unknown or len(codes) > 1 or strong_unknown_residence:
+            return _FinnishAnaphoricResolution("standalone", None, "", "unknown_or_conflicting_place")
+        if negation_scopes_residence and (configured_codes or unaccounted_residue):
+            return _FinnishAnaphoricResolution("standalone", None, "", "negated_residence_claim")
+        if unaccounted_residue:
+            return _FinnishAnaphoricResolution("unresolved", None, "", "unaccounted_place_shaped_residue")
+        if not codes:
+            return _FinnishAnaphoricResolution("resolved", None, "", "no_place_evidence")
+        if len(configured_codes) == 1 and configured_codes == codes:
+            return _FinnishAnaphoricResolution("resolved", next(iter(configured_codes)), configured_place, "configured_inessive_form")
+        # Exactly one code was collected, but it came only from a direct
+        # market-name mention with no configured inessive (residence) support
+        # behind it - a bare name mention is not itself a residence claim, so
+        # it keeps ordinary context without being trusted as a market swap.
+        return _FinnishAnaphoricResolution("unresolved", None, "", "direct_mention_without_residence_support")
+
+    def _finnish_anaphoric_trust_decision(self, message: str) -> tuple[str, str | None, str]:
+        """The one earned-trust decision, read by both query construction and provenance.
+
+        Neither consumer recomputes this: `_needs_history_context` and
+        `_contains_topic_shift_marker` use only the ``decision``,
+        `_has_ambiguous_finnish_lowercase_complement` (provenance) checks for
+        ``unresolved``, and `_canonicalize_finnish_anaphoric_market` (the
+        retrieval query) uses ``code``/``place`` only when ``decision`` is
+        ``resolved``.
+        """
+        resolution = self._resolve_finnish_anaphoric(message)
+        return resolution.decision, resolution.code, resolution.reason
+
+    def _has_ambiguous_finnish_lowercase_complement(self, message: str) -> bool:
+        """True when the earned-trust decision for this follow-up is ``unresolved``.
+
+        The query can retain ordinary conversation context, but the capture
+        must not claim that an unresolved shape resolved the market.
+        """
+        if not self._is_finnish_anaphoric_follow_up(message):
+            return False
+        decision, _code, _reason = self._finnish_anaphoric_trust_decision(message)
+        return decision == "unresolved"
+
+    def _canonicalize_finnish_anaphoric_market(self, message: str) -> str:
+        """Replace one earned-trust Finnish inessive form for retrieval only."""
+        if not self._is_finnish_anaphoric_follow_up(message):
+            return message
+        resolution = self._resolve_finnish_anaphoric(message)
+        if resolution.decision != "resolved" or not resolution.code or not resolution.place:
+            return message
+        display_name = market_display_name(resolution.code)
+        if not display_name:
+            return message
+        return re.sub(
+            rf"(?<!\w){re.escape(resolution.place)}(?!\w)", display_name, message, count=1, flags=re.UNICODE,
         )
 
     def _localized_follow_up_shape(self, message: str) -> str:
@@ -3343,6 +3659,18 @@ class AIOrchestrator:
         history: str = "",
     ) -> tuple[ChatResponse | None, RetrievalResult, EvidenceDecision | None]:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
+        if retrieval_result.availability is RetrievalAvailability.UNAVAILABLE:
+            # R02 routing site 1 of 2. It uses the one shared builder so the
+            # copy, the metadata and the DependencyUnavailable metric stay
+            # identical to the exception paths (integration, 2026-09-18).
+            unavailable = self._dependency_unavailable_response(
+                body,
+                correlation_id,
+                "retrieval",
+                retrieval_result=retrieval_result,
+                retrieval_availability=retrieval_result.availability.value,
+            )
+            return unavailable, retrieval_result, None
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id, candidate_flags)
         if routed_response:
             return routed_response, retrieval_result, None
@@ -3364,6 +3692,22 @@ class AIOrchestrator:
             if not evidence_decision.approved:
                 evidence_decision = replace(evidence_decision, reason="cross_market_local_evidence")
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
+        if (
+            retrieval_result.availability is RetrievalAvailability.DEGRADED
+            and not evidence_decision.approved
+            and evidence_decision.reason != "cross_market_policy_request"
+        ):
+            # R02 routing site 2 of 2: degraded, with no usable evidence after
+            # country-scope reapproval. A foreign company-policy request stays a
+            # scope refusal (the reason check above). Same shared builder.
+            unavailable = self._dependency_unavailable_response(
+                body,
+                correlation_id,
+                "retrieval",
+                retrieval_result=retrieval_result,
+                retrieval_availability=retrieval_result.availability.value,
+            )
+            return unavailable, retrieval_result, None
         if evidence_decision.approved:
             unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
             if unsupported_years:

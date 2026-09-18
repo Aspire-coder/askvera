@@ -350,6 +350,7 @@ def with_approved_evidence(retrieval_result: RetrievalResult, decision: Evidence
             **(retrieval_result.metadata or {}),
             "evidence_decision": decision.to_metadata(),
         },
+        availability=retrieval_result.availability,
     )
 
 

@@ -1,0 +1,19 @@
+# V2-07 final offline integration and audit
+
+**Status:** 7/7 LOCAL PLAN completion remains conditional on Sol approval of this exact snapshot. Live validation is 0 and production changes are 0.
+
+This is an offline audit and a future-adapter specification, not backend wiring. The module makes no filesystem, provider, network, index, route, configuration, or production action. It pins the accepted V2-01 through V2-06 manifests privately, recomputes every accepted aggregate with its actual historical serialization, and separately verifies the exact current 26-path retained-byte set.
+
+V2-01's accepted aggregate retains its historical `__init__.py` and offline-isolation hashes. V2-02 explicitly supersedes those two bytes with its replacement `__init__.py` and offline-isolation hashes; that replacement does not rewrite the V2-01 identity. V2-03 uses candidate-prefixed forward paths and hash-first rows. V2-04 uses forward paths and hash-first rows. V2-05 and V2-06 use the same hash-first rows with a final LF. V2-01 and V2-02 use backslash paths and path-first rows with no final LF.
+
+The executable local fixture has one five-combined-stage progression: `interpret`, `retrieve`, `ground`, `compose_validate`, and `compare_rank`. Its hit/fault population performs eight actual injected-adapter attempts: five completed-stage attempts for the hit case and three attempts through the ground fault for the fault case. The remaining stages are recorded as skipped without downstream calls. This is local accounting only, not live calls or quality evidence.
+
+Each stage has one canonical terminal truth table. Missing and cancelled represent one attempted stage; skipped represents no attempted stage and one skip; corrected and retried each require two actual attempts, one completed terminal result, and one retry. Completed or fault has one terminal completion or fault plus its actual retry count, so a failed bounded retry records two attempts, one retry, and one fault. A bounded adapter exception, malformed adapter result, or invoked adapter that reports `skipped` becomes a counted sanitized fault record. A non-completed terminal state stops downstream calls. Ranking is eligible to be invoked when the first four prerequisite stages completed; a final rank fault is therefore an eligible invocation but not completed-result evidence.
+
+Future adapters remain approval-gated typed boundaries: request/context to standalone request; standalone request to candidate capture; capture to facts/coverage; facts/coverage to validated result; and validated result to comparison/ranking report. Any future adapter must retain the documented identities and bindings. No adapter is wired to current routes.
+
+A future approved query is a paired old/new unit. Approval must specify included stages and arms, whether retries and failures consume ceilings, billable units, currency, time, the exact trigger, observation window, monitoring evidence, owner, executor, escalation, retention/redaction, and re-enable authority. All presently unknown operational values are `APPROVAL_REQUIRED` blockers, not measurements.
+
+Rollback has two distinct actions: shadow rollback disables the shadow flag; traffic rollback restores the existing route. Either action requires recovery checks for restored flag or route, existing-path serving, safety/scope/citation baseline recovery, and retained approved review evidence. Re-enabling requires the separately approved authority.
+
+Before any read-only capture or live validation, approve data scope/query IDs, environment/index generation, paired call/cost ceiling, retention/redaction, no-write/no-reindex/no-deploy conditions, source review, exact trigger/window, and rollback ownership. Real-source comparison, held-out comparison, and real ranking evidence remain **UNAVAILABLE**. No retrieval-quality, release-readiness, latency, or cost score is claimed.
