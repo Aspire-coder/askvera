@@ -21,7 +21,29 @@ reference:
   then not a market reference at all, regardless of language or candidate
   count, and is left untouched (coordinator review, 2026-09-18; see
   ``_is_pure_reference`` and config/reference_vocabulary.py's
-  LOCALIZED_NON_CONTENT_TOKENS / LOCALIZED_PROP_WORDS).
+  LOCALIZED_NON_CONTENT_TOKENS / LOCALIZED_PROP_WORDS);
+- puts a generic prop word ("one" and this module's other configured
+  equivalents) BEFORE the ordinal word instead of after it (Fable review,
+  2026-09-18, finding A1). "One second" is the common English interjection
+  ("wait a moment"), not a reference to a second candidate market, whereas
+  "the second one" is. Both phrases contain the exact same two tokens
+  ("one", "second"); only their ORDER tells them apart, so
+  ``_prop_word_precedes_ordinal`` additionally requires the ordinal word to
+  precede the prop word before rule 3 may fire (see that function's
+  docstring for why this is safe to apply to every configured language, not
+  only English, even though only English exercises it today).
+
+Fable also flagged that "Any other?" and "Is there another?" now trigger
+rule 2's clarification. That is intentional, not a regression: both are
+genuine contrastive references (English "other"/"another" plus only
+closed-class opener words - "any", "is", "there" - all already listed in
+LOCALIZED_NON_CONTENT_TOKENS), so under rule 2 asking which candidate is
+meant is the correct, safe response - the same behaviour "What about the
+other one?" gets. Two languages' worth of examples is not enough evidence to
+special-case bare contrastive openers out of rule 2, and no general rule
+suggested itself that would do so without also re-opening the false-positive
+risk rule 2 exists to close; the coordinator's decision is to leave this
+behaviour as designed.
 
 No model call is made anywhere in this module. Candidate markets come from
 the exact matchers app/orchestrator/chat_orchestrator.py already trusts for
@@ -47,6 +69,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from services.market_config import find_market_mentions, find_shared_office_record_countries, market_display_name
+from config.directory_field_vocabulary import normalize_language_code
 from config.reference_vocabulary import (
     LOCALIZED_CONTRASTIVE_TOKENS,
     LOCALIZED_NON_CONTENT_TOKENS,
@@ -78,7 +101,17 @@ def _tokens(text: str) -> tuple[str, ...]:
 
 
 def _language_code(language: str) -> str:
-    return (language or "").split("-", 1)[0].split("_", 1)[0].strip().casefold()
+    """Fold a request-language tag the same way Lane B's directory-field
+    vocabulary does (Fable review, 2026-09-18, finding A2), so a tag this
+    module's own tables key by a different code - Norwegian's "nb"/"nb-NO"
+    ("nb" folds to "no" here, matching every other localized vocabulary in
+    this repository) or any bare "-region"/"_REGION" suffix ("fr-FR") -
+    resolves instead of silently falling through rule 5 (unknown language)
+    every time. ``config.directory_field_vocabulary`` has no dependency on
+    this module or on ``app.orchestrator``, so importing its
+    ``normalize_language_code`` here creates no import cycle.
+    """
+    return normalize_language_code(language)
 
 
 def _user_turns(history: str) -> list[str]:
@@ -150,6 +183,47 @@ def _is_pure_reference(tokens: set[str], matched: set[str], language_code: str) 
     return leftover <= prop_words
 
 
+def _prop_word_precedes_ordinal(
+    ordered_tokens: tuple[str, ...], ordinal_matched: set[str], prop_words: frozenset[str]
+) -> bool:
+    """True when a generic prop word ("one"/"ones" and this module's other
+    configured equivalents) appears BEFORE the matched ordinal word in
+    ``ordered_tokens`` - i.e. the message reads like "one second", the
+    common English interjection, rather than "the second one" (Fable
+    review, 2026-09-18, finding A1).
+
+    Word order, not word choice, is what tells these two apart: "one" and
+    "second" are present in both phrases. English's ordinal-noun-phrase
+    order is fixed (an ordinal adjective always precedes the noun/pronoun
+    it modifies - "the second one", never "one the second"), so requiring
+    the ordinal to come first is a safe, general rule for English, applied
+    here rather than special-cased to just the word "second".
+
+    This check is written to run for every language this module configures,
+    not only English, but today it can only ever change English's answer:
+    LOCALIZED_PROP_WORDS's non-English entries (fr/de/nl/it/pt/es/fi/sv/no)
+    are all COUNTRY/MARKET/PLACE nouns ("pays", "land", "maa", ...), never a
+    generic "one"-type pronoun that also opens a fixed interjection the way
+    English "one" does, so ``prop_words`` for those languages never appears
+    in a message this function is asked to check, and the function returns
+    False (order irrelevant) by simple absence. Documented here rather than
+    skipped per-language so a future language whose LOCALIZED_PROP_WORDS
+    table gains its own generic "one" word - and only if that language ALSO
+    puts the ordinal after it in the same kind of interjection - inherits
+    this protection automatically instead of needing its own carve-out; if
+    such a language instead orders things the other way (prop-word-first is
+    its NORMAL ordinal phrasing), this rule would wrongly reject its valid
+    ordinal references and should be scoped out for that language's code
+    specifically rather than applied blindly.
+    """
+    first_ordinal_index = next(
+        (index for index, token in enumerate(ordered_tokens) if token in ordinal_matched), None
+    )
+    if first_ordinal_index is None:
+        return False
+    return any(token in prop_words for token in ordered_tokens[:first_ordinal_index])
+
+
 def might_reference_market(message: str, language: str) -> bool:
     """Cheap, history-free pre-check: could ``message`` possibly need resolving?
 
@@ -169,12 +243,18 @@ def might_reference_market(message: str, language: str) -> bool:
         return False  # rule 5: unknown language
     if _named_markets(message):
         return False  # rule 1: the message names its own market
-    tokens = set(_tokens(message))
+    ordered_tokens = _tokens(message)
+    tokens = set(ordered_tokens)
     contrastive_matched = tokens & contrastive_tokens
     if contrastive_matched and _is_pure_reference(tokens, contrastive_matched, language_code):
         return True
     ordinal_matched = {token for token in tokens if token in ordinal_tokens}
-    return bool(ordinal_matched) and _is_pure_reference(tokens, ordinal_matched, language_code)
+    if not ordinal_matched or not _is_pure_reference(tokens, ordinal_matched, language_code):
+        return False
+    prop_words = LOCALIZED_PROP_WORDS.get(language_code, frozenset())
+    if _prop_word_precedes_ordinal(ordered_tokens, ordinal_matched, prop_words):
+        return False  # A1: "one second", not "the second one"
+    return True
 
 
 def resolve_reference(message: str, history: str, language: str) -> ReferenceResolution:
