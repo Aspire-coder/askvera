@@ -346,6 +346,27 @@ def _is_acronym(word: str) -> bool:
     return 2 <= len(word) <= 6 and word.isupper()
 
 
+def _acronym_with_suffix(word: str) -> bool:
+    """True for a bare acronym, or the same acronym with a plural/possessive suffix.
+
+    The corpus itself inflects a role acronym like any other word - "FBO" and
+    "FBOs" name the same role (see _FBO_ROLE_RE, which matches both). Freeing
+    a sentence-initial capitalised word only ahead of the bare, unsuffixed
+    spelling left the plural bound to it: "For FBOs, the minimum order size is
+    50 USD" kept {"for", "fbos"} as the only subject, and no source sentence
+    repeats "for" beside its figure. A correctly grounded amount was then
+    reported unsupported and deleted. Stripping a plain "s" or a possessive
+    "'s"/"'s" before testing is a spelling rule, not a language-specific word
+    list, so it applies to any acronym this corpus uses.
+    """
+    if _is_acronym(word):
+        return True
+    for suffix in ("'s", "’s", "s"):
+        if word.endswith(suffix) and _is_acronym(word[: -len(suffix)]):
+            return True
+    return False
+
+
 def _entity_phrases(text: str) -> list[tuple[str, bool, bool]]:
     """Capitalised phrases, each flagged when it is an acronym freed from a segment's first word,
     and whether the phrase itself begins at the segment's first word.
@@ -389,7 +410,7 @@ def _entity_phrases(text: str) -> list[tuple[str, bool, bool]]:
             and len(segment_words) >= 2
             and entities[first_entity][0] == f"{segment_words[0]} {segment_words[1]}"
             and _is_title_case_word(segment_words[0])
-            and _is_acronym(segment_words[1])
+            and _acronym_with_suffix(segment_words[1])
         ):
             entities[first_entity] = (segment_words[1], True, False)
     return entities
