@@ -334,3 +334,51 @@ def normalize_language_code(language: str | None) -> str:
 def supported_languages() -> frozenset[str]:
     """Every non-English language code this module has a vocabulary for."""
     return frozenset(LANGUAGE_FIELD_TERMS)
+
+
+# --- R05/N6 follow-up (2026-09-18): directory-INTENT-only synonyms ---------
+#
+# Scope: these terms exist ONLY to help `app.retrieval.providers` recognise
+# that a question carries genuine directory-field intent, for the retrieval
+# scoring/dominance protection described in
+# `docs/conversation-quality/phase2/R05_N6_DIRECTORY_PROTECTION.md`. They are
+# never consumed by `utils.directory_fields._requested_directory_field_set`
+# (the function `remove_unrequested_directory_fields`,
+# `restore_missing_requested_directory_fields`, and `directory_field_conflicts`
+# all call), so adding a term here cannot change what those functions strip,
+# restore, or flag as conflicting - that behaviour keeps reading only
+# `LANGUAGE_FIELD_TERMS`/`ORDER_WORD_TERMS`, exactly as before this change.
+#
+# An independent review of the R05/N6 fix (2026-09-18) found that
+# `_requested_directory_field_set`'s own English field-request patterns
+# already recognise "located"/"location" (part of the `address` field) and
+# every literal field name (phone, email, website, address, business hours,
+# payment methods, delivery cost/time, fax) in every one of the 13
+# languages `LANGUAGE_FIELD_TERMS` covers - so questions phrased with those
+# words need no new vocabulary at all. Two shapes from the review's failing
+# repro set are not covered by any existing field name, though:
+#
+# - "How do I **reach** Forever Ghana?" - a bare contact verb, naming no
+#   field at all, that nonetheless clearly asks for a way to contact the
+#   office (a phone-shaped request in spirit). "contact" itself is the same
+#   shape ("How do I **contact** Forever Ghana?").
+# - "Does Forever Ghana accept **credit cards**?" - asking about a specific
+#   payment instrument rather than using the literal phrase "payment
+#   methods".
+#
+# Deliberately narrow and closed, per the review's own instruction not to
+# make directory-intent recognition permissive wholesale: only these two
+# shapes, English only. Confidence: English only, reviewer-identified
+# (2026-09-18); not yet extended to any of the other 12 languages
+# `LANGUAGE_FIELD_TERMS` covers - a documented gap (see
+# `directory_field_intent_present`'s docstring in `utils/directory_fields.py`
+# and the R05/N6 doc's "Limitations" section), not a claimed complete
+# solution. A native-language addition here should follow the same
+# "compound stem, not a bare generic word" discipline as the rest of this
+# module before being trusted for another language.
+DIRECTORY_INTENT_SYNONYM_TERMS: dict[str, dict[str, tuple[str, ...]]] = {
+    "en": {
+        PHONE: ("reach", "contact"),
+        PAYMENT_METHODS: (r"credit\s+cards?", r"debit\s+cards?"),
+    },
+}

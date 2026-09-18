@@ -172,24 +172,176 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
    `FLAKE8_EXIT=0`.**
 4. `git diff --check HEAD~1 HEAD`: **no output, `DIFFCHECK_EXIT=0`.**
 
+## Follow-up (2026-09-18): multilingual directory-intent RECOGNITION
+
+An independent review of the fix above (offline, stubbed-planner
+reproduction, no network) confirmed the "Limitations" section below as a
+real, exploitable gap, not a theoretical one: every RECOGNITION regex this
+classifier reads (`SPONSORING_QUESTION_RE`, `DIRECTORY_OPERATIONAL_QUESTION_RE`,
+`_DIRECTORY_GUARD_TOPIC_RE`) matches English vocabulary only, so a genuine
+directory question phrased in another language - or in English using a
+contact verb or payment-instrument name rather than a literal field name -
+fell through to `ambiguous` and lost the country-match bonus entirely
+(8.0 -> 0.0). Reproduced exactly as reported, US session, a Ghana
+`international_sponsoring_directory` row, `targets={'Ghana'}`:
+
+| Question | Language | Before | After |
+|---|---|---|---|
+| "¿Cuál es el número de teléfono de Forever Ghana?" | es | `ambiguous` (0.0) | `directory` (8.0) |
+| "Quel est le numéro de téléphone de Forever Ghana ?" | fr | `ambiguous` (0.0) | `directory` (8.0) |
+| "Wie lautet die Adresse von Forever Ghana?" | de | `ambiguous` (0.0) | `directory` (8.0) |
+| "How do I reach Forever Ghana?" | en | `ambiguous` (0.0) | `directory` (8.0) |
+| "Where is Forever Ghana located?" | en | `ambiguous` (0.0) | `directory` (8.0) |
+| "Does Forever Ghana accept credit cards?" | en | `ambiguous` (0.0) | `directory` (8.0) |
+| "What is the Ghana office address?" (control) | en | `directory` (8.0) | `directory` (8.0), unchanged |
+| "Who is the country manager for Forever Ghana?" | en | `ambiguous` (0.0) | `ambiguous` (0.0), unchanged - names no directory field |
+| Norway former-FBO/downline (en/no) | en/no | `ambiguous` | `ambiguous`, unchanged |
+
+### The fix: reuse the reviewed field vocabulary, don't invent a new one
+
+`_runtime_scope_intent` (`app/retrieval/providers.py:176`) gained one new,
+optional parameter, `language` (default `"en"`), and one new disjunct in its
+branch that decides the `directory` intent: alongside the existing
+`deterministic_directory_route`, it now also asks
+`utils.directory_fields.directory_field_intent_present(text, language=language)`.
+That function (new, `utils/directory_fields.py`) is a thin, read-only
+wrapper:
+
+1. It first calls the *already-reviewed* `_requested_directory_field_set`
+   (the same function that drives field removal/restoration) with the
+   request's own language. This is why Spanish "teléfono", French
+   "téléphone", and German "Adresse" needed **zero new vocabulary** -
+   `config/directory_field_vocabulary.py`'s `LANGUAGE_FIELD_TERMS` already
+   carried reviewed stems for phone/email/website/address/business_hours/
+   payment_methods/delivery_cost/delivery_time/fax in 12 non-English
+   languages (13 with English), and English's own
+   `_FIELD_REQUEST_PATTERNS["address"]` already matched "located"/"location"
+   - it was simply never consulted from `providers.py` before this change.
+2. Only for the two reviewer-identified shapes that name no field at all -
+   "reach"/"contact" (a bare contact verb) and "credit card(s)"/"debit
+   card(s)" (a payment instrument, not the phrase "payment methods") - a
+   new, small, closed, **English-only** dictionary,
+   `DIRECTORY_INTENT_SYNONYM_TERMS` (`config/directory_field_vocabulary.py`),
+   is checked as a second disjunct. Its own docstring records the exact
+   scope and confidence (English only, reviewer-identified 2026-09-18, not
+   yet extended to the other 12 languages).
+
+Critically, `directory_field_intent_present` is a **new, separate**
+function - it is not folded into `_requested_directory_field_set` itself,
+and `DIRECTORY_INTENT_SYNONYM_TERMS` is never read by
+`remove_unrequested_directory_fields`, `restore_missing_requested_directory_fields`,
+or `directory_field_conflicts`. Those three functions - which decide what to
+strip or restore in an *already-generated answer* and must stay
+conservative about compound/ambiguous requests - keep reading only
+`LANGUAGE_FIELD_TERMS`/`ORDER_WORD_TERMS`, byte-for-byte unchanged. This
+fix only ever affects retrieval scoring/protection classification, never
+answer post-processing.
+
+An unrecognized `language` (no table in either vocabulary) makes
+`directory_field_intent_present` return `False`, falling back to exactly
+the English-only recognition this classifier already had before this
+change - measured directly: the Ghana Spanish phone question, re-run under
+a bogus `language="xx"`, stays `ambiguous`, identical to the pre-N6
+(`5b1d33f`) shape for the same underlying reason (the unconditional country
+bonus never depended on language either). No worse than before.
+
+### NOTE 6: "bonus" alone must not imply directory intent
+
+The reviewer separately flagged that `directory_topic_route` reuses
+`_directory_guard_topic_match` verbatim, whose `_DIRECTORY_GUARD_TOPIC_RE`
+includes a bare `\bbonus(?:es)?\b` alternative (added for the Ghana/
+Kyrgyzstan cross-market bonus controls). Taken naively, a Norway-shaped,
+own-market policy question that also happens to mention "bonus" - e.g. "I
+cancelled my Forever Norge distributorship... and do I keep my old downline
+**and their bonus**?" - would be wrongly promoted to `directory` on that
+word alone, which is exactly the class of bug R05/N6 exists to close.
+
+**Decision: separable with an existing signal, no new vocabulary needed.**
+The distinguishing signal between the genuine Ghana/Kyrgyzstan controls and
+the Norway-shaped risk is already available at the call site in
+`_planned_retrieval_plan`: `named_markets` (from `find_market_mentions`,
+which already returns market **codes**) versus the request's own `country`
+code. The Ghana and Kyrgyzstan controls are genuinely cross-market (a GB/US
+session naming a foreign market); the Norway risk names only the session's
+own market. So `directory_topic_route`'s "bonus"-only match (i.e. neither
+`_DIRECTORY_DETAIL_RE` nor `DIRECTORY_OPERATIONAL_QUESTION_RE` also matched)
+is now trusted only when `SPONSORING_QUESTION_RE` matches OR
+`named_markets - {own_market_code}` is non-empty - a genuinely
+cross-market or literal-"sponsor" question. A "bonus" mention alongside
+other independent directory/operational wording (e.g. "business hours ...
+bonus") is untouched, since that other wording is its own, non-"bonus"
+signal and was never gated.
+
+This change lives entirely inside `_planned_retrieval_plan`'s own
+`directory_topic_route` computation (`app/retrieval/providers.py`) and does
+**not** touch `_directory_guard_topic_match`/`_DIRECTORY_GUARD_TOPIC_RE`
+themselves - those are also used, unmodified, by the post-selector
+dominance guard's own topical gate in `app/retrieval/opensearch_sections.py`
+(`_dominant_directory_row`), which is a separate precondition from
+`runtime_scope_intent` compatibility and out of this follow-up's scope.
+Verified: Norway-with-"bonus" stays `ambiguous`; the pre-existing Ghana
+cross-market bonus control and the Kyrgyzstan real-production-failure-shape
+control both still resolve to `directory`; a "bonus" mention alongside
+independent directory wording ("business hours") stays `directory` for an
+own-market question too.
+
+### Follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. `test_r05_directory_protection_intent.py` alone (24 pre-existing + 16 new
+   tests added by this follow-up): **40 passed, `EXIT=0`.**
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_demo_own_market_directory.py`,
+   `test_evidence_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`, `tests/evidence_first_v2`): **920 passed, 1 failed,
+   `EXIT=1`.** The 1 failure is
+   `tests/evidence_first_v2/test_offline_isolation.py::OfflineIsolationTests::test_package_imports_use_a_narrow_allowlist`,
+   an unrelated import-allowlist check on
+   `app/experimental/evidence_first_v2/scope_aware_fusion.py` (a file this
+   follow-up never touched). Confirmed pre-existing: `git stash` back to the
+   unmodified worktree and re-running the identical file reproduces the
+   identical failure with the identical assertion text.
+3. Full `tests/unit` (foreground, 600000ms timeout): **8961 passed, 13
+   xfailed, `EXIT=0`**, 347.98s wall time. (8961 = the prior fix's 8935 plus
+   this follow-up's 16 new tests, minus the 24 pre-existing
+   `test_r05_directory_protection_intent.py` tests already counted in that
+   8935; net +26 tests in the file, 16 of which are new to this follow-up.)
+4. `flake8` on the four changed/added files
+   (`app/retrieval/providers.py`, `config/directory_field_vocabulary.py`,
+   `utils/directory_fields.py`, `tests/unit/test_r05_directory_protection_intent.py`):
+   **no output, `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
 ## Limitations
 
-- **Language coverage of the classifier is English-only for the
-  *recognition* side.** `SPONSORING_QUESTION_RE`,
-  `DIRECTORY_OPERATIONAL_QUESTION_RE`, `DIRECTORY_POLICY_WORDING_RE`, and
-  `_directory_guard_topic_match`'s component regexes all match English
-  vocabulary only. A genuinely directory-intentioned question phrased
-  entirely in another language (no English loanword, no recognized market
-  alias) will not be classified as `directory`/`international_sponsoring`
-  and will lose the country-match bonus even though it should keep it - this
-  fix does not add multilingual keyword coverage.
-- **The *suppression* side is not language-limited**, because it is the
-  default outcome whenever nothing matches (`ambiguous`, or `policy` when
-  `include_global_documents` is also false): a policy question naming a
-  market in French or Finnish is correctly suppressed for the same reason
-  the English case is, without needing any French/Finnish vocabulary in the
-  classifier at all. Verified directly for French and Finnish in the new
-  test file.
+- **Multilingual directory-field RECOGNITION now covers 13 languages
+  (English plus the 12 `config/directory_field_vocabulary.py`
+  `LANGUAGE_FIELD_TERMS` carries: fr, de, nl, es, it, pt, sv, da, no, fi, ru,
+  sr) for questions that literally name a canonical field** (phone, email,
+  website, address, business hours, payment methods, delivery cost/time,
+  fax). This is a real improvement over the 39-market configuration's much
+  broader language surface - the remaining ~26+ configured languages this
+  repository otherwise supports (per the task's own count) still recognize
+  directory intent in English only, an explicit, documented gap, not a
+  claimed complete solution.
+- **The two synonym-only shapes ("reach"/"contact", "credit/debit
+  card(s)") are English-only, and deliberately so** -
+  `DIRECTORY_INTENT_SYNONYM_TERMS` carries no non-English entries yet. A
+  native-language addition should follow this module's own
+  "compound stem, not a bare generic word" discipline before being trusted.
+- **A question naming no canonical field at all** ("Who is the country
+  manager for Forever Ghana?") stays `ambiguous` in every language,
+  unchanged - this fix recognizes named *fields*, not arbitrary
+  directory-adjacent topics, by design (recognizing more would risk
+  reopening the original Norway-shaped bug from the other direction).
+- **NOTE 6's cross-market gate uses market *codes*, not names or session
+  locale**, and only narrows the "bonus"-only match specifically - it does
+  not add any new suppression path, and a "bonus" mention with independent
+  directory/operational wording is unaffected.
 - **This fix does not address retrieval recall.** The raw capture shows the
   literal required section `NO:17.08-c` is entirely absent from the
   60-candidate merged list even in the per-channel data (only `17.08` and
