@@ -7,6 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+from config.timing_stage_vocabulary import TIMING_STAGE_VOCABULARY
 from services.market_config import find_market_mentions, market_adjective_codes
 from utils.redaction import PHONE_RE
 
@@ -770,6 +771,54 @@ _MEASURE_WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 _TIME_KINDS = frozenset({"hour", "day", "week", "month", "year"})
 _MEASURE_TOKEN_RE = re.compile(r"[^\W\d_]+|[\d.;:!?()\[\]]")
+
+
+# The process stage (delivery, approval, processing, payment, settlement,
+# waiting period, office hours) a timing figure belongs to, read from cue words
+# and short phrases in the surrounding clause or sentence -- never from a
+# figure's value alone. Terms come only from config/timing_stage_vocabulary.py,
+# unioned across every covered language, the same way _MEASURE_WORDS above
+# reads a unit word in any of this corpus's languages without first deciding
+# which one the text is in.
+_STAGE_TERMS: dict[str, set[str]] = {}
+for _language_terms in TIMING_STAGE_VOCABULARY.values():
+    for _stage, _terms in _language_terms.items():
+        _STAGE_TERMS.setdefault(_stage, set()).update(_terms)
+_STAGE_PATTERNS: dict[str, re.Pattern[str]] = {
+    stage: re.compile(
+        r"\b(?:" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + r")\b",
+        re.IGNORECASE | re.UNICODE,
+    )
+    for stage, terms in _STAGE_TERMS.items()
+}
+
+
+def _classify_stage(text: str) -> str:
+    """Return the one timing-process stage cued in this text, or "" when none or more than one is.
+
+    Conservative on purpose: a clause naming cues for two different stages (an
+    application that is "processed" as part of being "approved") or naming
+    none at all returns "", so a claim is never newly flagged just because its
+    stage, or the source's, could not be read with confidence.
+    """
+    normalized = _normalize(text)
+    matched = {stage for stage, pattern in _STAGE_PATTERNS.items() if pattern.search(normalized)}
+    return next(iter(matched)) if len(matched) == 1 else ""
+
+
+def _stage_mismatch(claim_stage: str, source_text: str, occurrence_start: int, occurrence_end: int) -> bool:
+    """True when this source occurrence is confidently a DIFFERENT timing stage than the claim's.
+
+    ``claim_stage`` is already "" for a non-timing figure or an unclassifiable
+    claim sentence (see the call site), so this only ever narrows a figure the
+    rest of the function would otherwise accept.
+    """
+    if not claim_stage:
+        return False
+    source_stage = _classify_stage(_rule_segment(source_text, occurrence_start, occurrence_end))
+    return bool(source_stage) and source_stage != claim_stage
+
+
 # A comma ends the figure's clause for its period: in "25 Case Credits, and
 # Home Office approval, which takes days, is needed" the days are not the limit's.
 # A colon ends it only before a space: Finnish writes "2 CC:n arvosta".
@@ -1194,6 +1243,19 @@ def _claim_is_supported(
     # A grouped source amount supports only a claim that could be the same money:
     # "2,000 CC" or "9,440 TND" in the answer never borrows "2.000 francs CFA".
     grouped_amounts = not claim_kind or _currency_groups_thousands(claim_kind)
+    # A timing figure borrowed from a different process stage is not support,
+    # even though the number itself is genuinely in the source: "3 working
+    # days" stated for delivery must not ground "3 working days" claimed for
+    # approval. Read only when the claim itself counts a time unit or names a
+    # period ("25 Case Credits in any calendar Month" does not qualify;
+    # "3 working days" or "within 48 hours" does), and only when the claim's
+    # own sentence names exactly one stage -- otherwise this never tightens
+    # anything, matching every other numeric claim exactly as before.
+    claim_stage = (
+        _classify_stage(claim.sentence)
+        if claim_kind in _TIME_KINDS or claim_period in _TIME_KINDS
+        else ""
+    )
     for number in _number_variants(claim.number):
         for window, occurrence_start, occurrence_end in _source_occurrences(
             source_text, number, grouped_amounts=grouped_amounts
@@ -1205,6 +1267,8 @@ def _claim_is_supported(
             # was kept. Compared only when both sides write a unit or a period.
             source_kind, source_period = _measure(source_text, occurrence_start, occurrence_end)
             if not _measures_agree((claim_kind, claim_period), (source_kind, source_period)):
+                continue
+            if _stage_mismatch(claim_stage, source_text, occurrence_start, occurrence_end):
                 continue
             if not _occurrence_can_support(
                 source_text, occurrence_start, occurrence_end, claim_letter, claim_reads_as_clock, clock_spans
