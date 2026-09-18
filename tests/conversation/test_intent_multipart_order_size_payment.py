@@ -16,16 +16,20 @@ _requested_directory_field_set already uses elsewhere in this module - see
 utils/directory_fields.py:675, :361, :435) to exclude any field the question
 itself names from the strip pattern. No new phrases were added.
 
-Multilingual check: _requested_directory_field_set's field-request
-vocabulary (_FIELD_REQUEST_PATTERNS) is English-only, and the order-size
-trigger regex on this same branch (`\b(minimum|ordering|order)\b...`) is
-also English-only, so a French equivalent of the same two-part question
-never even reaches this branch - it falls through to the "not confidently
-understood" path and leaves the answer untouched (safe, but not because of
-any localized field detection). This module has no localized field-request
-vocabulary to reuse, so none was added, per instruction not to introduce a
-new English-style list for other languages. Recorded as a real gap for
-whoever owns adding language coverage to _FIELD_REQUEST_PATTERNS.
+Multilingual update (Phase 2 / Lane B, 2026-09-18): the gap this docstring
+used to describe - _requested_directory_field_set and the order-size trigger
+regex both being English-only, so a French equivalent of this same two-part
+question fell through to the "not confidently understood" path and left the
+answer untouched (safe, but not because of any localized field detection) -
+is now closed for French (and nine other languages) by
+config/directory_field_vocabulary.py plus the ``language`` keyword added to
+remove_unrequested_directory_fields/_requested_directory_field_set. See
+tests/conversation/test_multilingual_fields.py for the full per-language
+positive/negative matrix. test_french_equivalent_multipart_question_is_kept_in_full
+below replaces the old "documents the gap, answer untouched" assertion with
+a real positive one (both halves survive, `changed is False`) - the one
+existing assertion in this file this project is allowed to strengthen rather
+than leave as a pinned gap.
 """
 
 from __future__ import annotations
@@ -88,18 +92,18 @@ def test_order_size_and_hours_two_part_question_keeps_hours_and_sheds_payment() 
     assert changed is True
 
 
-def test_french_equivalent_multipart_question_is_not_handled_by_this_branch() -> None:
-    """Documents the real multilingual gap rather than papering over it: the
-    order-size trigger regex and _requested_directory_field_set are both
-    English-only, so this branch never fires for the French equivalent and
-    the module falls through to its "not confidently understood" path
-    (answer left untouched - safe, but not evidence of localized field
-    detection). No English-style phrase list was added for other languages,
-    per instruction."""
+def test_french_equivalent_multipart_question_is_kept_in_full() -> None:
+    """The gap this test used to pin is closed: with language="fr", the
+    localized order-size trigger and the French field-request vocabulary
+    (config/directory_field_vocabulary.py) both fire, and both requested
+    halves survive - the same real assertion
+    test_multipart_001_keeps_both_requested_fields makes for English, not
+    merely "left untouched"."""
     question_fr = (
         "Quelle est la commande minimum pour un FBO au Kenya, "
         "et quels moyens de paiement acceptent-ils ?"
     )
-    result, changed = remove_unrequested_directory_fields(KENYA_ANSWER, question_fr)
-    assert result == KENYA_ANSWER
+    result, changed = remove_unrequested_directory_fields(KENYA_ANSWER, question_fr, language="fr")
+    assert "$100 worth of products when joining" in result
+    assert "Mpesa" in result
     assert changed is False
