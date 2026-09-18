@@ -1318,6 +1318,7 @@ class AIOrchestrator:
         focused_answer, extra_fields_removed = remove_unrequested_directory_fields(
             chat_response.answer,
             user_question,
+            language=language,
         )
         if extra_fields_removed:
             chat_response = self._replace_answer(
@@ -1514,6 +1515,7 @@ class AIOrchestrator:
             completed_answer,
             field_sets,
             user_question,
+            language=language,
         )
         completed_answer, contact_fields = restore_missing_directory_contacts(
             completed_answer,
@@ -1542,7 +1544,7 @@ class AIOrchestrator:
             _support_contact_approved_fields(document)
             for document in matched_documents
         ]
-        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question)
+        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question, language=language)
         if not source_conflicts:
             return chat_response
 

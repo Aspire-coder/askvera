@@ -213,11 +213,17 @@ Never written: `app/retrieval/**`, `app/experimental/**`, `docs/evidence_first_v
 | Lane | Status | Criteria done | Tests | Limitations |
 |---|---|---|---|---|
 | A | active | 0 | - | - |
-| B | active | 0 | - | - |
+| B | **integrated** (`6b33f68`, wired by coordinator) | Non-English questions now reach field focusing: requested parts kept, unrelated fields removed, durations are not office hours, unknown language strips nothing; ten languages plus da/ru/sr in one vocabulary module | lane: 367 passed, exit 0; coordinator re-run exit 0; flake8 and diff-check clean | Restored fields keep the source's English label inside a non-English answer; compound nouns ("Büroadresse") and some Finnish gradation forms missed; pt/fi/no least-confident terms need native review; free-delivery threshold, eligibility and qualification periods are policy text, not directory fields (out of scope) |
 | C | active | 0 | - | - |
 | D | active | 0 | - | - |
 | E | active | 0 | - | - |
 | F | active | 0 | - | - |
 | G | active | 0 | - | - |
 
-Phase 2 complete: 0% (0 of 7 lanes integrated; Fable review pending).
+Phase 2 complete: 14% (1 of 7 lanes integrated; Fable review pending).
+
+Coordinator findings so far:
+- Lane B's report framed the defect as "multipart preservation fails in other languages". Probing showed the base kept EVERYTHING for non-English questions, so the real defect was unrelated fields being kept. The fix is correct; the framing was corrected here.
+- Lane B's orchestrator patch was malformed (bad hunk header); its three one-line edits were applied by hand.
+- flake8 C901: `_handle_scrubbed_chat` reached complexity 16 (max 15) at Phase 1 `dbc6a7a`, which I missed because Phase 1 never ran flake8. Lane E's wiring must extract the dependency paths and bring it back to 15 or below.
+- Codex conflict baseline: Codex's current orchestrator diff conflicts with this branch in 2 hunks, both at the Phase 1 retrieve() catch. Resolution is mechanical (Codex's token set before `try`, our `except`, Codex's `finally`).
