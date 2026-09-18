@@ -329,6 +329,200 @@ def test_lowercase_finnish_anaphoric_role_follow_up_without_a_place_keeps_contex
     assert provenance["status"] == "resolved_dependent_follow_up"
 
 
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän on United States mutta asuu ugandassa?",
+        "Entä jos hän asuu ugandassa mutta työskentelee South Africa?",
+        "Entä jos hän asuu ugandassa mutta työskentelee United Kingdom?",
+    ],
+)
+def test_multiword_direct_market_mention_is_collected_over_the_whole_message(follow_up: str) -> None:
+    """R03 correction 8 - Fable BLOCKER on correction 7.
+
+    A multi-word configured market name ("United States", "South Africa",
+    "United Kingdom") competing with a configured Finnish inessive form used
+    to be invisible, because the prior code called ``find_market_mentions``
+    once per token instead of over the whole message. Both markets must now
+    be collected, so the turn goes standalone rather than trusting Uganda.
+    """
+    orchestrator = AIOrchestrator()
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c8-multiword-conflict",
+    )
+
+    assert query == follow_up
+    assert "Tanzania" not in query
+    assert "Uganda" not in query
+    assert provenance == {"provenance": "runtime", "status": "not_dependent"}
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    ["Entä jos hän muuttaa ugandaan?", "Entä jos hän on kotoisin ugandasta?"],
+)
+def test_noninessive_finnish_case_forms_of_a_configured_market_are_not_trusted(follow_up: str) -> None:
+    """R03 correction 8 - Fable SHOULD-FIX on correction 7.
+
+    An illative ("ugandaan") or elative ("ugandasta") form of a configured
+    market is not the supported inessive form, so it must not silently keep
+    the prior Tanzania target with trusted provenance. The closed
+    locative/directional case-ending set now flags it as place-shaped
+    residue, so the turn keeps the anchor but is recorded as ``unresolved``
+    rather than a trusted resolved follow-up.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c8-noninessive-form",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert "Uganda" not in query
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
+def test_negated_finnish_residence_verb_is_never_trusted() -> None:
+    """R03 correction 8 - Fable NOTE on correction 7.
+
+    "Entä jos hän ei asu ugandassa?" ("what if he does NOT live in Uganda")
+    used to resolve trusted to Uganda even though negation inverts the claim.
+    The closed negation set now blocks trust whenever it scopes the
+    residence verb, so this fails closed as standalone rather than
+    asserting either Tanzania or Uganda.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän ei asu ugandassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c8-negated-residence",
+    )
+
+    assert query == follow_up
+    assert "Tanzania" not in query
+    assert "Uganda" not in query
+    assert provenance == {"provenance": "runtime", "status": "not_dependent"}
+
+
+def test_dead_accented_configured_key_now_matches() -> None:
+    """R03 correction 8 - Fable NOTE #4 on correction 7 (dead accented keys).
+
+    The configured inessive map used to normalize its keys without stripping
+    accents, while tokens are always accent-stripped, so an accented
+    single-word market alias such as "Argentína" could never match its own
+    "-ssa" form. Keys are now normalized exactly like the tokens they are
+    matched against, so this previously dead key resolves and its exact
+    accented span is replaced in the retrieval query.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän on Argentínassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c8-dead-accented-key",
+    )
+
+    assert "Argentina" in query
+    assert "Tanzania" not in query
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+def test_finnish_configured_market_matching_normalizes_accents_on_both_sides() -> None:
+    """A capitalized accented configured form ("Ugandassa" with stray accents
+
+    normalized away) still resolves the same as the plain-ASCII form, proving
+    the fix generalizes rather than special-casing one market's alias.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän on Ugandassa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c8-accent-normalization-control",
+    )
+
+    assert "Uganda" in query
+    assert "Tanzania" not in query
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+def test_finnish_anaphoric_follow_up_asking_about_finland_is_reported_standalone() -> None:
+    """"Entä jos hän asuu Suomessa?" ("what if he lives in Finland").
+
+    "Suomessa" is not a configured single-word inessive alias for Finland
+    (the configured name is "Finland"), so it is an unrecognised capitalized
+    place. Per the earned-trust rule this fails closed exactly like any other
+    capitalized unknown place: standalone, dropping the Tanzania anchor
+    rather than guessing at a market. This is the R03 correction 8 answer to
+    the acceptance criterion asking to state Finland's outcome explicitly.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän asuu Suomessa?"
+    history = _history("How does Forever Tanzania pay bonuses to FBOs who live outside the country?")
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, history, "r03", session_id="r03-c8-finland-capitalized",
+    )
+
+    assert query == follow_up
+    assert "Tanzania" not in query
+    assert provenance == {"provenance": "runtime", "status": "not_dependent"}
+
+
+def test_finnish_possessive_inessive_token_is_not_mistaken_for_illative_residue() -> None:
+    """"tiimissään" ("in their team") ends in a doubled vowel plus "n" just
+
+    like a short illative place form, but it is an inessive-possessive
+    ending, not a place. The case-ending heuristic excludes an immediately
+    preceding "ss" for exactly this reason, so this configured-language role
+    follow-up (with no place at all) keeps its trusted dependent status
+    instead of being downgraded by a false-positive residue match.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = (
+        "Entä jos hän on Sponsored Recognized Manager ja hänen tiimissään on "
+        "ensimmäisen sukupolven Recognized Managereita?"
+    )
+    prior = "Mitä Suomessa tapahtuu FBO:lle, joka ei ole ostanut mitään 36 kuukauteen?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c8-possessive-inessive",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+def test_direct_market_mention_alone_keeps_context_without_trusted_market_swap() -> None:
+    """A bare nominative market mention with no configured inessive support
+
+    ("Entä jos hän on Kenya?") is a name mention, not a residence claim by
+    itself, so the earned-trust rule records this Finnish follow-up as
+    ``unresolved`` rather than a trusted resolved dependent follow-up, even
+    though the unrelated, pre-existing ``_replace_directory_target`` step
+    still swaps the anchor's named market the same way it would for any
+    other language's direct market mention.
+    """
+    orchestrator = AIOrchestrator()
+    follow_up = "Entä jos hän on Kenya?"
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c8-direct-mention-alone",
+    )
+
+    assert "Kenya" in query
+    assert "Tanzania" not in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
+
+
 def test_audit_mode_rejects_a_multiturn_pack_before_running_the_audit(monkeypatch, tmp_path, capsys) -> None:
     pack = {"cases": [{"id": "stored-turn", "conversation": [{"question": "Earlier question"}]}]}
     monkeypatch.setattr(capture, "_load_pack", lambda *_: (pack, "pack-hash"))
