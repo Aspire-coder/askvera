@@ -23,27 +23,44 @@ patterns from this table alone.
 
 How the terms were chosen
 --------------------------
-Each language's terms are direct, common-register translations of the English
-list, covering the verb, the deed noun and (where the language commonly uses
-one) the agent/process noun a policy or directory sentence would use for that
-stage - e.g. English "deliver / delivered / delivery"; French "livrer / livré /
-livraison". They were not extracted from a specific market's live corpus, so
-the coverage is deliberately generous rather than exhaustively verified against
-every one of Forever Living's per-market documents.
+Each stage's cues name the PROCESS EVENT or period itself - a verb, its
+participle, or the stage's own generic noun ("approval", "processing",
+"payment date", "settlement", "waiting period") - never the TOPIC a sentence
+happens to be about. This distinction is deliberate and was tightened after an
+integration review found the first draft mixing the two: a term such as
+"sponsor change" or "application" names WHAT is being approved, processed or
+waited out, not the stage itself, and a wrong answer naturally states its
+topic correctly while getting the stage wrong ("Your sponsor change will be
+processed within 6 months" - topic "sponsor change" is right, stage should be
+"waiting period", not "processing"). Keeping a topic word as a cue for one
+stage let that stage's own vocabulary appear, by coincidence, in a sentence
+about a completely different (and wrong) stage, which made the classifier see
+two different stages and back off as unclassifiable - silently letting the
+exact substitution this module exists to catch through. Each language's terms
+are direct, common-register translations of the English list; they were not
+extracted from a specific market's live corpus, so the coverage is
+deliberately generous rather than exhaustively verified against every one of
+Forever Living's per-market documents.
 
 Limits, and the least confident entries
 ----------------------------------------
-- "processing" and "approval" overlap in ordinary usage in every language here
-  (an application is "processed" as part of being "approved"); the classifier
-  treats a clause naming both as ambiguous (see `_classify_stage`) rather than
-  guessing, by design.
+- "processing" and "approval" still name closely related events (an
+  application is commonly "processed" as part of being "approved"), but with
+  topic nouns removed, only a clause that actually uses BOTH process verbs
+  ("processed" and "approved" together) is now ambiguous; a clause naming a
+  topic plus one process verb no longer is.
 - "payment" and "settlement" are the two stages this list is least confident
   about, because a single market document may use one generic verb ("betalen",
   "pay", "zahlen") for both crediting a distributor's bonus and a bank transfer
-  clearing. The terms below try to keep "payment" to the bonus/commission being
-  paid out and "settlement" to money arriving in a bank account, but a plain
-  "paid" / "betaald" / "payé" with no further qualifier is not listed under
-  either stage on purpose, because it cannot be told apart from context alone.
+  clearing. The terms below try to keep "payment" to the date/act of paying out
+  and "settlement" to money being credited or arriving in a bank account, but a
+  plain "paid" / "betaald" / "payé" with no further qualifier is not listed
+  under either stage on purpose, because it cannot be told apart from context
+  alone. Delivery's bare "arrive"/"arrival" (a parcel arriving) and
+  settlement's "arrive in your account" (funds arriving) share the same verb
+  by design; a sentence using the fuller settlement phrase still matches both
+  and is treated as unclassifiable rather than guessed, which is the safe
+  direction.
 - Finnish, Norwegian and Swedish terms for "payment", "settlement" and
   "waiting_period" are translated from English rather than sourced from a
   native policy document, so they are the entries most likely to need a native
@@ -68,30 +85,24 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "arrive", "arrives", "arrival", "courier",
         ),
         "approval": (
-            "approval", "approve", "approves", "approved", "approving",
-            "application", "apply", "applying", "applicant",
-            "registration", "register", "registers", "registered", "registering",
-            "qualification", "qualify", "qualifies", "qualified", "qualifying",
+            "approved", "approval", "approve", "approves", "approving",
+            "accepted", "confirmed as approved",
         ),
         "processing": (
-            "processing", "process", "processes", "processed",
-            "order processing", "handling", "handled",
+            "processing", "process", "processes", "processed", "handling", "handled",
         ),
         "payment": (
-            "bonus payment", "commission payment", "payment date", "pay date",
-            "payout", "paid out", "bonus is paid", "commissions are paid",
-            "bonus payment date",
+            "payment date", "pay date", "paid out", "payout", "paid", "pays", "paying",
         ),
         "settlement": (
-            "bank transfer", "bank settlement", "settle", "settlement",
-            "settled", "clearing", "cleared", "arrive in your account",
-            "arrives in your account", "credited to your account",
-            "funds arrive", "bank account",
+            "settlement", "settle", "settles", "settled", "credited", "credit",
+            "clear", "clears", "cleared", "clearing", "arrive in your account",
+            "arrives in your account", "funds arrive",
         ),
         "waiting_period": (
-            "waiting period", "cooling-off", "cooling off period",
-            "sponsor change", "change of sponsor", "changing sponsor",
-            "re-application", "reapplication", "re-apply", "reapply", "reapplying",
+            "waiting period", "wait", "waits", "waited", "waiting", "must wait",
+            "cooling-off", "cooling off period", "not eligible until",
+            "not permitted until", "before you may",
         ),
         "office_hours": (
             "office hours", "business hours", "opening hours", "opening times",
@@ -104,28 +115,24 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "expédition", "expédié", "expédiée", "arrivée", "arriver",
         ),
         "approval": (
-            "approbation", "approuver", "approuvé", "approuvée",
-            "demande", "candidature", "postuler",
-            "inscription", "s'inscrire", "inscrit", "inscrite",
-            "qualification", "qualifier", "qualifié", "qualifiée",
+            "approuvé", "approuvée", "approuvés", "approuvées", "approbation",
+            "approuver", "accepté", "acceptée", "confirmé comme approuvé",
         ),
         "processing": (
             "traitement", "traiter", "traité", "traitée",
-            "traitement de la commande",
         ),
         "payment": (
-            "paiement de la prime", "paiement de la commission",
-            "date de paiement", "versement", "versé", "versée",
-            "la prime est versée",
+            "date de paiement", "date de versement", "versement", "versé", "versée",
+            "payé", "payée",
         ),
         "settlement": (
-            "virement bancaire", "règlement bancaire", "crédité sur votre compte",
-            "créditée sur votre compte", "arrivée des fonds", "compte bancaire",
+            "règlement", "réglé", "réglée", "crédité", "créditée",
+            "créditée sur votre compte", "créditée à votre compte",
+            "arrivée des fonds", "les fonds arrivent",
         ),
         "waiting_period": (
-            "période d'attente", "délai de carence", "changement de parrain",
-            "changement de sponsor", "réinscription", "nouvelle demande",
-            "nouvelle candidature",
+            "période d'attente", "attendre", "doit attendre", "délai de carence",
+            "pas éligible avant", "avant de pouvoir",
         ),
         "office_hours": (
             "heures d'ouverture", "heures de bureau", "horaires d'ouverture",
@@ -138,26 +145,23 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "ankunft", "ankommen", "ankommt",
         ),
         "approval": (
-            "genehmigung", "genehmigen", "genehmigt",
-            "antrag", "bewerbung", "bewerben",
-            "registrierung", "registrieren", "registriert",
-            "qualifikation", "qualifizieren", "qualifiziert",
+            "genehmigt", "genehmigung", "genehmigen", "akzeptiert",
+            "bestätigt als genehmigt",
         ),
         "processing": (
             "bearbeitung", "bearbeiten", "bearbeitet",
-            "auftragsbearbeitung",
         ),
         "payment": (
-            "bonuszahlung", "provisionszahlung", "zahlungsdatum",
-            "auszahlung", "ausgezahlt", "wird ausgezahlt",
+            "zahlungsdatum", "auszahlung", "ausgezahlt", "wird ausgezahlt",
+            "bezahlt",
         ),
         "settlement": (
-            "banküberweisung", "gutschrift", "gutgeschrieben",
-            "ihrem konto gutgeschrieben", "geldeingang", "bankkonto",
+            "abrechnung", "abgerechnet", "gutschrift", "gutgeschrieben",
+            "ihrem konto gutgeschrieben", "geldeingang",
         ),
         "waiting_period": (
-            "wartezeit", "sperrfrist", "sponsorwechsel", "sponsorenwechsel",
-            "neuantrag", "erneute bewerbung", "erneute registrierung",
+            "wartezeit", "warten", "muss warten", "sperrfrist",
+            "nicht berechtigt bis", "bevor sie können",
         ),
         "office_hours": (
             "öffnungszeiten", "geschäftszeiten", "bürozeiten",
@@ -169,25 +173,23 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "aankomst", "aankomen",
         ),
         "approval": (
-            "goedkeuring", "goedkeuren", "goedgekeurd",
-            "aanvraag", "aanvragen", "aanmelding", "aanmelden",
-            "registratie", "registreren", "geregistreerd",
-            "kwalificatie", "kwalificeren", "gekwalificeerd",
+            "goedgekeurd", "goedkeuring", "goedkeuren", "geaccepteerd",
+            "bevestigd als goedgekeurd",
         ),
         "processing": (
-            "verwerking", "verwerken", "verwerkt", "orderverwerking",
+            "verwerking", "verwerken", "verwerkt",
         ),
         "payment": (
-            "bonusbetaling", "commissiebetaling", "betaaldatum",
-            "uitbetaling", "uitbetaald", "wordt uitbetaald",
+            "betaaldatum", "uitbetaling", "uitbetaald", "wordt uitbetaald",
+            "betaald",
         ),
         "settlement": (
-            "bankoverschrijving", "storting", "bijgeschreven",
-            "op uw rekening bijgeschreven", "bankrekening",
+            "verrekening", "verrekend", "bijgeschreven", "storting",
+            "op uw rekening bijgeschreven",
         ),
         "waiting_period": (
-            "wachttijd", "wachtperiode", "sponsorwissel", "wisselen van sponsor",
-            "herregistratie", "opnieuw aanmelden", "nieuwe aanvraag",
+            "wachttijd", "wachten", "moet wachten", "wachtperiode",
+            "niet gerechtigd tot", "voordat u kunt",
         ),
         "office_hours": (
             "openingstijden", "kantooruren", "werktijden",
@@ -199,26 +201,22 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "spedizione", "spedito", "spedita", "arrivo", "arrivare",
         ),
         "approval": (
-            "approvazione", "approvare", "approvato", "approvata",
-            "domanda", "richiesta", "iscrizione", "iscriversi",
-            "registrazione", "registrare", "registrato",
-            "qualificazione", "qualificarsi", "qualificato",
+            "approvato", "approvata", "approvazione", "approvare", "accettato",
+            "confermato come approvato",
         ),
         "processing": (
             "elaborazione", "elaborare", "elaborato", "elaborata",
-            "elaborazione dell'ordine",
         ),
         "payment": (
-            "pagamento del bonus", "pagamento della commissione",
-            "data di pagamento", "versamento", "versato", "versata",
+            "data di pagamento", "versamento", "versato", "versata", "pagato",
         ),
         "settlement": (
-            "bonifico bancario", "accredito", "accreditato", "accreditata",
-            "accreditato sul tuo conto", "arrivo dei fondi", "conto bancario",
+            "saldo", "saldato", "accredito", "accreditato", "accreditata",
+            "accreditato sul tuo conto", "arrivo dei fondi",
         ),
         "waiting_period": (
-            "periodo di attesa", "periodo di carenza", "cambio di sponsor",
-            "nuova domanda", "nuova iscrizione", "nuova registrazione",
+            "periodo di attesa", "attendere", "deve attendere",
+            "periodo di carenza", "non ammissibile fino a", "prima di poter",
         ),
         "office_hours": (
             "orario di apertura", "orari di ufficio", "orario di lavoro",
@@ -230,25 +228,22 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "envio", "enviado", "enviada", "chegada", "chegar",
         ),
         "approval": (
-            "aprovação", "aprovar", "aprovado", "aprovada",
-            "candidatura", "inscrição", "inscrever",
-            "registo", "registro", "registrar", "registado", "registrado",
-            "qualificação", "qualificar", "qualificado", "qualificada",
+            "aprovado", "aprovada", "aprovação", "aprovar", "aceite", "aceito",
+            "confirmado como aprovado",
         ),
         "processing": (
             "processamento", "processar", "processado", "processada",
         ),
         "payment": (
-            "pagamento do bónus", "pagamento do bônus", "pagamento da comissão",
-            "data de pagamento", "pagamento efetuado", "é pago", "é paga",
+            "data de pagamento", "pagamento efetuado", "é pago", "é paga", "pago",
         ),
         "settlement": (
-            "transferência bancária", "crédito na conta", "creditado na sua conta",
-            "creditada na sua conta", "chegada dos fundos", "conta bancária",
+            "liquidação", "liquidado", "crédito na conta", "creditado",
+            "creditado na sua conta", "creditada na sua conta", "chegada dos fundos",
         ),
         "waiting_period": (
-            "período de espera", "período de carência", "mudança de patrocinador",
-            "nova candidatura", "reinscrição", "novo registo", "novo registro",
+            "período de espera", "esperar", "deve esperar", "período de carência",
+            "não elegível até", "antes de poder",
         ),
         "office_hours": (
             "horário de funcionamento", "horário de expediente",
@@ -261,26 +256,22 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "envío", "enviado", "enviada", "llegada", "llegar",
         ),
         "approval": (
-            "aprobación", "aprobar", "aprobado", "aprobada",
-            "solicitud", "solicitar", "inscripción", "inscribirse",
-            "registro", "registrar", "registrado", "registrada",
-            "calificación", "calificar", "calificado", "calificada",
+            "aprobado", "aprobada", "aprobación", "aprobar", "aceptado",
+            "confirmado como aprobado",
         ),
         "processing": (
             "procesamiento", "procesar", "procesado", "procesada",
         ),
         "payment": (
-            "pago del bono", "pago de la comisión", "fecha de pago",
-            "desembolso", "se paga", "se abona el bono",
+            "fecha de pago", "desembolso", "se paga", "pagado",
         ),
         "settlement": (
-            "transferencia bancaria", "abono", "abonado en su cuenta",
-            "abonada en su cuenta", "llegada de los fondos", "cuenta bancaria",
+            "liquidación", "liquidado", "abono", "abonado", "abonado en su cuenta",
+            "abonada en su cuenta", "llegada de los fondos",
         ),
         "waiting_period": (
-            "período de espera", "periodo de espera", "período de carencia",
-            "periodo de carencia", "cambio de patrocinador", "nueva solicitud",
-            "reinscripción",
+            "período de espera", "periodo de espera", "esperar", "debe esperar",
+            "no elegible hasta", "antes de poder",
         ),
         "office_hours": (
             "horario de oficina", "horario de atención", "horas de apertura",
@@ -292,24 +283,20 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "saapuminen", "saapua",
         ),
         "approval": (
-            "hyväksyminen", "hyväksyä", "hyväksytty",
-            "hakemus", "hakea",
-            "rekisteröinti", "rekisteröityä", "rekisteröity",
-            "pätevyys", "kelpoisuus",
+            "hyväksytty", "hyväksyminen", "hyväksyä", "hyväksytään",
         ),
         "processing": (
-            "käsittely", "käsitellä", "käsitelty", "tilauksen käsittely",
+            "käsittely", "käsitellä", "käsitelty",
         ),
         "payment": (
-            "bonusmaksu", "palkkiomaksu", "maksupäivä", "maksettu", "maksetaan",
+            "maksupäivä", "maksettu", "maksetaan",
         ),
         "settlement": (
-            "pankkisiirto", "tilillepano", "tilille maksettu",
-            "varojen saapuminen", "pankkitili",
+            "hyvitys", "hyvitetty", "tilille maksettu", "varojen saapuminen",
         ),
         "waiting_period": (
-            "odotusaika", "sponsorin vaihto", "uusi hakemus",
-            "uudelleen rekisteröityminen",
+            "odotusaika", "odottaa", "on odotettava", "ei oikeutettu ennen",
+            "ennen kuin voi",
         ),
         "office_hours": (
             "aukioloajat", "toimistoaika",
@@ -321,24 +308,21 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "ankomst", "ankomme",
         ),
         "approval": (
-            "godkjenning", "godkjenne", "godkjent",
-            "søknad", "søke",
-            "registrering", "registrere", "registrert",
-            "kvalifikasjon", "kvalifisere", "kvalifisert",
+            "godkjent", "godkjenning", "godkjenne", "akseptert",
+            "bekreftet som godkjent",
         ),
         "processing": (
-            "behandling", "behandle", "behandlet", "bestillingsbehandling",
+            "behandling", "behandle", "behandlet",
         ),
         "payment": (
-            "bonusutbetaling", "provisjonsutbetaling", "betalingsdato",
-            "utbetalt", "utbetales",
+            "betalingsdato", "utbetalt", "utbetales",
         ),
         "settlement": (
-            "bankoverføring", "godskrevet", "innbetalt til kontoen",
-            "midlene ankommer", "bankkonto",
+            "oppgjør", "oppgjort", "godskrevet", "innbetalt til kontoen",
+            "midlene ankommer",
         ),
         "waiting_period": (
-            "ventetid", "sponsorbytte", "ny søknad", "ny registrering",
+            "ventetid", "vente", "må vente", "ikke berettiget før", "før du kan",
         ),
         "office_hours": (
             "åpningstider", "kontortid",
@@ -350,24 +334,21 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "ankomst", "ankomme",
         ),
         "approval": (
-            "godkjenning", "godkjenne", "godkjent",
-            "søknad", "søke",
-            "registrering", "registrere", "registrert",
-            "kvalifikasjon", "kvalifisere", "kvalifisert",
+            "godkjent", "godkjenning", "godkjenne", "akseptert",
+            "bekreftet som godkjent",
         ),
         "processing": (
-            "behandling", "behandle", "behandlet", "bestillingsbehandling",
+            "behandling", "behandle", "behandlet",
         ),
         "payment": (
-            "bonusutbetaling", "provisjonsutbetaling", "betalingsdato",
-            "utbetalt", "utbetales",
+            "betalingsdato", "utbetalt", "utbetales",
         ),
         "settlement": (
-            "bankoverføring", "godskrevet", "innbetalt til kontoen",
-            "midlene ankommer", "bankkonto",
+            "oppgjør", "oppgjort", "godskrevet", "innbetalt til kontoen",
+            "midlene ankommer",
         ),
         "waiting_period": (
-            "ventetid", "sponsorbytte", "ny søknad", "ny registrering",
+            "ventetid", "vente", "må vente", "ikke berettiget før", "før du kan",
         ),
         "office_hours": (
             "åpningstider", "kontortid",
@@ -379,24 +360,22 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "ankomst", "anlända",
         ),
         "approval": (
-            "godkännande", "godkänna", "godkänd",
-            "ansökan", "ansöka",
-            "registrering", "registrera", "registrerad",
-            "kvalifikation", "kvalificera", "kvalificerad",
+            "godkänd", "godkännande", "godkänna", "accepterad",
+            "bekräftad som godkänd",
         ),
         "processing": (
-            "behandling", "behandla", "behandlad", "orderbehandling",
+            "behandling", "behandla", "behandlad",
         ),
         "payment": (
-            "bonusutbetalning", "provisionsutbetalning", "betalningsdatum",
-            "utbetald", "utbetalas",
+            "betalningsdatum", "utbetald", "utbetalas",
         ),
         "settlement": (
-            "banköverföring", "insättning", "insatt på ditt konto",
-            "medlen anländer", "bankkonto",
+            "avräkning", "avräknad", "krediterad", "insatt på ditt konto",
+            "medlen anländer",
         ),
         "waiting_period": (
-            "väntetid", "sponsorbyte", "ny ansökan", "ny registrering",
+            "väntetid", "vänta", "måste vänta", "inte berättigad förrän",
+            "innan du kan",
         ),
         "office_hours": (
             "öppettider", "kontorstid",

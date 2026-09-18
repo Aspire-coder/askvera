@@ -32,6 +32,8 @@ then what it returns now. Reproduced entirely offline, no model call.
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.validation.validators.numeric_grounding_validator import (
     remove_unsupported_numeric_sentences,
     unsupported_numeric_claims,
@@ -121,6 +123,109 @@ def test_duration_grounds_against_a_delivery_duration() -> None:
     answer = "Your order is delivered within 48 hours."
     source = "Orders are delivered within 48 hours of purchase."
     assert _claim_texts(answer, source) == []
+
+
+# --- Topic vs. stage: a sentence naming its correct topic and the wrong stage
+# verb must still be caught, and one naming its topic with the RIGHT stage verb
+# must still pass. Found by coordinator review of f90318a: the first vocabulary
+# draft mixed topic nouns ("sponsor change", "application", "registration",
+# "qualification") into stage cue lists. A wrong answer naturally states its
+# topic correctly while getting the stage wrong, so a sentence like "Your
+# sponsor change will be processed..." named BOTH a waiting_period topic noun
+# ("sponsor change") and a processing verb ("processed"), which `_classify_stage`
+# read as two different stages and, being conservative on purpose, refused to
+# guess between - silently letting the exact substitution through.
+# Fixed by keeping topic nouns out of every stage's cue list entirely: cues now
+# name only the process event/verb or the stage's own generic noun, never what
+# the process is about. Re-verified as failing on this table's own predecessor
+# (commit f90318a) for every case below.
+
+def test_topic_named_correctly_with_wrong_stage_verb_is_still_caught() -> None:
+    """The coordinator's own example. "Sponsor change" is the correct topic; the
+    source states it as a waiting_period, and the answer wrongly reports it as
+    processing. Before the topic-noun fix: unsupported_numeric_claims returned
+    [] (the substitution passed), because "sponsor change" was itself listed as
+    a waiting_period cue, so the answer's sentence named both "processed"
+    (processing) and "sponsor change" (waiting_period, by the old table) and
+    was read as unclassifiable."""
+    answer = "Your sponsor change will be processed within 6 months."
+    source = "A sponsor change requires a waiting period of 6 months."
+    assert _claim_texts(answer, source) == ["6"]
+
+
+@pytest.mark.parametrize("answer,source", [
+    (
+        "Votre changement de parrain sera traité dans un délai de 6 mois.",
+        "Un changement de parrain nécessite une période d'attente de 6 mois.",
+    ),
+    (
+        "Ihr Sponsorwechsel wird innerhalb von 6 Monaten bearbeitet.",
+        "Ein Sponsorwechsel erfordert eine Wartezeit von 6 Monaten.",
+    ),
+    (
+        "Uw sponsorwissel wordt binnen 6 maanden verwerkt.",
+        "Een sponsorwissel vereist een wachttijd van 6 maanden.",
+    ),
+    (
+        "Su cambio de patrocinador será procesado en un plazo de 6 meses.",
+        "Un cambio de patrocinador requiere un período de espera de 6 meses.",
+    ),
+    (
+        "Il tuo cambio di sponsor sarà elaborato entro 6 mesi.",
+        "Un cambio di sponsor richiede un periodo di attesa di 6 mesi.",
+    ),
+])
+def test_topic_named_correctly_with_wrong_stage_verb_is_caught_in_other_languages(
+    answer: str, source: str
+) -> None:
+    """The same sponsor-change/processed-vs-waiting-period substitution as above,
+    in French, German, Dutch, Spanish and Italian."""
+    assert _claim_texts(answer, source) == ["6"]
+
+
+def test_waiting_to_change_sponsor_still_grounds_a_waiting_period_answer() -> None:
+    """A source phrased as "you must wait" (a waiting_period cue) still grounds an
+    answer that restates it as "a waiting period", even though both sentences
+    also name the same "changing sponsor" topic - the topic itself is no longer
+    a cue for any stage, so it cannot create a false stage match OR a false
+    mismatch."""
+    answer = "There is a waiting period of 6 months before changing sponsor."
+    source = "You must wait 6 months before changing sponsor."
+    assert _claim_texts(answer, source) == []
+
+
+@pytest.mark.parametrize("answer,source", [
+    (
+        "Your application will be approved within 5 days.",
+        "Applications are approved within 5 days.",
+    ),
+    (
+        "Your registration will be approved within 5 days.",
+        "Registrations are approved within 5 days.",
+    ),
+])
+def test_topic_noun_alone_with_the_correct_stage_verb_still_grounds(answer: str, source: str) -> None:
+    """A sentence naming its topic ("application", "registration") plus the
+    CORRECT stage verb ("approved") on both sides must still ground - the topic
+    noun is inert for stage purposes; only the verb decides the stage, and here
+    it agrees."""
+    assert _claim_texts(answer, source) == []
+
+
+def test_processing_time_does_not_ground_an_approval_time_claim_deliberate_trade_off() -> None:
+    """Deliberate trade-off, confirmed with the coordinator: the brief lists
+    processing and approval as distinct stages, and a record stating how long
+    PROCESSING takes does not state how long approval takes, even when an
+    application is processed as a normal part of being approved. An answer that
+    claims "approved within 5 working days" for a source that only ever states
+    "processed within 5 working days" is not shown to be true by that source,
+    so this repository keeps it flagged rather than treating "processed" and
+    "approved" as interchangeable. This does remove a plausible-looking
+    sentence when a model conflates the two; the coordinator asked that this be
+    pinned rather than loosened."""
+    answer = "Your application will be approved within 5 working days."
+    source = "Applications are processed within 5 working days."
+    assert _claim_texts(answer, source) == ["5"]
 
 
 # --- Non-timing numbers: behaviour must not change ---------------------------
