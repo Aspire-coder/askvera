@@ -16,6 +16,13 @@ class RiskPolicyMetadata:
     enabled: bool
     risk_level: RiskLevel
     action: PolicyAction
+    is_claim_topic: bool = False
+    """True for a policy that flags medical/income claim vocabulary.
+
+    Such a policy is suppressed on the answer-side pass when the caller has
+    established that the generated answer is explaining a reviewed policy
+    (see RiskContext.allow_claim_topics and RiskEngine.evaluate).
+    """
 
 
 class RiskPolicy(Protocol):

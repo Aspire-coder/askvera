@@ -15,6 +15,7 @@ class MedicalClaimPolicy:
         enabled=True,
         risk_level=RiskLevel.HIGH,
         action=PolicyAction.WARN,
+        is_claim_topic=True,
     )
     phrases = tuple(DENIED_TOPICS["medical_claim"])
 

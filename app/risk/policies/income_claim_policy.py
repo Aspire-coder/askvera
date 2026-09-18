@@ -505,6 +505,7 @@ class IncomeClaimPolicy:
         enabled=True,
         risk_level=RiskLevel.HIGH,
         action=PolicyAction.REFUSE,
+        is_claim_topic=True,
     )
     phrases = tuple(DENIED_TOPICS["income_claim"])
 
