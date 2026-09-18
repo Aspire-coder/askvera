@@ -667,12 +667,51 @@ def _outline_text_query(message: str, country: str, language: str) -> dict[str, 
     return query
 
 
+# R05/N6 (2026-09-18): a country named in a question is not, by itself,
+# evidence that the question wants directory/sponsoring content. The Norway
+# former-FBO/downline case names the country only ("Forever Norge") for an
+# ordinary company-policy question; unconditionally awarding the >= 6.0
+# genuine-target-match bonus below let a directory record (score ~10.1)
+# bury the correct policy clause (~1.4) with no competing evidence. Directory
+# protection now also requires a compatible runtime scope intent - the
+# deterministic decision `_runtime_scope_intent` (app/retrieval/providers.py)
+# already produces for this exact request, reusing the same classifier that
+# already used to decide `include_global_documents`. "policy" and "ambiguous"
+# are the two intents that mean the country mention is not a genuine
+# directory/sponsoring signal; every other intent (including "directory",
+# "international_sponsoring", and "unknown" - the planner-disabled/
+# planner-unavailable fallback, which already documented that it preserves
+# directory availability) keeps the prior, permissive scoring. Callers that
+# never computed a runtime intent (offline tests constructing rows/scores
+# directly) pass `None` and keep the prior behaviour unconditionally - this
+# is an additive gate, not a replacement classifier.
+_DIRECTORY_PROTECTION_SUPPRESSED_INTENTS = frozenset({"policy", "ambiguous"})
+
+
+def _directory_protection_compatible(runtime_scope_intent: dict[str, str] | None) -> bool:
+    """True unless a runtime-produced scope intent rules out directory protection.
+
+    See the module note above `_DIRECTORY_PROTECTION_SUPPRESSED_INTENTS`.
+    """
+    if not runtime_scope_intent:
+        return True
+    return runtime_scope_intent.get("intent") not in _DIRECTORY_PROTECTION_SUPPRESSED_INTENTS
+
+
 def _directory_record_country_score(
     message: str,
     row: dict[str, Any],
     target_country_names: set[str] | None = None,
+    runtime_scope_intent: dict[str, str] | None = None,
 ) -> float:
-    """Reward directory records whose own country metadata matches the query."""
+    """Reward directory records whose own country metadata matches the query.
+
+    The strong, explicit-target-match bonuses (>= 6.0) additionally require a
+    directory-compatible runtime scope intent when one was computed for this
+    request - see `_directory_protection_compatible`. This never affects the
+    wrong-country penalty or the weak generic fallback scores below, only
+    whether an explicitly resolved target is allowed to dominate the merge.
+    """
     if row.get("document_type") not in GLOBAL_DIRECTORY_DOCUMENT_TYPES:
         return 0.0
     metadata = dict(row.get("metadata") or {})
@@ -690,13 +729,14 @@ def _directory_record_country_score(
         record_segments = {
             _normalize_text(part) for part in str(metadata.get("record_country") or "").split("/") if part.strip()
         }
+        directory_compatible = _directory_protection_compatible(runtime_scope_intent)
         if record_country in normalized_targets or record_segments & normalized_targets:
-            return 8.0
+            return 8.0 if directory_compatible else 0.0
         # A country explicitly named in the question outranks the selected
         # widget market. This matters for global-directory questions such as
         # "What is Gambia's telephone number?" asked from a US widget.
         if record_country in normalized_message:
-            return 6.0
+            return 6.0 if directory_compatible else 0.0
         return -4.0
     if record_country in normalized_message:
         return 2.4
@@ -810,11 +850,16 @@ def _dominant_directory_row(
     message: str,
     raw_rows: list[tuple[dict[str, Any], float]],
     target_country_names: set[str] | None,
+    runtime_scope_intent: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], float] | None:
     """Return the top-scoring raw candidate if it is a decisively dominant,
     country-matched global directory record answering a directory-detail
     question; otherwise None. See the guard documentation above for the exact
-    thresholds and how they were calibrated."""
+    thresholds and how they were calibrated. `runtime_scope_intent`, when
+    provided, must also be directory-compatible (R05/N6, see the note above
+    `_DIRECTORY_PROTECTION_SUPPRESSED_INTENTS`) - the country_bonus check
+    below already enforces this because it recomputes the score through
+    `_directory_record_country_score`, which applies the same gate."""
     if not raw_rows:
         return None
     if not _directory_guard_topic_match(message):
@@ -826,7 +871,9 @@ def _dominant_directory_row(
         return None
     if top_score < _DIRECTORY_DOMINANCE_MIN_SCORE:
         return None
-    country_bonus = _directory_record_country_score(message, top_row, target_country_names)
+    country_bonus = _directory_record_country_score(
+        message, top_row, target_country_names, runtime_scope_intent
+    )
     if country_bonus < _DIRECTORY_DOMINANCE_MIN_COUNTRY_BONUS:
         return None
     rest_scores = [score for index, (_row, score) in enumerate(raw_rows) if index != top_index]
@@ -841,6 +888,7 @@ def _restore_dominant_directory_record(
     raw_rows: list[tuple[dict[str, Any], float]],
     rows: list[tuple[dict[str, Any], float]],
     target_country_names: set[str] | None,
+    runtime_scope_intent: dict[str, str] | None = None,
 ) -> list[tuple[dict[str, Any], float]]:
     """Deterministically undo the selector demoting a dominant directory row.
 
@@ -856,7 +904,7 @@ def _restore_dominant_directory_record(
     """
     if not rows:
         return rows
-    dominant = _dominant_directory_row(message, raw_rows, target_country_names)
+    dominant = _dominant_directory_row(message, raw_rows, target_country_names, runtime_scope_intent)
     if dominant is None:
         return rows
     dominant_row, _dominant_score = dominant
@@ -1886,6 +1934,7 @@ class OpenSearchSectionProvider:
             ranking_queries=typo_ranking_queries,
             prefer_outline=search_plan.prefer_outline,
             target_country_names=target_country_names,
+            runtime_scope_intent=search_plan.runtime_scope_intent,
         )
         if self.enable_bedrock_rerank:
             from .bedrock_reranker import rerank_rows
@@ -1909,7 +1958,9 @@ class OpenSearchSectionProvider:
         # `selector_applied` can flip True->False when the restored row was
         # not one of the selector's own picks). That is intentional, not a
         # bug: the row should report its own truth, not the selector's.
-        rows = _restore_dominant_directory_record(message, raw_rows, rows, target_country_names)
+        rows = _restore_dominant_directory_record(
+            message, raw_rows, rows, target_country_names, search_plan.runtime_scope_intent
+        )
         rows = _bind_selected_parent_children(rows)
 
         eligible_rows = self._finalize_eligible_rows(rows)
@@ -2066,6 +2117,7 @@ class OpenSearchSectionProvider:
         ranking_queries: list[str] | None = None,
         prefer_outline: bool = False,
         target_country_names: set[str] | None = None,
+        runtime_scope_intent: dict[str, str] | None = None,
     ) -> list[tuple[dict[str, Any], float]]:
         merged: dict[str, dict[str, Any]] = {}
         for hit in text_hits:
@@ -2109,7 +2161,7 @@ class OpenSearchSectionProvider:
         for row in merged.values():
             original_score = (
                 _source_score(row, message)
-                + _directory_record_country_score(message, row, target_country_names)
+                + _directory_record_country_score(message, row, target_country_names, runtime_scope_intent)
             )
             best_score = original_score
             ranking_query_used = message
@@ -2127,7 +2179,7 @@ class OpenSearchSectionProvider:
             )
             for ranking_query in candidate_ranking_queries:
                 candidate_score = _source_score(row, ranking_query) + _directory_record_country_score(
-                    ranking_query, row, target_country_names
+                    ranking_query, row, target_country_names, runtime_scope_intent
                 )
                 if candidate_score > best_score:
                     best_score = candidate_score

@@ -662,7 +662,7 @@ def _planned_retrieval_plan(
         # this scope from shared market configuration so planner omissions do
         # not hide approved cross-market evidence.
         # Imported here: opensearch_sections imports this module at load time.
-        from .opensearch_sections import _directory_target_country_names
+        from .opensearch_sections import _directory_guard_topic_match, _directory_target_country_names
 
         named_markets = find_market_mentions(message)
         shared_office_markets = find_shared_office_record_countries(message)
@@ -674,6 +674,17 @@ def _planned_retrieval_plan(
             and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
             and bool(_directory_target_country_names(message, country))
         )
+        # R05/N6: the same topical gate that already decides whether the
+        # post-selector dominance guard may fire (`_directory_guard_topic_match`
+        # - directory/contact/logistics detail wording, or "bonus", and never
+        # policy/rules wording) also counts as a deterministic directory route
+        # here. It is reused verbatim, not reinvented, and is not country- or
+        # case-specific. This recovers cross-market sponsoring/bonus questions
+        # (e.g. "How much do I need to earn before Forever Ghana pays my
+        # bonus?") that name no operational-field keyword and no "sponsor" root
+        # word, so they were falling through to "ambiguous" and losing
+        # directory protection alongside the genuine Norway-shaped regression.
+        directory_topic_route = bool(_directory_guard_topic_match(message))
         include_global_documents = (
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
@@ -785,7 +796,9 @@ def _planned_retrieval_plan(
             include_global_documents=include_global_documents,
             named_markets=named_markets,
             shared_office_markets=shared_office_markets,
-            deterministic_directory_route=operational_directory_route or own_market_directory_route,
+            deterministic_directory_route=(
+                operational_directory_route or own_market_directory_route or directory_topic_route
+            ),
         ),
         authorized_policy_market=_authorized_policy_market(country),
     )
