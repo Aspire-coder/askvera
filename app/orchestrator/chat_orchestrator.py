@@ -108,6 +108,7 @@ from utils.directory_fields import (
 )
 from utils.logging import get_logger
 from utils.validators import ChatRequest
+from app.orchestrator.reference_resolution import might_reference_market, resolve_reference
 
 LOGGER = get_logger("app.orchestrator")
 # Reference follow-ups point back at the prior answer with no new subject of
@@ -988,11 +989,18 @@ class AIOrchestrator:
             preserve_location_names=True,
             preserve_person_names=True,
         )
-        response = self._mixed_request_response(body, scrubbed_input, correlation_id, candidate_flags)
-        if response is None:
-            response = self._handle_scrubbed_chat(body, scrubbed_input, correlation_id, candidate_flags)
-        # Persist the original request and the actual delivered response exactly
-        # once, including refusals, cache hits and partial mixed-intent answers.
+        resolved_input, reference_clarification = self._resolve_unresolved_reference(
+            scrubbed_input, body, correlation_id
+        )
+        if reference_clarification is not None:
+            response = reference_clarification
+        else:
+            response = self._mixed_request_response(body, resolved_input, correlation_id, candidate_flags)
+            if response is None:
+                response = self._handle_scrubbed_chat(body, resolved_input, correlation_id, candidate_flags)
+        # Persist the original request (never a reference-resolution rewrite) and
+        # the actual delivered response exactly once, including refusals, cache
+        # hits and partial mixed-intent answers.
         append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
         # Counted at the same single choke point, and for the same reason: this
         # is the one place every return path has converged, so the fallback rate
@@ -3050,6 +3058,46 @@ class AIOrchestrator:
             correlation_id,
             metadata={"intent": "assistant_meta", "fallback": False, "response_source": "template"},
         )
+
+    def _resolve_unresolved_reference(
+        self, scrubbed_input: str, body: ChatRequest, correlation_id: str,
+    ) -> tuple[str, ChatResponse | None]:
+        """A7 hook: resolve or flag a closed-class back-reference before retrieval.
+
+        Delegates every decision to app.orchestrator.reference_resolution (pure,
+        deterministic, no model call). A contrastive reference ("the other one")
+        over 2+ user-named markets returns a clarification naming them instead of
+        a silent guess. A resolvable ordinal ("the first one") returns the
+        message with its candidate market appended, so the unmodified retrieval
+        anchor names it exactly as an explicit market follow-up would. Anything
+        else returns the input unchanged.
+
+        ``might_reference_market`` is checked first so the session-history
+        read below - a real store lookup, not a pure function - is skipped
+        entirely for the overwhelming majority of messages that plainly
+        cannot be an unresolved reference (no closed-class token at all, one
+        that names its own market, or one that turns out to modify real
+        content such as "the first ORDER" rather than a market).
+        """
+        if not might_reference_market(scrubbed_input, body.language):
+            return scrubbed_input, None
+        history = get_session_history(body.sessionId, correlation_id)
+        outcome = resolve_reference(scrubbed_input, history, body.language)
+        if outcome.clarification_candidates:
+            answer = localized_conversation_response("reference_clarification", body.language)
+            if answer:
+                candidates = " / ".join(outcome.clarification_candidates)
+                return scrubbed_input, self.response_builder.fallback(
+                    answer.replace("{candidates}", candidates),
+                    correlation_id,
+                    metadata={
+                        "fallback": False,
+                        "failure_layer": "directory_clarification",
+                        "response_source": "reference_resolution",
+                        "reference_candidates": list(outcome.clarification_candidates),
+                    },
+                )
+        return outcome.rewritten_message, None
 
     def _early_conversation_response(
         self,
