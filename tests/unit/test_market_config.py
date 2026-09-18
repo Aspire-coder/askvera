@@ -335,6 +335,7 @@ def test_market_display_name_covers_directory_only_markets():
 
     assert market_display_name("DZ") == "Algeria"
     assert market_display_name("ZZ") == ""
+    assert market_display_name("") == ""
 
 
 def _market_with_fbo_field(code, fbo_enrollment_available=None):

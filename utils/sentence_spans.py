@@ -42,6 +42,7 @@ from typing import NamedTuple
 
 __all__ = [
     "ABBREVIATIONS",
+    "TITLE_ABBREVIATIONS",
     "SentenceSpan",
     "abbreviation_or_initial_before",
     "iter_sentences",
@@ -74,20 +75,65 @@ ABBREVIATIONS: frozenset[str] = frozenset(
     {
         # English
         "e.g", "i.e", "etc", "approx", "vs", "no", "nr", "ca",
-        "mr", "mrs", "ms", "dr", "prof", "st", "jr", "sr", "vol", "fig", "ref", "pp",
+        "mr", "mrs", "ms", "dr", "prof", "st", "mt", "jr", "sr", "fr", "vol", "fig", "ref", "pp",
         "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
         # German
-        "z.b", "bzw", "usw", "ggf", "inkl", "exkl", "std", "u.a", "d.h",
+        "z.b", "bzw", "usw", "ggf", "inkl", "exkl", "std", "u.a", "d.h", "hr",
         # French
-        "p.ex", "cf", "svp", "etc.al",
+        "p.ex", "cf", "svp", "etc.al", "mme", "mlle",
         # Spanish / Portuguese
         "sr", "sra", "dr", "dra", "ud", "uds",
         # Italian
-        "sig", "dott", "sigg",
+        "sig", "dott", "sigg", "ing",
         # Dutch
         "dhr", "mevr", "bv", "ev",
         # Scandinavian
         "t.ex", "f.eks", "osv", "bl.a",
+    }
+)
+
+# CLOSED subset of ABBREVIATIONS: personal/place titles and honorifics whose
+# period stays non-terminal even before a CAPITALISED word, because the word
+# that follows is the name the title attaches to, not a new sentence ("Dr.
+# Smith", "St. Louis", "Mme. Dupont") - unlike an ordinary plain abbreviation
+# such as "No." or "Dec.", which IS terminal before an uppercase word (Fable
+# Phase 2 review, finding 4). Fable Phase 2 review (independent re-review,
+# finding 1): the finding-4 fix above correctly split "Is the fee refundable?
+# No. Delivery takes 5 days." but, applied to every plain abbreviation without
+# exception, it also split "Call Dr. Smith. Delivery takes 3 days." into
+# "Call Dr." + "Smith. Delivery takes 3 days." - directory contacts and
+# addresses carry exactly this "Title. Name" and "St. City" shape. Kept
+# deliberately small and closed, one language-tagged group at a time, the
+# same discipline as ABBREVIATIONS itself: every entry here must be an actual
+# title/honorific this module has needed, never a speculative addition.
+#
+# "st" is genuinely ambiguous at the end of this list: it reads as "Saint"
+# when a name follows ("St. Louis office") but as "Street" when it ends a
+# sentence about an address ("...on Main St. Delivery takes 3 days."). Both
+# shapes look identical to this module (a plain abbreviation immediately
+# before a capitalised word) and there is no local signal - lookahead beyond
+# the next word, a gazetteer of street vs. place names - that this module
+# has. The trade-off is deliberate: "St." is kept in TITLE_ABBREVIATIONS
+# because "St. <Capitalised City>" is the shape this module has actually seen
+# in directory data (finding 1's own repro), so treating "St." as
+# non-terminal fixes the observed defect at the cost of leaving the rarer
+# "Main St. <New sentence>" shape merged instead of split. Both shapes are
+# covered by tests (see tests/unit/test_sentence_spans.py and
+# tests/conversation/test_p2fix_title_abbreviations.py), with the "Main St."
+# case documented as a known, accepted limitation rather than silently
+# regressed.
+TITLE_ABBREVIATIONS: frozenset[str] = frozenset(
+    {
+        # English
+        "dr", "mr", "mrs", "ms", "prof", "st", "mt", "jr", "sr", "fr",
+        # German
+        "hr",
+        # French
+        "mme", "mlle",
+        # Spanish / Portuguese
+        "sra",
+        # Italian
+        "dott", "ing",
     }
 )
 
@@ -162,12 +208,13 @@ def _inside_any(position: int, spans: list[tuple[int, int]]) -> bool:
     return any(start <= position < end for start, end in spans)
 
 
-def _plain_abbreviation_before(text: str, index: int) -> bool:
-    """True when the word ending immediately before ``index`` is a known plain abbreviation."""
+def _plain_abbreviation_word(text: str, index: int) -> str | None:
+    """The known plain abbreviation ending immediately before ``index``, or ``None``."""
     word_match = re.search(r"[^\W\d_]+$", text[:index])
     if not word_match:
-        return False
-    return word_match.group(0).casefold() in _PLAIN_ABBREVIATIONS
+        return None
+    word = word_match.group(0).casefold()
+    return word if word in _PLAIN_ABBREVIATIONS else None
 
 
 def _dotted_abbreviation_dot(text: str, index: int) -> bool:
@@ -214,6 +261,23 @@ def _forward_continuation(text: str, index: int) -> bool:
     return unicodedata.category(first_char) == "Ll"
 
 
+def _title_continuation(text: str, index: int) -> bool:
+    """True when a CAPITALISED word follows ``index``, skipping spaces/tabs only.
+
+    The title-specific half of the non-terminal test: "Dr. Smith" and "St.
+    Louis" continue with an uppercase letter, not a digit or lowercase letter,
+    so this is deliberately the mirror image of ``_forward_continuation``
+    rather than an extension of it. Like that function, a newline never
+    counts as a continuation - a title abbreviation at the end of a line must
+    not reach across it to swallow the next.
+    """
+    rest = text[index:]
+    stripped = rest.lstrip(" \t")
+    if not stripped or stripped[0] == "\n":
+        return False
+    return unicodedata.category(stripped[0]) == "Lu"
+
+
 def abbreviation_or_initial_before(text: str, index: int) -> bool:
     """True when the "." at ``index`` sits right after a known abbreviation or an initial chain.
 
@@ -245,12 +309,25 @@ def abbreviation_or_initial_before(text: str, index: int) -> bool:
        lowercase letter ("approx. 999", "Nr. 999 ..."). Before an uppercase
        word it is terminal: "Is the fee refundable? No. Delivery takes 5
        days." must split after "No.", not merge into "Delivery ...".
+    3. The exception to rule 2: a CLOSED set of title/honorific abbreviations
+       (``TITLE_ABBREVIATIONS`` - "Dr", "Mr", "Mrs", "Ms", "Prof", "St", "Mt",
+       "Sr", "Jr" and their configured-language equivalents) is non-terminal
+       before an uppercase word too, because that word is the name the title
+       attaches to, not a new sentence: "Call Dr. Smith. Delivery takes 3
+       days." must keep "Dr. Smith" together (independent re-review, finding
+       1). Every plain abbreviation NOT in this closed set keeps rule 2's
+       terminal-before-uppercase behaviour unchanged.
     """
     if _dotted_abbreviation_dot(text, index):
         return True
     if _initial_chain_dot(text, index):
         return True
-    return _plain_abbreviation_before(text, index) and _forward_continuation(text, index + 1)
+    word = _plain_abbreviation_word(text, index)
+    if word is None:
+        return False
+    if _forward_continuation(text, index + 1):
+        return True
+    return word in TITLE_ABBREVIATIONS and _title_continuation(text, index + 1)
 
 
 def _is_list_marker(text: str, index: int) -> bool:
@@ -331,7 +408,32 @@ def sentence_boundaries(text: str) -> list[int]:
     for match in re.finditer(r"\n", text):
         if not _inside_any(match.start(), protected_spans):
             boundaries.append(match.end())
-    return sorted(set(boundaries))
+    return _drop_empty_units(text, sorted(set(boundaries)))
+
+
+def _drop_empty_units(text: str, boundaries: list[int]) -> list[int]:
+    """Remove a boundary whose unit (back to the previous kept boundary) is blank.
+
+    Two boundaries can legitimately land back-to-back with nothing but
+    whitespace between them - a "." that ends a sentence immediately
+    followed by the newline that starts the next line, as in "A.\\nB.":
+    the terminal-punctuation rule puts a boundary right after "A." and the
+    bare-newline rule puts another right after the "\\n" that follows it,
+    producing an empty "\\n" unit between them. That unit is never real
+    content, so this drops the earlier of the two boundaries (merging the
+    blank stretch into the next unit instead of emitting it as its own) -
+    every boundary that still ends a non-empty unit is left exactly where
+    it was.
+    """
+    kept: list[int] = []
+    unit_start = 0
+    for boundary in boundaries:
+        if text[unit_start:boundary].strip():
+            kept.append(boundary)
+            unit_start = boundary
+        # else: this boundary would only close a blank unit - skip it and
+        # let the blank stretch merge into whatever unit follows instead.
+    return kept
 
 
 def is_sentence_boundary(text: str, end: int) -> bool:
