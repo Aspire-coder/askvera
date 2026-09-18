@@ -11,6 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.risk.models import RiskContext
 from app.risk.policies.income_claim_policy import IncomeClaimPolicy
+from app.risk.policies.income_claim_translations import is_covered_language
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions, find_shared_office_record_countries
@@ -185,10 +186,14 @@ def _verified_conversation_intent(
     income_policy = IncomeClaimPolicy()
     if income_policy.evaluate(context):
         return intent, False
-    # No income-adjacent vocabulary means the planner's label is an obvious
-    # false positive and must not prevent retrieval. Ambiguous income-adjacent
-    # wording still receives the independent semantic check below.
-    if not income_policy.has_income_context(message):
+    # Fix A (2026-09-15, PR #154 follow-up): absence of income vocabulary only
+    # justifies skipping the semantic check below when we actually cover the
+    # language being written. An uncovered language (or a script no covered
+    # language uses, regardless of the declared language) always falls
+    # through to the semantic check instead - has_income_context() finding
+    # nothing there just means our vocabulary has a gap, not that the message
+    # is safe. See income_claim_translations.is_covered_language().
+    if not income_policy.has_income_context(message) and is_covered_language(language, message):
         return "knowledge", True
     system_prompt = (
         "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
