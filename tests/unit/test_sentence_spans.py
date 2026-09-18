@@ -217,16 +217,139 @@ def test_dotted_compound_abbreviation_protects_both_of_its_own_dots() -> None:
     assert split_sentences(text_de) == [text_de]
 
 
-def test_st_louis_now_splits_matching_base_behaviour_not_a_regression() -> None:
-    """"St." before an uppercase proper noun ("St. Louis") now splits, per the
-    coordinator's rule that a plain abbreviation is terminal before an
-    uppercase word. This is NOT a regression versus base (commit dbc6a7a):
-    base's own abbreviation guard, ``\\b(?:[^\\W\\d_]\\.){2,}``, only ever
-    matched a run of single-LETTER-dot pairs ("J.R.", "z.B."), never a
-    multi-letter word like "St" followed by one dot - so base already split
-    "St. Louis" into two sentences; this restores that same behaviour rather
-    than changing it."""
+def test_st_louis_no_longer_splits_after_the_independent_review_correction() -> None:
+    """Supersedes the earlier "St. Louis now splits" expectation recorded above.
+
+    That expectation encoded finding 4's terminal-before-uppercase rule
+    applied with NO exceptions, which is exactly the regression the
+    independent re-review's finding 1 caught: applied to every plain
+    abbreviation including personal/place titles, it also split "Call Dr.
+    Smith. Delivery takes 3 days." into "Call Dr." + "Smith. Delivery takes 3
+    days." - directory contacts and addresses carry exactly the "Title. Name"
+    and "St. City" shape. Finding 1's fix (``TITLE_ABBREVIATIONS`` in
+    ``utils/sentence_spans.py``) keeps "St." non-terminal before an uppercase
+    word specifically, so "St. Louis" now stays whole again - see
+    docs/conversation-quality/phase2/FRAGMENT_AUDIT.md for the full
+    before/after and the accepted trade-off against "Main St. <sentence>"."""
     assert split_sentences("Take the train to St. Louis for the conference.") == [
-        "Take the train to St.",
-        "Louis for the conference.",
+        "Take the train to St. Louis for the conference."
+    ]
+
+
+# --- Independent re-review correction (finding 1): title abbreviations -----
+#
+# p2fix-1 (finding 4 above) made a plain abbreviation's "." terminal before
+# an uppercase word, unconditionally. That is right for "No." and "Dec." but
+# wrong for personal/place titles, whose following capitalised word is the
+# name the title attaches to, not a new sentence. See
+# docs/conversation-quality/phase2/FRAGMENT_AUDIT.md.
+
+
+def test_title_abbreviation_before_a_capitalised_name_is_non_terminal() -> None:
+    """The repro from the independent re-review, plus its direct analogues."""
+    assert split_sentences("Call Dr. Smith. Delivery takes 3 days.") == [
+        "Call Dr. Smith.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Ask Mr. Jones. Delivery takes 3 days.") == [
+        "Ask Mr. Jones.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Contact Mrs. Kim. Delivery takes 3 days.") == [
+        "Contact Mrs. Kim.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Ask Ms. Patel. Delivery takes 3 days.") == [
+        "Ask Ms. Patel.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Contact Prof. Lee. Delivery takes 3 days.") == [
+        "Contact Prof. Lee.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("The office is near St. Louis office. Hours are 09.00-17.00.") == [
+        "The office is near St. Louis office.",
+        "Hours are 09.00-17.00.",
+    ]
+
+
+def test_title_abbreviation_language_equivalents_are_non_terminal_too() -> None:
+    """The closed set also covers the configured-language equivalents named
+    in finding 1 (Hr, Fr, Mme, Mlle, Sra, Dott, Ing), not only the English ones."""
+    assert split_sentences("Ask Hr. Müller. Delivery takes 3 days.") == [
+        "Ask Hr. Müller.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Contact Fr. O'Brien. Delivery takes 3 days.") == [
+        "Contact Fr. O'Brien.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Ask Mme. Dupont. Delivery takes 3 days.") == [
+        "Ask Mme. Dupont.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Ask Mlle. Blanc. Delivery takes 3 days.") == [
+        "Ask Mlle. Blanc.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Contact Sra. Lopez. Delivery takes 3 days.") == [
+        "Contact Sra. Lopez.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Ask Dott. Rossi. Delivery takes 3 days.") == [
+        "Ask Dott. Rossi.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Contact Ing. Bianchi. Delivery takes 3 days.") == [
+        "Contact Ing. Bianchi.",
+        "Delivery takes 3 days.",
+    ]
+
+
+def test_st_street_at_a_real_sentence_end_is_a_documented_known_limitation() -> None:
+    """The trade-off finding 1 asked us to pick and document: "St." is ambiguous
+    between "Saint" (continues into a name) and "Street" (can end a sentence).
+    Keeping "St." in TITLE_ABBREVIATIONS fixes the observed "St. Louis"-style
+    directory defect but leaves this rarer shape merged instead of split -
+    an accepted, documented limitation, not a silent regression. See
+    docs/conversation-quality/phase2/FRAGMENT_AUDIT.md."""
+    assert split_sentences("The clinic is on Main St. Delivery takes 3 days.") == [
+        "The clinic is on Main St. Delivery takes 3 days."
+    ]
+
+
+def test_plain_abbreviation_before_uppercase_stays_terminal_when_not_a_title() -> None:
+    """Positive control for finding 1: abbreviations NOT in the closed title
+    set keep finding 4's terminal-before-uppercase behaviour exactly as
+    before - the fix only carves out an exception for titles."""
+    assert split_sentences("See policy No. Delivery takes 5 days.") == [
+        "See policy No.",
+        "Delivery takes 5 days.",
+    ]
+    assert split_sentences("Ship it by Dec. Delivery takes 5 days.") == [
+        "Ship it by Dec.",
+        "Delivery takes 5 days.",
+    ]
+
+
+# --- Independent re-review correction (finding 2): empty newline units -----
+
+
+def test_sentence_boundaries_drops_the_empty_unit_between_a_period_and_a_newline() -> None:
+    """"A.\\nB." previously produced boundaries [2, 3, 5]: a real boundary right
+    after "A.", another right after the "\\n" that immediately follows it, and
+    nothing but whitespace between those two - an empty unit. Finding 2:
+    that empty/whitespace-only unit must be dropped without moving either of
+    the real, non-empty boundaries."""
+    assert sentence_boundaries("A.\nB.") == [2, 5]
+    assert split_sentences("A.\nB.") == ["A.", "B."]
+
+
+def test_sentence_boundaries_drop_empty_unit_does_not_move_a_real_boundary() -> None:
+    """Positive control: when the unit between two boundaries is NOT blank,
+    both boundaries are kept exactly where they were."""
+    text = "The minimum order is 50 USD. Delivery costs 5 USD."
+    assert sentence_boundaries(text) == [
+        text.index(".") + 1,
+        len(text),
     ]
