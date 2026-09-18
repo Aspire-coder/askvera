@@ -271,6 +271,18 @@ _FINNISH_STRONG_RESIDENCE_STEMS = ("asu",)
 # stem but the fixed idiom "on kotoisin X" = "is originally from X".
 _FINNISH_WEAK_RESIDENCE_STEMS = ("tyoskentel", "muutta", "sijaits", "sijait", "oleskel")
 _FINNISH_RESIDENCE_IDIOM_TOKENS = frozenset({"kotoisin"})
+# R03 correction 10: the olla ("to be") forms - "on", "olla", "ole", "oli",
+# "ollut" - are the single most common way to say someone IS somewhere
+# ("on atlantisissa", "on narniassa"), and correction 9 left them out of the
+# verb vocabulary entirely, which wrongly promoted an unknown place after
+# "on" to a TRUSTED resolved follow-up (Fable's correction-9 review; R03
+# forbids trusting an unrecognised place). Olla only counts as a WEAK
+# location verb for a LOCATIVE complement - inessive ("-ssa"/"-ssä", "on
+# atlantisissa") or adessive ("-lla"/"-llä") - never for a bare nominative
+# complement ("on johtaja"), which carries no case ending at all and so
+# never reaches this check in the first place.
+_FINNISH_OLLA_LOCATION_TOKENS = frozenset({"on", "olla", "ole", "oli", "ollut"})
+_FINNISH_INESSIVE_OR_ADESSIVE_ENDING = re.compile(r"(?:ssa|lla)$")
 # The full verb-stem vocabulary the negation window checks against - a
 # negated residence-adjacent verb of ANY of these strengths must never be
 # trusted, even though only the strong stem controls standalone-vs-unresolved
@@ -2450,17 +2462,22 @@ class AIOrchestrator:
         `_FINNISH_RESIDENCE_VERB_WINDOW` tokens (covers a short adverbial gap,
         e.g. "asuu nyt pysyvästi ugandassa"). Only the strong stem ("asu-",
         genuine residence) makes an UNKNOWN place confident enough to go
-        standalone; the weaker location verbs only keep it as ordinary,
-        untrusted residue.
+        standalone; the weaker location verbs, INCLUDING olla ("on"/"olla"/
+        "ole"/"oli"/"ollut") when the complement itself is inessive or
+        adessive - never a bare nominative complement like "on johtaja" -
+        only keep it as ordinary, untrusted residue (R03 correction 10).
         """
         start = max(0, place_index - _FINNISH_RESIDENCE_VERB_WINDOW)
+        olla_governs_this_complement = bool(_FINNISH_INESSIVE_OR_ADESSIVE_ENDING.search(tokens[place_index]))
         tier: str | None = None
         for index in range(start, place_index):
             token = tokens[index]
             if any(token.startswith(stem) for stem in _FINNISH_STRONG_RESIDENCE_STEMS):
                 return "strong"
-            if token in _FINNISH_RESIDENCE_IDIOM_TOKENS or any(
-                token.startswith(stem) for stem in _FINNISH_WEAK_RESIDENCE_STEMS
+            if (
+                token in _FINNISH_RESIDENCE_IDIOM_TOKENS
+                or any(token.startswith(stem) for stem in _FINNISH_WEAK_RESIDENCE_STEMS)
+                or (olla_governs_this_complement and token in _FINNISH_OLLA_LOCATION_TOKENS)
             ):
                 tier = "weak"
         return tier

@@ -274,3 +274,163 @@ nor the test file is flagged.
 
 Send this exact snapshot to a fresh Sol review, then Astra final review.
 Stop after review; R04 remains paused.
+
+## Correction 10 (Fable review of correction 9, commit `6f87124`)
+
+Fable accepted the tokenization fix, the clitic/partitive/essive residue
+check, the negation window, and the span-based substitution. It found two
+problems in the SAME change:
+
+1. **Test deletion.** Correction 9's diff deleted reviewed correction-7
+   assertions instead of updating the code to keep satisfying them: two
+   cases ("Entä jos hän on atlantisissa?", "...on nyt atlantisissa?") were
+   dropped from `test_ambiguous_lowercase_finnish_complement_keeps_context`;
+   one case ("...on nyt pysyvästi tiimissä?") was dropped from `test_
+   unsupported_finnish_place_shape_keeps_context_but_is_unresolved`; the
+   whole `test_lowercase_finnish_noun_after_on_keeps_context` function was
+   deleted; and `test_bounded_finnish_location_phrase_does_not_scan_
+   ordinary_nouns`'s assertion was changed from `unresolved` to `resolved_
+   dependent_follow_up` for its original three cases. This is exactly the
+   "delete or loosen a reviewed assertion to make a change pass" rule
+   violation - it made the diff look green by removing what it could not
+   satisfy, rather than fixing the design gap that caused the conflict.
+2. **Root cause.** The residence/location verb vocabulary
+   (`_FINNISH_STRONG_RESIDENCE_STEMS` / `_FINNISH_WEAK_RESIDENCE_STEMS`)
+   left out olla ("to be": "on", "olla", "ole", "oli", "ollut") entirely -
+   the single most common way to say someone IS somewhere. Reproduced under
+   `6f87124` (Tanzania history): "Entä jos hän on atlantisissa?", "...on nyt
+   atlantisissa?", "...on narniassa?", and "...on nyt narniassa töissä?" all
+   returned `resolved_dependent_follow_up` with a `prior_user_turn_id` and
+   the Tanzania target - an unrecognised place upgraded into a TRUSTED
+   resolution of the prior market, which R03 forbids outright.
+
+### Fix
+
+Olla is added as a WEAK location verb (`_FINNISH_OLLA_LOCATION_TOKENS =
+{"on", "olla", "ole", "oli", "ollut"}`), checked in `_finnish_residence_
+verb_tier` alongside the existing weak stems - but ONLY when the complement
+token itself is inessive or adessive shaped
+(`_FINNISH_INESSIVE_OR_ADESSIVE_ENDING = re.compile(r"(?:ssa|lla)$")`). A
+bare nominative complement ("on johtaja") carries no case ending at all, so
+it never reaches the residence-verb-tier check in the first place (the
+outer loop's case-ending gate runs first) - "on johtaja" and every other
+nominative-complement case (Sponsored/Recognized/Manager, "sääntöjen mukaan
+johtaja", etc.) stays trusted, exactly as the coordinator required.
+
+Negation was deliberately NOT extended to olla in this correction: "ei ole"
+is an extremely common Finnish pattern for many non-locative meanings ("ei
+ole totta", "ei ole mahdollista"), and the negation check has no visibility
+into whether a LATER token in the message is actually olla's locative
+complement - blindly treating every "ei ole" as scoping residence risked
+turning an unrelated negated statement elsewhere in the same message into a
+false `standalone`. The coordinator's instruction was "with negation still
+handled" (keep the EXISTING negation feature intact), not "extend negation
+to olla," and no test in the required list exercises negated olla, so this
+is a deliberate, documented scope boundary rather than an oversight.
+
+### Restoring every correction-7 test case and assertion
+
+Per the coordinator's rule 1, every deleted/loosened correction-7 assertion
+was restored, and the file was diffed against `e3b399a` (the correction-7
+baseline: `git show e3b399a:tests/evidence_first_v2/test_r03_context_
+capture.py`) to verify. **Zero lines were removed relative to that
+baseline** - every correction-7 test case now appears in the file with its
+correction-7 assertion, byte-for-byte, and the fix above (adding olla) makes
+every one of them pass again without weakening anything:
+
+| Restored item | Where | Assertion |
+| --- | --- | --- |
+| `"Entä jos hän on nyt pysyvästi tiimissä?"` | `test_unsupported_finnish_place_shape_keeps_context_but_is_unresolved` | `unresolved` |
+| `"Entä jos hän on atlantisissa?"`, `"...on nyt atlantisissa?"` | `test_ambiguous_lowercase_finnish_complement_keeps_context` | `unresolved` |
+| `["on nyt tiimissä?", "on nyt johdossa?", "on nyt verkostossa?"]` | `test_bounded_finnish_location_phrase_does_not_scan_ordinary_nouns` | reverted to `unresolved` (correction 9 had loosened this to `resolved_dependent_follow_up`) |
+| `test_lowercase_finnish_noun_after_on_keeps_context` (whole function, `["on tiimissä?", "on johdossa?", "on verkostossa?"]`) | restored verbatim, in its original position (between `test_bounded_finnish_location_phrase_without_history_stays_standalone` and `test_lowercase_finnish_anaphoric_role_follow_up_without_a_place_keeps_context`) | `unresolved` |
+
+No correction-7 case genuinely conflicts with Fable's correction-8 finding
+3 (the over-fire fix) - every one of them is either a residence/location
+verb complement (now correctly caught by adding olla) or, for "on johtaja"
+and the other nominative-complement controls, was never affected by finding
+3 in the first place (finding 3 was about tokens with NO governing verb at
+all, e.g. "24 kuukauteen", "tilille" - none of which are locative
+complements of "on"). So nothing needed to be dropped; the coordinator's
+target of zero removed assertions was met exactly.
+
+The correction-9-era tests that examined the (now-corrected) over-fire
+behavior for genuinely verb-free ordinary nouns
+(`test_ordinary_case_marked_nouns_outside_residence_context_are_trusted`:
+"24 kuukauteen", "sääntöjen mukaan johtaja", "tilille", "tasolle",
+"jälkeen", "toimistossa", "netissä") are kept as-is and still pass, since
+none of those tokens sit near "on" OR any other residence/location verb -
+they remain trusted, which is the correct and intended behavior Fable asked
+for in finding 3.
+
+### New tests
+
+`test_olla_forms_govern_a_locative_complement_as_a_weak_location_verb`,
+parametrized with `"Entä jos hän on narniassa?"` and `"Entä jos hän on nyt
+narniassa töissä?"` (both unrecognised-place probes, both asserting
+`unresolved` with no `prior_user_turn_id`).
+
+### Before/after table
+
+| Input | Before (`6f87124`) | After (correction 10) |
+| --- | --- | --- |
+| `Entä jos hän on atlantisissa?` | `resolved_dependent_follow_up`, trusted, Tanzania kept | `unresolved`, untrusted |
+| `Entä jos hän on nyt atlantisissa?` | `resolved_dependent_follow_up`, trusted | `unresolved`, untrusted |
+| `Entä jos hän on narniassa?` | `resolved_dependent_follow_up`, trusted | `unresolved`, untrusted |
+| `Entä jos hän on nyt narniassa töissä?` | `resolved_dependent_follow_up`, trusted | `unresolved`, untrusted |
+| `Entä jos hän on nyt pysyvästi tiimissä?` | `resolved_dependent_follow_up`, trusted (correction 9's own regression) | `unresolved`, untrusted |
+| `Entä jos hän on tiimissä?` / `on johdossa?` / `on verkostossa?` | `resolved_dependent_follow_up`, trusted (correction 9's own regression) | `unresolved`, untrusted |
+| `Entä jos hän on johtaja?` | `resolved_dependent_follow_up`, trusted | unchanged - `resolved_dependent_follow_up`, trusted (nominative complement, olla does not govern it) |
+
+### Test commands and results
+
+Focused suite (adds 1 new parametrized test - 2 cases - to the R03 file;
+restores every deleted/loosened correction-7 case):
+
+```
+<PYTHON> -m pytest tests/evidence_first_v2/test_r03_context_capture.py tests/unit/test_demo_multilingual_followups.py tests/unit/test_demo_followup_resolution.py tests/unit/test_retrieval_canary_delivered_answer.py tests/unit/test_retrieval_rank_list_capture.py -p no:cacheprovider --basetemp <TEMP>\pytest-r03c10
+```
+
+Result: **498 passed, exit 0** (80 in the R03 file, up from 78).
+
+Compatibility suite:
+
+```
+<PYTHON> -m pytest tests/unit/test_chat_orchestrator.py tests/unit/test_evidence_routing.py tests/unit/test_opensearch_sections.py tests/unit/test_retrieval_service.py tests/unit/test_retrieval_rank_list_capture.py tests/evidence_first_v2 -p no:cacheprovider --basetemp <TEMP>\pytest-r03c10
+```
+
+Result: **537 passed, 1 failed, exit 1**. The sole failure is the
+pre-existing, unrelated `test_offline_isolation.py::test_package_imports_
+use_a_narrow_allowlist` (`capture_provenance` relative import allowlist
+mismatch in `scope_aware_fusion.py`), unchanged.
+
+Scoped lint: **exit 0**. Plain `flake8` (disclosure): **exit 1**, same two
+pre-existing baseline findings in untouched scripts as every prior
+correction; neither `chat_orchestrator.py` nor the test file is flagged.
+`git diff --check`: **exit 0**.
+
+### Removed-line audit versus `e3b399a`
+
+```
+diff <(git show e3b399a:tests/evidence_first_v2/test_r03_context_capture.py) tests/evidence_first_v2/test_r03_context_capture.py | grep '^<'
+```
+
+Result: **no output** - zero lines present in the correction-7 baseline are
+absent from the current file.
+
+### Limitations (unchanged from correction 9, plus one addition)
+
+- All limitations listed under correction 9 above still apply.
+- **Olla's negation is not covered.** "Entä jos hän ei ole atlantisissa?"
+  or "...ei ole ugandassa?" (negated olla + locative complement) is not
+  recognized by `_finnish_negation_scopes_residence` - only asu-/weak-stem
+  verbs are. This is a deliberate scope boundary (see "Fix" above), not an
+  oversight: extending negation to olla risked misfiring on the very common
+  non-locative "ei ole X" pattern elsewhere in a message. If a future
+  correction needs negated-olla coverage, it should be scoped narrowly to
+  only fire when olla's OWN complement (not some other token in the
+  message) is the locative one, which requires tracking position, not just
+  token identity.
+
+Send this exact snapshot to a fresh Sol review, then Astra final review.
+Stop after review; R04 remains paused.

@@ -231,15 +231,10 @@ def test_finnish_competing_market_or_unknown_signal_stays_standalone(follow_up: 
     "follow_up",
     [
         "Entä jos hän työskentelee nyt pysyvästi atlantisissa?",
+        "Entä jos hän on nyt pysyvästi tiimissä?",
     ],
 )
 def test_unsupported_finnish_place_shape_keeps_context_but_is_unresolved(follow_up: str) -> None:
-    """A WEAK location verb ("työskentelee") governing an unknown place keeps
-
-    context but is never trusted (R03 correction 9 B2 - Fable's reference
-    check on correction 9: this must stay ``unresolved`` with no id, since it
-    IS a residence/location-verb complement, just not the strong "asuu" one).
-    """
     orchestrator = AIOrchestrator()
     prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
 
@@ -255,6 +250,8 @@ def test_unsupported_finnish_place_shape_keeps_context_but_is_unresolved(follow_
 @pytest.mark.parametrize(
     "follow_up",
     [
+        "Entä jos hän on atlantisissa?",
+        "Entä jos hän on nyt atlantisissa?",
         "Entä jos hän työskentelee atlantisissa?",
         "Entä jos hän työskentelee nyt atlantisissa?",
         "Entä jos hän työskentelee tiimissä?",
@@ -277,27 +274,9 @@ def test_ambiguous_lowercase_finnish_complement_keeps_context(follow_up: str) ->
 
 @pytest.mark.parametrize(
     "follow_up",
-    [
-        "Entä jos hän on atlantisissa?",
-        "Entä jos hän on nyt atlantisissa?",
-        "Entä jos hän on nyt pysyvästi tiimissä?",
-        "Entä jos hän on nyt tiimissä?",
-        "Entä jos hän on nyt johdossa?",
-        "Entä jos hän on nyt verkostossa?",
-        "Entä jos hän on tiimissä?",
-        "Entä jos hän on johdossa?",
-        "Entä jos hän on verkostossa?",
-    ],
+    ["Entä jos hän on nyt tiimissä?", "Entä jos hän on nyt johdossa?", "Entä jos hän on nyt verkostossa?"],
 )
 def test_bounded_finnish_location_phrase_does_not_scan_ordinary_nouns(follow_up: str) -> None:
-    """R03 correction 9 SHOULD-FIX (over-fire): an ordinary case-marked noun
-
-    that is neither a configured-market stem nor the complement of a
-    residence/location verb ("on", the copula, is not in that closed set) is
-    not a place candidate at all, so it no longer blocks trust. This was
-    correction 8's own defect: it made the trusted path unreachable for
-    realistic follow-ups like this one.
-    """
     orchestrator = AIOrchestrator()
     prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
 
@@ -307,7 +286,7 @@ def test_bounded_finnish_location_phrase_does_not_scan_ordinary_nouns(follow_up:
 
     assert prior in query
     assert query.endswith(follow_up)
-    assert provenance["status"] == "resolved_dependent_follow_up"
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 def test_bounded_finnish_location_phrase_without_history_stays_standalone() -> None:
@@ -320,6 +299,23 @@ def test_bounded_finnish_location_phrase_without_history_stays_standalone() -> N
 
     assert query == follow_up
     assert provenance == {"provenance": "runtime", "status": "not_dependent"}
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    ["Entä jos hän on tiimissä?", "Entä jos hän on johdossa?", "Entä jos hän on verkostossa?"],
+)
+def test_lowercase_finnish_noun_after_on_keeps_context(follow_up: str) -> None:
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-finnish-lowercase-noun",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 def test_lowercase_finnish_anaphoric_role_follow_up_without_a_place_keeps_context() -> None:
@@ -706,6 +702,37 @@ def test_ordinary_case_marked_nouns_outside_residence_context_are_trusted(follow
     assert prior in query
     assert query.endswith(follow_up)
     assert provenance["status"] == "resolved_dependent_follow_up"
+
+
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "Entä jos hän on narniassa?",
+        "Entä jos hän on nyt narniassa töissä?",
+    ],
+)
+def test_olla_forms_govern_a_locative_complement_as_a_weak_location_verb(follow_up: str) -> None:
+    """R03 correction 10 (Fable review of correction 9, commit 6f87124).
+
+    Correction 9's residence/location verb vocabulary left out olla ("to
+    be") entirely, which is the single most common way to say someone IS
+    somewhere. That wrongly promoted "Entä jos hän on atlantisissa?" and an
+    unrecognised-place probe like "on narniassa?" to a TRUSTED resolved
+    follow-up keeping Tanzania - an unknown place upgraded into trusted
+    resolution of the prior market, which R03 forbids. Olla now counts as a
+    weak location verb for an inessive/adessive complement, so an unknown
+    place after "on" keeps context but is never trusted.
+    """
+    orchestrator = AIOrchestrator()
+    prior = "How does Forever Tanzania pay bonuses to FBOs who live outside the country?"
+
+    query, provenance = orchestrator._build_retrieval_query_with_provenance(
+        follow_up, _history(prior), "r03", session_id="r03-c10-olla-locative-complement",
+    )
+
+    assert prior in query
+    assert query.endswith(follow_up)
+    assert provenance == {"provenance": "runtime", "status": "unresolved"}
 
 
 def test_weak_residence_verb_multimodifier_complement_stays_unresolved_with_no_id() -> None:
