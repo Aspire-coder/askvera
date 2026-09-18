@@ -43,7 +43,7 @@ byte-for-byte preserved.
 | E | Dependency truthfulness and metrics | Lane E in progress | - | - | must use R02's availability contract; one fallback builder; C901 on `_handle_scrubbed_chat` (complexity 16) outstanding | Lane E, then coordinator | finish, review, combine with R02 once |
 | F | Contact completion | `app/response/contact_completion.py` plus the orchestrator hook | test_contact_completion_* | implemented; Fable pending | negated recommendations still match; nine-language table not natively reviewed | coordinator | verify citations and multilingual rendering |
 | G | Test integrity | pytest.ini (4 suites), collection-integrity and label tests, A1 rewrite, COVERAGE.md | test_collection_integrity, test_module_docstring_labels | implemented; Fable pending | COVERAGE.md predates the A, C, D and F integrations | coordinator | refresh coverage; review each xfail and skip |
-| X1 | Message-language change without the selector | none | - | - | product behaviour undefined: answer language vs source eligibility | coordinator | define behaviour first (decision doc), then implement if safe |
+| X1 | Message-language change without the selector | none | - | - | decision doc written (`phase2/X1_LANGUAGE_SWITCH_DECISION.md`); recommends answer-only switching, with source eligibility never changing | user | **blocked**: product decision (approval 6) |
 | X2 | Typos and malformed spacing | existing typo_safety (Codex), `_normalize_malformed_spacing` | pack TYPO-001/002 are needs-live | - | offline proof limited | - | inventory existing controls |
 | X3 | Direct answers, unanswered part, no filler or unnamed "they" | prompt rules (Phase 1) | prompt-structure tests only | Phase 1 Fable reviewed wording | needs live | - | blocked on live eval (R12) |
 
@@ -73,3 +73,21 @@ byte-for-byte preserved.
 | N3 | Finnish inflected country names outside the inessive are missed, e.g. "Kenian" gets no target | same probe | medium | R05 / R04 | bounded inflection support or honest gap |
 | N4 | Phase 1 `dbc6a7a` left C901 (complexity 16) on `_handle_scrubbed_chat` | flake8 | lint | Lane E | extraction |
 | N5 | R03 anchor keeps the Finnish text "Tansaniassa" after resolution; the directory target is correctly {Uganda} | probe | note | R03 | disclose; lexical impact unmeasured |
+
+## Language coverage (from real configuration)
+
+Enabled markets configure **39** language codes: ar(10 markets), az, bg, bs,
+cs, da, de(3), el(2), en(118), es(36), et, fi, fr(30), he, hr, hu(2), it(3),
+ka, kk, ku, ky, lt, lv, mk, nl(2), no, pl, pt(3), ro(2), ru(5), sk, sl,
+sq(3), sr(3), sr-ME, sv(2), tr, uk, uz.
+
+| Capability | Languages covered | Everything else |
+|---|---|---|
+| Route copy (refusals, outage, clarification) | da de en es fi fr it nl no ru sr sv (12) | English or translated copy |
+| A: reference vocabulary | en fr de nl it pt es fi no sv (10) | unchanged (no clarification) |
+| B: directory-field vocabulary | en fr de nl it pt es fi no sv, plus da ru sr (13) | returns None, so nothing is stripped |
+| C: timing-stage vocabulary | en fr de nl it pt es fi no nb sv | unclassified (never newly flagged) |
+| F: contact recommendation | en plus 9 | nothing appended |
+
+This is "fail conservatively", not multilingual support. Approval 7 asks for
+a prioritized list.
