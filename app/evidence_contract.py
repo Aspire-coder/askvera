@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Iterator
 
 from app.retrieval.models import RetrievedDocument
+from utils.sentence_spans import split_sentences
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,6 @@ SENTENCE_COVERAGE_THRESHOLD = 0.5
 # produces noise rather than signal.
 MIN_CHECKED_CONTENT_TOKENS = 4
 
-_SENTENCE_SPLIT_RE = re.compile(r"[\n\r]|(?<=[.!?])\s")
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _STRUCTURAL_LINE_RE = re.compile(r"[#>*\-\d.)\s]+")
 
@@ -141,9 +141,13 @@ def _iter_checkable_sentences(
     see ``unsupported_answer_sentences`` for why the whole-answer check needs a
     higher one than a declared claim list does.
     """
-    for raw_sentence in _SENTENCE_SPLIT_RE.split(text):
-        sentence = raw_sentence.strip()
-        if not sentence or _is_structural_line(sentence):
+    # utils.sentence_spans instead of a bare "[.!?]\\s" split: a decimal, an
+    # abbreviation, an initial, an email or a URL inside a sentence must not
+    # become its own "sentence" here, or a real claim is judged one broken
+    # fragment at a time and rejected for coverage a whole sentence would
+    # have had.
+    for sentence in split_sentences(text):
+        if _is_structural_line(sentence):
             continue
         tokens = _content_tokens(sentence)
         if len(tokens) < min_tokens:
