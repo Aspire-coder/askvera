@@ -43,7 +43,7 @@ run:
 |---|---|---|
 | Baseline B0 | `5b1d33f` (`origin/main`) | intended production state; the live deploy was **not verified** this session |
 | Baseline B1 | `d7b9747` | B0 plus 4 unmerged branches (see TASK_BOARD.md), merged locally |
-| **Candidate** | `feat/conversation-quality-20260918` (final SHA in section 5) | `askvera-conv-quality` |
+| **Candidate** | `feat/conversation-quality-20260918`; code as tested is `dbc6a7a` (later commits are docs only) | `askvera-conv-quality` |
 | Lane branches | `conv/{a-followup-state,b-composition,c-intent-contacts-recovery,g-regression-pack}-20260918` | `askvera-conv-*`: source material only; everything accepted is already in the candidate |
 
 Review the candidate as `git diff d7b9747..<candidate>`.
