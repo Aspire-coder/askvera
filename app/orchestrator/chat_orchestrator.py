@@ -1089,7 +1089,7 @@ class AIOrchestrator:
                     )
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language, body.message),
+                    self._insufficient_evidence_message(body.language, body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -1117,7 +1117,7 @@ class AIOrchestrator:
         if contracted_response is None:
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language, body.message),
+                    self._insufficient_evidence_message(body.language, body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": "evidence_contract"},
                 ),
@@ -1371,7 +1371,7 @@ class AIOrchestrator:
         if not chat_response.answer.strip():
             refusal = self._replace_answer(
                 chat_response,
-                self._insufficient_evidence_message(language, user_question),
+                self._insufficient_evidence_message(language, user_question, country),
                 {"empty_after_output_cleanup": True, "fallback": True},
             )
             # The refusal states no policy fact, so it cites no source. Keeping
@@ -2702,7 +2702,9 @@ class AIOrchestrator:
             )
         )
 
-    def _insufficient_evidence_message(self, language: str = "en", user_message: str = "") -> str:
+    def _insufficient_evidence_message(
+        self, language: str = "en", user_message: str = "", country: str = ""
+    ) -> str:
         """Use the approved fallback while remaining compatible with older config.
 
         A question about prices, the catalogue, stock or order status gets a
@@ -2741,15 +2743,26 @@ class AIOrchestrator:
             boundary = localized_conversation_response("catalogue_scope", language)
             if boundary:
                 return boundary
-        return localized_conversation_response("insufficient_evidence", language) or FALLBACK_RESPONSES.get(
+        message = localized_conversation_response("insufficient_evidence", language) or FALLBACK_RESPONSES.get(
             "insufficient_evidence",
             FALLBACK_RESPONSES.get(
                 "low_confidence",
                 "I couldn't find a clear answer in the approved information available to me.",
             ),
         )
+        # The copy above carries a reviewed contact placeholder rather than a
+        # hardcoded number, because the contact differs per market while the
+        # wording is per language. Resolve it here with the same mechanism
+        # that already resolves contact placeholders in generated answers, so
+        # a market with a reviewed Customer Care number gets it inline and a
+        # market without one has the line removed cleanly instead of showing
+        # a broken token or a dangling lead-in sentence.
+        resolved_message, _contact_changes = remove_or_replace_contact_placeholders(message, country)
+        return resolved_message
 
-    def _cross_market_scope_message(self, language: str = "en", user_message: str = "") -> str:
+    def _cross_market_scope_message(
+        self, language: str = "en", user_message: str = "", country: str = ""
+    ) -> str:
         """Explain a cross-market local-policy refusal without disclosing policy."""
         copy, reviewed_for_locale = configured_conversation_response(
             "cross_market_policy_scope", language
@@ -2758,7 +2771,7 @@ class AIOrchestrator:
             return copy
         if (language or "en").split("-", 1)[0].lower() == "en":
             return CROSS_MARKET_POLICY_SCOPE_RESPONSE
-        return self._insufficient_evidence_message(language, user_message)
+        return self._insufficient_evidence_message(language, user_message, country)
 
     def _candidate_narrowing_response(
         self,
@@ -3207,11 +3220,11 @@ class AIOrchestrator:
                 return narrowing_response, approved_result, evidence_decision
         if evidence_decision.reason == "cross_market_policy_request":
             fallback_message = self._cross_market_scope_message(
-                body.language, body.message
+                body.language, body.message, body.country
             )
         else:
             fallback_message = self._insufficient_evidence_message(
-                body.language, body.message
+                body.language, body.message, body.country
             )
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:
@@ -3494,7 +3507,7 @@ class AIOrchestrator:
             _record_diagnostic_validation(chat_response, result, "critical_fallback", numeric_repair_attempt)
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language, body.message),
+                    self._insufficient_evidence_message(body.language, body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),

@@ -288,7 +288,7 @@ def test_directory_contact_lines_and_phone_placeholder_handling_are_unchanged():
     assert "contact_placeholder_actions" not in secured.metadata
 
     replaced, changes = remove_or_replace_contact_placeholders("Call [PHONE] for help.", "US")
-    assert replaced == "Call (888) 440-ALOE (2563) for help."
+    assert replaced == "Call 1-888-440-ALOE (2563) for help."
     assert changes == ["phone_replaced"]
     removed, changes = remove_or_replace_contact_placeholders(f"{FACT}\nCall [PHONE] for help.", "CA")
     assert removed == FACT

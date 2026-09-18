@@ -29,7 +29,8 @@ FALLBACK_RESPONSES = {
     "insufficient_evidence": (
         "The approved policy documents currently available do not contain enough "
         "information to answer this question clearly. Please rephrase the question or "
-        "contact Forever Living support for an official answer."
+        "contact Forever Living support for an official answer.\n\n"
+        "You can also reach Forever Living Customer Care at [PHONE]."
     ),
     "income_claim": (
         "I can't share income projections or guarantees - that's not something I'm "
