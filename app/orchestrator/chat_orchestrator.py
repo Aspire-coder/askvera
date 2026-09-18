@@ -90,8 +90,11 @@ from utils.exceptions import (
     RetrievalMissError,
 )
 from utils.inline_citations import separate_verified_citations
+from app.response.contact_completion import (
+    build_contact_supplement_with_fax_fallback,
+    recommends_contact_in_language,
+)
 from utils.directory_fields import (
-    build_support_contact_supplement,
     canonical_requested_order_size,
     directory_field_conflicts,
     parse_directory_fields,
@@ -1610,9 +1613,10 @@ class AIOrchestrator:
         the answer *already* cites backs the answer too, so that citation is
         deliberately left unmarked. Citations stay a flat list of dicts.
         """
-        if _support_contact_response_is_ineligible(chat_response) or not _CARE_CONTACT_RECOMMENDATION_RE.search(
-            chat_response.answer or ""
-        ):
+        answer_recommends_contact = bool(
+            _CARE_CONTACT_RECOMMENDATION_RE.search(chat_response.answer or "")
+        ) or recommends_contact_in_language(chat_response.answer or "", language)
+        if _support_contact_response_is_ineligible(chat_response) or not answer_recommends_contact:
             return chat_response
 
         lookup_text = resolved_request or user_question or ""
@@ -1628,7 +1632,7 @@ class AIOrchestrator:
         if not approved_fields:
             return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
 
-        supplement = build_support_contact_supplement(
+        supplement = build_contact_supplement_with_fax_fallback(
             chat_response.answer,
             approved_fields,
             True,

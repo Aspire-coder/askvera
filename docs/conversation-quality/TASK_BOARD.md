@@ -214,13 +214,13 @@ Never written: `app/retrieval/**`, `app/experimental/**`, `docs/evidence_first_v
 |---|---|---|---|---|
 | A | active | 0 | - | - |
 | B | **integrated** (`6b33f68`, wired by coordinator) | Non-English questions now reach field focusing: requested parts kept, unrelated fields removed, durations are not office hours, unknown language strips nothing; ten languages plus da/ru/sr in one vocabulary module | lane: 367 passed, exit 0; coordinator re-run exit 0; flake8 and diff-check clean | Restored fields keep the source's English label inside a non-English answer; compound nouns ("Büroadresse") and some Finnish gradation forms missed; pt/fi/no least-confident terms need native review; free-delivery threshold, eligibility and qualification periods are policy text, not directory fields (out of scope) |
-| C | active | 0 | - | - |
+| C | round 2 | Round 1 (`f90318a`) flags a delivery-to-approval substitution in 10 languages | lane: 794 passed, exit 0 | **Not integrated.** The coordinator's probe found the brief's own example missed: topic nouns ("sponsor change", "application") were mixed into the stage cues, so a wrong answer that names its topic becomes two-stage, unknown, unflagged. Sent back. "Processed" versus "approved" is flagged: consistent with the brief, recorded as a deliberate trade-off |
 | D | active | 0 | - | - |
 | E | active | 0 | - | - |
-| F | active | 0 | - | - |
+| F | **integrated** (`137b772`, wired by coordinator) | Two reproduced defects fixed: a care recommendation in a non-English answer got no contact supplement (9 languages now; English unchanged); a fax-only approved record was dropped silently (now offered, labelled as fax, only when nothing else qualifies). Five requirements already held and are now pinned: nothing invented, country and purpose kept, nothing appended unasked, the right contact named without a detail, sponsoring contacts cross-market with policy restricted | lane: 253 passed, exit 0; coordinator: both strict xfails flipped to pass on the candidate, exit 0 | Negated recommendations ("no need to contact customer care") still match, as in the English regex; nine-language table not natively reviewed; the patch file had CRLF endings and was applied from an LF-normalized copy; the patch left an unused import (F401), removed by the coordinator |
 | G | active | 0 | - | - |
 
-Phase 2 complete: 14% (1 of 7 lanes integrated; Fable review pending).
+Phase 2 complete: 29% (2 of 7 lanes integrated; Fable review pending).
 
 Coordinator findings so far:
 - Lane B's report framed the defect as "multipart preservation fails in other languages". Probing showed the base kept EVERYTHING for non-English questions, so the real defect was unrelated fields being kept. The fix is correct; the framing was corrected here.

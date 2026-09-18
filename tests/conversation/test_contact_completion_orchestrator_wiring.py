@@ -1,22 +1,18 @@
-"""Phase 2 Lane F: two reproduced defects that need orchestrator wiring.
+"""Phase 2 Lane F: two reproduced defects, wired into the orchestrator. Mocked dependency behaviour.
 
-Both are reproduced through the REAL
-``AIOrchestrator._secure_and_complete_response`` (mocking only the
-Comprehend PII boundary, exactly as
-tests/unit/test_demo_contact_supplement_separation.py already does), not
-guessed at. Both fixes live in the new, pure
-``app/response/contact_completion.py`` (Lane F's own file); wiring them in
-is a small hook in ``app/orchestrator/chat_orchestrator.py``
-(``_apply_support_contact_supplement``), which Lane F may not edit directly
-(that file's sole writer is the coordinator). The unified diff is at
-``docs/conversation-quality/phase2/patches/laneF-multilingual-and-fax-contact.patch``;
-``git apply --check`` against base ``583b39a`` passes, and applying it in a
-scratch copy flips every test below from failing to passing (see
-``docs/conversation-quality/phase2/CONTACT_COMPLETION.md`` for the
-transcript).
+Both run through the REAL ``AIOrchestrator._secure_and_complete_response``,
+mocking only the Comprehend PII boundary, as
+tests/unit/test_demo_contact_supplement_separation.py does.
 
-Every test in this file is ``xfail(strict=True)`` against the unpatched
-tree - a false pass here would mean the reproduction itself is wrong.
+1. A care recommendation in a non-English answer got no contact supplement:
+   _CARE_CONTACT_RECOMMENDATION_RE is English-only.
+2. A fax-only approved record was dropped silently.
+
+The fixes are in ``app/response/contact_completion.py``. The coordinator wired
+them into ``_apply_support_contact_supplement`` from Lane F's patch
+(``docs/conversation-quality/phase2/patches/laneF-multilingual-and-fax-contact.patch``,
+applied after normalizing its CRLF line endings). These tests were strict
+xfails on Lane F's branch and pass on the integrated candidate.
 """
 
 from __future__ import annotations
@@ -27,11 +23,6 @@ from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
 from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalResult
-
-_PATCH_REASON = (
-    "needs docs/conversation-quality/phase2/patches/"
-    "laneF-multilingual-and-fax-contact.patch"
-)
 
 PHONE = "+254 712 434 328"
 EMAIL = "info@forever-kenya.example"
@@ -96,7 +87,6 @@ _MULTILINGUAL_CARE_ANSWERS = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason=_PATCH_REASON)
 @pytest.mark.parametrize("language", sorted(_MULTILINGUAL_CARE_ANSWERS))
 def test_a_non_english_care_recommendation_gets_the_supplement(monkeypatch, language: str) -> None:
     completed = _run(
@@ -115,7 +105,6 @@ def test_a_non_english_care_recommendation_gets_the_supplement(monkeypatch, lang
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason=_PATCH_REASON)
 def test_a_fax_only_record_is_offered_when_the_answer_recommends_care(monkeypatch) -> None:
     completed = _run(
         monkeypatch,
