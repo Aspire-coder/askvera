@@ -64,14 +64,14 @@ Status values: `todo`, `active`, `repro-confirmed`, `no-defect-pinned`,
 
 | ID | Task | Acceptance | Lane | Status |
 |---|---|---|---|---|
-| A1 | Kenya office-or-order follow-up | Kenya kept; numbers come from re-retrieved source, never from history | A | todo |
-| A2 | "And the office hours?" | office context kept | A | todo |
-| A3 | Explicit new place | old place not inherited | A | todo |
-| A4 | Cross-conversation isolation | no state, cache identity or facts shared | A | todo |
-| A5 | Topic change | irrelevant context released | A | todo |
-| A6 | Language switch (selector change mid-session) | topic kept, response language follows the new selection | A | todo |
-| A7 | Ambiguous follow-up | brief clarification when unresolvable | A | todo |
-| A8 | Hallucinated prior answer | cannot become evidence | A | todo |
+| A1 | Kenya office-or-order follow-up | Kenya kept; numbers come from re-retrieved source, never from history | A | no-defect-pinned (e2e) |
+| A2 | "And the office hours?" | office context kept | A | no-defect-pinned (e2e) |
+| A3 | Explicit new place | old place not inherited | A | no-defect-pinned (e2e) |
+| A4 | Cross-conversation isolation | no state, cache identity or facts shared | A | no-defect-pinned (real memory session store) |
+| A5 | Topic change | irrelevant context released | A | no-defect-pinned (e2e) |
+| A6 | Language switch (selector change mid-session) | topic kept, response language follows the new selection | A | no-defect-pinned (deterministic text only; model language needs live) |
+| A7 | Ambiguous follow-up | brief clarification when unresolvable | A | repro-confirmed, OPEN: strict xfail; Codex request `codex-requests/A7-unresolved-reference.md` |
+| A8 | Hallucinated prior answer | cannot become evidence | A | no-defect-pinned (real validator pipeline) |
 | B1 | Manager qualification completeness | supported requirements stated, not "specific requirements apply" | B | todo |
 | B2 | Minimum order FBO vs Preferred Customer | both distinguished when both are supported | B | todo |
 | B3 | Two-part question | both parts answered, or the unestablished part named | B | todo |
@@ -86,7 +86,7 @@ Status values: `todo`, `active`, `repro-confirmed`, `no-defect-pinned`,
 | C5 | Five failure kinds worded distinctly | scope, country restriction, missing evidence, ambiguity, dependency | C (wording) / coordinator (orchestrator wiring) | todo |
 | D1 | Verified contact presentation | right type, country and topic; exact digits; no duplicate; none invented | C | todo |
 | F1 | Recovery: timeout, empty, central claim rejected, empty source, unresolved "they" | coherent and honest; dependency failure kept separate from refusal | C | todo |
-| G1 | Conversation regression pack | every category in the brief, paraphrases and negative controls, honestly labelled | G | todo |
+| G1 | Conversation regression pack | every category in the brief, paraphrases and negative controls, honestly labelled | G | implemented: 26 cases; 1 expectation corrected; MULTIPART-001 open finding (routed to Lane C) |
 
 ## Initial Priority A reproduction (coordinator, query layer, 2026-09-18)
 
@@ -127,9 +127,23 @@ here in Lanes A–C. This project deliberately improves the production path and
 does not build a second state framework. The user needs to decide which path
 owns composition long-term. Recorded for the final handoff; not blocking.
 
+## Integration notes
+
+- `pytest.ini` sets `testpaths = tests/unit`, so `tests/conversation` and
+  `tests/conversation_pack` do not run by default. Run them explicitly, or
+  adopt the `testpaths = tests` change on `chore/measure-real-coverage-20260917`.
+
+## Rejected worker proposals
+
+- Lane A's A7 patch: an English regex for "the other one" that returns a
+  refusal rather than a clarification.
+- Lane C's `_drop_dangling_pronoun_handoffs`: an English-only fourteenth
+  post-editor that deletes the reader's next step. Moved to Lane B as a
+  composition rule.
+
 ## Blockers
 
-None yet.
+None.
 
 ## Approvals needed
 
