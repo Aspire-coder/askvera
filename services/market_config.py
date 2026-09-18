@@ -618,8 +618,26 @@ def get_widget_country_codes() -> set[str]:
 
 @lru_cache(maxsize=1)
 def _localized_market_names() -> dict[str, list[str]]:
+    """Load market_name_aliases.json's per-market alias names, with any alias
+    that collides with a closed-class function word in a configured
+    language (e.g. Estonian "Tai" for Thailand, which is also the Finnish
+    word for "or") excluded before it ever becomes a match pattern - see
+    ``config.alias_function_word_guard`` for the guard itself and why the
+    exclusion happens here rather than by hand-editing the generated JSON.
+    Every exclusion is logged (auditable), never silent.
+    """
+    from config.alias_function_word_guard import filter_function_word_aliases
+
     path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json")
-    return json.loads(path.read_text(encoding="utf-8"))["names"]
+    raw_names = json.loads(path.read_text(encoding="utf-8"))["names"]
+    filtered_names, excluded = filter_function_word_aliases(raw_names)
+    if excluded:
+        LOGGER.warning(
+            "market_alias_function_word_collision_excluded",
+            excluded_count=len(excluded),
+            excluded=[f"{code}:{alias}" for code, alias in excluded],
+        )
+    return filtered_names
 
 
 def find_market_mentions(message: str) -> set[str]:
