@@ -6,6 +6,12 @@ import bisect
 import re
 from collections.abc import Iterable
 
+from config.directory_field_vocabulary import (
+    LANGUAGE_FIELD_TERMS,
+    ORDER_WORD_TERMS,
+    normalize_language_code,
+)
+
 
 _FIELD_LABEL_RE = re.compile(
     r"(?:country|name|address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
@@ -51,6 +57,28 @@ _FIELD_REQUEST_PATTERNS: dict[str, re.Pattern[str]] = {
 # "office phone" must exclude it, while "office and order phone" or any
 # mention of "order" alongside phone/telephone must include it.
 _ORDER_PHONE_REQUEST_RE = re.compile(r"\border\b", re.IGNORECASE)
+
+# --- Phase 2 Lane B: multilingual field-REQUEST detection ------------------
+#
+# _FIELD_REQUEST_PATTERNS/_ORDER_PHONE_REQUEST_RE above are English-only and
+# stay exactly as they are (default/"en" behaviour is unchanged - see
+# _requested_directory_field_set below). config/directory_field_vocabulary.py
+# carries the reviewed non-English term lists; this compiles them once, at
+# import time, into per-language regexes keyed the same way. It answers only
+# "does the QUESTION name this field?" - the answer text's own field labels
+# stay English (see that module's docstring for why), so nothing else in
+# this file needs to change to support a non-English question.
+_LOCALIZED_FIELD_REQUEST_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
+    language: {
+        field: re.compile(r"(?<!\w)(?:" + "|".join(terms) + ")", re.IGNORECASE | re.UNICODE)
+        for field, terms in fields.items()
+    }
+    for language, fields in LANGUAGE_FIELD_TERMS.items()
+}
+_LOCALIZED_ORDER_WORD_PATTERNS: dict[str, re.Pattern[str]] = {
+    language: re.compile(r"(?<!\w)(?:" + "|".join(terms) + ")", re.IGNORECASE | re.UNICODE)
+    for language, terms in ORDER_WORD_TERMS.items()
+}
 
 # How each canonical field's directory label is recognised, reused for both
 # stripping an unrequested "Label: value" line and restoring a requested one
@@ -101,19 +129,43 @@ _FIELD_ALLOWED_LINE_FRAGMENTS: dict[str, str] = {
 _EXPLICIT_BUSINESS_HOURS_RE = re.compile(r"\b(?:business|office)\s+hours?\b", re.IGNORECASE)
 
 
-def _requested_directory_field_set(question: str) -> set[str] | None:
+def _requested_directory_field_set(question: str, *, language: str = "en") -> set[str] | None:
     """Return the canonical fields a question confidently names, or ``None``.
 
     ``None`` means the request was not confidently understood - the caller
     must not strip or guess anything in that case, rather than destructively
     acting on a first guessed match the way the old if/elif chain did.
+
+    ``language`` selects which vocabulary interprets ``question`` -
+    English's own (unchanged; the default, so every existing caller that
+    passes no ``language`` keeps behaving byte-for-byte as before) or, for a
+    language :mod:`config.directory_field_vocabulary` has a table for, that
+    table's terms. A ``language`` this module does not recognise (including
+    one with a table typo, or a language nobody has added yet) is not
+    guessed at - see :func:`config.directory_field_vocabulary.normalize_language_code`
+    - and returns ``None`` here, the same "not confidently understood"
+    outcome as no field being named at all, so nothing is stripped or
+    restored on a guess.
     """
     text = question or ""
-    requested: set[str] = set()
-    for key, pattern in _FIELD_REQUEST_PATTERNS.items():
-        if pattern.search(text):
-            requested.add(key)
-    if "phone" in requested and _ORDER_PHONE_REQUEST_RE.search(text):
+    normalized_language = normalize_language_code(language)
+    if normalized_language == "en":
+        requested: set[str] = set()
+        for key, pattern in _FIELD_REQUEST_PATTERNS.items():
+            if pattern.search(text):
+                requested.add(key)
+        if "phone" in requested and _ORDER_PHONE_REQUEST_RE.search(text):
+            requested.add("order_phone")
+        if not requested:
+            return None
+        return requested
+
+    field_patterns = _LOCALIZED_FIELD_REQUEST_PATTERNS.get(normalized_language)
+    if field_patterns is None:
+        return None
+    requested = {key for key, pattern in field_patterns.items() if pattern.search(text)}
+    order_word_pattern = _LOCALIZED_ORDER_WORD_PATTERNS.get(normalized_language)
+    if "phone" in requested and order_word_pattern is not None and order_word_pattern.search(text):
         requested.add("order_phone")
     if not requested:
         return None
@@ -349,6 +401,8 @@ def restore_missing_requested_directory_fields(
     answer: str,
     field_sets: Iterable[dict[str, object]],
     question: str,
+    *,
+    language: str = "en",
 ) -> tuple[str, list[str]]:
     """Restore the exact structured directory field(s) explicitly requested.
 
@@ -359,9 +413,13 @@ def restore_missing_requested_directory_fields(
     request naming several fields (e.g. "payment methods and delivery cost")
     restores each one found in the primary record and silently skips any
     field the record does not have - it never invents the missing one.
+
+    ``language`` selects the vocabulary that interprets ``question`` - see
+    :func:`_requested_directory_field_set`. The default ``"en"`` keeps every
+    existing caller's behaviour unchanged.
     """
     original = (answer or "").strip()
-    requested = _requested_directory_field_set(question)
+    requested = _requested_directory_field_set(question, language=language)
     if not requested:
         return original, []
 
@@ -433,9 +491,16 @@ def repair_labeled_directory_contacts(
 def directory_field_conflicts(
     field_sets: Iterable[dict[str, object]],
     question: str,
+    *,
+    language: str = "en",
 ) -> dict[str, list[str]]:
-    """Return distinct source values for requested fields that disagree."""
-    requested = _requested_directory_field_set(question) or set()
+    """Return distinct source values for requested fields that disagree.
+
+    ``language`` selects the vocabulary that interprets ``question`` - see
+    :func:`_requested_directory_field_set`. The default ``"en"`` keeps every
+    existing caller's behaviour unchanged.
+    """
+    requested = _requested_directory_field_set(question, language=language) or set()
     fbo_order_requested = bool(
         re.search(r"\b(?:minimum|first)\s+order\b", question or "", re.IGNORECASE)
         and re.search(r"\bfbo\b|business\s+owner", question or "", re.IGNORECASE)
@@ -636,6 +701,7 @@ def remove_unrequested_directory_fields(
     question: str,
     *,
     keep_labels: Iterable[str] = (),
+    language: str = "en",
 ) -> tuple[str, bool]:
     """Remove extra labelled directory fields when only some were requested.
 
@@ -644,6 +710,13 @@ def remove_unrequested_directory_fields(
     does not name their field - used to protect an explicitly approved
     supplemental contact block (see :func:`build_support_contact_supplement`)
     from being deleted again by this cleanup pass.
+
+    ``language`` selects the vocabulary used to interpret ``question`` (see
+    :func:`_requested_directory_field_set`) - the answer's own field labels
+    stay the record's canonical English text regardless of ``language`` (see
+    config/directory_field_vocabulary.py's docstring), so nothing else here
+    changes. The default ``"en"`` keeps every existing caller's behaviour
+    unchanged.
     """
     question_text = (question or "").casefold()
     protected = {str(label).strip().casefold() for label in keep_labels if str(label).strip()}
@@ -675,15 +748,35 @@ def remove_unrequested_directory_fields(
     # added) so a field the question itself names is never stripped here,
     # while an order-size-only question keeps shedding every other field
     # exactly as before.
-    if re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text):
-        order_size_requested = _requested_directory_field_set(question_text) or set()
+    normalized_language = normalize_language_code(language)
+    is_order_size_question = bool(
+        re.search(r"\b(minimum|ordering|order)\b.*\b(order|size)\b|\border\s+size\b", question_text)
+    )
+    if not is_order_size_question and normalized_language != "en":
+        # A non-English order-size question never reaches the English trigger
+        # above. Reuse the same localized minimum-order vocabulary this module
+        # already carries for restoring/canonicalizing the order-size answer
+        # (_LOCALIZED_ORDER_SIZE_QUESTION_RE, defined further below) rather
+        # than inventing a second one.
+        localized_order_size_re = _LOCALIZED_ORDER_SIZE_QUESTION_RE.get(normalized_language)
+        is_order_size_question = bool(localized_order_size_re and localized_order_size_re.search(question_text))
+    if is_order_size_question:
+        order_size_requested = _requested_directory_field_set(question_text, language=language) or set()
         # _FIELD_REQUEST_PATTERNS["business_hours"] also accepts a bare "hours",
         # which is right for a directory-field question ("What are the hours?")
         # but not here: "the minimum order if I need it within 48 hours" names a
         # duration, not the office's hours (Fable review, 2026-09-18). Inside
         # this branch only the explicit business/office form counts - the same
-        # alternative that pattern already carries, not a new phrase.
-        if "business_hours" in order_size_requested and not _EXPLICIT_BUSINESS_HOURS_RE.search(question_text):
+        # alternative that pattern already carries, not a new phrase. This
+        # applies to English only: every non-English business_hours term in
+        # config/directory_field_vocabulary.py is already an explicit
+        # business/office-hours compound and never a bare duration word (see
+        # that module's docstring), so no separate discard is needed there.
+        if (
+            normalized_language == "en"
+            and "business_hours" in order_size_requested
+            and not _EXPLICIT_BUSINESS_HOURS_RE.search(question_text)
+        ):
             order_size_requested.discard("business_hours")
         order_size_field_patterns = {
             "payment_methods": r"payment\s+methods?\s+accepted",
@@ -710,7 +803,7 @@ def remove_unrequested_directory_fields(
         )
         return cleaned.strip(), replacements > 0
 
-    requested = _requested_directory_field_set(question_text)
+    requested = _requested_directory_field_set(question_text, language=language)
     if not requested:
         # The request is not confidently understood as naming a specific
         # field - do not destructively strip anything based on a guess.
@@ -1303,6 +1396,10 @@ _LOCALIZED_ORDER_SIZE_QUESTION_RE: dict[str, re.Pattern[str]] = {
     "fr": re.compile(r"commande\w*\s+minim|minim\w*\s+(?:de\s+)?commande", re.IGNORECASE),
     "de": re.compile(r"mindestbestell|minim\w*\s+bestell", re.IGNORECASE),
     "es": re.compile(r"pedido\w*\s+mínim|mínim\w*\s+(?:de\s+)?pedido", re.IGNORECASE),
+    # Added Phase 2 / Lane B (2026-09-18): "pt" was missing from this dict even
+    # though every other Romance language here has an entry, using the same
+    # "encomenda/pedido mínima" shape as "es"/"fr"/"it".
+    "pt": re.compile(r"encomenda\w*\s+mínim|mínim\w*\s+(?:de\s+)?encomenda|pedido\w*\s+mínim|mínim\w*\s+(?:de\s+)?pedido", re.IGNORECASE),
     "it": re.compile(r"ordin\w*\s+minim|minim\w*\s+(?:d |di )?ordin", re.IGNORECASE),
     "da": re.compile(r"minimumsbestilling|minimumsordre|mindste\s+(?:bestilling|ordre)", re.IGNORECASE),
     "fi": re.compile(r"vähimmäistilau|minimitilau", re.IGNORECASE),
