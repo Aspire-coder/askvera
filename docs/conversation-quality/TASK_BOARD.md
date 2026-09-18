@@ -167,3 +167,57 @@ is out of scope without separate authorization.
 AGENTS.md asks for `graphify update .` after code changes. graphify is not
 installed and `graphify-out/` does not exist. Installing it is out of bounds,
 so the rule cannot apply in this session.
+
+---
+
+# Phase 2 (started 2026-09-18, base `3c0e6c5`; tested code `dbc6a7a`)
+
+## New constraint found at kickoff
+
+Codex's `askvera-evidence-first-v2` worktree now has uncommitted edits to
+`app/orchestrator/chat_orchestrator.py`, `app/retrieval/opensearch_sections.py`
+and `app/retrieval/providers.py`. In the orchestrator it wraps
+`_build_retrieval_query` in `_build_retrieval_query_with_provenance` (around
+lines 1874-1950) and puts `retriever.retrieve` inside a `try/finally` (around
+lines 1030-1065). Those are the regions that A7 and C5 touch. It also adds
+`import hashlib` at the top.
+
+Rule for this phase: an orchestrator change is a **small hook calling a new
+module**, placed outside those regions. At integration the coordinator
+trial-applies Codex's orchestrator diff (read from its worktree, never
+written) onto a scratch copy of the candidate and records the real conflict
+surface.
+
+No outage contract exists in Codex's changes yet, so Lane E defines one on
+the conversation side.
+
+## Lane ownership (disjoint write sets)
+
+| Lane | Goal | Writes (exclusive) |
+|---|---|---|
+| A | Unresolved references (A7) | `app/orchestrator/chat_orchestrator.py` (sole writer; hooks only), new `app/orchestrator/reference_resolution.py`, new `config/reference_vocabulary.py`, `config/conversation_routes.json` (clarification copy only), new `tests/conversation/test_reference_*.py`, `tests/conversation/test_followup_state_e2e.py` (A7 xfail flip only) |
+| B | Multilingual directory fields | `utils/directory_fields.py`, new `config/directory_field_vocabulary.py`, `tests/conversation/test_intent_multipart_order_size_payment.py`, `tests/conversation/test_order_size_field_keeping.py`, new `tests/conversation/test_multilingual_fields*.py` |
+| C | Timing and process stage | `app/validation/validators/numeric_grounding_validator.py`, new `config/timing_stage_vocabulary.py`, new `tests/conversation/test_timing_stage*.py` |
+| D | Fragment audit | `app/evidence_contract.py`, `app/response/quality.py`, `app/response/builder.py`, `utils/inline_citations.py`, new `utils/sentence_spans.py`, other editors except B's, C's and A's files; new `tests/conversation/test_fragment_*.py`; `docs/conversation-quality/phase2/FRAGMENT_AUDIT.md`. Defects in another lane's file become a failing test plus a patch under `docs/conversation-quality/phase2/patches/` |
+| E | Dependency truthfulness and observability | `app/metrics/**`, new `app/orchestrator/dependency_contract.py`, new `tests/conversation/test_dependency_*.py`, `docs/conversation-quality/codex-requests/C5-*.md`, `docs/conversation-quality/phase2/DEPENDENCY_ALARM_SPEC.md`; orchestrator wiring as a patch |
+| F | Contact completion | new `app/response/contact_completion.py`, new `tests/conversation/test_contact_completion*.py`; orchestrator wiring as a patch; `utils/directory_fields.py` and `config/public_contacts.json` read-only |
+| G | Test and measurement integrity | `pytest.ini`, `Makefile`, `tests/conversation_pack/**`, existing Phase 1 files `tests/conversation/test_{composition_*,contacts_*,intent_company_*,intent_dependency_*,followup_state_e2e (except A7)}.py`, `docs/conversation-quality/phase2/COVERAGE.md` |
+| Coordinator | Integration | `app/prompts/templates.py`, `config/settings.py` (`PROMPT_VERSION`), `tests/unit/test_codex_conversation_tone.py` and `tests/unit/test_bedrock.py` pins, applying patches, all `docs/conversation-quality/*.md` except lane-owned ones |
+
+Never written: `app/retrieval/**`, `app/experimental/**`, `docs/evidence_first_v2/**`,
+`scripts/evidence_first_v2/**`, `tests/evidence_first_v2/**`, the
+`askvera-evidence-first-v2` worktree, frozen evaluation content.
+
+## Phase 2 progress
+
+| Lane | Status | Criteria done | Tests | Limitations |
+|---|---|---|---|---|
+| A | active | 0 | - | - |
+| B | active | 0 | - | - |
+| C | active | 0 | - | - |
+| D | active | 0 | - | - |
+| E | active | 0 | - | - |
+| F | active | 0 | - | - |
+| G | active | 0 | - | - |
+
+Phase 2 complete: 0% (0 of 7 lanes integrated; Fable review pending).
