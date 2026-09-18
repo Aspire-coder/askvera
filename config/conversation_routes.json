@@ -115,7 +115,8 @@
         "income_claim": "I can't share income projections or guarantees - that's not something I'm able to speak to. The official Income Disclosure Statement is the right place for that kind of detail. Individual results may vary. Forever makes no guarantees on income or success. The Forever Business Owner opportunity and related incentives are not available to residents of the United States.",
         "bedrock_error": "Sorry about that - I'm having a brief technical hiccup reaching the knowledge base. Mind trying again in a moment?",
         "sensitive_pii": "For your privacy, I removed sensitive personal information from your message. AskVera does not use or save government IDs, payment details, passwords, or other sensitive identifiers. Please ask again without personal details.",
-        "guardrail_blocked": "I couldn't provide that response because it did not pass AskVera's safety checks. Please rephrase the question without private information or unsafe claims."
+        "guardrail_blocked": "I couldn't provide that response because it did not pass AskVera's safety checks. Please rephrase the question without private information or unsafe claims.",
+        "reference_clarification": "I want to make sure I answer about the right country — do you mean {candidates}?"
       }
     },
     "fr": {
@@ -153,7 +154,8 @@
         "income_claim": "Je ne peux pas partager de projections de revenus ou de garanties - ce n'est pas quelque chose dont je peux parler. La Déclaration officielle de divulgation des revenus est le bon endroit pour ce type de détail. Les résultats individuels peuvent varier. Forever ne garantit aucun revenu ni aucune réussite. L'opportunité Forever Business Owner et les incitations associées ne sont pas disponibles pour les résidents des États-Unis.",
         "bedrock_error": "Désolé - j'éprouve une brève difficulté technique pour accéder à la base de connaissances. Pourriez-vous réessayer dans un instant ?",
         "sensitive_pii": "Pour protéger votre vie privée, j'ai supprimé les informations personnelles sensibles de votre message. AskVera n'utilise ni n'enregistre les pièces d'identité, les données de paiement, les mots de passe ou d'autres identifiants sensibles. Reformulez votre question sans données personnelles.",
-        "guardrail_blocked": "Je n'ai pas pu fournir cette réponse, car elle n'a pas satisfait aux contrôles de sécurité d'AskVera. Reformulez la question sans informations privées ni allégations à risque."
+        "guardrail_blocked": "Je n'ai pas pu fournir cette réponse, car elle n'a pas satisfait aux contrôles de sécurité d'AskVera. Reformulez la question sans informations privées ni allégations à risque.",
+        "reference_clarification": "Je veux m'assurer de répondre pour le bon pays — voulez-vous dire {candidates} ?"
       }
     },
     "es": {
@@ -191,7 +193,8 @@
         "income_claim": "No puedo compartir proyecciones de ingresos ni garantías - eso no es algo sobre lo que pueda hablar. La Declaración Oficial de Divulgación de Ingresos es el lugar correcto para ese tipo de detalle. Los resultados individuales pueden variar. Forever no garantiza ingresos ni éxito. La oportunidad Forever Business Owner y los incentivos relacionados no están disponibles para los residentes de Estados Unidos.",
         "bedrock_error": "Lo siento, estoy teniendo un pequeño problema técnico para acceder a la base de conocimientos. ¿Te importaría intentarlo de nuevo en un momento?",
         "sensitive_pii": "Para proteger tu privacidad, eliminé la información personal confidencial del mensaje. AskVera no usa ni guarda identificaciones oficiales, datos de pago, contraseñas u otros identificadores confidenciales. Vuelve a preguntar sin datos personales.",
-        "guardrail_blocked": "No pude proporcionar esa respuesta porque no superó los controles de seguridad de AskVera. Reformula la pregunta sin información privada ni afirmaciones inseguras."
+        "guardrail_blocked": "No pude proporcionar esa respuesta porque no superó los controles de seguridad de AskVera. Reformula la pregunta sin información privada ni afirmaciones inseguras.",
+        "reference_clarification": "Quiero asegurarme de responder sobre el país correcto — ¿te refieres a {candidates}?"
       }
     },
     "de": {
@@ -229,7 +232,8 @@
         "income_claim": "Ich kann keine Einkommensprognosen oder Garantien geben – das ist etwas, das ich nicht besprechen kann. Die offizielle Income Disclosure Statement ist der richtige Ort für solche Details. Individuelle Ergebnisse können variieren. Forever gibt keine Garantien für Einkommen oder Erfolg. Die Forever Business Owner-Möglichkeit und die damit verbundenen Anreize stehen Einwohnern der Vereinigten Staaten nicht zur Verfügung.",
         "bedrock_error": "Entschuldigung – ich habe gerade eine kurze technische Störung beim Zugriff auf die Wissensdatenbank. Könnten Sie es in einem Moment erneut versuchen?",
         "sensitive_pii": "Zum Schutz Ihrer Privatsphäre habe ich sensible persönliche Angaben aus Ihrer Nachricht entfernt. AskVera verwendet oder speichert keine Ausweis-, Zahlungs- oder Zugangsdaten. Stellen Sie die Frage bitte erneut ohne persönliche Daten.",
-        "guardrail_blocked": "Ich konnte diese Antwort nicht bereitstellen, weil sie die Sicherheitsprüfungen von AskVera nicht bestanden hat. Formulieren Sie die Frage bitte ohne private Angaben oder unsichere Behauptungen neu."
+        "guardrail_blocked": "Ich konnte diese Antwort nicht bereitstellen, weil sie die Sicherheitsprüfungen von AskVera nicht bestanden hat. Formulieren Sie die Frage bitte ohne private Angaben oder unsichere Behauptungen neu.",
+        "reference_clarification": "Ich möchte sicherstellen, dass ich zum richtigen Land antworte – meinen Sie {candidates}?"
       }
     },
     "nl": {
@@ -269,7 +273,8 @@
         "income_claim": "Ik kan geen inkomstenverwachtingen of garanties delen - dat is iets waar ik niet over kan spreken. De officiële Income Disclosure Statement is de juiste plaats voor dat soort details. Individuele resultaten kunnen variëren. Forever geeft geen garanties op inkomen of succes. De Forever Business Owner-mogelijkheid en de bijbehorende incentives zijn niet beschikbaar voor inwoners van de Verenigde Staten.",
         "bedrock_error": "Het spijt me - ik heb even een technisch probleem met het bereiken van de kennisbank. Wil je het over een moment opnieuw proberen?",
         "sensitive_pii": "Om uw privacy te beschermen heb ik gevoelige persoonsgegevens uit uw bericht verwijderd. AskVera gebruikt of bewaart geen identiteits-, betaal- of inloggegevens. Stel uw vraag opnieuw zonder persoonlijke gegevens.",
-        "guardrail_blocked": "Ik kon dat antwoord niet geven omdat het niet door de veiligheidscontroles van AskVera kwam. Formuleer de vraag opnieuw zonder privégegevens of onveilige claims."
+        "guardrail_blocked": "Ik kon dat antwoord niet geven omdat het niet door de veiligheidscontroles van AskVera kwam. Formuleer de vraag opnieuw zonder privégegevens of onveilige claims.",
+        "reference_clarification": "Ik wil zeker weten dat ik over het juiste land antwoord — bedoel je {candidates}?"
       }
     },
     "it": {
@@ -286,7 +291,8 @@
         "capability": "Sono AskVera, la tua guida alle politiche ufficiali di Forever Living e all'elenco internazionale di sponsorizzazione. Chiedimi informazioni su regole di qualificazione, bonus, domande sulla conformità o come raggiungere un ufficio, e troverò la risposta approvata per te.",
         "off_topic": "Mi dispiace, ma non posso aiutarti con questa domanda. AskVera può aiutarti con le politiche aziendali approvate di Forever Living e le informazioni dell’elenco internazionale di sponsorizzazione. Fammi una domanda su uno di questi argomenti e sarò felice di aiutarti.",
         "medical_claim": "Non sono in grado di fornire consigli medici o fare affermazioni riguardanti il trattamento o la cura di qualsiasi cosa. Per qualsiasi questione legata alla salute, un professionista sanitario qualificato è davvero la persona giusta a cui rivolgersi. I prodotti Forever non sono stati valutati dalla Food and Drug Administration e non sono destinati a diagnosticare, trattare, curare o prevenire alcuna malattia.",
-        "income_claim": "Non posso condividere proiezioni di reddito o garanzie - non è qualcosa di cui posso parlare. L'Income Disclosure Statement ufficiale è il posto giusto per quel tipo di dettagli. I risultati individuali possono variare. Forever non offre garanzie di reddito o di successo. L'opportunità Forever Business Owner e i relativi incentivi non sono disponibili per i residenti degli Stati Uniti."
+        "income_claim": "Non posso condividere proiezioni di reddito o garanzie - non è qualcosa di cui posso parlare. L'Income Disclosure Statement ufficiale è il posto giusto per quel tipo di dettagli. I risultati individuali possono variare. Forever non offre garanzie di reddito o di successo. L'opportunità Forever Business Owner e i relativi incentivi non sono disponibili per i residenti degli Stati Uniti.",
+        "reference_clarification": "Voglio assicurarmi di rispondere sul paese giusto — intendi {candidates}?"
       }
     },
     "da": {
@@ -320,7 +326,8 @@
         "capability": "Olen AskVera, oppaasi Forever Livingin virallisiin käytäntöihin ja kansainväliseen sponsorointihakemistoon. Kysy minulta pätevyyssäännöistä, bonuksista, vaatimustenmukaisuuskysymyksistä tai siitä, kuinka tavoitat toimiston, ja löydän sinulle hyväksytyn vastauksen.",
         "off_topic": "Olen pahoillani, mutta en voi auttaa tässä kysymyksessä. AskVera auttaa Forever Livingin hyväksyttyihin yrityskäytäntöihin ja kansainvälisen sponsorointihakemiston tietoihin liittyvissä asioissa. Kysy mielellään jommastakummasta aiheesta.",
         "medical_claim": "En voi antaa lääketieteellistä neuvontaa tai tehdä väitteitä minkään hoidosta tai parantamisesta. Kaikkiin terveysasioihin liittyviin kysymyksiin pätevä terveydenhuollon ammattilainen on todella oikea henkilö, jolle kysyä. Foreverin tuotteita ei ole arvioinut Food and Drug Administration, eikä niitä ole tarkoitettu diagnosoimaan, hoitamaan, parantamaan tai ehkäisemään mitään sairautta.",
-        "income_claim": "En voi jakaa tuloennusteita tai takuita - se ei ole asia, josta voin puhua. Virallinen Income Disclosure Statement on oikea paikka tämän kaltaisille yksityiskohdille. Yksilölliset tulokset voivat vaihdella. Forever ei anna takeita tuloista tai menestyksestä. Forever Business Owner -mahdollisuus ja siihen liittyvät kannustimet eivät ole Yhdysvaltain asukkaiden käytettävissä."
+        "income_claim": "En voi jakaa tuloennusteita tai takuita - se ei ole asia, josta voin puhua. Virallinen Income Disclosure Statement on oikea paikka tämän kaltaisille yksityiskohdille. Yksilölliset tulokset voivat vaihdella. Forever ei anna takeita tuloista tai menestyksestä. Forever Business Owner -mahdollisuus ja siihen liittyvät kannustimet eivät ole Yhdysvaltain asukkaiden käytettävissä.",
+        "reference_clarification": "Haluan varmistaa, että vastaan oikeasta maasta — tarkoitatko {candidates}?"
       }
     },
     "no": {
@@ -337,7 +344,8 @@
         "capability": "Jeg er AskVera, din guide til Forever Livings offisielle retningslinjer og den internasjonale sponsorkatalogen. Spør meg om kvalifikasjonsregler, bonuser, compliance-spørsmål eller hvordan du når et kontor, og jeg finner det godkjente svaret for deg.",
         "off_topic": "Beklager, men jeg kan ikke hjelpe med det spørsmålet. AskVera kan hjelpe med godkjente selskapsretningslinjer for Forever Living og informasjon fra den internasjonale sponsorkatalogen. Spør meg gjerne om et av disse områdene.",
         "medical_claim": "Jeg kan ikke gi medisinsk råd eller fremsette påstander om behandling eller kurering av noe som helst. For alt som er helserelatert, er en kvalifisert helsepersonell virkelig den rette personen å spørre. Forevers produkter er ikke evaluert av Food and Drug Administration og er ikke beregnet på å diagnostisere, behandle, kurere eller forebygge noen sykdom.",
-        "income_claim": "Jeg kan ikke dele inntektsprognoser eller garantier – det er ikke noe jeg kan uttale meg om. Den offisielle inntektsopplysningserklæringen er det rette stedet for den typen detaljer. Individuelle resultater kan variere. Forever gir ingen garantier for inntekt eller suksess. Forever Business Owner-muligheten og tilhørende incentiver er ikke tilgjengelige for innbyggere i USA."
+        "income_claim": "Jeg kan ikke dele inntektsprognoser eller garantier – det er ikke noe jeg kan uttale meg om. Den offisielle inntektsopplysningserklæringen er det rette stedet for den typen detaljer. Individuelle resultater kan variere. Forever gir ingen garantier for inntekt eller suksess. Forever Business Owner-muligheten og tilhørende incentiver er ikke tilgjengelige for innbyggere i USA.",
+        "reference_clarification": "Jeg vil forsikre meg om at jeg svarer om det riktige landet — mener du {candidates}?"
       }
     },
     "sr": {
@@ -371,7 +379,8 @@
         "capability": "Jag är AskVera, din guide till Forever Livings officiella policyer och den internationella sponsorkatalogen. Fråga mig om kvalificeringsregler, bonusar, efterlevnadsfrågor eller hur du når ett kontor, så hittar jag det godkända svaret för dig.",
         "off_topic": "Jag är ledsen, men jag kan inte hjälpa till med den frågan. AskVera kan hjälpa till med godkända företagspolicyer för Forever Living och information från den internationella sponsorkatalogen. Fråga gärna om något av dessa områden.",
         "medical_claim": "Jag kan inte ge medicinsk rådgivning eller göra påståenden om att behandla eller bota något. För allt som är hälsorelaterat är en kvalificerad sjukvårdspersonal verkligen rätt person att fråga. Forevers produkter har inte utvärderats av Food and Drug Administration och är inte avsedda att diagnostisera, behandla, bota eller förebygga någon sjukdom.",
-        "income_claim": "Jag kan inte dela inkomstprognoser eller garantier - det är något jag inte kan tala om. Det officiella inkomstöppenbarhetsuttalandet är rätt plats för den typen av detaljer. Individuella resultat kan variera. Forever lämnar inga garantier för inkomst eller framgång. Forever Business Owner-möjligheten och tillhörande incitament är inte tillgängliga för invånare i USA."
+        "income_claim": "Jag kan inte dela inkomstprognoser eller garantier - det är något jag inte kan tala om. Det officiella inkomstöppenbarhetsuttalandet är rätt plats för den typen av detaljer. Individuella resultat kan variera. Forever lämnar inga garantier för inkomst eller framgång. Forever Business Owner-möjligheten och tillhörande incitament är inte tillgängliga för invånare i USA.",
+        "reference_clarification": "Jag vill vara säker på att jag svarar om rätt land — menar du {candidates}?"
       }
     },
     "ru": {

@@ -23,8 +23,6 @@ left in (no override), that is called out in the test.
 
 from __future__ import annotations
 
-import pytest
-
 from app.models.responses import ModelResponse
 from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
@@ -466,33 +464,26 @@ def test_a6_language_switch_on_a_safe_topic_follows_the_new_language(monkeypatch
 # =============================================================================
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "A7 open defect: 'the other one' after Kenya then Uganda resolves to Uganda, the market "
-        "just discussed, which is the one reading it cannot mean. Lane A's English-regex patch was "
-        "rejected by the coordinator (English phrase list; returns a refusal, not a clarification). "
-        "Flips to a visible pass when a general fix lands."
-    ),
-)
 def test_a7_the_other_one_after_two_named_markets_does_not_silently_answer_for_one(monkeypatch) -> None:
-    """Repro: after Kenya then an explicit switch to Uganda, "What about the
-    other one?" refers to whichever market the reader did NOT just get an
-    answer about - genuinely ambiguous between Kenya and Uganda from the
-    reader's point of view. The current implementation resolves the bare
-    "other one" phrase against the single most-recent target (Uganda) instead
-    of recognising the anaphor and asking which one is meant.
+    """Fixed (Phase 2, Lane A): after Kenya then an explicit switch to
+    Uganda, "What about the other one?" refers to whichever market the
+    reader did NOT just get an answer about - genuinely ambiguous between
+    Kenya and Uganda from the reader's point of view. It used to resolve the
+    bare "other one" phrase against the single most-recent target (Uganda)
+    instead of recognising the anaphor and asking which one is meant.
 
-    This is recorded as repro-confirmed at the orchestrator query-resolution
-    layer: retrieval runs for exactly one market (Uganda) rather than pausing
-    for a brief clarification. Because `_build_retrieval_query` /
-    `_build_request_query` are single-writer (owned by the coordinator, see
-    docs/conversation-quality/TASK_BOARD.md and this worktree's task prompt),
-    Lane A proposed a patch; the coordinator rejected it. It matched "the
-    other one" with an English regex and returned a refusal rather than a
-    clarification. The general fix needs an unresolved-reference signal from
-    the intent planner; see
-    docs/conversation-quality/codex-requests/A7-unresolved-reference.md.
+    Fix: app.orchestrator.reference_resolution.resolve_reference (a new,
+    pure, model-free module - see tests/conversation/test_reference_resolution.py)
+    recognises "other" as a closed-class contrastive reference
+    (config/reference_vocabulary.py), finds two or more distinct markets in
+    the session's own USER turns (Kenya, then Uganda), and routes to a
+    clarification that names both, through a small hook in
+    chat_orchestrator.AIOrchestrator._resolve_unresolved_reference - called
+    before retrieval ever runs, so retrieval never resolves to Uganda at all.
+
+    This assertion is now the requirement itself, not "either a clarification
+    or retrieval avoided the wrong guess": a real clarification must be
+    delivered, and retrieval must never have run for Uganda alone.
     """
     history = _history(
         ("What is the delivery cost in Kenya?", "Delivery to Kenya costs $3 within the country."),
@@ -505,18 +496,9 @@ def test_a7_the_other_one_after_two_named_markets_does_not_silently_answer_for_o
         documents=[_kenya_document()],
         model_text="Delivery to Kenya costs $3 within the country.",
     )
-    from app.retrieval.opensearch_sections import _directory_target_country_names
-
-    # Desired behaviour (coordinator correction): the original version of this
-    # test asserted the DEFECT - retrieval for Uganda alone - as its passing
-    # condition, so it would have failed the day A7 was fixed. It now asserts
-    # the requirement. Either a brief clarification is asked, or retrieval
-    # does not resolve to Uganda, the one market "the other one" cannot mean.
-    clarified = response.metadata.get("failure_layer") == "directory_clarification"
-    guessed_uganda = bool(retriever.seen) and _directory_target_country_names(
-        retriever.seen[0], "US"
-    ) == {"Uganda"}
-    assert clarified or not guessed_uganda
+    assert response.metadata.get("failure_layer") == "directory_clarification"
+    assert set(response.metadata.get("reference_candidates") or []) == {"Kenya", "Uganda"}
+    assert not retriever.seen, "retrieval must not run at all when the reference is ambiguous"
 
 
 # =============================================================================

@@ -34,7 +34,14 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # nl - the locales that already carry reviewed copy for this key); the
 # remaining configured locales continue to translate the English source on
 # demand and pick up the new sentence automatically.
-ROUTES_REST_SHA256 = "aa0853656c074a722eca5da549ef98801077bfcefd4f100bdf66f759c2670dce"
+# Updated 2026-09-18 (Phase 2, Lane A, task A7): added one new key,
+# "reference_clarification", to the "responses" object of every locale that
+# already had a "responses" block (en, fr, es, de, nl, it, fi, no, sr, sv,
+# ru) - the localized copy asking which of two or more candidate markets an
+# unresolved back-reference ("the other one") meant, with a "{candidates}"
+# placeholder the orchestrator fills in. No existing key's value changed, and
+# "pt" was left with no locale block, as before, since it never had one.
+ROUTES_REST_SHA256 = "0098ec016292865497a7f551b1eab12748f97ff67d84edbf41c3464fa2822165"
 # Updated 2026-09-18 (conversation-quality project): four rules edited in
 # place, all additive in meaning, with the rendered prompt held under the
 # existing 4392-character budget (4247 -> 4381), so no budget assertion moved.
