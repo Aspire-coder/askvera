@@ -157,7 +157,90 @@ LOCALIZED_ORDINAL_TOKENS: dict[str, dict[str, str]] = {
     },
 }
 
-# Every language this module covers must key both tables identically, so a
-# lookup by language code can test one table and trust the other.
+# A contrastive/ordinal token counts as a MARKET reference only when the
+# message is otherwise empty of content (coordinator review, 2026-09-18: a
+# reference token counts whatever noun phrase it modifies, so "the first
+# ORDER", "the last DAY", "the other FEE" are not market references at all -
+# resolving them would confidently answer the wrong question, not just the
+# wrong market). The two tables below implement that check:
+#
+# LOCALIZED_NON_CONTENT_TOKENS - articles, prepositions, conjunctions, WH-
+# question words and copula/auxiliary verbs, i.e. the closed grammatical
+# classes a short question is built from around its one content word. These
+# are stripped, along with the matched reference token itself, before asking
+# "is anything left?". This mirrors chat_orchestrator.py's own
+# LOCALIZED_FOLLOW_UP_FUNCTION_WORDS / LOCALIZED_FOLLOW_UP_STOP_WORDS and the
+# opener phrases in LOCALIZED_TOPIC_SHIFT_OPENERS (not imported - see
+# app/orchestrator/reference_resolution.py's docstring on why - but the same
+# closed-class technique, extended with the WH/aux words a bare "what
+# about"/"qu'en est-il"/"was ist mit" opener needs).
+#
+# This list is deliberately allowed to be incomplete per language: a word
+# missing from it only ever makes the leftover-content check see MORE
+# content than there really is, which only ever suppresses a reference this
+# module could have resolved (the safe, unchanged direction). It can never
+# cause a false positive - a false positive needs an EMPTY leftover, and a
+# missing function word only ever adds to that leftover, never removes from
+# it. So under-covering a language here is a documented limitation (missed
+# clarifications/resolutions in unanticipated phrasings), never a new risk.
+LOCALIZED_NON_CONTENT_TOKENS: dict[str, frozenset[str]] = {
+    "en": frozenset({
+        "the", "a", "an", "of", "to", "is", "are", "was", "were", "do", "does", "did",
+        "what", "how", "about", "there", "any",
+    }),
+    "fr": frozenset({
+        "le", "la", "les", "l", "du", "des", "d", "a", "au", "aux", "pour", "et", "en",
+        "qu", "est", "il", "y", "de",
+    }),
+    "de": frozenset({
+        "der", "die", "das", "den", "dem", "ein", "eine", "im", "fur", "fuer", "nach",
+        "mit", "und", "aus", "von", "was", "ist",
+    }),
+    "nl": frozenset({
+        "de", "het", "een", "van", "voor", "naar", "in", "met", "en", "hoe", "zit",
+    }),
+    "it": frozenset({
+        "il", "lo", "i", "gli", "di", "della", "alla", "ad", "nel", "nella", "per",
+        "e", "quanto", "riguarda", "l",
+    }),
+    "pt": frozenset({
+        "o", "os", "as", "do", "da", "dos", "no", "na", "nos", "nas", "em", "ao", "aos",
+        "e", "quanto",
+    }),
+    "es": frozenset({
+        "el", "los", "las", "del", "al", "para", "y", "que", "hay",
+    }),
+    "fi": frozenset({
+        "enta", "se", "mika", "onko", "mita",
+    }),
+    "sv": frozenset({
+        "for", "till", "om", "och", "hur", "ar", "det", "med", "den",
+    }),
+    "no": frozenset({
+        "for", "til", "og", "hva", "med", "den", "er",
+    }),
+}
+
+# The only real-world-content-free nouns a bare reference word may still
+# stand next to: a generic pronoun head ("the first ONE") or a generic
+# place/market head. Anything else left over is real content, so the
+# message is not a market reference.
+LOCALIZED_PROP_WORDS: dict[str, frozenset[str]] = {
+    "en": frozenset({"one", "ones", "country", "market", "place"}),
+    "fr": frozenset({"pays", "marche", "endroit"}),
+    "de": frozenset({"land", "markt", "ort"}),
+    "nl": frozenset({"land", "markt", "plaats"}),
+    "it": frozenset({"paese", "mercato", "posto"}),
+    "pt": frozenset({"pais", "mercado", "lugar"}),
+    "es": frozenset({"pais", "mercado", "lugar"}),
+    "fi": frozenset({"maa", "markkina", "paikka"}),
+    "sv": frozenset({"land", "marknad", "plats"}),
+    "no": frozenset({"land", "marked", "sted"}),
+}
+
+# Every language this module covers must key all four tables identically, so
+# a lookup by language code can test one table and trust the others.
 assert set(LOCALIZED_CONTRASTIVE_TOKENS) == set(LOCALIZED_ORDINAL_TOKENS)
+assert set(LOCALIZED_CONTRASTIVE_TOKENS) == set(LOCALIZED_NON_CONTENT_TOKENS)
+assert set(LOCALIZED_CONTRASTIVE_TOKENS) == set(LOCALIZED_PROP_WORDS)
 SUPPORTED_REFERENCE_LANGUAGES = frozenset(LOCALIZED_CONTRASTIVE_TOKENS)

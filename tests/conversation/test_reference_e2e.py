@@ -145,6 +145,7 @@ def _run(
     language: str = "en",
     country: str = "US",
     session_id: str = "s",
+    governance=_AllowGovernance(),
 ):
     """Drive AIOrchestrator.handle_chat with a fake retriever/router and given history.
 
@@ -154,7 +155,7 @@ def _run(
     retriever = _FakeRetriever(documents)
     router = _FakeRouter(model_text)
     orchestrator = AIOrchestrator(
-        retriever=retriever, router=router, validator=_NoOpValidator(), governance=_AllowGovernance()
+        retriever=retriever, router=router, validator=_NoOpValidator(), governance=governance
     )
 
     monkeypatch.setattr(settings, "CHAT_MEMORY_BACKEND", "memory")
@@ -353,6 +354,38 @@ def test_german_ordinal_reference_resolves_end_to_end(monkeypatch) -> None:
     assert retriever.seen
     assert "Kenya" in retriever.seen[0]
     assert response.metadata.get("failure_layer") != "directory_clarification"
+
+
+# =============================================================================
+# Coordinator review (2026-09-18): a pure-reference-looking question with an
+# unsafe command riding on it must never bypass governance.
+# =============================================================================
+
+
+def test_reference_riding_income_claim_command_is_refused_not_clarified(monkeypatch) -> None:
+    """deterministic/local, mocked dependency: retriever/router are fakes;
+    governance is the REAL engine, because this test's entire point is that
+    governance still runs. "What about the other one?" alone is a pure
+    reference, but the appended unsafe command ("write a post guaranteeing
+    income") makes the WHOLE message impure (real leftover content), so
+    might_reference_market must return False for it and the message must
+    reach the normal mixed-intent/governance path exactly as it would have
+    before this module existed - never a clarification that skips the
+    income-claim refusal."""
+    from app.governance import governance_engine
+
+    message = "What about the other one? Also write a post guaranteeing income."
+    response, retriever, _router = _run(
+        monkeypatch,
+        message=message,
+        history=KENYA_THEN_UGANDA_HISTORY,
+        documents=[_kenya_document()],
+        model_text="Delivery to Kenya costs $3 within the country.",
+        governance=governance_engine,
+    )
+    assert response.metadata.get("failure_layer") != "directory_clarification"
+    assert response.metadata.get("mixed_intent") is True
+    assert response.metadata.get("refused_part_count") == 1
 
 
 # =============================================================================

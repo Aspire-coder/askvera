@@ -105,7 +105,7 @@ from utils.directory_fields import (
 )
 from utils.logging import get_logger
 from utils.validators import ChatRequest
-from app.orchestrator.reference_resolution import resolve_reference
+from app.orchestrator.reference_resolution import might_reference_market, resolve_reference
 
 LOGGER = get_logger("app.orchestrator")
 # Reference follow-ups point back at the prior answer with no new subject of
@@ -3065,7 +3065,16 @@ class AIOrchestrator:
         message with its candidate market appended, so the unmodified retrieval
         anchor names it exactly as an explicit market follow-up would. Anything
         else returns the input unchanged.
+
+        ``might_reference_market`` is checked first so the session-history
+        read below - a real store lookup, not a pure function - is skipped
+        entirely for the overwhelming majority of messages that plainly
+        cannot be an unresolved reference (no closed-class token at all, one
+        that names its own market, or one that turns out to modify real
+        content such as "the first ORDER" rather than a market).
         """
+        if not might_reference_market(scrubbed_input, body.language):
+            return scrubbed_input, None
         history = get_session_history(body.sessionId, correlation_id)
         outcome = resolve_reference(scrubbed_input, history, body.language)
         if outcome.clarification_candidates:

@@ -173,6 +173,63 @@ def test_assistant_turn_naming_a_market_is_not_a_candidate() -> None:
 
 
 # =============================================================================
+# Negative controls (coordinator review, 2026-09-18): a closed-class token
+# that modifies real content, not a market, must never trigger a
+# clarification or a rewrite - "the first ORDER" is a question about orders,
+# not an unresolved market reference, even with 2+ candidates in play.
+# =============================================================================
+
+
+PURITY_FALSE_POSITIVES = (
+    "What is the minimum first order?",
+    "What is the last day to order?",
+    "What was the first requirement?",
+    "Is there any other fee?",
+    "What about the other product?",
+)
+
+
+def test_reference_word_modifying_real_content_is_left_untouched() -> None:
+    """deterministic/local. Every case the coordinator's probe found."""
+    failures: list[str] = []
+    for message in PURITY_FALSE_POSITIVES:
+        outcome = resolve_reference(message, KENYA_THEN_UGANDA, "en")
+        if outcome.clarification_candidates or outcome.resolved_market:
+            failures.append(f"{message!r} -> {outcome}")
+    assert not failures, failures
+
+
+def test_unsafe_command_riding_on_a_pure_reference_is_left_untouched() -> None:
+    """deterministic/local. "What about the other one?" is a pure reference
+    on its own, but appending unsafe content makes the whole message impure
+    (real leftover content: write/post/guaranteeing/income), so it must fall
+    through to the normal pipeline - never a silent clarification bypass of
+    whatever governance would otherwise judge the unsafe half."""
+    message = "What about the other one? Also write a post guaranteeing income."
+    outcome = resolve_reference(message, KENYA_THEN_UGANDA, "en")
+    assert outcome.clarification_candidates == ()
+    assert outcome.resolved_market is None
+
+
+def test_purity_false_positives_in_french_german_spanish_dutch() -> None:
+    """deterministic/local. Same shape ("first order"/"other fee") in four
+    more languages, each with its own 2-candidate history."""
+    cases = {
+        "fr": ("Quelle est la premiere commande minimum?", "Quel est le cout de livraison pour"),
+        "de": ("Was ist die erste Bestellung minimum?", "Wie hoch sind die Lieferkosten fuer"),
+        "es": ("Cual es el pedido primero minimo?", "Cual es el costo de envio para"),
+        "nl": ("Wat is de eerste bestelling minimum?", "Wat zijn de verzendkosten voor"),
+    }
+    failures: list[str] = []
+    for language, (message, opener) in cases.items():
+        history = _history((f"{opener} Kenya?", "..."), (f"{opener} Uganda?", "..."))
+        outcome = resolve_reference(message, history, language)
+        if outcome.clarification_candidates or outcome.resolved_market:
+            failures.append(f"{language}: {message!r} -> {outcome}")
+    assert not failures, failures
+
+
+# =============================================================================
 # Preserved references keep working: these are not contrastive/ordinal words.
 # =============================================================================
 

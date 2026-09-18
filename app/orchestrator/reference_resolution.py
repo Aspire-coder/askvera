@@ -15,7 +15,13 @@ reference:
   deterministically to one candidate, by order of first mention (rule 3);
 - has fewer than two candidate markets in play, or is written in a language
   this module does not recognize, in which case behaviour is unchanged
-  (rules 4 and 5 - fail conservative).
+  (rules 4 and 5 - fail conservative);
+- names something OTHER than a market alongside the reference word ("the
+  first ORDER", "the other FEE", "my first REQUIREMENT") - the message is
+  then not a market reference at all, regardless of language or candidate
+  count, and is left untouched (coordinator review, 2026-09-18; see
+  ``_is_pure_reference`` and config/reference_vocabulary.py's
+  LOCALIZED_NON_CONTENT_TOKENS / LOCALIZED_PROP_WORDS).
 
 No model call is made anywhere in this module. Candidate markets come from
 the exact matchers app/orchestrator/chat_orchestrator.py already trusts for
@@ -41,7 +47,12 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from services.market_config import find_market_mentions, find_shared_office_record_countries, market_display_name
-from config.reference_vocabulary import LOCALIZED_CONTRASTIVE_TOKENS, LOCALIZED_ORDINAL_TOKENS
+from config.reference_vocabulary import (
+    LOCALIZED_CONTRASTIVE_TOKENS,
+    LOCALIZED_NON_CONTENT_TOKENS,
+    LOCALIZED_ORDINAL_TOKENS,
+    LOCALIZED_PROP_WORDS,
+)
 
 
 @dataclass(frozen=True)
@@ -122,23 +133,66 @@ def _resolve_ordinal(slot: str, candidates: list[str]) -> str | None:
     return None
 
 
+def _is_pure_reference(tokens: set[str], matched: set[str], language_code: str) -> bool:
+    """True when ``tokens``, once the closed-class opener/connector words and
+    ``matched`` (the reference token(s) themselves) are removed, has nothing
+    left but an allowed generic pronoun/place word (or nothing at all).
+
+    This is the coordinator's fix (2026-09-18) for the false positives a bare
+    token match produces: "the first ORDER", "the last DAY", "the other FEE"
+    all match a closed-class word, but the word modifies real content, not a
+    market. Only when the message is otherwise EMPTY of content does the
+    reference word refer to a market candidate.
+    """
+    non_content = LOCALIZED_NON_CONTENT_TOKENS.get(language_code, frozenset())
+    prop_words = LOCALIZED_PROP_WORDS.get(language_code, frozenset())
+    leftover = tokens - non_content - matched
+    return leftover <= prop_words
+
+
+def might_reference_market(message: str, language: str) -> bool:
+    """Cheap, history-free pre-check: could ``message`` possibly need resolving?
+
+    True does not guarantee ``resolve_reference`` will act - it still needs
+    2+ candidate markets in the session's history, which this function never
+    looks at. False *does* guarantee ``resolve_reference`` would return the
+    message unchanged, so a caller that fetches history at real cost (a
+    session-store read) can skip that read entirely for the common case of a
+    message that names no bare, content-free reference at all - every other
+    condition ``resolve_reference`` checks before it would ever read
+    ``candidates`` (rules 1 and 5, plus the purity check above).
+    """
+    language_code = _language_code(language)
+    contrastive_tokens = LOCALIZED_CONTRASTIVE_TOKENS.get(language_code)
+    ordinal_tokens = LOCALIZED_ORDINAL_TOKENS.get(language_code)
+    if contrastive_tokens is None or ordinal_tokens is None:
+        return False  # rule 5: unknown language
+    if _named_markets(message):
+        return False  # rule 1: the message names its own market
+    tokens = set(_tokens(message))
+    contrastive_matched = tokens & contrastive_tokens
+    if contrastive_matched and _is_pure_reference(tokens, contrastive_matched, language_code):
+        return True
+    ordinal_matched = {token for token in tokens if token in ordinal_tokens}
+    return bool(ordinal_matched) and _is_pure_reference(tokens, ordinal_matched, language_code)
+
+
 def resolve_reference(message: str, history: str, language: str) -> ReferenceResolution:
     """Check ``message`` for an unresolved back-reference against ``history``.
 
     ``history`` is the session's rendered history text (the same string
     ``services.session.get_session_history`` returns); only its "user:"
-    lines are read.
+    lines are read. Callers for whom fetching ``history`` has a real cost
+    should call ``might_reference_market`` first and skip both the fetch and
+    this call when it returns False.
     """
     unresolved = ReferenceResolution(rewritten_message=message)
+    if not might_reference_market(message, language):
+        return unresolved  # rules 1 and 5, and the purity check, need no history
+
     language_code = _language_code(language)
-    contrastive_tokens = LOCALIZED_CONTRASTIVE_TOKENS.get(language_code)
-    ordinal_tokens = LOCALIZED_ORDINAL_TOKENS.get(language_code)
-    if contrastive_tokens is None or ordinal_tokens is None:
-        return unresolved  # rule 5: unknown language, unchanged behaviour
-
-    if _named_markets(message):
-        return unresolved  # rule 1: the message names its own market
-
+    contrastive_tokens = LOCALIZED_CONTRASTIVE_TOKENS[language_code]
+    ordinal_tokens = LOCALIZED_ORDINAL_TOKENS[language_code]
     candidates = _candidate_markets(_user_turns(history))
     if len(candidates) < 2:
         return unresolved  # rule 4: nothing to disambiguate
@@ -149,14 +203,6 @@ def resolve_reference(message: str, history: str, language: str) -> ReferenceRes
         # both: asking is always safe, guessing is not.
         return ReferenceResolution(clarification_candidates=tuple(candidates), rewritten_message=message)
 
-    if "question" in tokens:
-        # "my first question" / "the last question" already mean something
-        # else entirely in this codebase - FOLLOW_UP_REFERENCE_MARKERS in
-        # chat_orchestrator.py ("first question", "last question") reuses the
-        # conversation's own opening question, not a candidate market. An
-        # ordinal token next to "question" is that established meaning, not
-        # this module's, so it is left alone rather than double-claimed.
-        return unresolved
     matched_slot = next((slot for token, slot in ordinal_tokens.items() if token in tokens), None)
     if matched_slot is None:
         return unresolved  # no closed-class reference at all; leave untouched
