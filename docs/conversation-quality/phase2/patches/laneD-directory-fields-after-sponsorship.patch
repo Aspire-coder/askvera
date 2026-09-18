@@ -1,0 +1,46 @@
+--- a/utils/directory_fields.py	2026-09-18 11:00:55.762337600 -0400
++++ b/utils/directory_fields.py	2026-09-18 11:00:55.779873400 -0400
+@@ -6,6 +6,8 @@
+ import re
+ from collections.abc import Iterable
+ 
++from utils.sentence_spans import sentence_boundaries
++
+ 
+ _FIELD_LABEL_RE = re.compile(
+     r"(?:country|name|address|phone(?:\s*\d+)?|telephone(?:\s+(?:for\s+orders|office))?|"
+@@ -1521,14 +1523,26 @@
+             source_text,
+             re.IGNORECASE,
+         ):
+-            corrected, replacements = re.subn(
+-                r"after\s+sponsorship\s*[:\-]?\s*[^.\n]+(?:\.|$)",
+-                "After sponsorship: there is no minimum order.",
+-                corrected,
+-                count=1,
+-                flags=re.IGNORECASE,
+-            )
+-            changed = changed or replacements > 0
++            # The replaced span must end where the sentence actually ends,
++            # not at the first literal "." - a "[^.\n]+" search stops inside
++            # a decimal figure the generated sentence happened to contain
++            # ("...minimum order of 0.5 CC to place."), leaving the fixed
++            # replacement text glued to what followed that decimal point
++            # ("...there is no minimum order.5 CC to place."). Sentence
++            # boundaries from utils.sentence_spans are decimal/abbreviation
++            # -safe, so the whole original sentence is replaced instead.
++            lead_in_match = re.search(r"after\s+sponsorship\s*[:\-]?\s*", corrected, re.IGNORECASE)
++            if lead_in_match:
++                sentence_end = next(
++                    (end for end in sentence_boundaries(corrected) if end > lead_in_match.end()),
++                    len(corrected),
++                )
++                corrected = (
++                    corrected[: lead_in_match.start()]
++                    + "After sponsorship: there is no minimum order."
++                    + corrected[sentence_end:]
++                )
++                changed = True
+ 
+     return corrected, changed
+ 

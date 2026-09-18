@@ -1,0 +1,46 @@
+diff --git a/app/validation/validators/numeric_grounding_validator.py b/app/validation/validators/numeric_grounding_validator.py
+index d84d92b..314acdf 100644
+--- a/app/validation/validators/numeric_grounding_validator.py
++++ b/app/validation/validators/numeric_grounding_validator.py
+@@ -9,6 +9,7 @@ from dataclasses import dataclass
+ from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+ from services.market_config import find_market_mentions, market_adjective_codes
+ from utils.redaction import PHONE_RE
++from utils.sentence_spans import sentence_boundaries
+
+
+ # Numbers are universal. Claim extraction deliberately does not depend on unit
+@@ -1823,15 +1824,25 @@ def remove_unsupported_numeric_sentences(answer: str, source_documents: list[obj
+         return answer, []
+
+     spans: list[tuple[int, int]] = []
+-    # Decimal/time separators are not sentence endings. A bare period search
+-    # left fragments such as "00 pm" after deleting a sentence with 09.00-17.00.
+-    abbreviations = list(re.finditer(r"\b(?:[^\W\d_]\.){2,}", answer))
+-    boundaries = [match for match in re.finditer(r"[.!?](?=\s|$)|\n", answer)
+-                  if not any(abbreviation.start() <= match.start() < abbreviation.end()
+-                             for abbreviation in abbreviations)]
++    # Sentence ends come from utils.sentence_spans, which is safe against
++    # decimal/time separators ("09.00"), abbreviations ("approx.", "Nr.",
++    # "ca.") and initials ("J."). The previous bare period search here only
++    # excluded a letter-dot-letter-dot run of two or more ("e.g.", "U.S."),
++    # so a single abbreviation or an initial was still read as a sentence
++    # end: deleting the unsupported number that followed left "The fee is
++    # approx." and "Contact J. R." standing as fragments once the sentence
++    # around the number was removed (fragment audit, Phase 2 Lane D,
++    # 2026-09-18) - the same defect class as the already-fixed "09.00"
++    # decimal-time remnant this comment used to describe alone. A bare
++    # newline is still a boundary in its own right, as before: a line break
++    # ends the sentence it is on even with no closing punctuation.
++    boundary_ends = sorted({
++        *sentence_boundaries(answer),
++        *(match.end() for match in re.finditer(r"\n", answer)),
++    })
+     for claim in unsupported:
+-        left = max((match.end() for match in boundaries if match.end() <= claim.start), default=0)
+-        right = next((match.end() for match in boundaries if match.start() >= claim.end), len(answer))
++        left = max((end for end in boundary_ends if end <= claim.start), default=0)
++        right = next((end for end in boundary_ends if end - 1 >= claim.end), len(answer))
+         spans.append((left, right))
+
+     merged: list[tuple[int, int]] = []
