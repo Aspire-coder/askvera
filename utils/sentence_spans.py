@@ -43,6 +43,7 @@ from typing import NamedTuple
 __all__ = [
     "ABBREVIATIONS",
     "SentenceSpan",
+    "abbreviation_or_initial_before",
     "iter_sentences",
     "sentence_boundaries",
     "split_sentences",
@@ -143,6 +144,27 @@ def _abbreviation_before(text: str, index: int) -> bool:
 
 def _initial_before(text: str, index: int) -> bool:
     return bool(_INITIAL_RE.search(text[:index]))
+
+
+def abbreviation_or_initial_before(text: str, index: int) -> bool:
+    """True when the "." at ``index`` sits right after a known abbreviation or a single initial.
+
+    Exposed for editors that need this one check without adopting this
+    module's fuller ``sentence_boundaries`` boundary rule (which also
+    requires an uppercase letter, opening quote, line break or end of text to
+    follow before it will call anything a boundary at all). That extra
+    "what follows" test is wrong for a caller whose own boundary regex
+    already decides that independently: ``app/validation/validators/
+    numeric_grounding_validator.py``'s ``remove_unsupported_numeric_sentences``
+    read "You must generate 120 Open Group Case Credits. (There is an
+    exception ..." as one sentence under the full ``sentence_boundaries``
+    rule, because "(" is not uppercase, a quote, or a line break - and then
+    deleted the grounded "120" sentence along with the exception clause that
+    followed it. This function answers only "is this period read as
+    abbreviation punctuation, not a sentence end", leaving what follows to
+    the caller's own boundary logic.
+    """
+    return _abbreviation_before(text, index) or _initial_before(text, index)
 
 
 def _is_list_marker(text: str, index: int) -> bool:

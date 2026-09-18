@@ -10,6 +10,7 @@ from app.validation.models import ValidationContext, ValidationIssue, Validation
 from config.timing_stage_vocabulary import TIMING_STAGE_VOCABULARY
 from services.market_config import find_market_mentions, market_adjective_codes
 from utils.redaction import PHONE_RE
+from utils.sentence_spans import abbreviation_or_initial_before
 
 
 # Numbers are universal. Claim extraction deliberately does not depend on unit
@@ -1890,9 +1891,24 @@ def remove_unsupported_numeric_sentences(answer: str, source_documents: list[obj
     # Decimal/time separators are not sentence endings. A bare period search
     # left fragments such as "00 pm" after deleting a sentence with 09.00-17.00.
     abbreviations = list(re.finditer(r"\b(?:[^\W\d_]\.){2,}", answer))
+    # A single abbreviation ("approx.", "Nr.", "ca.") or an initial ("J.") is
+    # not the letter-dot-letter-dot shape above, so the bare period search
+    # still read it as a sentence end. Deleting the unsupported number that
+    # followed then left the abbreviation or initial standing alone: "The fee
+    # is approx." or "Contact J. R." (fragment audit, Phase 2 Lane D,
+    # 2026-09-18). abbreviation_or_initial_before answers only "is this period
+    # abbreviation punctuation" and leaves what follows to this function's own
+    # boundary regex - unlike utils.sentence_spans.sentence_boundaries, which
+    # also requires an uppercase letter, quote, line break or end of text to
+    # follow before calling anything a boundary. That fuller rule reads "You
+    # must generate 120 Open Group Case Credits. (There is an exception ..."
+    # as one sentence, because "(" is not uppercase/quote/newline, and a
+    # first attempt at this fix (round 1) deleted the grounded "120" sentence
+    # along with the exception clause that came after it.
     boundaries = [match for match in re.finditer(r"[.!?](?=\s|$)|\n", answer)
                   if not any(abbreviation.start() <= match.start() < abbreviation.end()
-                             for abbreviation in abbreviations)]
+                             for abbreviation in abbreviations)
+                  and not (match.group() == "." and abbreviation_or_initial_before(answer, match.start()))]
     for claim in unsupported:
         left = max((match.end() for match in boundaries if match.end() <= claim.start), default=0)
         right = next((match.end() for match in boundaries if match.start() >= claim.end), len(answer))
