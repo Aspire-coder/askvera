@@ -208,3 +208,210 @@ syntax, not a defect in the files they describe.)
 No file outside Lane D's write scope was edited. `app/validation/validators/numeric_grounding_validator.py`
 (Lane C) and `utils/directory_fields.py` (Lane B) were read and probed only;
 their fixes exist solely as the two patch files above.
+
+## Fable Phase 2 review corrections
+
+An independent Fable review of Phase 2 returned NEEDS CORRECTION. Base for
+this round: `dbc6a7a` (Phase 1's reviewed code); worked in
+`p2fix/splitter-and-timing-20260918` off `fe45cdc`. Four findings, each
+reproduced as a failing test first, then fixed.
+
+### Finding 1 (BLOCKER) - a bare newline was not a unit boundary
+
+`utils.sentence_spans.sentence_boundaries` only ever produced a boundary at a
+"." "!" or "?" run; a bare `\n` with no preceding terminal punctuation was
+never a boundary on its own; unlike the OLD, per-editor
+`re.split(r"(?<=[.!?])\s+|\n", ...)` this module replaced, which always split
+on `\n`. A label-style directory answer -
+"Telephone Office: +254 20 2026869\nEmail: info@foreverea.com\nWebsite:
+www.x.com" - has no `.`/`!`/`?` anywhere, so it was read as ONE unit by both
+`app/response/builder.py` (`_surviving_text`/`_delivered_model_text`, used by
+`reconcile_citations`) and `app/evidence_contract.py`
+(`_iter_checkable_sentences`, used by `unsupported_answer_sentences` /
+`HistoryGroundingValidator`). Once a directory-field filter or a numeric
+repair removed ONE line from that block, the whole merged unit no longer
+matched the delivered text verbatim, so `_surviving_text` returned no
+surviving text at all and `reconcile_citations` dropped every citation for
+the answer - even though the delivered answer still quoted the record's
+phone number and email.
+
+Fix: `sentence_boundaries` now also treats every `\n` character as an
+unconditional unit boundary (skipped only inside a protected email/URL span),
+independent of whether it follows terminal punctuation. Every existing
+sentence_spans guarantee (decimals, abbreviations, emails, URLs, clause
+references) is unaffected, since the newline rule is additive.
+
+Tests: `tests/unit/test_sentence_spans.py`
+(`test_bare_newline_is_a_boundary_even_with_no_preceding_punctuation`,
+`test_bare_newline_boundary_does_not_split_a_url_or_email_across_lines`,
+`test_heading_line_is_its_own_unit_and_does_not_swallow_the_next_line`,
+`test_bullet_lines_are_each_their_own_unit`);
+`tests/conversation/test_p2fix_newline_and_abbreviation.py` (citation
+retention after a one-line directory-field removal, after a one-line
+numeric-repair removal, a policy-citation variant, and a direct
+`_surviving_text` check).
+
+### Finding 2 (BLOCKER) - a heading/bullet line hid the claim after it
+
+Same root cause as finding 1, surfacing in
+`app/evidence_contract._iter_checkable_sentences` /
+`unsupported_answer_sentences` (`HistoryGroundingValidator`): "## Bonus\n
+Distributors in Kenya receive a guaranteed monthly income bonus of 500 USD
+after sponsoring two people" was one merged unit starting with "#", so
+`_is_structural_line` skipped the WHOLE thing - heading and claim together -
+hiding an unsupported claim that was correctly flagged on base. Bullet lists
+("- claim\n- Telephone...") merged the same way.
+
+Fix: covered by finding 1's newline fix alone - once each line is its own
+unit, the heading (or bullet marker) is skipped on its own and the sentence
+after it is checked independently. No change to
+`app/evidence_contract.py` was needed.
+
+Tests: `tests/conversation/test_p2fix_newline_and_abbreviation.py`
+(`test_heading_does_not_hide_the_unsupported_claim_sentence_after_it`,
+`test_bullet_list_does_not_hide_the_unsupported_claim_in_the_next_bullet`,
+and a negative control that the heading line itself is never reported as an
+unsupported claim).
+
+### Finding 3 (SHOULD-FIX) - timing-stage false positives and a gap
+
+`app/validation/validators/numeric_grounding_validator.py` and
+`config/timing_stage_vocabulary.py`:
+
+- **(a) fixed**: the English `waiting_period` cue list included the bare
+  verb "wait" (and every other language's table included its own bare-verb
+  equivalent - "attendre", "warten", "wachten", "attendere", "esperar",
+  "odottaa", "vente", "vänta"). "Please wait 3-5 working days for your
+  parcel." then classified as `waiting_period` purely from that one generic
+  word, while the source ("Delivery takes 3-5 working days.") classified as
+  `delivery`, and the mismatch deleted a correct delivery answer. Fixed by
+  removing the bare verb from every language's `waiting_period` tuple,
+  keeping only phrases that name the waiting period itself ("waiting
+  period", "must wait", "doit attendre", "muss warten", "on odotettava",
+  "cooling-off", "not eligible until", and their per-language equivalents).
+  The other stages were re-audited for a similarly generic bare verb; none
+  of "processing"/"approval"/"payment"/"settlement"/"delivery"/"office_hours"
+  has one that is this unqualified (each already reads as its own specific
+  event or noun), so no further change was made there.
+- **(b) deliberate, kept**: a bonus-payment date must not ground a
+  bank-settlement-arrival time ("Your bonus is credited to your account
+  within 15 days of month end." vs "Bonuses are paid within 15 days of month
+  end." stays flagged), and "processing" must not ground "approval" ("The
+  application process takes 10 working days." vs "Applications are approved
+  within 10 working days." stays flagged). Both are documented, intentional
+  trade-offs from the original Lane C design (see
+  `tests/conversation/test_timing_stage_grounding.py`) and are now pinned
+  with docstrings stating exactly that, so a future change does not loosen
+  them by accident.
+- **(c) fixed**: "Approval takes five (5) working days." against "Delivery
+  takes five (5) working days." was never caught, because
+  `_is_structural_reference` reads ANY `(N)` as a footnote/citation marker
+  and never extracts it as a numeric claim at all - the bracketed figure
+  skipped not just the stage check but every check. Fixed narrowly:
+  a parenthesised figure immediately preceded by a spelled-out number word
+  ("five (5)") is recognised as the common legal/policy convention of
+  restating a number in digits, not a footnote, and is now extracted and
+  stage-checked like any other figure. An ordinary bracketed footnote with no
+  spelled-out number in front of it ("... 3 working days (1).") is still
+  ignored, unchanged. Scoped to English number words only for now; extending
+  the spelled-out-number list to other covered languages is future work.
+
+Tests: `tests/conversation/test_timing_stage_fable_review_corrections.py`.
+
+### Finding 4 (SHOULD-FIX) - a correct short neighbour was merged away
+
+`app/validation/validators/numeric_grounding_validator.py`
+(`abbreviation_or_initial_before`, called from
+`remove_unsupported_numeric_sentences`'s own boundary regex) and
+`utils/sentence_spans.py` (`_INITIAL_RE`, `ABBREVIATIONS`): the previous
+round's fix treated ANY bare capital-letter-plus-dot as an "initial" and any
+plain abbreviation as unconditionally non-terminal, regardless of what
+followed. "Is the fee refundable? No. Delivery takes 5 days." (the "5" is
+unsupported) was "Is the fee refundable? No." on base, but merged "No." into
+the deleted sentence and became "Is the fee refundable?" - the correct "No."
+answer was lost. "Take Vitamin C. Delivery takes 5 days.",
+"Use Form A. Delivery takes 5 days." and "Send it by Dec. Delivery takes 5
+days." were kept correctly on base and collapsed to "" once merged.
+
+Fix, per the coordinator's rule:
+
+1. A single capital letter before a dot counts as an initial only as part of
+   a chain of two or more ("J. R. Smith"); a lone "C." or "A." is now an
+   ordinary sentence end. Implemented as `_INITIAL_CHAIN_RE`, a regex
+   requiring at least two whitespace-separated `letter.` tokens, replacing
+   the old blanket `_INITIAL_RE` (any single letter, either case).
+2. An abbreviation period is non-terminal only when the next token starts
+   with a digit or a lowercase letter ("approx. 999", "Nr. 999"); before an
+   uppercase word it is terminal ("No. Delivery", "Dec. Delivery").
+   Implemented as a forward-continuation check (`_forward_continuation`)
+   added to the plain-abbreviation branch of
+   `abbreviation_or_initial_before`.
+3. The dotted compound entries that could never actually match through the
+   old trailing-word lookup ("e.g", "i.e", "z.b", "u.a", "d.h", "p.ex",
+   "t.ex", "f.eks", "bl.a", "etc.al" - the lookup only ever sees the letters
+   after the LAST internal dot, so "e.g" could never match the literal string
+   "e.g") are now matched correctly: `_DOTTED_ABBREVIATION_RE` matches the
+   whole compound as one case-insensitive literal (with the module's own
+   trailing dot appended), and both of its dots - the internal one and the
+   final one - are read as non-terminal. These entries were kept rather than
+   removed, since they were doing real (if accidental) work protecting
+   compounds like "e.g." and "z.B." via the old blanket initial rule that
+   rule 1 above now removes.
+
+One documented, deliberate behaviour change versus base: "St. Louis" (a
+plain abbreviation, "st", before an uppercase proper noun) now splits into
+two units under `sentence_boundaries`/`split_sentences`, per rule 2 above.
+This is NOT a regression versus base (`dbc6a7a`): base's own abbreviation
+guard in `remove_unsupported_numeric_sentences`,
+`\b(?:[^\W\d_]\.){2,}`, only ever matched a run of single-LETTER-dot pairs
+("J.R.", "z.B."), never a multi-letter word like "St" followed by one dot -
+so base already split "St. Louis" into two sentences; this restores that
+same behaviour rather than changing it. See
+`tests/unit/test_sentence_spans.py::test_st_louis_now_splits_matching_base_behaviour_not_a_regression`
+for the pinned repro and its reasoning.
+
+Tests: `tests/unit/test_sentence_spans.py`
+(`test_lone_initial_before_a_period_is_an_ordinary_sentence_end`,
+`test_initial_chain_of_two_still_stays_whole_before_an_uppercase_name`,
+`test_plain_abbreviation_before_an_uppercase_word_is_terminal`,
+`test_plain_abbreviation_before_a_digit_or_lowercase_word_is_still_non_terminal`,
+`test_dotted_compound_abbreviation_protects_both_of_its_own_dots`,
+`test_st_louis_now_splits_matching_base_behaviour_not_a_regression`);
+`tests/conversation/test_fragment_abbreviation_initial_fable_review.py`
+(all four Fable repros, plus positive controls that round 2's approx./Nr./
+initial-chain fixes still pass unchanged).
+
+### Verification
+
+Ran together: `tests/conversation`, `tests/conversation_pack`, and the named
+`tests/unit` files (`test_sentence_spans`, `test_response_builder`,
+`test_orchestrator_citation_reconcile`, `test_demo_contract_citation_order`,
+`test_evidence_contract`, `test_history_grounding_validator`,
+`test_numeric_grounding_validator`, `test_numeric_grounding_repair_corrections`,
+`test_numeric_grounding_repair_defects`, `test_numeric_notation_coverage`,
+`test_demo_numeric_repair_live_removals`, `test_supported_figure_preservation_c`,
+`test_supported_figure_role_binding`, `test_directory_fields`,
+`test_demo_journeys_postprocessing`, `test_chat_orchestrator`): 956 passed, 4
+skipped, 2 xfailed. Then the whole `tests/unit` directory: 8869 passed, 13
+xfailed, 0 failed. `flake8` on every changed `.py` file and `git diff
+--check`: both clean.
+
+### Files changed in this round
+
+- `utils/sentence_spans.py` (newline-as-boundary; initial-chain and
+  dotted-compound abbreviation rewrite)
+- `config/timing_stage_vocabulary.py` (removed the bare "wait"-family verb
+  from every language's `waiting_period` tuple)
+- `app/validation/validators/numeric_grounding_validator.py`
+  (`_is_structural_reference` now recognises a spelled-out-number-prefixed
+  bracketed figure as a real claim)
+- `tests/unit/test_sentence_spans.py` (extended)
+- `tests/conversation/test_p2fix_newline_and_abbreviation.py` (new)
+- `tests/conversation/test_timing_stage_fable_review_corrections.py` (new)
+- `tests/conversation/test_fragment_abbreviation_initial_fable_review.py` (new)
+- `docs/conversation-quality/phase2/FRAGMENT_AUDIT.md` (this section)
+
+No existing test was weakened or deleted. `app/evidence_contract.py` and
+`app/response/builder.py` were re-verified against this round's fix but
+needed no code change of their own - the newline fix in
+`utils/sentence_spans.py` was sufficient for both.

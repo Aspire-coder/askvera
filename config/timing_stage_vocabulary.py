@@ -100,9 +100,8 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "arrives in your account", "funds arrive",
         ),
         "waiting_period": (
-            "waiting period", "wait", "waits", "waited", "waiting", "must wait",
-            "cooling-off", "cooling off period", "not eligible until",
-            "not permitted until", "before you may",
+            "waiting period", "must wait", "cooling-off", "cooling off period",
+            "not eligible until", "not permitted until", "before you may",
         ),
         "office_hours": (
             "office hours", "business hours", "opening hours", "opening times",
@@ -131,7 +130,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "arrivée des fonds", "les fonds arrivent",
         ),
         "waiting_period": (
-            "période d'attente", "attendre", "doit attendre", "délai de carence",
+            "période d'attente", "doit attendre", "délai de carence",
             "pas éligible avant", "avant de pouvoir",
         ),
         "office_hours": (
@@ -160,7 +159,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "ihrem konto gutgeschrieben", "geldeingang",
         ),
         "waiting_period": (
-            "wartezeit", "warten", "muss warten", "sperrfrist",
+            "wartezeit", "muss warten", "sperrfrist",
             "nicht berechtigt bis", "bevor sie können",
         ),
         "office_hours": (
@@ -188,7 +187,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "op uw rekening bijgeschreven",
         ),
         "waiting_period": (
-            "wachttijd", "wachten", "moet wachten", "wachtperiode",
+            "wachttijd", "moet wachten", "wachtperiode",
             "niet gerechtigd tot", "voordat u kunt",
         ),
         "office_hours": (
@@ -215,7 +214,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "accreditato sul tuo conto", "arrivo dei fondi",
         ),
         "waiting_period": (
-            "periodo di attesa", "attendere", "deve attendere",
+            "periodo di attesa", "deve attendere",
             "periodo di carenza", "non ammissibile fino a", "prima di poter",
         ),
         "office_hours": (
@@ -242,7 +241,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "creditado na sua conta", "creditada na sua conta", "chegada dos fundos",
         ),
         "waiting_period": (
-            "período de espera", "esperar", "deve esperar", "período de carência",
+            "período de espera", "deve esperar", "período de carência",
             "não elegível até", "antes de poder",
         ),
         "office_hours": (
@@ -270,7 +269,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "abonada en su cuenta", "llegada de los fondos",
         ),
         "waiting_period": (
-            "período de espera", "periodo de espera", "esperar", "debe esperar",
+            "período de espera", "periodo de espera", "debe esperar",
             "no elegible hasta", "antes de poder",
         ),
         "office_hours": (
@@ -295,7 +294,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "hyvitys", "hyvitetty", "tilille maksettu", "varojen saapuminen",
         ),
         "waiting_period": (
-            "odotusaika", "odottaa", "on odotettava", "ei oikeutettu ennen",
+            "odotusaika", "on odotettava", "ei oikeutettu ennen",
             "ennen kuin voi",
         ),
         "office_hours": (
@@ -322,7 +321,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "midlene ankommer",
         ),
         "waiting_period": (
-            "ventetid", "vente", "må vente", "ikke berettiget før", "før du kan",
+            "ventetid", "må vente", "ikke berettiget før", "før du kan",
         ),
         "office_hours": (
             "åpningstider", "kontortid",
@@ -348,7 +347,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "midlene ankommer",
         ),
         "waiting_period": (
-            "ventetid", "vente", "må vente", "ikke berettiget før", "før du kan",
+            "ventetid", "må vente", "ikke berettiget før", "før du kan",
         ),
         "office_hours": (
             "åpningstider", "kontortid",
@@ -374,7 +373,7 @@ TIMING_STAGE_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
             "medlen anländer",
         ),
         "waiting_period": (
-            "väntetid", "vänta", "måste vänta", "inte berättigad förrän",
+            "väntetid", "måste vänta", "inte berättigad förrän",
             "innan du kan",
         ),
         "office_hours": (
