@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import re
 
+from config.directory_field_vocabulary import normalize_language_code
 from utils.directory_fields import build_support_contact_supplement
 
 # One bounded, documented vocabulary per non-English language this project
@@ -130,6 +131,71 @@ _RECOMMENDS_CONTACT_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
 }
 
+# Fable review, 2026-09-18 (finding F1): "Il n'est pas necessaire de
+# contacter le service client" ("It is not necessary to contact customer
+# care") still matches the pattern above - "contacter" plus "service
+# client" are both present - and previously returned True, recommending a
+# contact that the sentence actually says is unnecessary. This is the same
+# defect the English ``_CARE_CONTACT_RECOMMENDATION_RE`` already has and
+# already discloses (parity, not a new gap), but it is cheap and safe to
+# close here: each language's ordinary clause-level negation word ("pas",
+# "nicht", "no", "niet", "non", "nao", "inte", "ikke" - Finnish "ei" is
+# listed too for the same reason, though no realistic Finnish negation of
+# this module's imperative-mood pattern has been found) is a single closed,
+# common word, so checking "does this exact negation word appear earlier in
+# the SAME CLAUSE (the run of text between sentence-ending punctuation) as
+# the matched verb phrase" is a small, bounded, clause-local check - not an
+# attempt at general negation handling, which would need real parsing this
+# module deliberately does not do. A negation word appearing in an EARLIER
+# or LATER sentence never counts, so "Contact support today. It is not a
+# problem." still returns True for the first sentence's recommendation.
+#
+# KNOWN LIMITATION (see tests/conversation/test_p2fix_reference_contact_edges.py
+# ``test_negation_of_an_unrelated_earlier_clause_is_a_known_limitation``):
+# clauses are split only on ".", "!", "?", not on commas, so a negation
+# word that grammatically modifies an earlier, comma-separated clause of
+# the SAME sentence can still suppress a later, genuinely unnegated
+# recommendation in that sentence ("Der Kundenservice ist nicht
+# telefonisch erreichbar, aber kontaktieren Sie das Buro." wrongly reports
+# False). Accepted cost of keeping this guard cheap and closed rather than
+# building real clause/dependency parsing.
+_NEGATION_WORDS: dict[str, frozenset[str]] = {
+    "fr": frozenset({"pas", "jamais"}),
+    "de": frozenset({"nicht", "kein", "keine"}),
+    "es": frozenset({"no", "nunca"}),
+    "nl": frozenset({"niet", "geen"}),
+    "it": frozenset({"non", "mai"}),
+    "pt": frozenset({"nao", "não", "nunca"}),
+    "fi": frozenset({"ei"}),
+    "sv": frozenset({"inte", "aldrig"}),
+    "no": frozenset({"ikke", "aldri"}),
+}
+
+
+def _clause_span(text: str, index: int) -> tuple[int, int]:
+    """Start/end offsets of the sentence in ``text`` containing ``index``."""
+    start = 0
+    for sep in re.finditer(r"[.!?]", text):
+        if sep.start() >= index:
+            break
+        start = sep.end()
+    end_match = re.search(r"[.!?]", text[index:])
+    end = index + end_match.start() if end_match else len(text)
+    return start, end
+
+
+def _negated_before(text: str, match_start: int, language_code: str) -> bool:
+    """True when a closed-class negation word for ``language_code`` appears
+    earlier in the same clause as the recommendation match at ``match_start``.
+    """
+    negation_words = _NEGATION_WORDS.get(language_code)
+    if not negation_words:
+        return False
+    clause_start, _clause_end = _clause_span(text, match_start)
+    preceding_text = text[clause_start:match_start]
+    preceding_tokens = re.findall(r"[^\W_]+", preceding_text, flags=re.UNICODE)
+    return any(token.casefold() in negation_words for token in preceding_tokens)
+
 
 def recommends_contact_in_language(answer: str, language: str) -> bool:
     """True when ``answer`` recommends contacting an office/care channel.
@@ -139,12 +205,19 @@ def recommends_contact_in_language(answer: str, language: str) -> bool:
     detection stays owned by the orchestrator's own regex, and anything
     unrecognised - returns ``False``: this function never guesses a
     recommendation from an unreviewed language, matching the "fail
-    conservatively" rule for unknown languages.
+    conservatively" rule for unknown languages. The language tag itself is
+    normalized the same way Lane B's directory-field vocabulary normalizes
+    one (Fable review, 2026-09-18, finding F1), so a region-tagged code
+    such as "fr-FR" is recognized the same as "fr".
     """
-    pattern = _RECOMMENDS_CONTACT_PATTERNS.get((language or "").strip().lower())
+    language_code = normalize_language_code(language)
+    pattern = _RECOMMENDS_CONTACT_PATTERNS.get(language_code)
     if pattern is None:
         return False
-    return bool(pattern.search(answer or ""))
+    match = pattern.search(answer or "")
+    if match is None:
+        return False
+    return not _negated_before(answer or "", match.start(), language_code)
 
 
 # Mirrors utils.directory_fields._FIELD_LABEL_PATTERNS["fax"] - kept local

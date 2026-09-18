@@ -36,11 +36,15 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # demand and pick up the new sentence automatically.
 # Updated 2026-09-18 (Phase 2, Lane A, task A7): added one new key,
 # "reference_clarification", to the "responses" object of every locale that
-# already had a "responses" block (en, fr, es, de, nl, it, fi, no, sr, sv,
-# ru) - the localized copy asking which of two or more candidate markets an
+# already had a "responses" block (en, fr, es, de, nl, it, fi, no, sv) - the
+# localized copy asking which of two or more candidate markets an
 # unresolved back-reference ("the other one") meant, with a "{candidates}"
 # placeholder the orchestrator fills in. No existing key's value changed, and
 # "pt" was left with no locale block, as before, since it never had one.
+# (Fable review, 2026-09-18, finding T1: this comment previously also named
+# "sr" and "ru", but config/conversation_routes.json never gained a
+# "reference_clarification" key for either locale; corrected the comment
+# only - the hash below and the config file are unchanged.)
 ROUTES_REST_SHA256 = "0098ec016292865497a7f551b1eab12748f97ff67d84edbf41c3464fa2822165"
 # Updated 2026-09-18 (conversation-quality project): four rules edited in
 # place, all additive in meaning, with the rendered prompt held under the

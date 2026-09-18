@@ -263,10 +263,22 @@ def test_unknown_language_code_is_unchanged_even_with_the_english_word_other() -
     assert outcome.resolved_market is None
 
 
-def test_empty_language_code_is_unchanged() -> None:
-    """deterministic/local."""
+def test_empty_language_code_now_defaults_to_english() -> None:
+    """deterministic/local. Updated (Fable review, 2026-09-18, finding A2):
+    this module's language-code folding now reuses Lane B's
+    ``config.directory_field_vocabulary.normalize_language_code``, whose own
+    docstring says "An empty/None input folds to 'en'" - the same default
+    the rest of this codebase already applies to a missing language tag.
+    Before A2, an empty string fell through this module's own ad hoc
+    split-only folding as an unrecognized code (rule 5, unchanged); it is
+    now treated as English, a language this module does support, so it
+    clarifies exactly as an explicit "en" would. This is an intentional
+    side effect of reusing one normalization function everywhere, not a
+    new risk: it only ever changes behaviour for a language tag that was
+    never actually specified, and "assume English" is the same default
+    already used elsewhere in this repository."""
     outcome = resolve_reference("What about the other one?", KENYA_THEN_UGANDA, "")
-    assert outcome.clarification_candidates == ()
+    assert set(outcome.clarification_candidates) == {"Kenya", "Uganda"}
     assert outcome.resolved_market is None
 
 
