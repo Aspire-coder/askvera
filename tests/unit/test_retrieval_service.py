@@ -7,7 +7,13 @@ import pytest
 
 from app.retrieval import service as retrieval_service_module
 from app.retrieval import providers as retrieval_providers
-from app.retrieval import BedrockRetrievalProvider, RetrievedDocument, RetrievalResult, RetrievalService
+from app.retrieval import (
+    BedrockRetrievalProvider,
+    RetrievedDocument,
+    RetrievalAvailability,
+    RetrievalResult,
+    RetrievalService,
+)
 from app.retrieval.providers import (
     _expanded_retrieval_query,
     _tokens,
@@ -73,6 +79,91 @@ class _RecordingProvider:
             confidence=0.8,
             metadata={"provider": self.provider_name},
         )
+
+
+class _UnavailableProvider:
+    def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
+        return RetrievalResult(
+            documents=[],
+            citations=[],
+            confidence=0.0,
+            availability=RetrievalAvailability.UNAVAILABLE,
+        )
+
+
+def test_retrieval_service_records_typed_provider_unavailability_as_health_failure(monkeypatch) -> None:
+    """A provider can return an outage without it becoming a false healthy result."""
+    outcomes: list[bool] = []
+    metrics: list[dict[str, object]] = []
+    monkeypatch.setattr(retrieval_service_module, "record_retrieval_outcome", lambda *, success: outcomes.append(success))
+    monkeypatch.setattr(
+        retrieval_service_module,
+        "record_pipeline_metric",
+        lambda **kwargs: metrics.append(kwargs),
+    )
+
+    result = RetrievalService(provider=_UnavailableProvider()).retrieve(
+        "question", "US", "en", "new_prospect", "unavailable-cid"
+    )
+
+    assert result.availability is RetrievalAvailability.UNAVAILABLE
+    assert outcomes == [False]
+    assert metrics[0]["success"] is False
+    assert metrics[0]["metadata"]["availability"] == "unavailable"
+
+
+class _DegradedEmptyProvider:
+    def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
+        return RetrievalResult(
+            documents=[],
+            citations=[],
+            confidence=0.0,
+            availability=RetrievalAvailability.DEGRADED,
+        )
+
+
+def test_retrieval_service_records_empty_degraded_retrieval_as_health_failure(monkeypatch) -> None:
+    """A partial outage with no usable result must not look healthy."""
+    outcomes: list[bool] = []
+    monkeypatch.setattr(retrieval_service_module, "record_retrieval_outcome", lambda *, success: outcomes.append(success))
+    monkeypatch.setattr(retrieval_service_module, "record_pipeline_metric", lambda **_: None)
+
+    result = RetrievalService(provider=_DegradedEmptyProvider()).retrieve(
+        "question", "US", "en", "new_prospect", "degraded-empty-cid"
+    )
+
+    assert result.availability is RetrievalAvailability.DEGRADED
+    assert outcomes == [False]
+
+
+class _DegradedEvidenceProvider:
+    def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
+        document = RetrievedDocument(
+            id="us-policy",
+            title="US policy",
+            content="Manager qualifications.",
+            source="s3://approved/us-policy.pdf",
+        )
+        return RetrievalResult(
+            documents=[document],
+            citations=[document.to_source()],
+            confidence=0.9,
+            availability=RetrievalAvailability.DEGRADED,
+        )
+
+
+def test_retrieval_service_records_degraded_evidence_as_health_success(monkeypatch) -> None:
+    """A partial outage with usable evidence remains available to the answer path."""
+    outcomes: list[bool] = []
+    monkeypatch.setattr(retrieval_service_module, "record_retrieval_outcome", lambda *, success: outcomes.append(success))
+    monkeypatch.setattr(retrieval_service_module, "record_pipeline_metric", lambda **_: None)
+
+    result = RetrievalService(provider=_DegradedEvidenceProvider()).retrieve(
+        "question", "US", "en", "new_prospect", "degraded-evidence-cid"
+    )
+
+    assert result.availability is RetrievalAvailability.DEGRADED
+    assert outcomes == [True]
 
 
 def test_retrieval_service_refreshes_provider_after_config_load(monkeypatch) -> None:
@@ -1079,6 +1170,33 @@ def test_query_planner_includes_global_documents_for_named_markets(
     assert plan.include_global_documents is True
 
 
+def test_country_named_policy_question_keeps_global_search_but_records_ambiguous_scope(monkeypatch) -> None:
+    """A country mention alone cannot authorize V2 directory protection."""
+    runtime = MagicMock()
+    runtime.converse.return_value = {
+        "output": {
+            "message": {
+                "content": [{
+                    "text": '{"queries":["Canada manager qualifications"],'
+                    '"document_scopes":["locale_policy"],"intent":"knowledge",'
+                    '"intent_confidence":0.99}'
+                }]
+            }
+        }
+    }
+    monkeypatch.setattr(retrieval_providers.settings, "BEDROCK_QUERY_PLANNER_ENABLED", True)
+    monkeypatch.setattr(retrieval_providers, "get_aws_clients", lambda: SimpleNamespace(bedrock_runtime=runtime))
+
+    plan = _planned_retrieval_plan("What are manager qualifications in Canada?", "US", "en", "named-policy-cid")
+
+    assert plan.include_global_documents is True
+    assert plan.runtime_scope_intent == {
+        "provenance": "runtime",
+        "intent": "ambiguous",
+        "decision_source": "planner_global_scope_only",
+    }
+
+
 def test_query_planner_includes_global_documents_for_unknown_directory_country(monkeypatch) -> None:
     """Operational directory intent must not depend on a configured widget market."""
     runtime = MagicMock()
@@ -1139,6 +1257,8 @@ def test_operational_policy_question_does_not_open_global_scope_without_named_re
     )
 
     assert plan.include_global_documents is False
+
+
 def test_policy_restriction_question_cannot_be_routed_to_claim_refusal(monkeypatch):
     from app.retrieval import providers
     from services.guardrails import is_policy_safety_question

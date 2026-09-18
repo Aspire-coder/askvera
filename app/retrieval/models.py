@@ -1,7 +1,16 @@
 """Retrieval result models."""
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
+
+
+class RetrievalAvailability(str, Enum):
+    """Whether a provider could complete the retrieval request."""
+
+    AVAILABLE = "available"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -49,6 +58,7 @@ class RetrievalResult:
     citations: list[dict[str, Any]]
     confidence: float
     metadata: dict[str, Any] = field(default_factory=dict)
+    availability: RetrievalAvailability = RetrievalAvailability.AVAILABLE
 
     @property
     def sources(self) -> list[dict[str, Any]]:

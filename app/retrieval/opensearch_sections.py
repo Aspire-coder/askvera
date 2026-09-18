@@ -13,7 +13,15 @@ from typing import Any
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
-from opensearchpy.exceptions import OpenSearchException
+from opensearchpy.exceptions import (
+    AuthenticationException,
+    AuthorizationException,
+    ConnectionError,
+    ConflictError,
+    NotFoundError,
+    RequestError,
+    TransportError,
+)
 
 from config import settings
 from services.aws_clients import get_aws_clients
@@ -36,7 +44,7 @@ from services.market_config import (
 from utils.logging import get_logger
 from utils.opensearch_fields import exact_term_query, exact_terms_query
 
-from .models import RetrievedDocument, RetrievalResult
+from .models import RetrievedDocument, RetrievalAvailability, RetrievalResult
 from .providers import (
     DIRECTORY_OPERATIONAL_QUESTION_RE,
     DIRECTORY_POLICY_WORDING_RE,
@@ -56,6 +64,26 @@ GLOBAL_DIRECTORY_DOCUMENT_TYPES = (
     "office_directory",
     "international_sponsoring_directory",
 )
+_SHARD_CONFIGURATION_FAILURE_TYPES = frozenset({
+    "authentication_exception",
+    "authorization_exception",
+    "illegal_argument_exception",
+    "index_not_found_exception",
+    "mapper_parsing_exception",
+    "parsing_exception",
+    "query_shard_exception",
+    "resource_not_found_exception",
+    "security_exception",
+    "validation_exception",
+})
+_TRANSIENT_SHARD_FAILURE_TYPES = frozenset({
+    "circuit_breaking_exception",
+    "cluster_block_exception",
+    "es_rejected_execution_exception",
+    "node_not_connected_exception",
+    "process_cluster_event_timeout_exception",
+    "unavailable_shards_exception",
+})
 _DIRECTORY_DETAIL_RE = re.compile(
     r"\b(?:address|business\s+hours?|email|office|phone|telephone|website|contact)\b",
     re.IGNORECASE,
@@ -70,6 +98,21 @@ def _normalize_text(value: str) -> str:
     """Normalize text for glossary trigger checks."""
     normalized = unicodedata.normalize("NFKC", value or "").casefold()
     return " ".join("".join(character if character.isalnum() else " " for character in normalized).split())
+
+
+def _search_hits(response: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return OpenSearch hits, or no hits when one optional channel failed."""
+    if response is None:
+        return []
+    return response.get("hits", {}).get("hits", [])
+
+
+def _weighted_search_hits(response: dict[str, Any] | None, weight: float) -> list[dict[str, Any]]:
+    """Return one channel's hits with its planned query weight applied."""
+    return [
+        {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
+        for hit in _search_hits(response)
+    ]
 
 
 @lru_cache(maxsize=1)
@@ -204,6 +247,9 @@ _RANK_LIST_SECTION_CHARS = 48
 _RANK_LIST_CODE_CHARS = 24
 _rank_list_capture_enabled: ContextVar[bool] = ContextVar("askvera_rank_list_capture", default=False)
 _rank_list_record: ContextVar[dict[str, Any] | None] = ContextVar("askvera_rank_list_record", default=None)
+_rank_list_context_resolution: ContextVar[dict[str, str] | None] = ContextVar(
+    "askvera_rank_list_context_resolution", default=None
+)
 
 
 def enable_rank_list_capture() -> Token[bool]:
@@ -213,6 +259,16 @@ def enable_rank_list_capture() -> Token[bool]:
 
 def disable_rank_list_capture(token: Token[bool]) -> None:
     _rank_list_capture_enabled.reset(token)
+
+
+def set_rank_list_context_resolution(value: dict[str, str] | None) -> Token[dict[str, str] | None]:
+    """Attach orchestrator-resolved follow-up provenance to this request only."""
+    return _rank_list_context_resolution.set(dict(value) if value is not None else None)
+
+
+def reset_rank_list_context_resolution(token: Token[dict[str, str] | None]) -> None:
+    """Reset one request's follow-up provenance context."""
+    _rank_list_context_resolution.reset(token)
 
 
 def _start_rank_list_record() -> dict[str, Any] | None:
@@ -236,6 +292,9 @@ def _start_rank_list_record() -> dict[str, Any] | None:
         "selector_candidates": None,
         "selector_relevant_evidence": None,
         "selector_selected_ranks": None,
+        "runtime_scope_intent": None,
+        "authorized_policy_market": None,
+        "context_resolution": _rank_list_context_resolution.get(),
         "recording_errors": 0,
         "_document_index": {},
         "_selector_candidate_section_ids": None,
@@ -354,6 +413,8 @@ def _rank_list_fields(
             record["query_count"] = len(search_plan.queries)
             record["prefer_outline"] = bool(search_plan.prefer_outline)
             record["include_global_documents"] = bool(search_plan.include_global_documents)
+            record["runtime_scope_intent"] = search_plan.runtime_scope_intent
+            record["authorized_policy_market"] = search_plan.authorized_policy_market
         if target_country_names is not None:
             record["target_country_names"] = sorted(
                 _rank_list_text(name, _RANK_LIST_SECTION_CHARS) for name in target_country_names
@@ -1524,129 +1585,298 @@ class OpenSearchSectionProvider:
         self.index_name = index_name or settings.OPENSEARCH_INDEX
         self.enable_bedrock_rerank = enable_bedrock_rerank
 
+    def _search_channel(
+        self,
+        client: OpenSearch,
+        *,
+        kind: str,
+        body: dict[str, Any],
+        correlation_id: str,
+        rank_record: dict[str, Any] | None,
+        query_index: int | None = None,
+        weight: float = 1.0,
+    ) -> tuple[dict[str, Any] | None, str | None, list[dict[str, Any]]]:
+        """Run one search channel and preserve a typed provider failure state.
+
+        Query/request errors remain visible for diagnosis. Transport and other
+        provider failures are returned to the caller as a failed channel, so
+        healthy channels can still provide evidence.
+        """
+        try:
+            response = client.search(index=self.index_name, body=body)
+        except (ConnectionError, AuthenticationException, AuthorizationException):
+            LOGGER.exception(
+                "opensearch_section_search_failed",
+                correlation_id=correlation_id,
+                channel=kind,
+            )
+            return None, kind, [{"channel": kind, "reason": "transport_exception"}]
+        except TransportError as exc:
+            status_code = getattr(exc, "status_code", None)
+            is_service_failure = isinstance(status_code, int) and 500 <= status_code < 600
+            if isinstance(exc, (RequestError, NotFoundError, ConflictError)) or not is_service_failure:
+                raise
+            LOGGER.exception(
+                "opensearch_section_search_failed",
+                correlation_id=correlation_id,
+                channel=kind,
+            )
+            return None, kind, [{"channel": kind, "reason": "service_exception"}]
+        response_failures = self._response_failures(response, kind)
+        _record_rank_list_search(rank_record, kind, query_index, weight, response)
+        return response, kind if response_failures else None, response_failures
+
+    @staticmethod
+    def _response_failures(response: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+        """Classify truthful partial OpenSearch responses without hiding bad requests.
+
+        OpenSearch can return hits together with a timeout or failed shards.
+        Those hits are valid but incomplete only for a verified transient or
+        service-side failure. Query, mapping, index, and unknown shard errors
+        remain visible to callers instead of becoming an availability state.
+        """
+        failures: list[dict[str, Any]] = []
+        if response.get("timed_out") is True:
+            failures.append({"channel": kind, "reason": "timed_out"})
+
+        shards = response.get("_shards")
+        if shards is None:
+            return failures
+        if not isinstance(shards, dict):
+            raise RequestError(400, "invalid OpenSearch shard response", {"_shards": shards})
+        failed = shards.get("failed", 0)
+        if isinstance(failed, bool) or not isinstance(failed, int) or failed < 0:
+            raise RequestError(400, "invalid OpenSearch failed shard count", {"_shards": shards})
+        if not failed:
+            return failures
+
+        shard_failures = shards.get("failures")
+        if not isinstance(shard_failures, list) or not shard_failures:
+            raise RequestError(500, "OpenSearch shard failure without diagnostics", {"_shards": shards})
+        if len(shard_failures) != failed:
+            raise RequestError(
+                500,
+                "OpenSearch shard failure with incomplete diagnostics",
+                {"_shards": shards},
+            )
+
+        for position, failure in enumerate(shard_failures, start=1):
+            if not isinstance(failure, dict):
+                raise RequestError(400, "invalid OpenSearch shard failure", {"failure": failure})
+            reason = failure.get("reason")
+            error_type = reason.get("type") if isinstance(reason, dict) else None
+            status = failure.get("status")
+            has_status = isinstance(status, int) and not isinstance(status, bool)
+            failure_label = error_type if isinstance(error_type, str) else "unclassified_shard_failure"
+            failure_context = {
+                "_shards": shards,
+                "failure": failure,
+                "failure_position": position,
+            }
+            if (
+                failure_label in _SHARD_CONFIGURATION_FAILURE_TYPES
+                or has_status and 400 <= status < 500
+            ):
+                raise RequestError(
+                    400,
+                    f"OpenSearch shard failure: {failure_label}",
+                    failure_context,
+                )
+            is_transient = failure_label in _TRANSIENT_SHARD_FAILURE_TYPES
+            is_service_failure = has_status and 500 <= status < 600
+            if not is_transient and not is_service_failure:
+                raise RequestError(
+                    500,
+                    f"OpenSearch shard failure: {failure_label}",
+                    failure_context,
+                )
+
+        failures.append({"channel": kind, "reason": "shard_failure", "failed_shards": failed})
+        return failures
+
+    def _retrieve_channel_hits(
+        self,
+        client: OpenSearch,
+        *,
+        message: str,
+        country: str,
+        language: str,
+        correlation_id: str,
+        search_plan: RetrievalQueryPlan,
+        rank_record: dict[str, Any] | None,
+        target_country_names: set[str],
+        explicit_section_id: str | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str, list[str], list[dict[str, Any]], int]:
+        """Collect independent search channels without collapsing outages into empties."""
+        text_hits: list[dict[str, Any]] = []
+        vector_hits: list[dict[str, Any]] = []
+        failed_channels: list[str] = []
+        failure_details: list[dict[str, Any]] = []
+        successful_searches = 0
+
+        def collect(
+            kind: str,
+            body: dict[str, Any],
+            target: list[dict[str, Any]],
+            *,
+            query_index: int | None = None,
+            weight: float = 1.0,
+            weighted: bool = False,
+        ) -> dict[str, Any] | None:
+            nonlocal successful_searches
+            response, failed_channel, channel_failures = self._search_channel(
+                client,
+                kind=kind,
+                body=body,
+                correlation_id=correlation_id,
+                rank_record=rank_record,
+                query_index=query_index,
+                weight=weight,
+            )
+            successful_searches += int(response is not None)
+            if failed_channel:
+                failed_channels.append(failed_channel)
+            failure_details.extend(channel_failures)
+            target.extend(_weighted_search_hits(response, weight) if weighted else _search_hits(response))
+            return response
+
+        if explicit_section_id:
+            exact, failed_channel, channel_failures = self._search_channel(
+                client,
+                kind="exact",
+                body=_exact_section_query(explicit_section_id, country, language),
+                correlation_id=correlation_id,
+                rank_record=rank_record,
+            )
+            successful_searches += int(exact is not None)
+            if failed_channel:
+                failed_channels.append(failed_channel)
+            failure_details.extend(channel_failures)
+            text_hits.extend(
+                {**hit, "_score": max(float(hit.get("_score") or 0.0), 100.0)}
+                for hit in _search_hits(exact)
+            )
+        for index, search_message in enumerate(search_plan.queries):
+            weight = 1.0 if index == 0 else 0.88
+            collect(
+                "text",
+                _text_query(search_message, country, language, scope="locale"),
+                text_hits,
+                query_index=index,
+                weight=weight,
+                weighted=True,
+            )
+            collect(
+                "vector",
+                _vector_query(search_message, country, language, scope="locale"),
+                vector_hits,
+                query_index=index,
+                weight=weight,
+                weighted=True,
+            )
+        if search_plan.prefer_outline:
+            collect("outline", _outline_text_query(message, country, language), text_hits)
+
+        global_search_message = ""
+        if search_plan.include_global_documents:
+            global_search_message = self._global_search_query(message, language, correlation_id)
+            collect(
+                "global_text",
+                _directory_text_query(global_search_message, target_country_names),
+                text_hits,
+            )
+            global_vector_query = _vector_query(global_search_message, country, language, scope="global")
+            country_filter = _record_country_filter(target_country_names)
+            if country_filter is not None:
+                global_vector_query["query"]["knn"]["embedding"]["filter"]["bool"]["filter"].append(
+                    country_filter
+                )
+            collect("global_vector", global_vector_query, vector_hits)
+        return text_hits, vector_hits, global_search_message, failed_channels, failure_details, successful_searches
+
     def retrieve(self, message: str, country: str, language: str, role: str, correlation_id: str) -> RetrievalResult:
         del role
         _start_generation_lookup_signal()
         rank_record = _start_rank_list_record()
-        try:
-            search_plan = self._build_search_plan(message, country, language, correlation_id)
-            if search_plan.client_action:
-                return RetrievalResult(
-                    documents=[],
-                    citations=[],
-                    confidence=1.0,
-                    metadata={
-                        "provider": "opensearch_section",
-                        "client_action": search_plan.client_action,
-                        "conversation_intent": "support_request",
-                        "intent_confidence": search_plan.intent_confidence,
-                    },
-                )
-            # A reviewed policy-safety question - asking what the rules prohibit -
-            # must still reach the documents. Skipping retrieval here leaves the
-            # request with no evidence, so it is refused downstream no matter what
-            # the routing layers decide. Verified live 2026-09-07: the planner
-            # classifies these as medical_claim/income_claim and this branch, not
-            # the guardrails, is what withheld the answer.
-            if (
-                search_plan.conversation_intent != "knowledge"
-                and search_plan.intent_confidence >= settings.BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE
-                and not is_policy_safety_question(message)
-            ):
-                return RetrievalResult(
-                    documents=[],
-                    citations=[],
-                    confidence=1.0,
-                    metadata={
-                        "provider": "opensearch_section",
-                        "conversation_intent": search_plan.conversation_intent,
-                        "conversation_subtype": search_plan.conversation_subtype,
-                        "intent_confidence": search_plan.intent_confidence,
-                    },
-                )
-            client = _client()
-            search_messages = search_plan.queries
-            global_search_message = ""
-            target_country_names = _directory_target_section_names(message, country)
-            text_hits: list[dict[str, Any]] = []
-            vector_hits: list[dict[str, Any]] = []
-            explicit_section_id = _section_reference(message)
-            if explicit_section_id:
-                exact_response = client.search(
-                    index=self.index_name,
-                    body=_exact_section_query(explicit_section_id, country, language),
-                )
-                _record_rank_list_search(rank_record, "exact", None, 1.0, exact_response)
-                text_hits.extend(
-                    {**hit, "_score": max(float(hit.get("_score") or 0.0), 100.0)}
-                    for hit in exact_response.get("hits", {}).get("hits", [])
-                )
-            for index, search_message in enumerate(search_messages):
-                weight = 1.0 if index == 0 else 0.88
-                text_response = client.search(
-                    index=self.index_name,
-                    body=_text_query(search_message, country, language, scope="locale"),
-                )
-                _record_rank_list_search(rank_record, "text", index, weight, text_response)
-                vector_response = client.search(
-                    index=self.index_name,
-                    body=_vector_query(search_message, country, language, scope="locale"),
-                )
-                _record_rank_list_search(rank_record, "vector", index, weight, vector_response)
-                text_hits.extend(
-                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                    for hit in text_response.get("hits", {}).get("hits", [])
-                )
-                vector_hits.extend(
-                    {**hit, "_score": float(hit.get("_score") or 0.0) * weight}
-                    for hit in vector_response.get("hits", {}).get("hits", [])
-                )
+        search_plan = self._build_search_plan(message, country, language, correlation_id)
+        if search_plan.client_action:
+            return RetrievalResult(
+                documents=[],
+                citations=[],
+                confidence=1.0,
+                metadata={
+                    "provider": "opensearch_section",
+                    "client_action": search_plan.client_action,
+                    "conversation_intent": "support_request",
+                    "intent_confidence": search_plan.intent_confidence,
+                },
+            )
+        # A reviewed policy-safety question - asking what the rules prohibit -
+        # must still reach the documents. Skipping retrieval here leaves the
+        # request with no evidence, so it is refused downstream no matter what
+        # the routing layers decide. Verified live 2026-09-07: the planner
+        # classifies these as medical_claim/income_claim and this branch, not
+        # the guardrails, is what withheld the answer.
+        if (
+            search_plan.conversation_intent != "knowledge"
+            and search_plan.intent_confidence >= settings.BEDROCK_CONVERSATION_ROUTE_MIN_CONFIDENCE
+            and not is_policy_safety_question(message)
+        ):
+            return RetrievalResult(
+                documents=[],
+                citations=[],
+                confidence=1.0,
+                metadata={
+                    "provider": "opensearch_section",
+                    "conversation_intent": search_plan.conversation_intent,
+                    "conversation_subtype": search_plan.conversation_subtype,
+                    "intent_confidence": search_plan.intent_confidence,
+                },
+            )
+        client = _client()
+        search_messages = search_plan.queries
+        target_country_names = _directory_target_section_names(message, country)
+        explicit_section_id = _section_reference(message)
+        text_hits, vector_hits, global_search_message, failed_search_channels, failure_details, successful_searches = (
+            self._retrieve_channel_hits(
+                client,
+                message=message,
+                country=country,
+                language=language,
+                correlation_id=correlation_id,
+                search_plan=search_plan,
+                rank_record=rank_record,
+                target_country_names=target_country_names,
+                explicit_section_id=explicit_section_id,
+            )
+        )
 
-            if search_plan.prefer_outline:
-                outline_response = client.search(
-                    index=self.index_name,
-                    body=_outline_text_query(message, country, language),
-                )
-                _record_rank_list_search(rank_record, "outline", None, 1.0, outline_response)
-                text_hits.extend(outline_response.get("hits", {}).get("hits", []))
-
-            if search_plan.include_global_documents:
-                global_search_message = self._global_search_query(message, language, correlation_id)
-                global_text_response = client.search(
-                    index=self.index_name,
-                    body=_directory_text_query(global_search_message, target_country_names),
-                )
-                global_vector_query = _vector_query(
-                    global_search_message,
-                    country,
-                    language,
-                    scope="global",
-                )
-                country_filter = _record_country_filter(target_country_names)
-                if country_filter is not None:
-                    global_vector_query["query"]["knn"]["embedding"]["filter"]["bool"]["filter"].append(
-                        country_filter
-                    )
-                global_vector_response = client.search(
-                    index=self.index_name,
-                    body=global_vector_query,
-                )
-                _record_rank_list_search(rank_record, "global_text", None, 1.0, global_text_response)
-                _record_rank_list_search(rank_record, "global_vector", None, 1.0, global_vector_response)
-                text_hits.extend(global_text_response.get("hits", {}).get("hits", []))
-                vector_hits.extend(global_vector_response.get("hits", {}).get("hits", []))
-        except OpenSearchException:
-            LOGGER.exception("opensearch_section_retrieval_failed", correlation_id=correlation_id)
+        if failed_search_channels and not successful_searches:
             return RetrievalResult(
                 documents=[],
                 citations=[],
                 confidence=0.0,
                 metadata={
                     "provider": "opensearch_section",
+                    "failed_search_channels": failed_search_channels,
+                    "search_channel_failures": failure_details,
                     **_generation_lookup_fields(),
-                    **_rank_list_fields(rank_record),
+                    **_rank_list_fields(rank_record, search_plan=search_plan, target_country_names=target_country_names),
                 },
+                availability=RetrievalAvailability.UNAVAILABLE,
             )
+
+        failure_metadata = (
+            {
+                "failed_search_channels": failed_search_channels,
+                "search_channel_failures": failure_details,
+            }
+            if failed_search_channels
+            else {}
+        )
+        availability = (
+            RetrievalAvailability.DEGRADED if failed_search_channels else RetrievalAvailability.AVAILABLE
+        )
 
         typo_ranking_queries = safe_typo_ranking_queries(message, search_messages[1:])
         rows = self._merge_hits(
@@ -1751,6 +1981,7 @@ class OpenSearchSectionProvider:
                     for document in documents
                     if document.metadata.get("parent_bound_child")
                 ],
+                **failure_metadata,
                 "candidate_sources": [
                     self._document_from_row(row, score).to_source()
                     for row, score in raw_rows[: settings.OPENSEARCH_CANDIDATE_COUNT]
@@ -1763,6 +1994,7 @@ class OpenSearchSectionProvider:
                     target_country_names=target_country_names,
                 ),
             },
+            availability=availability,
         )
         LOGGER.info(
             "opensearch_section_retrieval_success",

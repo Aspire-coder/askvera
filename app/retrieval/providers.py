@@ -159,6 +159,47 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
 )
 DIRECTORY_POLICY_WORDING_RE = re.compile(r"\bpolic(?:y|ies)\b|\brules?\b", re.IGNORECASE)
 
+# These values are emitted only from the runtime query-planning boundary.  They
+# deliberately describe routing, not an answer or an expected benchmark label.
+_RUNTIME_SCOPE_INTENTS = frozenset({
+    "policy", "directory", "international_sponsoring", "ambiguous", "unknown",
+})
+
+
+def _authorized_policy_market(country: object) -> str | None:
+    """Return the request's explicit two-letter policy authority, if usable."""
+    value = str(country or "").strip().upper()
+    return value if len(value) == 2 and value.isascii() and value.isalpha() else None
+
+
+def _runtime_scope_intent(
+    message: str,
+    *,
+    include_global_documents: bool,
+    named_markets: set[str],
+    shared_office_markets: set[str],
+    deterministic_directory_route: bool,
+) -> dict[str, str]:
+    """Record the explicit runtime scope decision without replay inference.
+
+    A planner's global-scope hint on its own remains ambiguous.  Directory and
+    sponsoring protection may rely only on a deterministic route that the
+    runtime itself applied to this request.
+    """
+    text = message or ""
+    if is_policy_safety_question(text) or DIRECTORY_POLICY_WORDING_RE.search(text):
+        intent, source = "policy", "deterministic_policy_route"
+    elif SPONSORING_QUESTION_RE.search(text):
+        intent, source = "international_sponsoring", "deterministic_sponsoring_route"
+    elif not include_global_documents:
+        intent, source = "policy", "local_policy_only"
+    elif deterministic_directory_route:
+        intent, source = "directory", "deterministic_directory_route"
+    else:
+        intent, source = "ambiguous", "planner_global_scope_only"
+    assert intent in _RUNTIME_SCOPE_INTENTS
+    return {"provenance": "runtime", "intent": intent, "decision_source": source}
+
 
 def _verified_conversation_intent(
     intent: str,
@@ -235,6 +276,8 @@ class RetrievalQueryPlan:
     conversation_intent: str = "knowledge"
     conversation_subtype: str = ""
     intent_confidence: float = 0.0
+    runtime_scope_intent: dict[str, str] | None = None
+    authorized_policy_market: str | None = None
 
 
 def _metadata_value(metadata: dict[str, Any], *keys: str) -> str:
@@ -529,7 +572,16 @@ def _planned_retrieval_plan(
         # The shared strict check excludes appended instructions and compound
         # requests. Retrieve policy evidence; do not let an advisory classifier
         # turn a question about prohibited claims into a request to make one.
-        return RetrievalQueryPlan(base_queries, include_global_documents=False)
+        return RetrievalQueryPlan(
+            base_queries,
+            include_global_documents=False,
+            runtime_scope_intent={
+                "provenance": "runtime",
+                "intent": "policy",
+                "decision_source": "deterministic_policy_safety_route",
+            },
+            authorized_policy_market=_authorized_policy_market(country),
+        )
     joined_term_queries = approved_joined_term_queries(message, country, language)
     glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
@@ -537,6 +589,12 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(
             [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
+            runtime_scope_intent={
+                "provenance": "runtime",
+                "intent": "unknown",
+                "decision_source": "planner_disabled",
+            },
+            authorized_policy_market=_authorized_policy_market(country),
         )
 
     system_prompt = (
@@ -598,25 +656,29 @@ def _planned_retrieval_plan(
         # named markets. Keep the model planner as a helpful hint, but enforce
         # this scope from shared market configuration so planner omissions do
         # not hide approved cross-market evidence.
-        named_markets = find_market_mentions(message)
         # Imported here: opensearch_sections imports this module at load time.
         from .opensearch_sections import _directory_target_country_names
 
+        named_markets = find_market_mentions(message)
+        shared_office_markets = find_shared_office_record_countries(message)
+        operational_directory_route = bool(
+            DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries]))
+        ) and bool(FOREVER_NAMED_RECORD_RE.search(message or "") or named_markets or shared_office_markets)
+        own_market_directory_route = (
+            bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
+            and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
+            and bool(_directory_target_country_names(message, country))
+        )
         include_global_documents = (
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
             or bool(named_markets)
-            or bool(find_shared_office_record_countries(message))
-            or bool(DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries])))
-            and bool(FOREVER_NAMED_RECORD_RE.search(message or ""))
+            or bool(shared_office_markets)
+            or operational_directory_route
             # An own-market operational question with no country named opens
             # the directory only when the session market resolves to a record
             # name, so the global search is always filtered to that record.
-            or (
-                bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
-                and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
-                and bool(_directory_target_country_names(message, country))
-            )
+            or own_market_directory_route
         )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
@@ -626,6 +688,12 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(
             [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
+            runtime_scope_intent={
+                "provenance": "runtime",
+                "intent": "unknown",
+                "decision_source": "planner_unavailable",
+            },
+            authorized_policy_market=_authorized_policy_market(country),
         )
 
     conversation_intent, intent_overridden = _verified_conversation_intent(
@@ -707,6 +775,14 @@ def _planned_retrieval_plan(
         conversation_intent=conversation_intent,
         conversation_subtype=conversation_subtype,
         intent_confidence=intent_confidence,
+        runtime_scope_intent=_runtime_scope_intent(
+            message,
+            include_global_documents=include_global_documents,
+            named_markets=named_markets,
+            shared_office_markets=shared_office_markets,
+            deterministic_directory_route=operational_directory_route or own_market_directory_route,
+        ),
+        authorized_policy_market=_authorized_policy_market(country),
     )
 
 

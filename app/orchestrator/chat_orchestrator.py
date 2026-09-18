@@ -1,5 +1,6 @@
 """AI chat orchestration for AskVera."""
 
+import hashlib
 import re
 import unicodedata
 from contextvars import ContextVar
@@ -38,7 +39,7 @@ from app.response.quality import (
     unsupported_requested_years,
 )
 from app.retrieval import RetrievalService, confidence_from_sources, retrieval_service
-from app.retrieval.models import RetrievalResult
+from app.retrieval.models import RetrievalAvailability, RetrievalResult
 from app.retrieval.cache_evidence import restore_evidence, serialize_evidence
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
@@ -1029,7 +1030,9 @@ class AIOrchestrator:
         if chat_response:
             return chat_response
         history = get_session_history(body.sessionId, correlation_id)
-        retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
+        retrieval_query, context_resolution = self._build_retrieval_query_with_provenance(
+            scrubbed_input, history, correlation_id, session_id=body.sessionId,
+        )
         request_query = self._build_request_query(scrubbed_input, retrieval_query, history)
         governance_decision = self._evaluate_governance(
             self._governance_text(scrubbed_input, request_query), body, correlation_id
@@ -1046,7 +1049,21 @@ class AIOrchestrator:
         if cached_response:
             return cached_response
 
-        retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        # This context is diagnostic-only.  It records that the orchestrator
+        # actually resolved a dependent follow-up before retrieval, without
+        # leaking transcript text into rank-list artifacts.
+        from app.retrieval.opensearch_sections import (
+            reset_rank_list_context_resolution,
+            set_rank_list_context_resolution,
+        )
+
+        context_token = set_rank_list_context_resolution(context_resolution)
+        try:
+            retrieval_result = self.retriever.retrieve(
+                retrieval_query, body.country, body.language, body.role, correlation_id
+            )
+        finally:
+            reset_rank_list_context_resolution(context_token)
         _record_diagnostic_retrieval("question", retrieval_result)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
             retrieval_query,
@@ -1850,6 +1867,7 @@ class AIOrchestrator:
                 **(retrieval_result.metadata or {}),
                 "evidence_contract": {"status": "accepted", "evidence_ids": list(contract.evidence_ids)},
             },
+            availability=retrieval_result.availability,
         )
         LOGGER.info(
             "evidence_contract_accepted",
@@ -1873,15 +1891,36 @@ class AIOrchestrator:
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
         """Return the substantive question used to retrieve follow-up evidence."""
+        query, _context = self._build_retrieval_query_with_provenance(user_message, history, correlation_id)
+        return query
+
+    @staticmethod
+    def _prior_user_turn_capture_id(session_id: str, position: int, message: str) -> str:
+        """Return an opaque ID for the actual compact-history turn selected."""
+        if not session_id:
+            return ""
+        digest = hashlib.sha256(f"{session_id}\x00{position}\x00{message}".encode("utf-8")).hexdigest()
+        return f"history-user-{position + 1}-{digest[:16]}"
+
+    def _build_retrieval_query_with_provenance(
+        self, user_message: str, history: str, correlation_id: str, *, session_id: str = "",
+    ) -> tuple[str, dict[str, str]]:
+        """Build retrieval text plus runtime-only dependent-follow-up provenance."""
         user_message = self._normalize_malformed_spacing(user_message, correlation_id)
         if not self._needs_history_context(user_message, history):
-            return user_message
+            return user_message, {"provenance": "runtime", "status": "not_dependent"}
+        ambiguous_finnish_context = self._has_ambiguous_finnish_lowercase_complement(user_message)
+        user_message = self._canonicalize_finnish_anaphoric_market(user_message)
 
         user_messages = self._user_messages_from_history(history)
         if not user_messages:
-            return user_message
+            return user_message, {"provenance": "runtime", "status": "unresolved"}
 
-        anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        anchor_source = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
+        anchor_position = max(
+            (index for index, value in enumerate(user_messages) if value == anchor_source), default=-1
+        )
+        anchor = anchor_source
         # An explicit new directory market replaces the anchor's market; the
         # topic still carries. Live 2026-09-12 (W7): "What about delivery cost
         # for Gambia?" after a Mali question kept "in Mali" here, retrieval
@@ -1890,7 +1929,7 @@ class AIOrchestrator:
         if not anchor:
             # Every candidate was an instruction rather than a question (or named
             # only the replaced market), so there is nothing left to anchor against.
-            return user_message
+            return user_message, {"provenance": "runtime", "status": "unresolved"}
         if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
             # A topic-shift follow-up ("what about Kenya?") introduces a new
             # subject that a bare anchor substitution would silently drop.
@@ -1908,7 +1947,13 @@ class AIOrchestrator:
             original_length=len(user_message),
             contextual_length=len(contextual_query),
         )
-        return contextual_query
+        if ambiguous_finnish_context:
+            return contextual_query, {"provenance": "runtime", "status": "unresolved"}
+        context = {"provenance": "runtime", "status": "resolved_dependent_follow_up"}
+        prior_turn_id = self._prior_user_turn_capture_id(session_id, anchor_position, anchor_source)
+        if prior_turn_id:
+            context["prior_user_turn_id"] = prior_turn_id
+        return contextual_query, context
 
     def _governance_text(self, user_message: str, request_query: str) -> str:
         """Return the text governance judges: the action being requested NOW.
@@ -2025,8 +2070,11 @@ class AIOrchestrator:
         normalized = " ".join(user_message.lower().split())
         if not normalized:
             return False
-        word_count = len(normalized.split())
         message = " ".join(user_message.split())
+        word_count = len(normalized.split())
+        if self._is_finnish_anaphoric_follow_up(message):
+            _market, _place, unresolved_place = self._finnish_anaphoric_place_resolution(message)
+            return not unresolved_place
         if word_count <= 14 and CONTINUATION_TERMS.search(normalized):
             return True
         if (
@@ -2118,6 +2166,149 @@ class AIOrchestrator:
             self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
             or self._is_market_ellipsis(normalized_message)
             or self._localized_follow_up_shape(normalized_message) in {"market", "topic_shift"}
+            or (
+                self._is_finnish_anaphoric_follow_up(normalized_message)
+                and not self._finnish_anaphoric_place_resolution(normalized_message)[2]
+            )
+        )
+
+    @staticmethod
+    def _is_finnish_anaphoric_follow_up(message: str) -> bool:
+        """Recognize the configured Finnish ``Entä jos hän...`` follow-up form.
+
+        This is intentionally a grammar-bound reference signal, not a country,
+        role, or topic rule. The third-person Finnish pronoun makes the prior
+        user turn necessary, unlike a new standalone ``Entä jos haluan...``
+        question. The normal no-history and unrecognised-place guards still
+        run before this can affect retrieval.
+        """
+        tokens = _follow_up_tokens(message)
+        return (
+            4 <= len(tokens) <= 18
+            and tokens[:2] == ("enta", "jos")
+            and bool({"han", "hanen"}.intersection(tokens))
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _finnish_inessive_market_codes() -> dict[str, str]:
+        """Map safe configured ``-ssa`` place forms to one market code only."""
+        candidates: dict[str, set[str]] = {}
+        aliases = _localized_market_names()
+        for market in [*load_market_config()["markets"], *load_global_directory_markets()]:
+            code = str(market.get("code") or "").upper()
+            if not code:
+                continue
+            for name in [market.get("name"), *aliases.get(code, [])]:
+                normalized_name = _normalize_market_text(str(name or ""))
+                if normalized_name and " " not in normalized_name:
+                    candidates.setdefault(f"{normalized_name}ssa", set()).add(code)
+        return {
+            form: next(iter(codes))
+            for form, codes in candidates.items()
+            if len(codes) == 1
+        }
+
+    def _finnish_anaphoric_place_resolution(self, message: str) -> tuple[str | None, str, bool]:
+        """Return one exact Finnish anaphoric place, or an unresolved-place flag.
+
+        Collect exact configured inessive forms, direct market mentions, and
+        unknown place candidates before deciding. A market resolves only when
+        all current-turn signals support one code and no competing unknown
+        place exists. A lowercase unknown form must end the bounded ``asuu``
+        residence phrase to make the turn standalone; other lowercase
+        place-shaped forms remain ambiguous for provenance purposes.
+        """
+        codes: set[str] = set()
+        matched_place = ""
+        places = _follow_up_tokens(message, casefold=False)[2:]
+        capitalized_unknown = False
+        lowercase_unknown_indexes: list[int] = []
+        strong_lowercase_unknown = False
+        for index, place in enumerate(places):
+            normalized_place = _normalize_market_text(place)
+            inessive_code = self._finnish_inessive_market_codes().get(
+                normalized_place,
+            )
+            direct_codes = set(find_market_mentions(place))
+            if inessive_code:
+                codes.add(inessive_code)
+                matched_place = place
+            if direct_codes:
+                codes.update(direct_codes)
+                matched_place = place
+            is_inessive_candidate = normalized_place.endswith("ssa")
+            if is_inessive_candidate and not inessive_code and not direct_codes:
+                if place[:1].isupper():
+                    capitalized_unknown = True
+                else:
+                    lowercase_unknown_indexes.append(index)
+                    strong_lowercase_unknown = strong_lowercase_unknown or self._is_finnish_location_phrase(
+                        places, index, allow_state_cue=False,
+                    )
+        if len(codes) > 1 or capitalized_unknown or strong_lowercase_unknown:
+            return None, "", True
+        if codes and lowercase_unknown_indexes:
+            return None, "", True
+        return (next(iter(codes)), matched_place, False) if codes else (None, "", False)
+
+    @staticmethod
+    def _is_finnish_location_phrase(
+        tokens: tuple[str, ...], place_index: int, *, allow_state_cue: bool,
+    ) -> bool:
+        """Match one bounded Finnish location cue plus an optional ``nyt`` gap."""
+        if place_index != len(tokens) - 1 or place_index < 1:
+            return False
+        preceding = _normalize_market_text(tokens[place_index - 1])
+        if preceding == "nyt":
+            if place_index < 2:
+                return False
+            preceding = _normalize_market_text(tokens[place_index - 2])
+        return preceding == "asuu" or (
+            allow_state_cue and preceding in {"on", "tyoskentelee"}
+        )
+
+    def _has_ambiguous_finnish_lowercase_complement(self, message: str) -> bool:
+        """Record a lowercase ``on``/``työskentelee`` complement as unresolved.
+
+        The query can retain ordinary conversation context, but the capture must
+        not claim that such a complement resolved the market. Exact configured
+        forms and capitalized unknown-place handling are decided separately.
+        """
+        if not self._is_finnish_anaphoric_follow_up(message):
+            return False
+        code, _place, unresolved_place = self._finnish_anaphoric_place_resolution(message)
+        if code or unresolved_place:
+            return False
+        places = _follow_up_tokens(message, casefold=False)[2:]
+        for place in places:
+            if place[:1].isupper() or not _normalize_market_text(place).endswith("ssa"):
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _finnish_location_phrase_cue(tokens: tuple[str, ...], place_index: int) -> str:
+        """Return a bounded Finnish location cue before a terminal complement."""
+        if place_index != len(tokens) - 1 or place_index < 1:
+            return ""
+        cue_index = place_index - 1
+        if _normalize_market_text(tokens[cue_index]) == "nyt":
+            cue_index -= 1
+        return _normalize_market_text(tokens[cue_index]) if cue_index >= 0 else ""
+
+    def _canonicalize_finnish_anaphoric_market(self, message: str) -> str:
+        """Replace one validated Finnish inessive form for retrieval only."""
+        if not self._is_finnish_anaphoric_follow_up(message):
+            return message
+        code, place, unresolved_place = self._finnish_anaphoric_place_resolution(message)
+        if unresolved_place or not code or not place:
+            return message
+        display_name = market_display_name(code)
+        if not display_name:
+            return message
+        return re.sub(
+            rf"(?<!\w){re.escape(place)}(?!\w)", display_name, message, count=1, flags=re.UNICODE,
         )
 
     def _localized_follow_up_shape(self, message: str) -> str:
@@ -3139,6 +3330,21 @@ class AIOrchestrator:
         history: str = "",
     ) -> tuple[ChatResponse | None, RetrievalResult, EvidenceDecision | None]:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
+        if retrieval_result.availability is RetrievalAvailability.UNAVAILABLE:
+            unavailable = self._validate_response(
+                self.response_builder.fallback(
+                    localized_conversation_response("bedrock_error", body.language) or FALLBACK_RESPONSES["bedrock_error"],
+                    correlation_id,
+                    metadata={
+                        "failure_layer": "dependency_unavailable",
+                        "retrieval_availability": retrieval_result.availability.value,
+                    },
+                ),
+                body,
+                correlation_id,
+                retrieval_result=retrieval_result,
+            )
+            return unavailable, retrieval_result, None
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id, candidate_flags)
         if routed_response:
             return routed_response, retrieval_result, None
@@ -3160,6 +3366,25 @@ class AIOrchestrator:
             if not evidence_decision.approved:
                 evidence_decision = replace(evidence_decision, reason="cross_market_local_evidence")
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
+        if (
+            retrieval_result.availability is RetrievalAvailability.DEGRADED
+            and not evidence_decision.approved
+            and evidence_decision.reason != "cross_market_policy_request"
+        ):
+            unavailable = self._validate_response(
+                self.response_builder.fallback(
+                    localized_conversation_response("bedrock_error", body.language) or FALLBACK_RESPONSES["bedrock_error"],
+                    correlation_id,
+                    metadata={
+                        "failure_layer": "dependency_unavailable",
+                        "retrieval_availability": retrieval_result.availability.value,
+                    },
+                ),
+                body,
+                correlation_id,
+                retrieval_result=retrieval_result,
+            )
+            return unavailable, retrieval_result, None
         if evidence_decision.approved:
             unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
             if unsupported_years:

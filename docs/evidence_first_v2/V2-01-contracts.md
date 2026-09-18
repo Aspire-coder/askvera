@@ -1,0 +1,11 @@
+# Evidence-first V2-01 contracts
+
+This package is an offline experiment. It is not connected to an application route, flag, provider, cache, index, model, or network client.
+
+`V2Request` carries the user's market, requested directory market, role, language, effective version, message, and contextual turns. Turns are context only and cannot be evidence. Every enum and nested object is validated at construction. Caller-supplied collections are copied to tuples, so a later mutation of a source list cannot alter an accepted request, fact, or result.
+
+`EvidenceReference` requires a source identity, section identity, exact quote, access class, source market, language, and effective version. Market input is stripped then checked as exactly two ASCII letters before uppercasing. Local-policy evidence must have a non-global source market and no directory market. Global-directory evidence must have source market `GLOBAL` and a directory market. `EvidenceFact` retains any role, unit, timing, and exception qualifiers. A future stage must validate provider output before creating these objects.
+
+Scope is deterministic and receives a validated structured `ScopeIntent`; V2-01 does not infer intent. `ScopeDecision` validates direct construction as well as resolver output, retains request role, language, and effective version, and enforces its own cross-field rules. Company-policy decisions require a non-global user market, no directory market, and local-policy access. International-sponsoring decisions require a directory market and global-directory access. This deliberately keeps a session market and a requested directory market separate. Version must match exactly. Role-bound evidence must match the request role. Source language may differ from request language, but both values and the explicit `source_language_retained_translation_not_decided` rule remain inspectable for a later translation stage.
+
+The offline tests prove structural validation, country separation, immutable collection storage, and a narrow import allowlist. A clean subprocess smoke test confirms importing this package does not load legacy application, provider, network-client, or model-client modules. They do not test retrieval, inference, entailment, answer quality, or live behavior.
