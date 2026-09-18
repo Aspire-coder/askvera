@@ -415,3 +415,138 @@ No existing test was weakened or deleted. `app/evidence_contract.py` and
 `app/response/builder.py` were re-verified against this round's fix but
 needed no code change of their own - the newline fix in
 `utils/sentence_spans.py` was sufficient for both.
+
+## Independent re-review correction (2026-09-18): title abbreviations and empty newline units
+
+The independent re-review of the round above (findings 1 and 2) found that
+the "St. Louis now splits, not a regression" call recorded in the previous
+section was itself wrong, and that the newline-boundary fix left a small,
+harmless-looking artifact of its own.
+
+### Finding 1: a title abbreviation before a capitalised name was wrongly split
+
+The previous round's rule 2 (a plain abbreviation's "." is terminal before
+an uppercase word, non-terminal only before a digit or lowercase letter) is
+right for "No." and "Dec." but wrong for personal/place TITLES: the
+capitalised word that follows a title is the name it attaches to, not a new
+sentence. "Call Dr. Smith. Delivery takes 3 days." regressed to
+`["Call Dr.", "Smith. Delivery takes 3 days."]` - the name was severed from
+the sentence that named it. The same shape hit "Mr. Jones", "Mrs. Kim",
+"Prof. Lee" and "St. Louis office"; directory contacts and addresses carry
+exactly these shapes.
+
+Fixed by `TITLE_ABBREVIATIONS` in `utils/sentence_spans.py`: a small, CLOSED,
+documented subset of `ABBREVIATIONS` - Dr, Mr, Mrs, Ms, Prof, St, Mt, Sr, Jr
+(English) plus the configured-language equivalents Hr (German), Mme/Mlle
+(French), Sra (Spanish/Portuguese), Dott/Ing (Italian) - whose period is
+non-terminal before a capitalised word specifically.
+`abbreviation_or_initial_before` now checks, in order: the dotted-compound
+rule, the initial-chain rule, the existing digit-or-lowercase continuation
+rule (unchanged, applies to every abbreviation), and finally - only for a
+word in `TITLE_ABBREVIATIONS` - a new capitalised-word continuation rule
+(`_title_continuation`). Every abbreviation NOT in the closed title set
+(`no`, `nr`, `dec`, `approx`, etc.) keeps the previous round's
+terminal-before-uppercase behaviour unchanged.
+
+**Before/after:**
+
+| Text | Before this fix | After this fix |
+| --- | --- | --- |
+| `Call Dr. Smith. Delivery takes 3 days.` | `["Call Dr.", "Smith. Delivery takes 3 days."]` | `["Call Dr. Smith.", "Delivery takes 3 days."]` |
+| `Ask Mr. Jones. Delivery takes 3 days.` | split at `Mr.` | `["Ask Mr. Jones.", "Delivery takes 3 days."]` |
+| `Take the train to St. Louis for the conference.` | `["Take the train to St.", "Louis for the conference."]` | `["Take the train to St. Louis for the conference."]` |
+| `Is the fee refundable? No. Delivery takes 5 days.` | unchanged | unchanged: `["Is the fee refundable?", "No.", "Delivery takes 5 days."]` |
+| `Send it by Dec. Delivery takes 5 days.` | unchanged | unchanged: `["Send it by Dec.", "Delivery takes 5 days."]` |
+
+**The "St." trade-off.** "St." is genuinely ambiguous: "Saint" before a name
+continues the sentence ("St. Louis office"), but "Street" at a real sentence
+end does not ("...on Main St. Delivery takes 3 days."). Both shapes look
+identical to this module - a plain abbreviation immediately before a
+capitalised word - and there is no local signal (a gazetteer of street vs.
+place names, lookahead past the next word) that this module has access to.
+The rule chosen keeps "St." in `TITLE_ABBREVIATIONS`, because "St.
+<Capitalised City>" is the shape actually observed in directory data (this
+finding's own repro), so the fix is biased toward not truncating a directory
+address at the cost of leaving the rarer "Main St. <new sentence>" shape
+merged instead of split. Both shapes are covered by tests, with the "Main
+St." case asserted as a documented, accepted limitation rather than a silent
+regression - see
+`tests/unit/test_sentence_spans.py::test_st_street_at_a_real_sentence_end_is_a_documented_known_limitation`
+and
+`tests/conversation/test_p2fix_title_abbreviations.py::test_main_st_street_ending_a_sentence_is_a_documented_known_limitation`.
+
+The previous section's `test_st_louis_now_splits_matching_base_behaviour_not_a_regression`
+is superseded by
+`test_st_louis_no_longer_splits_after_the_independent_review_correction` in
+the same file, which records why the earlier expectation was itself the bug
+this finding fixes.
+
+### Finding 2: an empty unit between a period and the newline that follows it
+
+`sentence_boundaries("A.\nB.")` returned `[2, 3, 5]`: a real boundary right
+after `"A."` (offset 2), another right after the `"\n"` that immediately
+follows it (offset 3), and nothing but whitespace in between - an empty
+`"\n"` unit that `iter_sentences` turned into its own (blank) `SentenceSpan`.
+`split_sentences` already filtered it out by stripping and dropping empty
+candidates, so no caller observed a visible defect, but `sentence_boundaries`
+and `iter_sentences` themselves carried the redundant boundary.
+
+Fixed by `_drop_empty_units`, a small post-processing pass over the sorted
+boundary list: a boundary is dropped when the text between it and the
+previously-KEPT boundary is empty or whitespace-only, which merges the blank
+stretch into whatever unit follows instead of emitting it as its own. Every
+boundary that closes a non-empty unit is left exactly where it was -
+`sentence_boundaries("A.\nB.")` now returns `[2, 5]`.
+
+### Tests
+
+`tests/unit/test_sentence_spans.py`:
+`test_title_abbreviation_before_a_capitalised_name_is_non_terminal`,
+`test_title_abbreviation_language_equivalents_are_non_terminal_too`,
+`test_st_street_at_a_real_sentence_end_is_a_documented_known_limitation`,
+`test_plain_abbreviation_before_uppercase_stays_terminal_when_not_a_title`,
+`test_st_louis_no_longer_splits_after_the_independent_review_correction`
+(supersedes the earlier, now-corrected expectation),
+`test_sentence_boundaries_drops_the_empty_unit_between_a_period_and_a_newline`,
+`test_sentence_boundaries_drop_empty_unit_does_not_move_a_real_boundary`.
+
+`tests/conversation/test_p2fix_title_abbreviations.py` (new): the same
+findings exercised through `remove_unsupported_numeric_sentences` and
+`split_sentences` together, including the "Contact Dr. Smith" and "St.
+Louis" repros against a real numeric-repair deletion, the "No."/"Dec."
+negative control, and the documented "Main St." limitation.
+
+`tests/unit/test_market_config.py`: `test_market_display_name_covers_directory_only_markets`
+had its `assert market_display_name("") == ""` line (dropped in an unrelated
+earlier commit, `c15eee6`) restored; `market_display_name` already returned
+`""` for an empty code, so this is a test-integrity fix with no production
+code change.
+
+### Verification
+
+Ran together: `tests/conversation`, `tests/conversation_pack`, and the named
+`tests/unit` files (`test_sentence_spans`, `test_market_config`,
+`test_response_builder`, `test_orchestrator_citation_reconcile`,
+`test_evidence_contract`, `test_history_grounding_validator`,
+`test_numeric_grounding_validator`, `test_numeric_grounding_repair_corrections`,
+`test_numeric_grounding_repair_defects`, `test_directory_fields`,
+`test_demo_journeys_postprocessing`). Then the whole `tests/unit` directory
+once. `flake8` on every changed `.py` file and `git diff --check`: both
+clean. Exact counts and exit codes are recorded in the handoff for this
+round.
+
+### Files changed in this round
+
+- `utils/sentence_spans.py` (`TITLE_ABBREVIATIONS`, `_title_continuation`,
+  `_drop_empty_units`)
+- `tests/unit/test_sentence_spans.py` (extended; superseded the "St. Louis
+  now splits" expectation)
+- `tests/unit/test_market_config.py` (restored one dropped assertion)
+- `tests/conversation/test_p2fix_title_abbreviations.py` (new)
+- `docs/conversation-quality/phase2/FRAGMENT_AUDIT.md` (this section)
+
+No existing test was weakened; the one test whose EXPECTED VALUE changed
+(`test_st_louis_now_splits_matching_base_behaviour_not_a_regression` ->
+`test_st_louis_no_longer_splits_after_the_independent_review_correction`)
+changed because the behaviour it pinned was the bug this round fixes, per
+this round's own coordinator instruction - not a loosening of coverage.
