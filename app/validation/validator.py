@@ -11,6 +11,7 @@ from .validators import (
     AnswerValidator,
     CitationValidator,
     ConfidenceValidator,
+    HistoryGroundingValidator,
     LanguageValidator,
     LengthValidator,
     MetadataValidator,
@@ -62,6 +63,7 @@ def default_validators() -> list[ResponseValidator]:
         MetadataValidator(),
         LengthValidator(),
         NumericGroundingValidator(),
+        HistoryGroundingValidator(),
     ]
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 from app.retrieval.models import RetrievedDocument
 
@@ -129,22 +129,86 @@ def _is_structural_line(line: str) -> bool:
     return stripped.startswith("#") or bool(_STRUCTURAL_LINE_RE.fullmatch(stripped))
 
 
+def _iter_checkable_sentences(
+    text: str, min_tokens: int = MIN_CHECKED_CONTENT_TOKENS
+) -> Iterator[tuple[str, set[str]]]:
+    """Yield each sentence-like segment of ``text`` worth judging, with its tokens.
+
+    Shared by ``_uncovered_sentence`` (checked against a declared claim list)
+    and ``unsupported_answer_sentences`` (checked against retrieved evidence
+    text directly) so both apply the same structural/length filtering.
+    ``min_tokens`` lets a caller raise the bar above ``MIN_CHECKED_CONTENT_TOKENS``;
+    see ``unsupported_answer_sentences`` for why the whole-answer check needs a
+    higher one than a declared claim list does.
+    """
+    for raw_sentence in _SENTENCE_SPLIT_RE.split(text):
+        sentence = raw_sentence.strip()
+        if not sentence or _is_structural_line(sentence):
+            continue
+        tokens = _content_tokens(sentence)
+        if len(tokens) < min_tokens:
+            continue
+        yield sentence, tokens
+
+
+def _coverage_ratio(tokens: set[str], coverage_tokens: set[str]) -> float:
+    """Share of ``tokens`` also present in ``coverage_tokens``."""
+    if not tokens:
+        return 1.0
+    return len(tokens & coverage_tokens) / len(tokens)
+
+
 def _uncovered_sentence(answer: str, claims: list) -> str:
     """Return the first answer sentence no claim supports, or an empty string."""
     claim_tokens: set[str] = set()
     for claim in claims:
         claim_tokens |= _content_tokens(str(claim.get("text") or ""))
 
-    for raw_sentence in _SENTENCE_SPLIT_RE.split(answer):
-        sentence = raw_sentence.strip()
-        if not sentence or _is_structural_line(sentence):
-            continue
-        tokens = _content_tokens(sentence)
-        if len(tokens) < MIN_CHECKED_CONTENT_TOKENS:
-            continue
-        if len(tokens & claim_tokens) / len(tokens) < SENTENCE_COVERAGE_THRESHOLD:
+    for sentence, tokens in _iter_checkable_sentences(answer):
+        if _coverage_ratio(tokens, claim_tokens) < SENTENCE_COVERAGE_THRESHOLD:
             return sentence
     return ""
+
+
+# A declared claim list is written by the model to justify one specific
+# answer, so every entry in it is already a factual assertion - a short one
+# still deserves scrutiny. Checking a whole delivered answer against raw
+# evidence tokens is a blunter instrument: an answer legitimately contains
+# generic connective or service sentences ("You are welcome to place an order
+# directly. Please contact customer care for further help.") that share
+# little vocabulary with any evidence on any topic, precisely because they
+# assert nothing evidence-specific. A short sentence there is noise, not a
+# claim, and flagging it would fail the turns this check must leave alone
+# (see HistoryGroundingValidator). Requiring more distinct content tokens
+# before judging a sentence lets a real multi-clause factual claim - the kind
+# that carried section citations and quoted contract language in the
+# reproduced failure - through the filter while generic short remarks stay
+# unexamined.
+MIN_CHECKED_ANSWER_SENTENCE_TOKENS = 8
+
+
+def unsupported_answer_sentences(
+    answer: str, evidence_texts: list[str], min_tokens: int = MIN_CHECKED_ANSWER_SENTENCE_TOKENS
+) -> list[str]:
+    """Return delivered-answer sentences this turn's retrieved evidence text does not cover.
+
+    Same sentence-coverage test as ``_uncovered_sentence``, but compared
+    directly against the retrieved evidence's own tokens rather than a
+    model-declared claim list. History is deliberately excluded from
+    ``evidence_texts`` by every caller: the conversation is context for
+    interpreting the question, never a source of facts (see
+    ``FOLLOWUP_PROMPT`` in ``app/prompts/templates.py``), so a fact that only
+    history states and this turn's evidence does not is exactly what this
+    catches.
+    """
+    evidence_tokens: set[str] = set()
+    for text in evidence_texts:
+        evidence_tokens |= _content_tokens(text or "")
+    return [
+        sentence
+        for sentence, tokens in _iter_checkable_sentences(answer, min_tokens)
+        if _coverage_ratio(tokens, evidence_tokens) < SENTENCE_COVERAGE_THRESHOLD
+    ]
 
 
 def _claim_schema_error(claims: list, evidence_ids: list[str]) -> str:
