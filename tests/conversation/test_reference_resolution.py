@@ -317,3 +317,34 @@ def test_multilingual_ordinal_first_forms_resolve_deterministically() -> None:
         if not outcome.resolved_market:
             failures.append(f"{language}: {outcome}")
     assert not failures, failures
+
+
+_KENYA_THEN_UGANDA = _history(
+    ("What is the delivery cost in Kenya?", "Delivery to Kenya costs a fixed fee."),
+    ("What about Uganda?", "Delivery to Uganda costs a different fee."),
+)
+
+
+def test_conjunction_led_references_clarify_or_resolve() -> None:
+    """Coordinator, 2026-09-18. Deterministic/local.
+
+    English lacked "and"/"or" among its non-content tokens, although every
+    other language lists its equivalent, so "And the other country?" was left
+    unchanged: no guess, but also no clarification.
+    """
+    for message in ("And the other country?", "And the other?", "Or the other one?"):
+        assert resolve_reference(message, _KENYA_THEN_UGANDA, "en").clarification_candidates == ("Kenya", "Uganda")
+    assert resolve_reference("And the first one?", _KENYA_THEN_UGANDA, "en").resolved_market == "Kenya"
+
+
+def test_conjunction_led_ordinary_questions_are_untouched() -> None:
+    for message in (
+        "And the minimum first order?",
+        "And any other fee?",
+        "And the last day to order?",
+        "So what about the other product?",
+    ):
+        result = resolve_reference(message, _KENYA_THEN_UGANDA, "en")
+        assert not result.clarification_candidates
+        assert result.resolved_market is None
+        assert result.rewritten_message == message

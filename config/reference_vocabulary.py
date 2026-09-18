@@ -187,6 +187,10 @@ LOCALIZED_NON_CONTENT_TOKENS: dict[str, frozenset[str]] = {
     "en": frozenset({
         "the", "a", "an", "of", "to", "is", "are", "was", "were", "do", "does", "did",
         "what", "how", "about", "there", "any",
+        # Conjunction openers. Every other language already lists its "and"
+        # (et, und, en, e, y, og, och); English was the outlier, so "And the
+        # other country?" fell through unclarified (coordinator, 2026-09-18).
+        "and", "or", "so", "then",
     }),
     "fr": frozenset({
         "le", "la", "les", "l", "du", "des", "d", "a", "au", "aux", "pour", "et", "en",
