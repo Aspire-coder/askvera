@@ -1,4 +1,4 @@
-"""Phase 2 Lane F: international-sponsoring contacts vs. company-policy scope.
+"""Phase 2 Lane F: international-sponsoring contacts vs. company-policy scope. Deterministic/local proof.
 
 GOAL requirement: "international-sponsoring directory contacts may be used
 from any session country, while company-policy facts stay restricted to the

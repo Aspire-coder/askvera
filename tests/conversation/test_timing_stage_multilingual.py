@@ -1,6 +1,6 @@
 """Phase 2, Lane C (conversation-quality project): the delivery-vs-approval
 timing-stage substitution, reproduced in every language
-config/timing_stage_vocabulary.py covers.
+config/timing_stage_vocabulary.py covers. Deterministic/local proof.
 
 Each case pairs the language's own first-listed delivery and approval cue term
 (read from the vocabulary table itself, not retyped here, so the test always

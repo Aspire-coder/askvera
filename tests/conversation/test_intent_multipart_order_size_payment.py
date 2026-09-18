@@ -1,4 +1,4 @@
-"""MULTIPART-001 (regression pack, tests/conversation_pack/cases.json, Lane G):
+"""MULTIPART-001 (regression pack, tests/conversation_pack/cases.json, Lane G). Deterministic/local proof:
 "What is the minimum order for an FBO in Kenya, and what payment methods do
 they accept?" lost the payment-methods sentence.
 

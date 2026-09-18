@@ -53,11 +53,7 @@ LABEL_MARKERS = (
 # that currently lack a label. Lane G cannot edit these files. Kept narrow
 # and named, not a directory-wide exemption, so a new unlabeled file from any
 # lane still fails this check.
-_KNOWN_GAPS = {
-    "tests/conversation/test_intent_multipart_order_size_payment.py": (
-        "Lane B Phase 2 write target (TASK_BOARD.md); Lane G may not edit it."
-    ),
-}
+_KNOWN_GAPS: dict[str, str] = {}
 
 
 def _module_files() -> list[Path]:

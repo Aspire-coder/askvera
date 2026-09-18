@@ -1,5 +1,5 @@
 """Phase 2, Lane C (conversation-quality project): a timing number must not move
-between process stages.
+between process stages. Deterministic/local proof.
 
 Forever Living states several different clocks that share the same shape ("3
 working days", "48 hours", "within 5 days"): how long delivery takes, how long
