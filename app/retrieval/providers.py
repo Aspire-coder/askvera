@@ -16,6 +16,7 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions, find_shared_office_record_countries
 from services.guardrails import is_policy_safety_question
+from utils.directory_fields import directory_field_intent_present
 from utils.logging import get_logger
 
 from .glossary import approved_joined_term_queries, glossary_queries
@@ -180,12 +181,42 @@ def _runtime_scope_intent(
     named_markets: set[str],
     shared_office_markets: set[str],
     deterministic_directory_route: bool,
+    language: str = "en",
 ) -> dict[str, str]:
     """Record the explicit runtime scope decision without replay inference.
 
     A planner's global-scope hint on its own remains ambiguous.  Directory and
     sponsoring protection may rely only on a deterministic route that the
     runtime itself applied to this request.
+
+    R05/N6 follow-up (2026-09-18): an independent review found that every
+    regex this function (and the ``deterministic_directory_route`` inputs
+    computed for it in ``_planned_retrieval_plan``) reads matches English
+    vocabulary only, so a genuinely directory-intentioned question phrased
+    in Spanish, French, German, or any other non-English language fell
+    through to "ambiguous" and lost the directory bonus entirely (8.0 ->
+    0.0) - see the R05_N6 doc's "Language coverage" note and this fix's
+    entry below it. ``language`` - the request language already threaded
+    through every call site (``_planned_retrieval_plan`` already takes it as
+    a parameter; no new plumbing was needed) - now also asks
+    ``directory_field_intent_present`` (``utils/directory_fields.py``) whether
+    the question, interpreted in that language, names a canonical directory
+    field (phone, email, address, website, business hours, payment methods,
+    delivery cost/time, fax) using the same reviewed 13-language vocabulary
+    ``config/directory_field_vocabulary.py`` already carries for field
+    removal/restoration, plus a small closed English-only synonym set for
+    "reach"/"contact" and "credit/debit card(s)" (see that module's
+    docstring). This is purely additive: it can only ever turn "ambiguous"
+    into "directory" when a directory field is genuinely named, never the
+    reverse, so every existing English-only recognition path (this
+    function's own ``SPONSORING_QUESTION_RE`` branch,
+    ``deterministic_directory_route``'s own inputs) and every suppression
+    path (``policy``/``ambiguous`` still gate the country bonus to 0.0 in
+    ``app/retrieval/opensearch_sections.py``'s
+    ``_directory_record_country_score``) are unchanged. A ``language`` this
+    module's vocabulary does not recognize falls back to exactly the
+    English-only recognition this function already had before this change -
+    no worse than before.
     """
     text = message or ""
     if is_policy_safety_question(text) or DIRECTORY_POLICY_WORDING_RE.search(text):
@@ -196,6 +227,8 @@ def _runtime_scope_intent(
         intent, source = "policy", "local_policy_only"
     elif deterministic_directory_route:
         intent, source = "directory", "deterministic_directory_route"
+    elif directory_field_intent_present(text, language=language):
+        intent, source = "directory", "multilingual_directory_field_route"
     else:
         intent, source = "ambiguous", "planner_global_scope_only"
     assert intent in _RUNTIME_SCOPE_INTENTS
@@ -662,7 +695,11 @@ def _planned_retrieval_plan(
         # this scope from shared market configuration so planner omissions do
         # not hide approved cross-market evidence.
         # Imported here: opensearch_sections imports this module at load time.
-        from .opensearch_sections import _directory_guard_topic_match, _directory_target_country_names
+        from .opensearch_sections import (
+            _DIRECTORY_DETAIL_RE,
+            _directory_guard_topic_match,
+            _directory_target_country_names,
+        )
 
         named_markets = find_market_mentions(message)
         shared_office_markets = find_shared_office_record_countries(message)
@@ -684,7 +721,35 @@ def _planned_retrieval_plan(
         # bonus?") that name no operational-field keyword and no "sponsor" root
         # word, so they were falling through to "ambiguous" and losing
         # directory protection alongside the genuine Norway-shaped regression.
+        #
+        # R05/N6 follow-up (2026-09-18, independent review NOTE 6): reusing
+        # `_directory_guard_topic_match` verbatim means its own "bonus" branch
+        # fires here too - and a Norway-shaped, own-market policy question
+        # ("I cancelled my Forever Norge distributorship... and do I keep my
+        # old downline and their bonus?") would then be wrongly classified as
+        # "directory" on the word "bonus" alone, exactly the class of bug
+        # this whole task exists to close. The distinguishing signal already
+        # exists and needs no new vocabulary: the Ghana bonus control names a
+        # market (Ghana) the requesting session is explicitly OUTSIDE of ("a
+        # foreign FBO"/GB session), while the Norway case names only the
+        # session's OWN market (a Norwegian FBO asking about their own
+        # Norwegian distributorship). So the "bonus"-only match (no
+        # `_DIRECTORY_DETAIL_RE`/`DIRECTORY_OPERATIONAL_QUESTION_RE` wording
+        # alongside it) is trusted only when a literal "sponsor" root word is
+        # present, or a named market differs from the request's own
+        # `country` - i.e. this is a genuinely cross-market question, not a
+        # question about the requester's own market that merely mentions
+        # "bonus". A "bonus"-only match WITH other directory/operational
+        # wording already present is untouched, since that wording is its
+        # own independent, non-"bonus" signal.
         directory_topic_route = bool(_directory_guard_topic_match(message))
+        if directory_topic_route and not (
+            _DIRECTORY_DETAIL_RE.search(message or "") or DIRECTORY_OPERATIONAL_QUESTION_RE.search(message or "")
+        ):
+            own_market_code = str(country or "").strip().upper()
+            directory_topic_route = bool(SPONSORING_QUESTION_RE.search(message or "")) or bool(
+                named_markets - {own_market_code}
+            )
         include_global_documents = (
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
@@ -799,6 +864,7 @@ def _planned_retrieval_plan(
             deterministic_directory_route=(
                 operational_directory_route or own_market_directory_route or directory_topic_route
             ),
+            language=language,
         ),
         authorized_policy_market=_authorized_policy_market(country),
     )

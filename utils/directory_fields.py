@@ -8,6 +8,7 @@ from collections.abc import Iterable
 
 from utils.sentence_spans import sentence_boundaries
 from config.directory_field_vocabulary import (
+    DIRECTORY_INTENT_SYNONYM_TERMS,
     LANGUAGE_FIELD_TERMS,
     ORDER_WORD_TERMS,
     normalize_language_code,
@@ -171,6 +172,63 @@ def _requested_directory_field_set(question: str, *, language: str = "en") -> se
     if not requested:
         return None
     return requested
+
+
+# --- R05/N6 follow-up: directory-INTENT detection, not field removal -------
+#
+# config/directory_field_vocabulary.py's DIRECTORY_INTENT_SYNONYM_TERMS is a
+# small, closed, English-only set of contact-verb/payment-instrument
+# synonyms (its docstring explains exactly why and its confidence). It is
+# compiled here, the same way LANGUAGE_FIELD_TERMS is compiled above, but
+# kept in its own dict so nothing in this file's removal/restoration/
+# conflict-detection logic can accidentally start reading it.
+_DIRECTORY_INTENT_SYNONYM_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
+    language: {
+        field: re.compile(r"(?<!\w)(?:" + "|".join(terms) + ")", re.IGNORECASE | re.UNICODE)
+        for field, terms in fields.items()
+    }
+    for language, fields in DIRECTORY_INTENT_SYNONYM_TERMS.items()
+}
+
+
+def directory_field_intent_present(question: str, *, language: str = "en") -> bool:
+    """True when a question genuinely names a directory field, for INTENT only.
+
+    Used by ``app.retrieval.providers`` to help decide whether a question
+    carries genuine directory/sponsoring intent (see
+    ``docs/conversation-quality/phase2/R05_N6_DIRECTORY_PROTECTION.md``) -
+    never for deciding what to strip or restore in an already-generated
+    answer, which is what :func:`_requested_directory_field_set` itself is
+    for and must stay conservative about (a compound or ambiguous request
+    there returns ``None``/an empty set rather than guess).
+
+    This is a plain boolean OR of two independent signals: (1) the same
+    reviewed per-language field vocabulary (:data:`LANGUAGE_FIELD_TERMS`,
+    via :func:`_requested_directory_field_set`) already used everywhere else
+    in this module, so a question that literally names a field ("teléfono",
+    "Adresse", "numéro de téléphone") is recognized in any of the 13
+    languages that vocabulary covers; and (2) the small, closed,
+    English-only :data:`config.directory_field_vocabulary.DIRECTORY_INTENT_SYNONYM_TERMS`
+    for the two shapes that name no field at all ("reach"/"contact" as a
+    bare contact verb, "credit/debit card(s)" for payment methods) - see
+    that data structure's own docstring for scope and confidence.
+
+    An unrecognized ``language`` (no table in either vocabulary) falls back
+    to whatever English-only regexes the caller separately checks (e.g.
+    ``SPONSORING_QUESTION_RE``, ``DIRECTORY_OPERATIONAL_QUESTION_RE`` in
+    ``app/retrieval/providers.py``) - this function itself simply returns
+    ``False`` for such a language, exactly as it did before this addition,
+    so an unsupported language is never worse off than before the R05/N6
+    fix.
+    """
+    if _requested_directory_field_set(question, language=language):
+        return True
+    normalized_language = normalize_language_code(language)
+    synonym_patterns = _DIRECTORY_INTENT_SYNONYM_PATTERNS.get(normalized_language)
+    if not synonym_patterns:
+        return False
+    text = question or ""
+    return any(pattern.search(text) for pattern in synonym_patterns.values())
 
 
 def _label_canonical_field(label: str) -> str | None:

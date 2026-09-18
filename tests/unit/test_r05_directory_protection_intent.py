@@ -117,9 +117,9 @@ def _stub_planner(monkeypatch, scopes: str = "[]", intent: str = "knowledge") ->
     monkeypatch.setattr(retrieval_providers, "get_aws_clients", lambda: SimpleNamespace(bedrock_runtime=runtime))
 
 
-def _plan(monkeypatch, message: str, country: str = "NO") -> RetrievalQueryPlan:
+def _plan(monkeypatch, message: str, country: str = "NO", language: str = "en") -> RetrievalQueryPlan:
     _stub_planner(monkeypatch)
-    return _planned_retrieval_plan(message, country, "en", "cid")
+    return _planned_retrieval_plan(message, country, language, "cid")
 
 
 # --- confirmed cause (fail-before, at the scoring-function level) ----------
@@ -485,3 +485,205 @@ def test_kenya_retrieve_directory_gate_target_resolution_is_unchanged() -> None:
     the shared, untouched target-resolution helper - the gate tests
     themselves (``test_demo_kenya_directory_gate.py``) are not modified."""
     assert _directory_target_country_names(KENYA_QUESTION, "US") == {"Kenya"}
+
+
+# --- R05/N6 follow-up (2026-09-18): multilingual directory-intent RECOGNITION
+#
+# An independent review of the fix above found that RECOGNITION (not
+# suppression) was English-only: SPONSORING_QUESTION_RE,
+# DIRECTORY_OPERATIONAL_QUESTION_RE, and _DIRECTORY_GUARD_TOPIC_RE all match
+# English vocabulary only, so a genuine directory question phrased in
+# Spanish, French, or German fell through to "ambiguous" and lost the
+# country bonus entirely (8.0 -> 0.0), alongside two English shapes that
+# name no field literally ("reach", "credit cards"). Every case below is
+# taken verbatim from the reviewer's repro set: US session, a Ghana
+# `international_sponsoring_directory` row, targets={'Ghana'}.
+
+GHANA_PHONE_QUESTION_ES = "¿Cuál es el número de teléfono de Forever Ghana?"
+GHANA_PHONE_QUESTION_FR = "Quel est le numéro de téléphone de Forever Ghana ?"
+GHANA_ADDRESS_QUESTION_DE = "Wie lautet die Adresse von Forever Ghana?"
+GHANA_REACH_QUESTION_EN = "How do I reach Forever Ghana?"
+GHANA_LOCATED_QUESTION_EN = "Where is Forever Ghana located?"
+GHANA_CREDIT_CARDS_QUESTION_EN = "Does Forever Ghana accept credit cards?"
+GHANA_ADDRESS_QUESTION_EN = "What is the Ghana office address?"
+GHANA_COUNTRY_MANAGER_QUESTION_EN = "Who is the country manager for Forever Ghana?"
+
+
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        (GHANA_PHONE_QUESTION_ES, "es"),
+        (GHANA_PHONE_QUESTION_FR, "fr"),
+        (GHANA_ADDRESS_QUESTION_DE, "de"),
+    ],
+    ids=["spanish-phone", "french-phone", "german-address"],
+)
+def test_reviewer_repro_non_english_directory_field_question_is_directory(monkeypatch, question, language) -> None:
+    """Fail-before: each question literally names a directory field
+    (teléfono/téléphone/Adresse) in its own request language, using terms
+    already reviewed in ``config/directory_field_vocabulary.py``'s
+    ``LANGUAGE_FIELD_TERMS`` for 13 languages - this needed no new
+    vocabulary, only wiring ``utils.directory_fields.directory_field_intent_present``
+    into ``_runtime_scope_intent``."""
+    plan = _plan(monkeypatch, question, country="US", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [GHANA_REACH_QUESTION_EN, GHANA_LOCATED_QUESTION_EN, GHANA_CREDIT_CARDS_QUESTION_EN],
+    ids=["reach", "located", "credit-cards"],
+)
+def test_reviewer_repro_english_contact_or_payment_synonym_is_directory(monkeypatch, question) -> None:
+    """Fail-before: "located" already matched English's own
+    ``_FIELD_REQUEST_PATTERNS["address"]`` before this task (it was simply
+    never consulted from ``providers.py``); "reach" and "credit cards" name
+    no existing field term at all and needed the new, small, closed
+    ``DIRECTORY_INTENT_SYNONYM_TERMS["en"]`` addition."""
+    plan = _plan(monkeypatch, question, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_ghana_office_address_control_still_directory(monkeypatch) -> None:
+    """Control from the reviewer's own repro set: this English phrasing
+    already worked before this follow-up (via ``_DIRECTORY_DETAIL_RE``/
+    ``_directory_guard_topic_match``) and must keep working."""
+    plan = _plan(monkeypatch, GHANA_ADDRESS_QUESTION_EN, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_ghana_country_manager_question_names_no_field_and_stays_ambiguous(monkeypatch) -> None:
+    """"Country manager" names no canonical directory field (phone, email,
+    website, address, business hours, payment methods, delivery cost/time,
+    fax) in any vocabulary this fix reads, and matches none of the existing
+    English deterministic routes either (no operational keyword, no
+    "sponsor" root word, no ``_DIRECTORY_DETAIL_RE`` wording). It therefore
+    stays "ambiguous" and loses the country-match bonus, exactly like
+    before this follow-up - a genuine, documented gap (see
+    ``directory_field_intent_present``'s docstring), not a regression this
+    task introduces."""
+    plan = _plan(monkeypatch, GHANA_COUNTRY_MANAGER_QUESTION_EN, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+def test_norway_english_still_suppressed_after_multilingual_recognition(monkeypatch) -> None:
+    """Regression guard: the new multilingual field check must never flip
+    the Norway former-FBO/downline question (which names no directory
+    field in any language) from "ambiguous" to "directory"."""
+    plan = _plan(monkeypatch, NORWAY_QUESTION_EN, country="NO")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+def test_norway_norwegian_still_suppressed_after_multilingual_recognition(monkeypatch) -> None:
+    """Same control in Norwegian, the request's own language - "no" is one
+    of the 13 languages ``directory_field_intent_present`` reads, but the
+    Norwegian text names no directory field either, so this must also stay
+    "ambiguous", not be newly (and wrongly) promoted by this follow-up."""
+    plan = _plan(monkeypatch, NORWAY_QUESTION_NO, country="NO", language="no")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+def test_unrecognized_language_falls_back_to_english_only_recognition(monkeypatch) -> None:
+    """A request language this module has no vocabulary for (e.g. "xx", not
+    one of the 13 configured languages nor a real BCP-47 tag) must fall back
+    to exactly the English-only recognition that existed before this
+    follow-up - no better and no worse. The Ghana phone question written in
+    Spanish, but declared under an unrecognized language tag, therefore
+    stays "ambiguous": ``directory_field_intent_present`` returns ``False``
+    for an unrecognized language (see its docstring), and the message text
+    itself matches none of the English-only deterministic routes either
+    (no "sponsor" root word, no ``DIRECTORY_OPERATIONAL_QUESTION_RE``/
+    ``_DIRECTORY_DETAIL_RE`` wording - "teléfono" is not an English word).
+    This is identical to the pre-N6 (``5b1d33f``) shape for the same
+    reason: an unconditional country bonus never depended on language
+    either, and this fix does not change what happens for a language it
+    does not recognize."""
+    plan = _plan(monkeypatch, GHANA_PHONE_QUESTION_ES, country="US", language="xx")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+# --- R05/N6 follow-up NOTE 6: "bonus" alone must not imply directory intent
+
+
+def test_norway_own_market_bonus_mention_stays_ambiguous(monkeypatch) -> None:
+    """Independent review NOTE 6: ``_DIRECTORY_GUARD_TOPIC_RE`` (reused
+    verbatim by ``directory_topic_route``) includes a bare "bonus" branch,
+    so a Norway-shaped, own-market policy question that happens to also
+    mention "bonus" must not be promoted to "directory" on that word alone
+    - that is exactly the class of bug this task exists to close. The
+    distinguishing signal already exists and needed no new vocabulary: the
+    session's own market (``country="NO"``) is the ONLY market named in the
+    message, so this is not a genuinely cross-market question."""
+    norway_with_bonus = (
+        "I cancelled my Forever Norge distributorship. When can I reapply to become an FBO "
+        "again, and do I keep my old downline and their bonus?"
+    )
+    plan = _plan(monkeypatch, norway_with_bonus, country="NO")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+def test_ghana_cross_market_bonus_question_still_directory_after_note_6_gate(monkeypatch) -> None:
+    """The pre-existing Ghana cross-market bonus control
+    (``test_ghana_cross_market_bonus_question_is_directory`` above) must
+    still resolve to "directory" once the NOTE 6 gate is added: the message
+    names Ghana while the session's own market is GB, so
+    ``named_markets - {own_market_code}`` is non-empty and the "bonus"-only
+    match is trusted."""
+    plan = _plan(monkeypatch, GHANA_QUESTION, country="GB")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_kyrgyzstan_foreign_fbo_bonus_question_still_directory_after_note_6_gate(monkeypatch) -> None:
+    """Real 2026-09-14 production-failure shape control: a US session asking
+    about foreign FBOs' bonus payment in Kyrgyzstan is genuinely
+    cross-market (Kyrgyzstan named, session market is US) and must stay
+    "directory" after the NOTE 6 gate."""
+    plan = _plan(monkeypatch, "How are foreign FBOs paid their bonus in Kyrgyzstan?", country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_bonus_with_other_directory_wording_is_unaffected_by_note_6_gate(monkeypatch) -> None:
+    """The NOTE 6 gate only narrows the case where "bonus" is the SOLE
+    reason ``_directory_guard_topic_match`` fired. A question that also
+    carries independent directory/operational wording (here, "business
+    hours") alongside "bonus" must still resolve to "directory" even for an
+    own-market question, because that other wording is its own signal,
+    untouched by this gate."""
+    plan = _plan(
+        monkeypatch,
+        "What are Forever Norge's business hours, and how is my bonus calculated?",
+        country="NO",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+# --- full retrieve() pipeline control: a non-English multilingual repro ----
+
+
+def test_ghana_spanish_phone_retrieve_keeps_the_global_record_at_rank_one(monkeypatch, _offline_retrieval) -> None:
+    """End-to-end control mirroring ``test_ghana_retrieve_keeps_the_global_record_at_rank_one``
+    but in Spanish, the request language, exercising the full
+    ``retrieve()`` pipeline (merge + dominance guard) rather than only the
+    classifier."""
+    client = _Client(
+        [_directory_hit("sponsoring-010-ghana", "Ghana")],
+        [_policy_hit("GB", "9.01")],
+    )
+    _stub_planner(monkeypatch)
+    monkeypatch.setattr(opensearch_sections, "get_aws_clients", lambda: SimpleNamespace(bedrock_runtime=MagicMock()))
+    monkeypatch.setattr(opensearch_sections, "_client", lambda: client)
+    provider = OpenSearchSectionProvider()
+    result = provider.retrieve(GHANA_PHONE_QUESTION_ES, "GB", "es", "fbo", "cid")
+
+    assert result.documents[0].id == "sponsoring-010-ghana"
