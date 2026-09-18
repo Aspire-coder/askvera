@@ -7,6 +7,11 @@ real functions (no fakes) turned up no invented contact and no order-phone/
 customer-care mix-up, so no code change was made for these cases. Negative
 controls below prove a mix-up or a fabricated number would actually be
 caught (regression guard), rather than the assertions trivially passing.
+
+Label: deterministic/local proof. No model, no fakes, no monkeypatching -
+these call the real functions directly with real config fixtures
+(config/public_contacts.json via contact_for_country) and assert on their
+actual return values.
 """
 
 from __future__ import annotations

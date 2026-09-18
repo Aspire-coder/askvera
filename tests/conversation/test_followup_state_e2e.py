@@ -206,22 +206,36 @@ def _run(
 
 
 def test_a1_office_or_order_phone_follow_up_keeps_kenya_and_uses_the_fresh_record(monkeypatch) -> None:
-    """Retrieval re-runs for Kenya on the follow-up. Mocked/local behaviour.
+    """Retrieval re-runs for Kenya on the follow-up, and a stale number the
+    model echoes from history is caught and repaired by the real pipeline.
+    Real behavioural proof, not scripted.
 
-    What this proves: the follow-up reaches retrieval again, anchored to Kenya,
-    and post-processing delivers the scripted answer without reinserting the
-    previous turn's number.
+    Rewritten (Phase 2, Lane G) after the independent review flagged the
+    previous version: it scripted the fake model to say the FRESH number, so
+    the two answer-content assertions were decided by that script, not by
+    AskVera. Probed empirically (not assumed) by scripting the model to do
+    the opposite - echo the STALE number from the realistic prior answer,
+    exactly the failure mode the review was worried about - and running the
+    REAL validator/response pipeline (``validator=None``) instead of the
+    no-op stub the rest of this file uses for pure-targeting tests.
 
-    What it does NOT prove (independent review, 2026-09-18): that a real model
-    prefers the fresh record over the stale number in history. The fake model
-    is scripted to use the fresh number, so the two answer assertions are
-    decided by the script rather than by AskVera. Grounding against the
-    history is covered by the A8 test, through the real validator pipeline.
+    Result: the real pipeline does not trust the model's stale digits. It
+    strips them (``numeric_grounding_validator``, because they are
+    unsupported by this turn's re-retrieved record) and restores the
+    correct field from that record via the same directory-contact
+    supplement mechanism ``test_contacts_type_and_country_fidelity.py``
+    exercises directly. Both are asserted below through
+    ``response.metadata``, not just the answer string, so this pins the
+    mechanism, not merely its incidental text output.
     """
     history = _history(("What is the Kenya office phone number and email?", KENYA_PRIOR_ANSWER))
     updated_kenya = KENYA_CONTENT.replace("+254 20 2026869 / +254 20 2026873", "+254 20 5551234")
     fresh_record = _kenya_document(content=updated_kenya)
-    model_text = "The office phone is +254 20 5551234. The order phone is +254 71 0600206."
+    # The fake model does NOT know about the fresh number; it echoes the
+    # STALE one from the realistic prior turn, as an LLM conditioned on
+    # history might. The order number is unchanged between turns, so
+    # repeating it here is not itself a defect.
+    model_text = "The office phone is +254 20 2026869. The order phone is +254 71 0600206."
 
     response, retriever, _router = _run(
         monkeypatch,
@@ -229,15 +243,20 @@ def test_a1_office_or_order_phone_follow_up_keeps_kenya_and_uses_the_fresh_recor
         history=history,
         documents=[fresh_record],
         model_text=model_text,
+        validator=None,  # real OutputValidator/ResponseBuilder pipeline
     )
 
     assert retriever.seen, "retrieval must run again for the follow-up, not reuse the cached prior turn"
     assert "Kenya" in retriever.seen[0]
-    # The delivered answer's numbers come from THIS turn's re-retrieved record.
-    assert "+254 20 5551234" in response.answer
-    # The stale number from the previous (realistic) assistant answer must not
-    # survive into the new delivered answer.
+    # The real numeric-grounding validator caught and removed the stale,
+    # unsupported figure - not a script deciding to omit it.
+    assert response.metadata.get("numeric_claim_repair") is True
+    assert "+254 20 2026869" in response.metadata.get("removed_numeric_claims", [])
     assert "+254 20 2026869" not in response.answer
+    # The real directory-contact-restoration mechanism supplied the CORRECT,
+    # freshly-retrieved office number in its place.
+    assert "Telephone Office" in response.metadata.get("directory_contacts_restored", [])
+    assert "+254 20 5551234" in response.answer
 
 
 def test_a1_kenya_field_follow_up_never_reaches_retrieval_with_stale_history_numbers(monkeypatch) -> None:
