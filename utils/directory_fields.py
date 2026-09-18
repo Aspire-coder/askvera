@@ -6,6 +6,7 @@ import bisect
 import re
 from collections.abc import Iterable
 
+from utils.sentence_spans import sentence_boundaries
 from config.directory_field_vocabulary import (
     LANGUAGE_FIELD_TERMS,
     ORDER_WORD_TERMS,
@@ -1618,14 +1619,31 @@ def correct_directory_source_contradictions(
             source_text,
             re.IGNORECASE,
         ):
-            corrected, replacements = re.subn(
-                r"after\s+sponsorship\s*[:\-]?\s*[^.\n]+(?:\.|$)",
-                "After sponsorship: there is no minimum order.",
-                corrected,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-            changed = changed or replacements > 0
+            # The replaced span must end where the sentence actually ends. The
+            # old "[^.\n]+" search stopped inside a decimal ("minimum order of
+            # 0.5 CC to place."), gluing the fix to the rest of the number:
+            # "...there is no minimum order.5 CC to place." (Lane D audit).
+            # The span ends at the first decimal-safe sentence boundary or the
+            # end of the line, whichever comes first. The line bound matters:
+            # a directory line often has no full stop, and without it the fix
+            # would swallow the next field ("Payment methods accepted: ...")
+            # (coordinator review of the Lane D patch).
+            lead_in_match = re.search(r"after\s+sponsorship\s*[:\-]?\s*", corrected, re.IGNORECASE)
+            if lead_in_match:
+                after = lead_in_match.end()
+                sentence_end = next(
+                    (end for end in sentence_boundaries(corrected) if end > after),
+                    len(corrected),
+                )
+                line_end = corrected.find("\n", after)
+                if line_end != -1:
+                    sentence_end = min(sentence_end, line_end)
+                corrected = (
+                    corrected[: lead_in_match.start()]
+                    + "After sponsorship: there is no minimum order."
+                    + corrected[sentence_end:]
+                )
+                changed = True
 
     return corrected, changed
 
