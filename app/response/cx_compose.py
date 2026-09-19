@@ -44,6 +44,17 @@ untouched. ``clarification`` and ``safety_refusal`` get no additions at all,
 and neither does a response already marked ``guardrail``/``client_action``
 or blocked by a governance/PII failure layer -- see
 :data:`_SUPPRESSED_RESPONSE_SOURCES` / :data:`_GOVERNANCE_FAILURE_LAYERS`.
+
+This module never raises over ordinary content. It only ever checks a
+brace-shaped placeholder token in text IT rendered and is about to append
+(never in the model's own answer, which may legitimately contain a literal
+``{...}`` substring that is none of this module's business); a rendering
+defect that leaves one of its own additions with an unfilled placeholder
+drops that one addition (``"dropped:<name>"`` in ``cx_applied``) rather than
+delivering broken copy or crashing the turn. Every other input -- an empty
+answer, ``None`` metadata values, an unrecognised outcome kind, or evidence
+documents missing ``content``/``metadata`` -- is handled as ordinary,
+expected content, never an exception.
 """
 
 from __future__ import annotations
@@ -106,11 +117,15 @@ _GOVERNANCE_FAILURE_LAYERS = frozenset(
     {"local_guardrail", "risk_policy", "aws_guardrail", "sensitive_pii_input"}
 )
 
-# Every message key this module ever fills leaves no ``{name}``-shaped token
-# behind (see app/response/cx_render.py's own placeholder pattern) -- this is
-# the final, defensive check "a regex check comes before returning" (this
-# lane's brief) rather than a second independent implementation of
-# cx_render's own pattern.
+# Every message key this module ever fills is expected to leave no
+# ``{name}``-shaped token behind (see app/response/cx_render.py's own
+# placeholder pattern). This checks ONLY the text this module itself
+# renders and is about to append -- never the model's own answer, which may
+# legitimately contain a brace-shaped substring ("{country}" as a literal
+# example in a policy answer, JSON the model quoted, etc.) that is none of
+# this module's business and must never crash a chat turn. A defect that
+# left this module's OWN addition with an unfilled placeholder drops that
+# one addition (see :func:`_apply_addition`) rather than raising.
 _UNFILLED_PLACEHOLDER_RE = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
 
 
@@ -131,6 +146,29 @@ def _unchanged(response: ChatResponse) -> tuple[ChatResponse, dict[str, Any]]:
 def _append(answer: str, addition: str) -> str:
     """Append ``addition`` as its own paragraph, separated by a blank line."""
     return f"{answer}\n\n{addition}" if answer else addition
+
+
+def _apply_addition(answer: str, name: str, text: str | None, applied: list[str]) -> str:
+    """Append one of THIS module's own rendered additions, or drop it.
+
+    ``text`` is always copy this module itself just rendered -- never
+    content already in the model's answer (that text is never inspected for
+    a stray brace-shaped substring; see :data:`_UNFILLED_PLACEHOLDER_RE`).
+    When ``text`` is falsy, nothing is due and ``answer`` is returned
+    unchanged. When ``text`` still carries an unfilled ``{name}``-shaped
+    placeholder -- a rendering or translation defect that must never
+    happen, but must also never crash a chat turn if it does -- the
+    addition is dropped: ``"dropped:<name>"`` is recorded in ``applied``
+    instead of ``name``, and ``answer`` is returned unchanged rather than
+    delivering broken copy or raising.
+    """
+    if not text:
+        return answer
+    if _UNFILLED_PLACEHOLDER_RE.search(text):
+        applied.append(f"dropped:{name}")
+        return answer
+    applied.append(name)
+    return _append(answer, text)
 
 
 def _answer_names_market(answer_text: str, target: str) -> bool:
@@ -180,9 +218,26 @@ def _render_suggestions(
     country: str,
     topic_supported: Callable[[str, str], bool],
     render: Callable[..., str],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
+    """Return the rendered suggestion items, and whether any was dropped.
+
+    A suggestion key whose rendered ``text`` still carries an unfilled
+    placeholder (the ``suggest_topic_*`` keys take none today, so this is
+    only ever a defensive guard against a future key or a translation
+    defect) is silently left out of the returned list rather than delivered
+    broken -- the second return value tells the caller to record
+    ``"dropped:suggestions"`` when that happened.
+    """
     keys = suggest_follow_ups(outcome, language=language, country=country, topic_supported=topic_supported)
-    return [{"type": "follow_up", "key": key, "text": render(key, language)} for key in keys]
+    items: list[dict[str, Any]] = []
+    dropped = False
+    for key in keys:
+        text = render(key, language)
+        if text and _UNFILLED_PLACEHOLDER_RE.search(text):
+            dropped = True
+            continue
+        items.append({"type": "follow_up", "key": key, "text": text})
+    return items, dropped
 
 
 def compose_cx_response(
@@ -210,6 +265,11 @@ def compose_cx_response(
     ``app/response/partial_answer.py`` itself documents), never re-approved
     or re-ranked here. ``topic_supported`` is the injected predicate
     :func:`app.response.suggestions.suggest_follow_ups` already documents.
+
+    Never raises over ordinary content -- see the module docstring's last
+    paragraph for exactly what "ordinary" covers and how an unfilled
+    placeholder in this module's OWN rendered text is handled (dropped,
+    never delivered, never a crash).
     """
     if outcome.kind in _NO_ADDITION_KINDS:
         return _unchanged(response)
@@ -217,7 +277,7 @@ def compose_cx_response(
         return _unchanged(response)
 
     applied: list[str] = []
-    answer = response.answer
+    answer = response.answer or ""
     current_outcome = outcome
 
     if outcome.kind in _ANSWER_LIKE_KINDS:
@@ -230,10 +290,10 @@ def compose_cx_response(
             question=question,
             language=language,
             answer_text=answer,
-            evidence_documents=list(evidence_documents),
+            evidence_documents=list(evidence_documents or ()),
         )
         note = _partial_answer_gap_note(coverage, language, render=render)
-        if note:
+        if note and not _UNFILLED_PLACEHOLDER_RE.search(note):
             answer = _append(answer, note)
             applied.append("partial_note")
             current_outcome = replace(
@@ -242,10 +302,17 @@ def compose_cx_response(
                 fields_answered=coverage.answered,
                 fields_unsupported=coverage.unsupported,
             )
+        elif note:
+            # A rendering/translation defect left the note itself with an
+            # unfilled placeholder: drop the addition (and the promotion
+            # that would have gone with it) rather than delivering broken
+            # copy or crashing the turn.
+            applied.append("dropped:partial_note")
 
         if detect_personal_account_request(question, language):
-            answer = _append(answer, render("personal_account_limit", language))
-            applied.append("personal_account_limit")
+            answer = _apply_addition(
+                answer, "personal_account_limit", render("personal_account_limit", language), applied,
+            )
 
     elif outcome.kind not in _FALLBACK_KINDS:
         # Fail closed: an outcome kind this module does not recognise (a
@@ -256,28 +323,20 @@ def compose_cx_response(
     contact_note = contact_escalation(
         current_outcome, country=country, language=language, answer_text=answer, render=render,
     )
-    if contact_note:
-        answer = _append(answer, contact_note)
-        applied.append("contact_offer")
+    answer = _apply_addition(answer, "contact_offer", contact_note, applied)
 
     if outcome.kind == OutcomeKind.INTERNATIONAL_DIRECTORY and outcome.directory_target:
         if not _answer_names_market(answer, outcome.directory_target):
             directory_note = render("international_directory_note", language, country=outcome.directory_target)
-            answer = _append(answer, directory_note)
-            applied.append("international_directory_note")
+            answer = _apply_addition(answer, "international_directory_note", directory_note, applied)
 
-    suggestion_items = _render_suggestions(
+    suggestion_items, suggestions_dropped = _render_suggestions(
         current_outcome, language=language, country=country, topic_supported=topic_supported, render=render,
     )
     if suggestion_items:
         applied.append("suggestions")
-
-    if _UNFILLED_PLACEHOLDER_RE.search(answer):
-        # Never expected: every render() call above filled its own
-        # placeholders. Fail loud rather than deliver broken copy -- the
-        # same "must never happen" stance chat_orchestrator.py's own
-        # delivered-placeholder check takes.
-        raise ValueError(f"cx_compose: unfilled placeholder left in composed answer: {answer!r}")
+    if suggestions_dropped:
+        applied.append("dropped:suggestions")
 
     metadata = dict(response.metadata or {})
     metadata["outcome"] = current_outcome.to_metadata()

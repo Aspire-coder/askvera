@@ -140,10 +140,27 @@ to key off of); `text` is that key rendered in `language` via the same
 - The answer is never emptied -- only ever appended to, and only when the
   original answer is non-empty is a leading blank line avoided.
 - Each addition is joined with `"\n\n"` (its own paragraph).
-- A final regex check (`\{[a-zA-Z_][a-zA-Z0-9_]*\}`) runs on the composed
-  answer before returning; an unfilled placeholder raises `ValueError`
-  rather than ever being delivered (mirrors, and is independent of, the
-  orchestrator's own `_UNFILLED_CX_PLACEHOLDER_RE` delivered-response check).
+- **Never raises over ordinary content.** The unfilled-placeholder check
+  (`\{[a-zA-Z_][a-zA-Z0-9_]*\}`) runs ONLY on text this module itself just
+  rendered and is about to append -- never on the model's own answer, which
+  may legitimately contain a literal brace-shaped substring ("{country}" as
+  a quoted example, echoed JSON, a case reference token, ...) that is none
+  of this module's business. When one of this module's OWN additions still
+  carries an unfilled placeholder (a rendering/translation defect), that one
+  addition is dropped -- `"dropped:<name>"` recorded in `cx_applied` instead
+  of `<name>` -- rather than delivering broken copy or raising. (Fixed after
+  coordinator review of `36a2187`: the original version ran this check over
+  the WHOLE composed answer, including the model's own text, and raised
+  `ValueError` on a false-positive match, crashing the chat turn in
+  production; the orchestrator's own `_UNFILLED_CX_PLACEHOLDER_RE` check on
+  the final delivered response is the one place that is still expected to
+  ever see -- and only log -- a stray placeholder-shaped substring in model
+  output.) Every other input this module was audited for is likewise treated
+  as ordinary, expected content rather than an error: an empty answer,
+  `None` metadata or a `None` metadata dict itself, evidence documents
+  missing `content`/`metadata` (or `None` altogether), and an outcome kind
+  this module does not recognise (fails closed to "no addition" instead of
+  guessing).
 - Deterministic: no randomness, no clock, no I/O.
 - Every addition is rendered in `language` via the injected `render`
   callable -- this module never inlines English copy.
@@ -161,3 +178,16 @@ topic and for the question's own topic, and excluded entirely for
 match; and each global invariant (citations/metadata/never-empty/paragraph
 separation/determinism/no-unfilled-placeholder/guardrail and governance
 suppression/clarification and safety_refusal no-op) as its own test.
+
+Coordinator-review regression coverage: a literal brace-shaped substring
+already in the model's answer (both an answer-shaped and a fallback-shaped
+turn) never raises; an injected broken `render` leaving `contact_offer`,
+`partial_answer_gap` or a `suggest_topic_*` key with an unfilled placeholder
+gets dropped (and, for the partial-answer case, never promotes the outcome)
+rather than raising or being delivered; and a battery of "ordinary content"
+inputs -- an empty answer on both an answer-shaped and a fallback-shaped
+kind, `None` values inside metadata, a `None` metadata dict itself, a
+fabricated unrecognised outcome kind, evidence documents that are plain
+objects/dicts with neither `content` nor `metadata`, and `evidence_documents`
+itself being `None` -- each get their own test proving no exception
+propagates.
