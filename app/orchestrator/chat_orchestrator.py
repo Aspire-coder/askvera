@@ -32,6 +32,7 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
+from app.response.outcome import derive_outcome
 from app.response.quality import (
     contact_for_country,
     format_period_not_covered,
@@ -976,6 +977,10 @@ CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
 DIAGNOSTIC_CAPTURE_ENABLED = False
 DIAGNOSTIC_CAPTURE_VERSION = 1
 _DIAGNOSTIC_CAPTURE: ContextVar[dict[str, Any] | None] = ContextVar("askvera_diagnostic_capture", default=None)
+# CX: the turn's final evidence decision, read once at the delivery choke point
+# to derive the conversation outcome. Set in _route_or_approve_evidence; scoped
+# to one turn by _handle_chat (set to None on entry, reset in finally).
+_TURN_EVIDENCE: ContextVar[EvidenceDecision | None] = ContextVar("askvera_turn_evidence", default=None)
 _CAPTURED_DOCUMENT_METADATA = (
     "section_id", "parent_section_id", "access_scope", "document_type", "parent_bound_child",
     "ingestion_id", "logical_document_id", "content_hash",
@@ -1240,15 +1245,20 @@ class AIOrchestrator:
             preserve_location_names=True,
             preserve_person_names=True,
         )
-        resolved_input, reference_clarification = self._resolve_unresolved_reference(
-            scrubbed_input, body, correlation_id
-        )
-        if reference_clarification is not None:
-            response = reference_clarification
-        else:
-            response = self._mixed_request_response(body, resolved_input, correlation_id, candidate_flags)
-            if response is None:
-                response = self._handle_scrubbed_chat(body, resolved_input, correlation_id, candidate_flags)
+        evidence_token = _TURN_EVIDENCE.set(None)
+        try:
+            resolved_input, reference_clarification = self._resolve_unresolved_reference(
+                scrubbed_input, body, correlation_id
+            )
+            if reference_clarification is not None:
+                response = reference_clarification
+            else:
+                response = self._mixed_request_response(body, resolved_input, correlation_id, candidate_flags)
+                if response is None:
+                    response = self._handle_scrubbed_chat(body, resolved_input, correlation_id, candidate_flags)
+            response = self._attach_conversation_outcome(response, body, resolved_input)
+        finally:
+            _TURN_EVIDENCE.reset(evidence_token)
         # Persist the original request (never a reference-resolution rewrite) and
         # the actual delivered response exactly once, including refusals, cache
         # hits and partial mixed-intent answers.
@@ -1260,6 +1270,25 @@ class AIOrchestrator:
         # deliveries and are correctly absent.
         record_delivered_response(response.metadata)
         return response
+
+    def _attach_conversation_outcome(
+        self, response: ChatResponse, body: ChatRequest, question: str,
+    ) -> ChatResponse:
+        """CX: derive the turn's one typed outcome from decisions already made.
+
+        Runs once, at the choke point every return path converges on, so every
+        answer and every fallback carries metadata["outcome"]. It classifies;
+        it never changes the answer, the citations or any existing metadata.
+        """
+        outcome = derive_outcome(
+            metadata=response.metadata,
+            language=body.language,
+            country=body.country,
+            question=question,
+            answer_text=response.answer,
+            evidence_decision=_TURN_EVIDENCE.get(),
+        )
+        return self._replace_answer(response, response.answer, {"outcome": outcome.to_metadata()})
 
     def _mixed_request_response(
         self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
@@ -4122,6 +4151,7 @@ class AIOrchestrator:
             evidence_decision = approve_evidence(retrieval_query, scoped_result, body.country, body.language)
             if not evidence_decision.approved:
                 evidence_decision = replace(evidence_decision, reason="cross_market_local_evidence")
+        _TURN_EVIDENCE.set(evidence_decision)
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
         if (
             retrieval_result.availability is RetrievalAvailability.DEGRADED
