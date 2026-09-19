@@ -67,3 +67,9 @@ with the locale's list separator.
 | Coordinator | `app/orchestrator/chat_orchestrator.py` wiring, `app/response/outcome.py` fixes after Lane 1, docs |
 
 Each lane also writes one doc: `docs/conversation-quality/phase3/CX_LANE<n>_*.md`.
+
+## Coordinator wiring checklist
+
+- [ ] Extract the orchestrator-private `_support_contact_segments` / `_directory_record_matches_a_target` into a shared utility and make both `chat_orchestrator.py` and `app/response/outcome.py` import it (Lane 1's `f51d974` re-implemented the same shape locally to avoid importing the orchestrator).
+- [ ] Attach `derive_outcome(...).to_metadata()` to `ChatResponse.metadata["outcome"]` once per turn, on every return path (answers and every fallback builder).
+- [ ] Fold in the R05 LOW fixes (a single policy-wording helper at all four sites; comment corrections).
