@@ -222,7 +222,21 @@ _NO_DA_AMBIGUOUS_PAIR = frozenset({"no", "da"})
 # unswitched is the correct, safe outcome, not a defect - see
 # TestAcceptanceSet.test_known_miss_sr_sentence_stays_unswitched.
 _KNOWN_MISS_CASES: frozenset[tuple[str, str]] = frozenset(
-    {("sr", "Koje načine plaćanja prihvatate za porudžbine na internetu?")}
+    {
+        ("sr", "Koje načine plaćanja prihvatate za porudžbine na internetu?"),
+        # The two below are new costs of the Fable re-review word-evidence
+        # gate (2026-09-19): both are genuinely correct switches whose
+        # evidence happens to have the SAME thin-word/letter-heavy shape as
+        # the wrong-language switches that gate exists to block (one
+        # matching marker word plus a shared moderate-accent letter bonus -
+        # see answer_language.py's MIN_WORD_EVIDENCE/MIN_LATIN_SWITCH_SHARE
+        # docstring). There is no way to tell these apart from the pt/hu
+        # false positives using the evidence shape alone, so blocking them
+        # too is the safe, documented trade the coordinator accepted
+        # ("a small drop is acceptable; state it").
+        ("fi", "Mitä maksutapoja hyväksytte verkkotilauksissa?"),
+        ("sv", "Vilka betalningsmetoder accepterar ni för beställningar online?"),
+    }
 )
 
 # 4 questions per language x 12 languages = 48, covering shipping cost,
@@ -355,14 +369,16 @@ class TestAcceptanceSet:
                     failures.append((language, question, result))
         assert not failures, f"{len(failures)} acceptance-set failures: {failures}"
 
-    def test_known_miss_sr_sentence_stays_unswitched(self):
-        """Fable CX review finding F4 (2026-09-19): this sentence is a
-        genuine, documented non-switch - restored after an earlier revision
-        silently swapped it for one that switches instead of saying so. It
-        is ambiguous with Croatian/Bosnian (their marker words mirror
-        Serbian's almost exactly - see answer_language.py's "hr"/"bs" sink
-        note), so staying unswitched is the correct, safe outcome, never a
-        wrong-language switch."""
+    def test_known_miss_cases_stay_unswitched(self):
+        """Every documented _KNOWN_MISS_CASES entry stays unswitched, for
+        its own documented reason (see the frozenset's own comments): the
+        `sr` sentence restored per Fable F4 (2026-09-19, genuinely ambiguous
+        with Croatian/Bosnian), and the `fi`/`sv` sentences that are a new,
+        disclosed cost of the Fable re-review word-evidence gate (their
+        evidence has the same thin-word/letter-heavy shape as a true
+        wrong-language switch, so the gate cannot tell them apart). None of
+        these is a wrong-language switch - all stay on the selected
+        language."""
         for language, question in _KNOWN_MISS_CASES:
             result = resolve_answer_language(question, "en")
             assert result.switched is False, (language, question, result)
@@ -448,7 +464,15 @@ class TestAcceptanceSet:
 
         assert wrong_language_switches == 0, "a switch happened to the wrong language"
         assert precision == 1.0
-        assert recall >= 0.85, f"recall {recall:.2%} below the documented 0.85 bar (correct={correct}/{total})"
+        # Bar lowered 0.85 -> 0.80 (Fable CX re-review, 2026-09-19): the new
+        # word-evidence gate (MIN_WORD_EVIDENCE/MIN_LATIN_SWITCH_SHARE - see
+        # answer_language.py) closed two real wrong-language switches
+        # (Portuguese/Hungarian read as Spanish) but, being unable to tell
+        # a true positive with the same thin-evidence shape apart from a
+        # false one, also cost two genuine base-set switches (fi, sv - see
+        # _KNOWN_MISS_CASES). Precision (0 wrong switches) stays 100%; this
+        # bar states the recall cost honestly rather than hiding it.
+        assert recall >= 0.80, f"recall {recall:.2%} below the documented 0.80 bar (correct={correct}/{total})"
 
 
 # ---------------------------------------------------------------------------
@@ -599,14 +623,16 @@ class TestBrandMarketAcceptanceSet:
 
         recall = correct / total
         assert wrong == 0, "a switch happened to the wrong language in the brand/market set"
-        # Bar lowered 0.70 -> 0.65 (Fable CX review finding S4, 2026-09-19):
-        # the precision fixes (winner-share gate, the stricter words-only
-        # Cyrillic tier, the corrected Serbian distinctive-character set)
-        # cost some recall here in exchange for zero wrong-language
-        # switches, which the coordinator explicitly prioritized ("keep
-        # 100% precision ... report recall before and after"). See
-        # CX_LANE7_ANSWER_LANGUAGE.md for the exact before/after numbers.
-        assert recall >= 0.65, f"brand/market recall {recall:.2%} below the documented 0.65 bar ({correct}/{total})"
+        # Bar lowered 0.70 -> 0.65 (Fable S4, 2026-09-19), now 0.65 -> 0.55
+        # (Fable re-review, 2026-09-19): the new word-evidence gate
+        # (MIN_WORD_EVIDENCE/MIN_LATIN_SWITCH_SHARE) hits this set harder
+        # than the base set, because masking the brand/market proper nouns
+        # already thins out winner_share before the new >=0.3 floor is even
+        # applied - several genuine switches (e.g. a Spanish sentence with
+        # a real "¿" exempt-letter hit) now fall just short of that share
+        # floor. Precision (0 wrong-language switches) stays 100% - see
+        # CX_LANE7_ANSWER_LANGUAGE.md for the full before/after table.
+        assert recall >= 0.55, f"brand/market recall {recall:.2%} below the documented 0.55 bar ({correct}/{total})"
 
 
 class TestMarketNameExclusion:
@@ -910,41 +936,26 @@ SINK_LANGUAGE_NEGATIVE_CASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Disclosed, documented remaining misses (coordinator: "a small drop is
-# acceptable; state it") - both still switch to "es" despite the sink fix.
-# Neither could be closed without collateral damage to genuine Spanish
-# recall: strengthening the Portuguese/Hungarian sink's shared accented
-# vowels (á/é/í/ó/ú) to compensate for Spanish's own letter bonus also
-# vetoed genuinely Spanish sentences elsewhere in the acceptance set (or,
-# for Hungarian, collided with French's very common "é") once tried - see
-# answer_language.py's "pt"/"hu" _SINK_DISTINCTIVE_STRONG notes. Both are
-# short sentences with only one matching sink marker word each.
-SINK_LANGUAGE_KNOWN_MISSES: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("pt", "Quem é o meu patrocinador e como posso contactá-lo?"),
-        ("hu", "Milyen fizetési módokat fogadnak el?"),
-    }
-)
-
 
 class TestSinkLanguages:
-    """Fable CX review finding F1 (2026-09-19)."""
+    """Fable CX review finding F1 (2026-09-19), closed out by the Fable
+    re-review word-evidence gate (also 2026-09-19): the two sentences that
+    were disclosed as remaining wrong-language switches (`pt`/`hu`, both
+    switching to "es") are FIXED by that gate - coordinator review found a
+    wrong-language switch is never an acceptable "known miss", so there is
+    no longer any exemption here. Every case below is now a regular,
+    unconditional assertion."""
 
-    def test_fable_exact_sentences_no_longer_switch_to_spanish_except_the_documented_miss(self):
+    def test_fable_exact_sentences_no_longer_switch_to_spanish(self):
         for message in FABLE_F1_EXACT_SENTENCES:
             result = resolve_answer_language(message, "en")
-            is_known_miss = any(message == miss_message for _, miss_message in SINK_LANGUAGE_KNOWN_MISSES)
-            if is_known_miss:
-                continue
             assert result.switched is False, (message, result)
             assert result.answer_language == "en", (message, result)
 
-    def test_sink_language_negatives_never_switch_except_the_documented_misses(self):
+    def test_sink_language_negatives_never_switch(self):
         failures = []
         for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
             for question in questions:
-                if (language, question) in SINK_LANGUAGE_KNOWN_MISSES:
-                    continue
                 result = resolve_answer_language(question, "en")
                 if result.switched:
                     failures.append((language, question, result))
@@ -952,7 +963,9 @@ class TestSinkLanguages:
 
     def test_recall_of_the_sink_negative_set(self):
         """Aggregate count for the coordinator report: how many of the 50
-        realistic non-route-language questions correctly stay unswitched."""
+        realistic non-route-language questions correctly stay unswitched -
+        now 50/50 (100%), up from 48/50 once the word-evidence gate closed
+        the two remaining wrong-language switches."""
         total = 0
         correct = 0
         for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
@@ -961,26 +974,5 @@ class TestSinkLanguages:
                 result = resolve_answer_language(question, "en")
                 if not result.switched:
                     correct += 1
-        # Recorded for the coordinator report: correct/total == 48/50 (96%);
-        # the 2 misses are SINK_LANGUAGE_KNOWN_MISSES, disclosed above.
         assert total == 50
-        assert correct >= 48, f"only {correct}/{total} sink negatives stayed unswitched"
-
-    def test_disclosed_known_misses_behave_as_documented(self):
-        """The two remaining false switches are asserted explicitly (not
-        silently tolerated) so a future change that fixes - or worsens -
-        either one is immediately visible here."""
-        for language, question in SINK_LANGUAGE_KNOWN_MISSES:
-            result = resolve_answer_language(question, "en")
-            assert result.switched is True, (language, question, result)
-            assert result.answer_language == "es", (language, question, result)
-
-    def test_no_wrong_language_switch_in_the_sink_negative_set(self):
-        """Precision floor: even the two disclosed misses only ever switch
-        to "es" (never some other, arbitrary language), and nothing in the
-        set switches to anything but "es"."""
-        for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
-            for question in questions:
-                result = resolve_answer_language(question, "en")
-                if result.switched:
-                    assert result.answer_language == "es", (language, question, result)
+        assert correct == 50, f"only {correct}/{total} sink negatives stayed unswitched"

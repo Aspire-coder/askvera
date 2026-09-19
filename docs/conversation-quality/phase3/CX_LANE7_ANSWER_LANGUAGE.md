@@ -514,14 +514,91 @@ The doc's earlier "unchanged" claim is corrected above rather than removed,
 so the dishonest version stays visible as a corrected record, not silently
 edited away.
 
+## Fable CX re-review, second pass: letters must never carry a switch alone (fixed 2026-09-19, still branch `cx/lane7-fable2-20260919`)
+
+**Finding.** The two "disclosed misses" reported above (`pt`, `hu`) are not
+harmless known misses - they are WRONG-LANGUAGE SWITCHES (a Portuguese or
+Hungarian customer gets a Spanish answer), which breaks the 100%-precision
+rule outright; they cannot be accepted as a documented trade-off.
+Coordinator's own diagnosis from the `Detection` fields: `pt` "Quem é o meu
+patrocinador..." -> `es` score 4.5 = letters 3.0 + words 1.5 (share 0.22);
+`hu` "Milyen fizetési módokat fogadnak el?" -> `es` 4.0 = letters 3.0 +
+words 1.0 (share 0.20); compare a genuine Spanish question, "¿Cuál es el
+costo de envío de un pedido a España?" -> `es` 7.4 = letters 4.5 + words 2.9
+(share 0.56). Accented letters shared across Romance/other Latin-script
+languages (é/ó/á/í/ú) were carrying both false switches.
+
+**Fix: a word-evidence floor, letters exempted only when curated-exclusive.**
+`_distinctive_bonus` now returns `(total_bonus, exempt_bonus)`:
+`exempt_bonus` is the STRONG-letter contribution (Spanish ñ/¿/¡, German ß,
+French cedilla/ligature/circumflex, Russian/Serbian-exclusive Cyrillic
+letters) PLUS the three positional PATTERN bonuses (Italian's word-final
+accent, Finnish's doubled-vowel spelling, Serbian's "da li" idiom) - these
+are specific, multi-character shapes, not a bare shared letter, so they
+carry the same exclusivity a marker word would. Explicitly NOT exempt:
+`_DISTINCTIVE_MODERATE`'s bare accented vowels (á/é/í/ó/ú etc.), which are
+shared too broadly. `Detection` gained `winner_word_evidence` (marker-word
+score plus only the exempt letter bonus). For a Latin-script switch, when
+any NON-exempt letter evidence contributed to the score at all (i.e.
+`score > winner_word_evidence`), `resolve_answer_language` now additionally
+requires `winner_word_evidence >= MIN_WORD_EVIDENCE` (2.0, the coordinator's
+number) AND `winner_share >= MIN_LATIN_SWITCH_SHARE` (0.3, also the
+coordinator's number) - reason `insufficient_word_evidence` when either
+fails. A switch built entirely from marker words (zero letter contribution,
+exempt or not) has nothing for this gate to distrust and is left to the
+existing, gentler `MIN_WINNER_SHARE` (0.1) gate, so a real English sentence
+with modest word density and literally no letter evidence isn't penalized
+for a risk that doesn't apply to it - this refinement (engage the gate only
+when non-exempt letters actually contributed) was necessary: applying the
+floor unconditionally broke several genuinely correct switches with zero
+letter involvement.
+
+**One genuine pre-existing bug found while tuning:** German's marker list
+had `"fuer"` (literally spelled with "ue"), which never matched anything -
+`"für"` normalizes via NFKD-strip to `"fur"`, not `"fuer"`. Fixed (plus
+added `"werden"`, a common German auxiliary that was simply missing) - this
+is a real correctness fix, independent of the word-evidence gate, that the
+gate's tighter tolerances happened to expose.
+
+**Result: both disclosed misses are now fixed.** `TestSinkLanguages` no
+longer has any exemption - every case, including Fable's exact 3 sentences
+and the 50-question sink negative set, is now a regular, unconditional
+assertion (`test_disclosed_known_misses_behave_as_documented` was removed;
+its assertions were flipped and merged into the ordinary "never switches"
+tests).
+
+**Recall impact, every acceptance set, before (still switching letters-only)
+vs. after (this fix) - precision is 100% (0 wrong-language switches) on
+both sides except where marked:**
+
+| Set | Before | After | Wrong switches before -> after |
+|---|---|---|---|
+| Base acceptance (`TestAcceptanceSet`, 55 cases) | 49/55 (89.1%) | 46/55 (83.6%) | 0 -> 0 |
+| Brand/market (`TestBrandMarketAcceptanceSet`, 48 cases) | 33/48 (68.75%) | 29/48 (60.4%) | 0 -> 0 |
+| Sink negative set (`TestSinkLanguages`, 50 cases) | 48/50 (96%) | **50/50 (100%)** | **2 -> 0** |
+| Fable's 3 exact F1 sentences | 2/3 correctly unswitched, 1 wrong switch (`hu`->`es`) | **3/3 correctly unswitched** | **1 -> 0** |
+
+The base and brand/market sets each lose a small, genuinely-correct slice of
+recall (base: `fi`, `sv` - both now `_KNOWN_MISS_CASES`, alongside the
+existing F4 `sr` entry; brand/market: several previously-passing cases now
+land on `insufficient_word_evidence` or the pre-existing `below_threshold`/
+`below_winner_share` gates) because their evidence has the exact same
+thin-word/letter-heavy shape as the wrong-language switches this gate
+exists to block - there is no way to tell a true positive with that shape
+apart from a false one using the evidence alone. Documented bars: base
+0.85 -> 0.80, brand/market 0.65 -> 0.55. Zero wrong-language switches
+anywhere, before or after this specific fix; the fix's entire purpose was
+converting the sink set's 2 wrong switches into 2 correct non-switches,
+which it does completely.
+
 ## Verification run (2026-09-19, worktree `askvera-cx-lane7`, branch `cx/lane7-fable2-20260919`, integrated head `e8df5a8`)
 
-- `pytest tests/unit/test_cx_answer_language.py` - 49 passed.
+- `pytest tests/unit/test_cx_answer_language.py` - 47 passed.
 - `pytest tests/unit/test_cx_answer_language.py tests/unit/test_cx_outcome_wiring.py tests/conversation tests/conversation_pack/cx` -
-  512 passed, 9 xfailed (the 9 xfails are pre-existing, individually pinned
+  510 passed, 9 xfailed (the 9 xfails are pre-existing, individually pinned
   strict xfails from CX Lane 6, unrelated to this lane; everything outside
   this lane's own test file is unchanged - confirms no regression from a
   lane that touches no shared code path yet).
 - No `tests/unit/test_prompt*.py` files exist in this worktree to re-run.
-- `flake8 app/orchestrator/answer_language.py tests/unit/test_cx_answer_language.py` - clean (after extracting `_required_thresholds`/`_sink_veto_reason` to bring `resolve_answer_language` under the complexity limit).
+- `flake8 app/orchestrator/answer_language.py tests/unit/test_cx_answer_language.py` - clean.
 - `git diff --check` - clean.
