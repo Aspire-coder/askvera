@@ -687,3 +687,125 @@ def test_ghana_spanish_phone_retrieve_keeps_the_global_record_at_rank_one(monkey
     result = provider.retrieve(GHANA_PHONE_QUESTION_ES, "GB", "es", "fbo", "cid")
 
     assert result.documents[0].id == "sponsoring-010-ghana"
+
+
+# --- R05/N6 second follow-up (2026-09-18): Fable re-review findings F1/F2 --
+#
+# F1: the multilingual field-intent disjunct added above is 13-language, but
+# the policy-wording suppression it is checked alongside
+# (DIRECTORY_POLICY_WORDING_RE = policy|rules, is_policy_safety_question) was
+# still English-only, so a NON-English POLICY question naming a field was
+# wrongly promoted to "directory" instead of staying "policy" - reopening
+# the N6 class of bug. Every repro below is taken verbatim from the
+# reviewer's stubbed-planner (scopes=[]) Norway/Ghana repro set.
+
+NORWAY_POLICY_PAYMENT_QUESTION_ES = (
+    "¿Cuál es la política de Forever Norway sobre los métodos de pago?"
+)
+NORWAY_POLICY_ADDRESS_QUESTION_FR = (
+    "Quelles sont les règles de Forever Norge sur l'adresse de livraison ?"
+)
+NORWAY_POLICY_EMAIL_QUESTION_DE = (
+    "Welche Regeln gelten bei Forever Norge für die Rückgabe per E-Mail?"
+)
+GHANA_POLICY_DELIVERY_QUESTION_FR = (
+    "Quelle est la politique de Forever Ghana sur les frais de livraison ?"
+)
+
+
+@pytest.mark.parametrize(
+    "question,country,language",
+    [
+        (NORWAY_POLICY_PAYMENT_QUESTION_ES, "NO", "es"),
+        (NORWAY_POLICY_ADDRESS_QUESTION_FR, "NO", "fr"),
+        (NORWAY_POLICY_EMAIL_QUESTION_DE, "NO", "de"),
+        (GHANA_POLICY_DELIVERY_QUESTION_FR, "GB", "fr"),
+    ],
+    ids=["spanish-payment", "french-address", "german-email", "french-ghana-delivery"],
+)
+def test_f1_reviewer_repro_non_english_policy_question_naming_a_field_stays_policy(
+    monkeypatch, question, country, language
+) -> None:
+    """Fail-before (F1): each question uses localized policy/rules wording
+    (politica/politique/Regeln) AND names a directory field in the same
+    language (metodos de pago/adresse de livraison/E-Mail/frais de
+    livraison) - before this fix, the field disjunct fired and there was no
+    non-English policy-wording check to stop it, so these resolved to
+    "directory" with the full 8.0 bonus. The English equivalent
+    ("What is the policy of Forever Norway on payment methods?") already
+    correctly resolves to "policy"/0.0."""
+    plan = _plan(monkeypatch, question, country=country, language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        (GHANA_PHONE_QUESTION_ES, "es"),
+        (GHANA_PHONE_QUESTION_FR, "fr"),
+        (GHANA_ADDRESS_QUESTION_DE, "de"),
+    ],
+    ids=["spanish-phone", "french-phone", "german-address"],
+)
+def test_f1_earlier_non_english_directory_repros_stay_directory(monkeypatch, question, language) -> None:
+    """Regression guard: the F1 policy-wording fix must not suppress the
+    earlier (non-policy) non-English directory repros - none of these use
+    any localized policy/rules wording, so they must keep resolving to
+    "directory"/8.0."""
+    plan = _plan(monkeypatch, question, country="US", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [GHANA_REACH_QUESTION_EN, GHANA_LOCATED_QUESTION_EN, GHANA_CREDIT_CARDS_QUESTION_EN],
+    ids=["reach", "located", "credit-cards"],
+)
+def test_f1_earlier_english_synonym_repros_stay_directory(monkeypatch, question) -> None:
+    """Regression guard: the F1/F2 changes must not disturb the earlier
+    English contact/payment-synonym repros."""
+    plan = _plan(monkeypatch, question, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+# F2: the "reach" synonym in DIRECTORY_INTENT_SYNONYM_TERMS["en"] compiled
+# with a leading word-start boundary only, so it also matched inflected
+# forms like "reaches" - a bare contact verb false-positive unrelated to
+# the intended "How do I reach Forever Ghana?" shape.
+
+GHANA_DOWNLINE_REACHES_MANAGER_QUESTION = (
+    "What happens to my downline in Ghana when it reaches Manager level?"
+)
+
+
+def test_f2_reviewer_repro_reaches_inflection_does_not_trigger_directory_synonym(monkeypatch) -> None:
+    """Fail-before (F2): "reaches" (an inflected verb form describing a
+    downline reaching a rank, not a contact request) must not match the
+    "reach" synonym and must not be promoted to "directory" by it. This
+    question names no directory field and no other directory/operational
+    wording, so it must land on "ambiguous"."""
+    plan = _plan(monkeypatch, GHANA_DOWNLINE_REACHES_MANAGER_QUESTION, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+def test_f2_bare_reach_synonym_still_matches_as_a_whole_word(monkeypatch) -> None:
+    """Control: the literal word "reach" itself must still match after the
+    trailing boundary was added - only its inflected forms are excluded."""
+    plan = _plan(monkeypatch, GHANA_REACH_QUESTION_EN, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_f2_contact_question_still_routes_to_directory_without_the_synonym(monkeypatch) -> None:
+    """"contact" was removed from DIRECTORY_INTENT_SYNONYM_TERMS as
+    redundant with opensearch_sections._DIRECTORY_DETAIL_RE (already
+    matches "contact" and feeds deterministic_directory_route independently
+    of this synonym set) - this question must still resolve to "directory"
+    through that route."""
+    plan = _plan(monkeypatch, "How do I contact Forever Ghana?", country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"

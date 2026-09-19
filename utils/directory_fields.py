@@ -11,6 +11,7 @@ from config.directory_field_vocabulary import (
     DIRECTORY_INTENT_SYNONYM_TERMS,
     LANGUAGE_FIELD_TERMS,
     ORDER_WORD_TERMS,
+    POLICY_WORDING_TERMS,
     normalize_language_code,
 )
 
@@ -182,13 +183,69 @@ def _requested_directory_field_set(question: str, *, language: str = "en") -> se
 # compiled here, the same way LANGUAGE_FIELD_TERMS is compiled above, but
 # kept in its own dict so nothing in this file's removal/restoration/
 # conflict-detection logic can accidentally start reading it.
+#
+# R05/N6 second follow-up (2026-09-18): unlike LANGUAGE_FIELD_TERMS's
+# compound stems (deliberately open-ended so one spelling catches a family
+# of inflected forms - see that module's "Whole-word / inflection handling"
+# section), every term here is a short, complete word or phrase with no
+# useful inflection to catch that way, so both a leading AND a trailing
+# boundary are used: without the trailing boundary, the bare verb "reach"
+# also matched "reach**es**" ("...when it reaches Manager level?"),
+# wrongly granting the directory bonus to a question that never named a
+# contact field or used the "reach" synonym as intended.
 _DIRECTORY_INTENT_SYNONYM_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
     language: {
-        field: re.compile(r"(?<!\w)(?:" + "|".join(terms) + ")", re.IGNORECASE | re.UNICODE)
+        field: re.compile(r"(?<!\w)(?:" + "|".join(terms) + r")(?!\w)", re.IGNORECASE | re.UNICODE)
         for field, terms in fields.items()
     }
     for language, fields in DIRECTORY_INTENT_SYNONYM_TERMS.items()
 }
+
+# --- R05/N6 second follow-up: multilingual POLICY-wording, symmetric with --
+# --- directory_field_intent_present's multilingual field RECOGNITION -------
+#
+# config/directory_field_vocabulary.py's POLICY_WORDING_TERMS is a small,
+# closed, per-language set of policy/rules/regulations/terms equivalents
+# (its docstring explains scope and confidence). Every term is a complete
+# inflected word, so - like _DIRECTORY_INTENT_SYNONYM_PATTERNS above, and
+# unlike the compound-stem LANGUAGE_FIELD_TERMS - both a leading and a
+# trailing boundary are used.
+_POLICY_WORDING_PATTERNS: dict[str, re.Pattern[str]] = {
+    language: re.compile(r"(?<!\w)(?:" + "|".join(terms) + r")(?!\w)", re.IGNORECASE | re.UNICODE)
+    for language, terms in POLICY_WORDING_TERMS.items()
+}
+
+
+def localized_policy_wording_present(question: str, *, language: str = "en") -> bool:
+    """True when a non-English question uses localized policy/rules wording.
+
+    Symmetric counterpart to :func:`directory_field_intent_present`'s
+    multilingual field recognition. English's own ``DIRECTORY_POLICY_WORDING_RE``
+    (``app/retrieval/providers.py``) already matches "policy"/"policies"/
+    "rule(s)" and is checked first, ahead of any directory-field promotion,
+    in ``_runtime_scope_intent``. Before this function existed, an
+    equivalent policy question phrased in Spanish, French, German, or any
+    other language :mod:`config.directory_field_vocabulary` covers fell
+    through that English-only check, then matched
+    :func:`directory_field_intent_present`'s 13-language field disjunct
+    instead (because it also names a directory field, e.g. "metodos de
+    pago") and was wrongly promoted to "directory" with the full country
+    bonus - reopening the N6 class of bug for non-English policy questions.
+    ``_runtime_scope_intent`` calls this function before its directory
+    disjunct, so a match here keeps the question "policy", regardless of
+    what any deterministic directory route separately computed.
+
+    English is intentionally absent from ``POLICY_WORDING_TERMS`` - English's
+    own ``DIRECTORY_POLICY_WORDING_RE`` stays the sole English source,
+    unchanged. A ``language`` this dict has no table for (including "en"
+    itself) returns ``False`` here - the same "not recognized" default
+    :func:`directory_field_intent_present` uses for its own English-only
+    synonym disjunct - never worse than before this addition.
+    """
+    pattern = _POLICY_WORDING_PATTERNS.get(normalize_language_code(language))
+    if pattern is None:
+        return False
+    return bool(pattern.search(question or ""))
 
 
 def directory_field_intent_present(question: str, *, language: str = "en") -> bool:

@@ -361,3 +361,115 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   task's file scope (an experimental audit-module content-hash check over a
   fixed 26-path manifest) and reproduce identically on the unmodified base
   commit.
+
+## Second follow-up (2026-09-18): Fable re-review findings F1/F2
+
+An independent Fable re-review approved the multilingual-RECOGNITION follow-up
+above "with limitations" and flagged two should-fix findings against the
+stubbed-planner (`document_scopes=[]`) Norway/Ghana repro set.
+
+### F1: the policy-wording suppression stayed English-only
+
+`_runtime_scope_intent`'s policy branch
+(`is_policy_safety_question`/`DIRECTORY_POLICY_WORDING_RE` = `policy|rules`)
+was still English-only, while the `directory_field_intent_present` disjunct
+added by the first follow-up is 13-language. A non-English POLICY question
+that also names a directory field in the same language therefore skipped the
+(English-only) policy branch and matched the (multilingual) field branch
+instead - reopening the N6 class of bug for exactly the languages the first
+follow-up had just added recognition for.
+
+**Fix:** `config/directory_field_vocabulary.py` gains a new, small, closed,
+documented `POLICY_WORDING_TERMS` table (policy/rules/regulations/terms and
+their equivalents) for every language `LANGUAGE_FIELD_TERMS` already covers
+except English (es, fr, de, nl, it, pt, fi, no, da, sv, ru, sr).
+`utils/directory_fields.py` compiles it into
+`localized_policy_wording_present(question, language=...)`, checked in
+`_runtime_scope_intent` alongside the existing English-only checks, before
+the directory disjunct - so a genuine non-English policy-wording match keeps
+the question `policy`, exactly like its English equivalent, regardless of
+what any deterministic directory route separately computed.
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| "¿Cual es la politica de Forever Norway sobre los metodos de pago?" (es) | `directory` (8.0) | `policy` (0.0) |
+| "Quelles sont les regles de Forever Norge sur l'adresse de livraison ?" (fr) | `directory` (8.0) | `policy` (0.0) |
+| "Welche Regeln gelten bei Forever Norge fur die Ruckgabe per E-Mail?" (de) | `directory` (8.0) | `policy` (0.0) |
+| "Quelle est la politique de Forever Ghana sur les frais de livraison ?" (fr, GB session) | `directory` (8.0) | `policy` (0.0) |
+| "What is the policy of Forever Norway on payment methods?" (en, control) | `policy` (0.0) | `policy` (0.0), unchanged |
+| "¿Cual es el numero de telefono de Forever Ghana?" (es, earlier directory repro) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "Quel est le numero de telephone de Forever Ghana ?" (fr, earlier directory repro) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "Wie lautet die Adresse von Forever Ghana?" (de, earlier directory repro) | `directory` (8.0) | `directory` (8.0), unchanged |
+
+### F2: the "reach" synonym matched its own inflections
+
+`DIRECTORY_INTENT_SYNONYM_TERMS["en"][PHONE]` (`("reach", "contact")`) was
+compiled with a leading word-start boundary (`(?<!\w)`) only, the same style
+used for `LANGUAGE_FIELD_TERMS`'s compound stems - correct there (deliberately
+open-ended, so one spelling catches inflected forms of a compound), but wrong
+for a bare, complete verb like "reach": it also matched "reach**es**", so
+"What happens to my downline in Ghana when it **reaches** Manager level?"
+(a downline-rank question, not a contact request) was wrongly promoted to
+`directory`.
+
+**Fix:**
+`utils/directory_fields._DIRECTORY_INTENT_SYNONYM_PATTERNS` now compiles every
+synonym term with both a leading and a trailing boundary
+(`(?<!\w)(?:...)(?!\w)`), so only the complete word matches. Separately,
+"contact" was removed from the synonym set as redundant: it is already
+present, with the same full-word matching, in
+`app/retrieval/opensearch_sections.py`'s `_DIRECTORY_DETAIL_RE`, which feeds
+`_directory_guard_topic_match` -> `directory_topic_route` ->
+`deterministic_directory_route` independently of this synonym set - proven by
+a dedicated control test rather than assumed.
+
+| Question | Before this fix | After this fix |
+| --- | --- | --- |
+| "What happens to my downline in Ghana when it reaches Manager level?" | `directory` (8.0) | `ambiguous` (0.0) |
+| "How do I reach Forever Ghana?" (control, bare word) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "How do I contact Forever Ghana?" (control, synonym removed) | `directory` (8.0) | `directory` (8.0), unchanged (via `_DIRECTORY_DETAIL_RE`, not the removed synonym) |
+
+### Second follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. Both new F1/F2 repro tests, on the unmodified worktree (`git stash` the
+   three source changes, keep the new tests): **5 failed, `EXIT=1`**,
+   confirming genuine fail-before reproductions
+   (`test_f1_reviewer_repro_non_english_policy_question_naming_a_field_stays_policy`
+   x4 and
+   `test_f2_reviewer_repro_reaches_inflection_does_not_trigger_directory_synonym`).
+   `git stash pop` restored the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **650 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **8974 passed, 13
+   xfailed, `EXIT=0`**, 341.42s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): **no output,
+   `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Second follow-up limitations
+
+- **F1's policy-wording set is closed and per-language**, same discipline as
+  the field vocabulary it sits beside: es/fr/de/nl/it/sv are ordinary,
+  unambiguous dictionary words (high confidence, reused stems' sibling
+  quality); pt/fi/no/da/ru/sr are this module's own first pass (medium
+  confidence - a native reviewer should check these before they gate
+  anything destructive in production), exactly mirroring the confidence
+  split `LANGUAGE_FIELD_TERMS` already documents for the same language set.
+- **F1 does not touch `_directory_guard_topic_match`'s own (English-only)
+  `DIRECTORY_POLICY_WORDING_RE` check** in
+  `app/retrieval/opensearch_sections.py` - it does not need to: the new
+  `localized_policy_wording_present` check runs first in
+  `_runtime_scope_intent`'s if/elif chain, ahead of `deterministic_directory_route`,
+  so it overrides that route's result regardless of how it was computed.
+- **F2's trailing-boundary fix is scoped to `DIRECTORY_INTENT_SYNONYM_TERMS`
+  only**, not `LANGUAGE_FIELD_TERMS`'s compound stems, which still
+  intentionally omit a trailing boundary for the documented inflection
+  reasons in `config/directory_field_vocabulary.py`'s own docstring.

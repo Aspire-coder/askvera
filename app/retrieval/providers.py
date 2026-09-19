@@ -16,7 +16,7 @@ from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions, find_shared_office_record_countries
 from services.guardrails import is_policy_safety_question
-from utils.directory_fields import directory_field_intent_present
+from utils.directory_fields import directory_field_intent_present, localized_policy_wording_present
 from utils.logging import get_logger
 
 from .glossary import approved_joined_term_queries, glossary_queries
@@ -217,9 +217,33 @@ def _runtime_scope_intent(
     module's vocabulary does not recognize falls back to exactly the
     English-only recognition this function already had before this change -
     no worse than before.
+
+    R05/N6 second follow-up (2026-09-18): an independent re-review found
+    this function's policy-wording suppression - ``is_policy_safety_question``
+    and ``DIRECTORY_POLICY_WORDING_RE`` (``policy|rules``) - is itself
+    English-only, while the ``directory_field_intent_present`` disjunct just
+    added is 13-language. That asymmetry let a non-English POLICY question
+    that also names a directory field (e.g. Spanish "Cual es la politica de
+    Forever Norway sobre los metodos de pago?") skip this English-only
+    branch and fall straight into the multilingual directory disjunct below,
+    reopening the N6 class of bug for non-English policy questions - the
+    English equivalent already correctly stayed "policy"/0.0.
+    ``localized_policy_wording_present`` (``utils/directory_fields.py``, backed
+    by ``config/directory_field_vocabulary.py``'s new, small, closed,
+    per-language ``POLICY_WORDING_TERMS``) closes that gap the same way
+    ``directory_field_intent_present`` closed the recognition gap: checked
+    here, first, so a genuine policy-wording match keeps the question
+    "policy" regardless of what ``deterministic_directory_route`` or the
+    field disjunct below would otherwise compute. A ``language`` neither
+    vocabulary covers falls back to exactly the English-only behaviour this
+    function already had - no worse than before.
     """
     text = message or ""
-    if is_policy_safety_question(text) or DIRECTORY_POLICY_WORDING_RE.search(text):
+    if (
+        is_policy_safety_question(text)
+        or DIRECTORY_POLICY_WORDING_RE.search(text)
+        or localized_policy_wording_present(text, language=language)
+    ):
         intent, source = "policy", "deterministic_policy_route"
     elif SPONSORING_QUESTION_RE.search(text):
         intent, source = "international_sponsoring", "deterministic_sponsoring_route"
