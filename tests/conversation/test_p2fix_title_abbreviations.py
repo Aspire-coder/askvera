@@ -16,10 +16,22 @@ and the exact same shape corrupts
 ``remove_unsupported_numeric_sentences``: deleting an unsupported number next
 to a directory contact left "Contact Dr." standing alone as the answer, with
 the name and the sentence that named it discarded. Fixed by
-``TITLE_ABBREVIATIONS``, a closed set (Dr, Mr, Mrs, Ms, Prof, St, Mt, Sr, Jr
-and the configured-language equivalents) whose period is non-terminal before
-a capitalised word specifically; every other abbreviation keeps p2fix-1's
-terminal-before-uppercase rule.
+``TITLE_ABBREVIATIONS``, a closed set (Dr, Mr, Mrs, Ms, Prof, St, Sr, Jr
+and the configured-language equivalents Mme, Mlle, Sra, Dott) whose period is
+non-terminal before a capitalised word specifically; every other abbreviation
+keeps p2fix-1's terminal-before-uppercase rule.
+
+A Fable re-review (finding F3) later found that commit f64f57c had also put
+"hr", "fr", "ing" and "mt" into this closed set (and into ``ABBREVIATIONS``
+outright). Those four are ordinary words/units far more often than titles -
+"hr" is "hour", "fr" is "Friday"/"franc" (and fires on almost every "Fr."
+in German, which capitalises every noun), "ing" is a common word-final
+fragment, "mt" is "Mount" with no reproduced defect motivating it - so
+treating them as non-terminal merged sentences that must stay separate, and
+numeric-grounding repair then deleted the SUPPORTED sentence instead of the
+unsupported one because the two were read as one unit. They were removed
+again; see ``test_removing_an_unsupported_figure_after_hr_does_not_delete_the_supported_sentence``
+below and docs/conversation-quality/phase2/FRAGMENT_AUDIT.md.
 
 See docs/conversation-quality/phase2/FRAGMENT_AUDIT.md for the full
 before/after table and the "St." Saint-vs-Street trade-off this fix accepts.
@@ -94,7 +106,6 @@ def test_title_before_uppercase_name_stays_joined_to_its_own_sentence() -> None:
         ("Contact Mrs. Kim. Delivery takes 3 days.", "Contact Mrs. Kim."),
         ("Ask Ms. Patel. Delivery takes 3 days.", "Ask Ms. Patel."),
         ("Contact Prof. Lee. Delivery takes 3 days.", "Contact Prof. Lee."),
-        ("Ask Hr. Müller. Delivery takes 3 days.", "Ask Hr. Müller."),
         ("Ask Mme. Dupont. Delivery takes 3 days.", "Ask Mme. Dupont."),
         ("Contact Sra. Lopez. Delivery takes 3 days.", "Contact Sra. Lopez."),
         ("Ask Dott. Rossi. Delivery takes 3 days.", "Ask Dott. Rossi."),
@@ -102,6 +113,46 @@ def test_title_before_uppercase_name_stays_joined_to_its_own_sentence() -> None:
     for text, first_sentence in cases:
         sentences = split_sentences(text)
         assert sentences == [first_sentence, "Delivery takes 3 days."], (text, sentences)
+
+
+def test_removing_an_unsupported_figure_after_hr_does_not_delete_the_supported_sentence() -> None:
+    """The Fable re-review (finding F3) repro: "hr" was wrongly added to
+    TITLE_ABBREVIATIONS by commit f64f57c, which merged "Response time is 48
+    hr." with the following sentence into one unit. Numeric-repair then
+    treated the whole merged unit as unsupported (because only the "3" in the
+    second half was ungrounded) and deleted it wholesale, taking the
+    correctly-supported "48 hr" claim down with it. With "hr" no longer a
+    title, the two sentences are read separately and only the unsupported one
+    is removed."""
+    answer = "Response time is 48 hr. Delivery takes 3 days."
+    repaired, removed = remove_unsupported_numeric_sentences(
+        answer, [_document("Response time is 48 hr.")]
+    )
+    # Before this fix: repaired == "" and removed == ["3"] - both sentences
+    # were deleted because they were merged into one unsupported unit.
+    assert repaired == "Response time is 48 hr."
+    assert removed == ["3"]
+
+
+def test_mo_fr_opening_hours_range_still_splits_before_the_next_sentence() -> None:
+    """"fr" (Friday) was wrongly added to TITLE_ABBREVIATIONS too. German
+    capitalises every noun, so the following sentence's first word is
+    capitalised far more often than not, and the title rule fired on
+    essentially every "Fr." in an opening-hours range regardless of
+    context."""
+    assert split_sentences("Geoeffnet Mo.-Fr. Lieferung dauert 3 Tage.") == [
+        "Geoeffnet Mo.-Fr.",
+        "Lieferung dauert 3 Tage.",
+    ]
+
+
+def test_ing_title_before_a_name_still_splits() -> None:
+    """"ing" was wrongly added to TITLE_ABBREVIATIONS too - a common
+    word-final fragment, not an unambiguous honorific."""
+    assert split_sentences("Ask Ing. Delivery takes 3 days.") == [
+        "Ask Ing.",
+        "Delivery takes 3 days.",
+    ]
 
 
 def test_non_title_abbreviation_before_uppercase_word_still_splits() -> None:

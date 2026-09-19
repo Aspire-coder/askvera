@@ -274,16 +274,11 @@ def test_title_abbreviation_before_a_capitalised_name_is_non_terminal() -> None:
 
 
 def test_title_abbreviation_language_equivalents_are_non_terminal_too() -> None:
-    """The closed set also covers the configured-language equivalents named
-    in finding 1 (Hr, Fr, Mme, Mlle, Sra, Dott, Ing), not only the English ones."""
-    assert split_sentences("Ask Hr. Müller. Delivery takes 3 days.") == [
-        "Ask Hr. Müller.",
-        "Delivery takes 3 days.",
-    ]
-    assert split_sentences("Contact Fr. O'Brien. Delivery takes 3 days.") == [
-        "Contact Fr. O'Brien.",
-        "Delivery takes 3 days.",
-    ]
+    """The closed set also covers the configured-language equivalents that
+    survived the Fable re-review (finding F3) - Mme, Mlle, Sra, Dott - not
+    only the English ones. "Hr", "Fr" and "Ing" were dropped from this set
+    (and from ``ABBREVIATIONS`` entirely) by that same review: see
+    ``test_hr_fr_ing_mt_are_no_longer_titles_and_still_split`` below for why."""
     assert split_sentences("Ask Mme. Dupont. Delivery takes 3 days.") == [
         "Ask Mme. Dupont.",
         "Delivery takes 3 days.",
@@ -300,8 +295,39 @@ def test_title_abbreviation_language_equivalents_are_non_terminal_too() -> None:
         "Ask Dott. Rossi.",
         "Delivery takes 3 days.",
     ]
-    assert split_sentences("Contact Ing. Bianchi. Delivery takes 3 days.") == [
-        "Contact Ing. Bianchi.",
+
+
+# --- Fable re-review (finding F3): hr/fr/ing/mt were wrongly made titles ---
+#
+# Commit f64f57c added "hr", "fr", "ing" and "mt" to both ABBREVIATIONS and
+# TITLE_ABBREVIATIONS. Unlike "Dr"/"St"/etc., these are ordinary
+# words/units far more often than they are a title: "hr" is "hour", "fr" is
+# "Friday"/"franc" (German capitalises every noun, so the title rule fired on
+# almost every "Fr." regardless of context), "ing" is a common word-final
+# fragment, and "mt" ("Mount") had no reproduced defect motivating it. Making
+# them non-terminal before an uppercase word merged sentences that must stay
+# separate, and numeric-grounding repair then deleted the WRONG sentence -
+# the supported one - because the two sentences it should have kept apart
+# were read as one unit. See docs/conversation-quality/phase2/FRAGMENT_AUDIT.md.
+
+
+def test_hr_fr_ing_mt_are_no_longer_titles_and_still_split() -> None:
+    """Direct repros for the four removed entries: each must still split as
+    an ordinary sentence boundary, exactly as it did before commit f64f57c."""
+    assert split_sentences("Response time is 48 hr. Delivery takes 3 days.") == [
+        "Response time is 48 hr.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("Geoeffnet Mo.-Fr. Lieferung dauert 3 Tage.") == [
+        "Geoeffnet Mo.-Fr.",
+        "Lieferung dauert 3 Tage.",
+    ]
+    assert split_sentences("Ask Ing. Delivery takes 3 days.") == [
+        "Ask Ing.",
+        "Delivery takes 3 days.",
+    ]
+    assert split_sentences("The peak is 500 Mt. Delivery takes 3 days.") == [
+        "The peak is 500 Mt.",
         "Delivery takes 3 days.",
     ]
 
