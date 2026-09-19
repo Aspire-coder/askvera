@@ -324,6 +324,86 @@ def test_unresolvable_session_country_stays_answer_not_international_directory()
     assert outcome.directory_target is None
 
 
+def _ghana_and_kenya_evidence() -> _FakeEvidenceDecision:
+    ghana = _FakeDocument({"directory_kind": "international_sponsoring", "record_country": "Ghana"})
+    kenya = _FakeDocument(
+        {"directory_kind": "international_sponsoring", "record_country": "Kenya/East Africa"}
+    )
+    return _FakeEvidenceDecision(reason="approved", evidence=[ghana, kenya])
+
+
+def test_multiple_international_records_picks_the_one_the_question_names_kenya() -> None:
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="US",
+        question="What is the phone number of Forever Kenya?",
+        answer_text="The Kenya phone number is ...",
+        evidence_decision=_ghana_and_kenya_evidence(),
+    )
+    assert outcome.kind is OutcomeKind.INTERNATIONAL_DIRECTORY
+    assert outcome.directory_target == "Kenya/East Africa"
+
+
+def test_multiple_international_records_picks_the_one_the_question_names_ghana() -> None:
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="US",
+        question="What is the phone number of Forever Ghana?",
+        answer_text="The Ghana phone number is ...",
+        evidence_decision=_ghana_and_kenya_evidence(),
+    )
+    assert outcome.kind is OutcomeKind.INTERNATIONAL_DIRECTORY
+    assert outcome.directory_target == "Ghana"
+
+
+def test_multiple_international_records_with_no_market_named_never_guesses() -> None:
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="US",
+        question="What payment methods are accepted?",
+        answer_text="",
+        evidence_decision=_ghana_and_kenya_evidence(),
+    )
+    assert outcome.kind is OutcomeKind.ANSWER
+    assert outcome.directory_target is None
+
+
+def test_single_international_record_with_no_market_named_is_used() -> None:
+    kenya = _FakeDocument(
+        {"directory_kind": "international_sponsoring", "record_country": "Kenya/East Africa"}
+    )
+    decision = _FakeEvidenceDecision(reason="approved", evidence=[kenya])
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="US",
+        question="What payment methods are accepted?",
+        answer_text="Bank deposit, credit card and Mpesa are accepted.",
+        evidence_decision=decision,
+    )
+    assert outcome.kind is OutcomeKind.INTERNATIONAL_DIRECTORY
+    assert outcome.directory_target == "Kenya/East Africa"
+
+
+def test_multiple_international_records_resolves_a_localized_market_name() -> None:
+    # "Kenia" is Spanish for Kenya (config/market_name_aliases.json's KE
+    # entry) - find_market_mentions matches it language-agnostically, the
+    # same mechanism resolving any other market name.
+    outcome = derive_outcome(
+        metadata={},
+        language="es",
+        country="US",
+        question="¿Cuál es el número de teléfono de Forever Kenia?",
+        answer_text="El número de teléfono de Kenia es ...",
+        evidence_decision=_ghana_and_kenya_evidence(),
+    )
+    assert outcome.kind is OutcomeKind.INTERNATIONAL_DIRECTORY
+    assert outcome.directory_target == "Kenya/East Africa"
+
+
 def test_fields_requested_reuses_directory_fields_helper() -> None:
     outcome = derive_outcome(
         metadata={},
