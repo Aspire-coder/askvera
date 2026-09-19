@@ -9,8 +9,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.response.outcome import OutcomeKind
+from app.response.partial_answer import FieldCoverage
 from app.retrieval.models import RetrievedDocument
+from app.retrieval.providers import DIRECTORY_POLICY_WORDING_RE
+from config.directory_field_vocabulary import normalize_language_code
+from utils.directory_fields import _fold_diacritics, _INLINE_FIELD_RE, localized_policy_wording_present
 from utils.redaction import drop_emptied_lead_ins
+from utils.sentence_spans import iter_sentences
 _PLACEHOLDER_RE = re.compile(
     r"\*{4,}|(?:\[|\{|<)(?:ADDRESS|EMAIL|NAME|PHONE|PII|URL|WEBSITE|CONTACT|TBD)(?::[^\]\}>]*)?(?:\]|\}|>)",
     flags=re.IGNORECASE,
@@ -184,3 +190,246 @@ def format_period_not_covered(template: str, years: list[int]) -> str:
     """Format a reviewed period-unavailable response without model generation."""
     period = ", ".join(str(year) for year in years)
     return template.replace("{period}", period)
+
+
+# ---------------------------------------------------------------------------
+# CX phase 3, Lane 2 (docs/conversation-quality/phase3/CX_DESIGN.md,
+# docs/conversation-quality/phase3/CX_LANES.md): final-answer quality checks.
+# Pure functions only -- no I/O, no model calls, no answer of the coordinator's
+# own decisions. See docs/conversation-quality/phase3/CX_LANE2_PARTIAL_AND_QUALITY.md
+# for the recommended hook call sites in app/orchestrator/chat_orchestrator.py.
+# ---------------------------------------------------------------------------
+
+# CLOSED, per-language table of pure-pleasantry SENTENCE OPENERS -- the kind
+# of sentence that says nothing about the reader's question ("Great
+# question!", "Certainly!", "I'd be happy to help.") and exists only to
+# precede the real answer. Deliberately small and closed, the same discipline
+# every other per-language table in this codebase uses (see e.g.
+# config/reference_vocabulary.py's own docstring): every entry below is a
+# complete opener phrase, matched only at the very START of the answer's
+# first sentence, never a bare word matched anywhere in it -- so an answer
+# that happens to mention "of course you can return the item within 30 days"
+# is never touched (that phrase does not open the sentence).
+#
+# Confidence per language (documents which of these are held to the same bar
+# as the rest of this codebase's reviewed copy, and which are a best-effort
+# structural analogy pending native review -- the same distinction this
+# repository's other per-language tables draw, e.g.
+# utils/sentence_spans.py's ABBREVIATIONS docstring):
+#   en, es, fr, de, it, nl -- high confidence: phrases mirror the reviewed
+#       route-copy tone for these languages (config/conversation_routes.json)
+#       and have been checked against real generated openers in this
+#       codebase's own examples.
+#   da, no, sv, fi -- medium confidence: built the same way (literal
+#       translation of the en/de set plus each language's own idiomatic
+#       "of course"/"certainly"), not yet checked against a corpus of real
+#       generated openers in these languages.
+#   ru, sr -- lower confidence: no native-speaker review yet; kept narrow
+#       (fewer, more literal variants) rather than guessing at additional
+#       idiomatic phrasings.
+_PREAMBLE_OPENERS: dict[str, tuple[str, ...]] = {
+    "en": (
+        "great question", "thanks for asking", "thank you for asking",
+        "i'd be happy to help", "i would be happy to help", "happy to help",
+        "certainly", "of course", "sure thing", "no problem",
+    ),
+    "es": (
+        "buena pregunta", "gracias por preguntar", "con gusto te ayudo",
+        "con mucho gusto", "claro que si", "por supuesto",
+    ),
+    "fr": (
+        "bonne question", "merci de poser la question", "avec plaisir",
+        "je suis ravi de vous aider", "bien sur", "certainement",
+    ),
+    "de": (
+        "gute frage", "danke fur die frage", "gerne helfe ich",
+        "sehr gerne helfe ich", "naturlich", "selbstverstandlich",
+    ),
+    "it": (
+        "ottima domanda", "grazie per la domanda",
+        "sono felice di aiutarti", "certamente", "certo", "con piacere",
+    ),
+    "nl": (
+        "goede vraag", "bedankt voor de vraag", "ik help je graag",
+        "natuurlijk", "zeker",
+    ),
+    "da": (
+        "godt sporgsmal", "tak for sporgsmalet", "jeg hjaelper gerne",
+        "selvfolgelig", "naturligvis",
+    ),
+    "no": (
+        "godt sporsmal", "takk for sporsmalet", "jeg hjelper deg gjerne",
+        "selvfolgelig", "naturligvis",
+    ),
+    "sv": (
+        "bra fraga", "tack for fragan", "jag hjalper garna till",
+        "sjalvklart", "absolut",
+    ),
+    "fi": (
+        "hyva kysymys", "kiitos kysymyksesta", "autan mielellani",
+        "totta kai", "tietenkin",
+    ),
+    "ru": (
+        "хороший вопрос", "спасибо за вопрос", "конечно",
+    ),
+    "sr": (
+        "dobro pitanje", "hvala na pitanju", "naravno", "svakako",
+    ),
+}
+
+# A sentence opener is matched after folding accents/diacritics away (the
+# same NFKD/strip-combining/casefold recipe
+# utils.directory_fields._fold_diacritics uses, imported above), so
+# "Selbstverständlich," matches the accent-free "selbstverstandlich" table
+# entry above without a second, accented spelling being hand-written for
+# every language.
+
+# A citation marker in the shape utils/inline_citations.py already produces
+# and recognises ("[1]", "[Source 1]"): a sentence carrying one is reporting
+# a specific sourced fact, never an empty pleasantry.
+_CITATION_MARKER_RE = re.compile(r"\[(?:source\s+)?\d+\]", re.IGNORECASE)
+_ANY_DIGIT_RE = re.compile(r"\d")
+
+
+def _sentence_is_never_preamble(sentence: str, language: str) -> bool:
+    """True when ``sentence`` must never be treated as pure preamble.
+
+    Every check here reuses an existing signal rather than inventing a new
+    one: a digit, a citation marker in the shape
+    ``utils.inline_citations.separate_verified_citations`` already
+    recognises, a directory "Label: value" line
+    (``utils.directory_fields._INLINE_FIELD_RE`` -- the exact pattern
+    ``utils.directory_fields.parse_directory_fields`` uses to find one), or
+    policy wording (English: ``app.retrieval.providers.DIRECTORY_POLICY_WORDING_RE``;
+    other languages: ``utils.directory_fields.localized_policy_wording_present``,
+    itself backed by the reviewed ``config.directory_field_vocabulary.POLICY_WORDING_TERMS``
+    table) all mean this sentence is carrying real content, not a pleasantry.
+    """
+    if _ANY_DIGIT_RE.search(sentence):
+        return True
+    if _CITATION_MARKER_RE.search(sentence):
+        return True
+    if _INLINE_FIELD_RE.match(sentence.strip()):
+        return True
+    if DIRECTORY_POLICY_WORDING_RE.search(sentence):
+        return True
+    if localized_policy_wording_present(sentence, language=language):
+        return True
+    return False
+
+
+def leading_preamble_span(answer: str, language: str) -> tuple[int, int] | None:
+    """Return the ``(start, end)`` span of a pure-preamble opening sentence, if any.
+
+    Only ever the answer's FIRST sentence (span-aware, via
+    ``utils.sentence_spans.iter_sentences`` -- so a decimal, abbreviation,
+    initial, email or URL in that sentence is never mistaken for a sentence
+    break). ``None`` when the answer is empty, the first sentence carries
+    any of the never-preamble signals in :func:`_sentence_is_never_preamble`,
+    or ``language`` has no reviewed opener table (:data:`_PREAMBLE_OPENERS`).
+    """
+    sentences = iter_sentences(answer or "")
+    if not sentences:
+        return None
+    first = sentences[0]
+    text = first.text.strip()
+    if not text:
+        return None
+    if _sentence_is_never_preamble(first.text, language):
+        return None
+    openers = _PREAMBLE_OPENERS.get(normalize_language_code(language))
+    if not openers:
+        return None
+    folded = _fold_diacritics(text).strip(" \t\"'*.!?,:;-")
+    if any(folded == opener or folded.startswith(opener + " ") or folded.startswith(opener + ",")
+           for opener in openers):
+        return (first.start, first.end)
+    return None
+
+
+def strip_leading_preamble(answer: str, language: str) -> str:
+    """Remove a detected leading-preamble sentence so the direct answer comes first.
+
+    Removes only the span :func:`leading_preamble_span` identifies -- every
+    other sentence is untouched. Never empties the answer: when nothing but
+    the preamble sentence remains (or removing it would leave only
+    whitespace), the original ``answer`` is returned unchanged rather than
+    handing the reader an empty response.
+    """
+    span = leading_preamble_span(answer, language)
+    if span is None:
+        return answer
+    start, end = span
+    remainder = (answer[:start] + answer[end:]).lstrip()
+    if not remainder.strip():
+        return answer
+    return remainder
+
+
+# ---------------------------------------------------------------------------
+# Overclaim detection: an answer sentence that asserts a specific value for a
+# directory field no approved evidence document carries (FieldCoverage.unsupported,
+# app/response/partial_answer.py). Report-only -- the numeric and contact
+# validators (app/validation/validators/numeric_grounding_validator.py,
+# utils/directory_fields.py's restore/repair helpers) already own actually
+# editing the answer; this function never touches the text.
+#
+# Deliberately narrow: only the four directory fields with an unambiguous,
+# low-false-positive value SHAPE get a pattern here (a phone number, an
+# email address, a website). Address, business hours, payment methods and
+# delivery cost/time values are free-form prose with no shape distinct
+# enough to flag without a high false-positive rate against ordinary policy
+# sentences -- left undetected here rather than guessed at (documented
+# limitation, not an oversight).
+# ---------------------------------------------------------------------------
+_OVERCLAIM_FIELD_PATTERNS: dict[str, re.Pattern[str]] = {
+    "phone": re.compile(r"(?:\+\d{1,3}[\s().-]*)?(?:\(?\d{2,4}\)?[\s.-]){2,}\d{2,4}"),
+    "order_phone": re.compile(r"(?:\+\d{1,3}[\s().-]*)?(?:\(?\d{2,4}\)?[\s.-]){2,}\d{2,4}"),
+    "email": re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"),
+    "website": re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE),
+}
+
+
+def overclaim_findings(answer: str, coverage: FieldCoverage) -> list[str]:
+    """Return the sentences that assert a value for an unsupported field.
+
+    ``coverage`` is the same :class:`app.response.partial_answer.FieldCoverage`
+    :func:`app.response.partial_answer.assess_field_coverage` already
+    computed for this turn -- this function reads its ``unsupported`` set,
+    never recomputes coverage itself. Diagnostic only: returns the offending
+    sentence texts (stripped, in answer order, de-duplicated) for logging or
+    a downstream repair pass to act on; it never edits ``answer``.
+    """
+    if not coverage.unsupported:
+        return []
+    patterns = [
+        pattern
+        for field, pattern in _OVERCLAIM_FIELD_PATTERNS.items()
+        if field in coverage.unsupported
+    ]
+    if not patterns:
+        return []
+    findings: list[str] = []
+    for sentence in iter_sentences(answer or ""):
+        text = sentence.text.strip()
+        if not text:
+            continue
+        if any(pattern.search(text) for pattern in patterns) and text not in findings:
+            findings.append(text)
+    return findings
+
+
+def confidence_framing_key(outcome_kind: OutcomeKind, coverage: FieldCoverage) -> str | None:
+    """Return the one localized-copy key a partial answer's framing may add, or ``None``.
+
+    No numeric confidence is ever computed or shown -- this returns only the
+    existing ``partial_answer_gap`` message key (Lane 4 owns its copy in
+    ``config/conversation_routes.json``; see
+    ``docs/conversation-quality/phase3/CX_LANES.md``'s message-key table) for
+    a partial answer that actually has an unsupported field, and ``None``
+    for every other outcome, including a full ``OutcomeKind.ANSWER`` -- a
+    complete answer is never given hedging framing it does not need.
+    """
+    if outcome_kind == OutcomeKind.PARTIAL_ANSWER and coverage.unsupported:
+        return "partial_answer_gap"
+    return None
