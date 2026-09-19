@@ -77,6 +77,14 @@ _LIST_SEPARATORS: dict[str, tuple[str, str]] = {
     "ru": (", ", " и "),
 }
 
+# The same shape for a CHOICE between items ("a or b"), used by one-question
+# clarifications ("Did you mean shipping cost or shopping cost?"). Finnish
+# uses the interrogative "vai" because every clarification is a question.
+_ALTERNATIVE_CONJUNCTIONS: dict[str, str] = {
+    "en": " or ", "fr": " ou ", "es": " o ", "de": " oder ", "nl": " of ", "it": " o ",
+    "da": " eller ", "fi": " vai ", "no": " eller ", "sr": " ili ", "sv": " eller ", "ru": " или ",
+}
+
 # Script-mismatch detection: a bounded, deterministic check, not a language
 # identifier. It only recognizes Cyrillic vs. Latin, because that is the one
 # script split among the 12 reviewed CX locales (ru is Cyrillic; the other
@@ -171,6 +179,19 @@ def join_list(items: Sequence[Any], language: str) -> str:
         return values[0]
     locale = _locale_key(language)
     separator, conjunction = _LIST_SEPARATORS.get(locale, _LIST_SEPARATORS["en"])
+    return separator.join(values[:-1]) + conjunction + values[-1]
+
+
+def join_alternatives(items: Sequence[Any], language: str) -> str:
+    """Join ``items`` as a choice: "a or b", "a, b or c" (localized)."""
+    values = [str(item).strip() for item in items if str(item).strip()]
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    locale = _locale_key(language)
+    separator = _LIST_SEPARATORS.get(locale, _LIST_SEPARATORS["en"])[0]
+    conjunction = _ALTERNATIVE_CONJUNCTIONS.get(locale, _ALTERNATIVE_CONJUNCTIONS["en"])
     return separator.join(values[:-1]) + conjunction + values[-1]
 
 

@@ -303,3 +303,16 @@ class TestMixedLanguageOrEmpty:
     def test_digits_only_text_is_not_flagged_on_script_grounds(self) -> None:
         assert mixed_language_or_empty("12345", "ru") is False
         assert mixed_language_or_empty("12345", "en") is False
+
+
+def test_join_alternatives_is_a_localized_choice():
+    from app.response.cx_render import join_alternatives
+
+    assert join_alternatives(["shipping cost", "shopping cost"], "en") == "shipping cost or shopping cost"
+    assert join_alternatives(["a", "b", "c"], "es") == "a, b o c"
+    assert join_alternatives(["a", "b"], "de") == "a oder b"
+    assert join_alternatives(["a", "b"], "fi") == "a vai b"
+    assert join_alternatives(["a", "b"], "ru") == "a или b"
+    assert join_alternatives(["a", "b"], "pt") == "a or b"
+    assert join_alternatives(["only"], "fr") == "only"
+    assert join_alternatives([], "en") == ""

@@ -130,7 +130,10 @@ def test_other_market_directory_answer_is_international_and_names_the_target(run
     ([], RetrievalAvailability.AVAILABLE),
     ("kenya", RetrievalAvailability.AVAILABLE),
 ])
-def test_outcome_never_changes_the_delivered_answer_or_existing_metadata(run, documents, availability):
+def test_cx_only_appends_whole_paragraphs_and_never_alters_citations_or_existing_metadata(run, documents, availability):
+    """With the composer wired, CX may ADD paragraphs (and strip a pure
+    preamble, which these answers do not have). It never rewrites the delivered
+    answer, never touches citations and never changes an existing metadata key."""
     docs = [_kenya_directory_row()] if documents == "kenya" else documents
     kwargs = dict(answer="Forever Kenya accepts bank deposit, credit card and Mpesa.", availability=availability)
     original = chat_orchestrator.AIOrchestrator._attach_conversation_outcome
@@ -139,11 +142,12 @@ def test_outcome_never_changes_the_delivered_answer_or_existing_metadata(run, do
         without = run("What payment methods does Forever Kenya accept?", docs, **kwargs)
     finally:
         chat_orchestrator.AIOrchestrator._attach_conversation_outcome = original
-    with_outcome = run("What payment methods does Forever Kenya accept?", docs, **kwargs)
-    assert with_outcome.answer == without.answer
-    assert with_outcome.citations == without.citations
-    assert {k: v for k, v in with_outcome.metadata.items() if k != "outcome"} == without.metadata
-    assert "outcome" not in without.metadata
+    with_cx = run("What payment methods does Forever Kenya accept?", docs, **kwargs)
+    assert with_cx.answer == without.answer or with_cx.answer.startswith(without.answer + "\n\n")
+    assert with_cx.citations == without.citations
+    added = {"outcome", "cx_applied"}
+    assert {k: v for k, v in with_cx.metadata.items() if k not in added} == without.metadata
+    assert isinstance(with_cx.metadata["cx_applied"], list)
 
 
 def test_turn_evidence_does_not_leak_into_the_next_turn(run):
@@ -262,3 +266,100 @@ def test_answer_language_switch_never_changes_retrieval_eligibility_or_shares_a_
     assert prompt_languages[-1] == "en"
     assert cache_keys[-1] == "en"
     assert chat_orchestrator._ANSWER_LANGUAGE.get() is None
+
+
+def test_a_composer_failure_never_breaks_the_turn(run, monkeypatch):
+    def _boom(*_, **__):
+        raise RuntimeError("composer bug")
+
+    monkeypatch.setattr(chat_orchestrator, "compose_cx_response", _boom)
+    response = run("What payment methods does Forever Kenya accept?", [_kenya_directory_row()],
+                   answer="Forever Kenya accepts bank deposit, credit card and Mpesa.")
+    assert response.answer == "Forever Kenya accepts bank deposit, credit card and Mpesa."
+    assert response.metadata["outcome"]["kind"] in {"international_directory", "partial_answer", "answer"}
+    assert response.metadata["cx_applied"] == []
+
+
+def _repair_harness(monkeypatch, history):
+    monkeypatch.setattr(settings, "CHAT_MEMORY_BACKEND", "memory")
+    persisted = []
+    for name, value in {
+        "validate_and_touch_session": lambda *_: None, "has_valid_consent": lambda *_: True,
+        "scrub_pii": lambda text, *_, **__: text, "get_session_history": lambda *_: history,
+        "get_cache_value": lambda *_: None, "set_cache_value": lambda *_: None,
+        "semantic_cache_active": lambda: False,
+        "append_session_turn": lambda session, message, *_: persisted.append(message),
+        "write_audit_event": lambda *_: None,
+    }.items():
+        monkeypatch.setattr(chat_orchestrator, name, value)
+    return persisted
+
+
+class _QueryRecordingRetriever(_Retriever):
+    def __init__(self, documents):
+        super().__init__(documents)
+        self.queries = []
+
+    def retrieve(self, message, country, *args, **kwargs):
+        self.queries.append((message, country))
+        return super().retrieve()
+
+
+def test_a_repair_rewrites_retrieval_persists_the_original_and_keeps_the_policy_country(monkeypatch):
+    persisted = _repair_harness(monkeypatch, "user: What are the payment methods in Kenya?\nvera: An earlier answer.")
+    retriever = _QueryRecordingRetriever([_kenya_directory_row()])
+    orchestrator = AIOrchestrator(retriever=retriever, router=_Router("Approved text."),
+                                  validator=_Validator(), governance=_Governance())
+    body = ChatRequest(message="No, I meant Ghana", sessionId="s", country="US", language="en")
+    response = orchestrator.handle_chat(body, "cid")
+    assert response.metadata["conversation_repair"] == {"kind": "market", "replacement": "Ghana"}
+    assert any("Ghana" in query for query, _ in retriever.queries)
+    assert all(country == "US" for _, country in retriever.queries)
+    assert persisted == ["No, I meant Ghana"]
+
+
+@pytest.mark.parametrize("message,language", [
+    ("What is the shoping cost?", "en"),
+    ("¿Cuál es el costo de shoping?", "es"),
+])
+def test_an_ambiguous_typo_asks_one_question_and_never_retrieves(monkeypatch, message, language):
+    _repair_harness(monkeypatch, "")
+    retriever = _QueryRecordingRetriever([_kenya_directory_row()])
+    orchestrator = AIOrchestrator(retriever=retriever, router=_Router("Approved text."),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(ChatRequest(message=message, sessionId="s", country="US", language=language), "cid")
+    assert response.metadata["outcome"]["kind"] == "clarification"
+    assert response.metadata["failure_layer"] == "typo_clarification"
+    assert retriever.queries == []
+    assert response.answer.count("?") == 1
+    assert "{" not in response.answer
+    assert response.metadata["cx_applied"] == []
+
+
+@pytest.mark.parametrize("message", ["What is the shipping cost?", "How much is the shipping?", "No minimum order?"])
+def test_correct_words_and_plain_negatives_never_clarify_or_repair(monkeypatch, message):
+    _repair_harness(monkeypatch, "user: What are the payment methods in Kenya?\nvera: An earlier answer.")
+    retriever = _QueryRecordingRetriever([])
+    orchestrator = AIOrchestrator(retriever=retriever, router=_Router("Approved text."),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(ChatRequest(message=message, sessionId="s", country="US", language="en"), "cid")
+    assert response.metadata.get("failure_layer") != "typo_clarification"
+    assert "conversation_repair" not in response.metadata
+    assert retriever.queries
+
+
+def test_international_directory_note_only_when_the_question_asked_for_directory_fields(monkeypatch):
+    _repair_harness(monkeypatch, "")
+
+    def _answer(message, answer):
+        orchestrator = AIOrchestrator(retriever=_Retriever([_kenya_directory_row()]), router=_Router(answer),
+                                      validator=_Validator(), governance=_Governance())
+        return orchestrator.handle_chat(ChatRequest(message=message, sessionId="s", country="US", language="en"), "cid")
+
+    personal = _answer("Where is my order?", "Orders are usually delivered within 5 business days.")
+    assert "personal_account_limit" in personal.metadata["cx_applied"]
+    assert "international_directory_note" not in personal.metadata["cx_applied"]
+    field = _answer("What is the phone number?", "The office phone is +254 20 2026869.")
+    assert field.metadata["outcome"]["kind"] == "international_directory"
+    assert "international_directory_note" in field.metadata["cx_applied"]
+    assert "Kenya" in field.answer

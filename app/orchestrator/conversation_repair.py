@@ -323,6 +323,21 @@ def _build_contrast_pattern(language_code: str) -> re.Pattern[str] | None:
     )
 
 
+def might_be_repair(message: str, language: str) -> bool:
+    """Cheap, pure pre-check: does the message carry a correction cue at all?
+
+    Lets the orchestrator skip the session-history read for the overwhelming
+    majority of messages, the same discipline as
+    ``reference_resolution.might_reference_market``.
+    """
+    language_code = normalize_language_code(language)
+    text = _strip(message)
+    if not text:
+        return False
+    patterns = (_build_contrast_pattern(language_code), _build_meant_pattern(language_code))
+    return any(pattern is not None and pattern.search(text) for pattern in patterns)
+
+
 def detect_repair(message: str, language: str, prior_user_turns: Sequence[str]) -> Repair | None:
     """Detect a correction of the reader's own previous turn.
 

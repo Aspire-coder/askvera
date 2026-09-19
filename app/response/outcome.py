@@ -97,6 +97,7 @@ _FAILURE_LAYER_KINDS: dict[str, OutcomeKind] = {
     "directory_source_conflict": OutcomeKind.EVIDENCE_MISSING,
     "candidate_narrowing_fallback": OutcomeKind.CLARIFICATION,
     "directory_clarification": OutcomeKind.CLARIFICATION,
+    "typo_clarification": OutcomeKind.CLARIFICATION,
     "sensitive_pii_input": OutcomeKind.SAFETY_REFUSAL,
     "document_period_not_covered": OutcomeKind.EVIDENCE_MISSING,
     "evidence_gate": OutcomeKind.EVIDENCE_MISSING,  # overridden below for cross-market
@@ -233,6 +234,8 @@ def _clarification_subject(failure_layer: str | None, metadata: Mapping[str, Any
         return "directory_field"
     if failure_layer == "candidate_narrowing_fallback":
         return "candidate_narrowing"
+    if failure_layer == "typo_clarification":
+        return "typo"
     return None
 
 

@@ -325,7 +325,13 @@ def compose_cx_response(
     )
     answer = _apply_addition(answer, "contact_offer", contact_note, applied)
 
-    if outcome.kind == OutcomeKind.INTERNATIONAL_DIRECTORY and outcome.directory_target:
+    # The note describes directory details, so it is added only when the
+    # question actually asked for directory fields (coordinator, 2026-09-19).
+    if (
+        outcome.kind == OutcomeKind.INTERNATIONAL_DIRECTORY
+        and outcome.directory_target
+        and outcome.fields_requested
+    ):
         if not _answer_names_market(answer, outcome.directory_target):
             directory_note = render("international_directory_note", language, country=outcome.directory_target)
             answer = _apply_addition(answer, "international_directory_note", directory_note, applied)

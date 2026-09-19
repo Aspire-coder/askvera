@@ -102,3 +102,9 @@ def suggest_follow_ups(
 def suggestible_topics() -> Sequence[str]:
     """The closed topic-name set (without the ``suggest_topic_`` prefix)."""
     return _SUGGEST_TOPICS
+
+
+def topic_fields(topic: str) -> frozenset[str]:
+    """The canonical directory-field keys that evidence a topic (empty when the
+    topic is not a directory field, e.g. "returns")."""
+    return _TOPIC_FIELD_ALIASES.get(topic, frozenset())

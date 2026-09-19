@@ -33,8 +33,12 @@ from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
 from app.orchestrator.answer_language import resolve_answer_language
-from app.response.cx_render import render as cx_render
+from app.orchestrator.conversation_repair import detect_repair, might_be_repair, one_question, typo_clarification
+from app.orchestrator.reference_resolution import _user_turns
+from app.response.cx_compose import compose_cx_response
+from app.response.cx_render import join_alternatives as cx_join_alternatives, render as cx_render
 from app.response.outcome import derive_outcome
+from app.response.suggestions import topic_fields
 from app.response.quality import (
     contact_for_country,
     format_period_not_covered,
@@ -102,6 +106,7 @@ from app.response.contact_completion import (
 from utils.directory_fields import (
     canonical_requested_order_size,
     directory_field_conflicts,
+    _label_canonical_field,
     parse_directory_fields,
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
@@ -997,6 +1002,19 @@ def _answer_language(body: ChatRequest) -> str:
     return _ANSWER_LANGUAGE.get() or body.language
 
 
+def _topic_evidenced(topic: str, evidence_documents: tuple) -> bool:
+    """A follow-up topic is suggested only when this turn's approved evidence
+    carries a value for one of its directory fields; never from nothing."""
+    fields = topic_fields(topic)
+    if not fields:
+        return False
+    for document in evidence_documents:
+        parsed = parse_directory_fields(getattr(document, "content", "") or "")
+        if any(_label_canonical_field(label) in fields and str(value).strip() for label, value in parsed.items()):
+            return True
+    return False
+
+
 def _cache_language(body: ChatRequest) -> str:
     """Cache-key language: distinct when the answer language was switched, so a
     switched answer is never served to a request answered in the selected one."""
@@ -1275,6 +1293,11 @@ class AIOrchestrator:
             resolved_input, reference_clarification = self._resolve_unresolved_reference(
                 scrubbed_input, body, correlation_id
             )
+            repair_metadata: dict[str, object] = {}
+            if reference_clarification is None:
+                resolved_input, reference_clarification, repair_metadata = self._repair_or_clarify(
+                    resolved_input, body, correlation_id
+                )
             if reference_clarification is not None:
                 response = reference_clarification
             else:
@@ -1282,6 +1305,8 @@ class AIOrchestrator:
                 if response is None:
                     response = self._handle_scrubbed_chat(body, resolved_input, correlation_id, candidate_flags)
             response = self._attach_conversation_outcome(response, body, resolved_input)
+            if repair_metadata:
+                response = self._replace_answer(response, response.answer, repair_metadata)
             if answer_language.switched:
                 response = self._replace_answer(
                     response, response.answer,
@@ -1320,11 +1345,36 @@ class AIOrchestrator:
             answer_text=response.answer,
             evidence_decision=_TURN_EVIDENCE.get(),
         )
+        evidence_documents = tuple(getattr(_TURN_EVIDENCE.get(), "evidence", None) or ())
+        try:
+            response, _applied = compose_cx_response(
+                response,
+                outcome,
+                question=question,
+                language=_answer_language(body),
+                country=body.country,
+                evidence_documents=evidence_documents,
+                topic_supported=lambda topic, _country: _topic_evidenced(topic, evidence_documents),
+            )
+        except Exception:  # noqa: BLE001 - CX must never break a turn
+            # Fail open: deliver the pipeline's own response with its outcome.
+            LOGGER.exception("cx_compose_failed", kind=outcome.kind.value)
+            response = self._replace_answer(
+                response, response.answer, {"outcome": outcome.to_metadata(), "cx_applied": []}
+            )
         if _UNFILLED_CX_PLACEHOLDER_RE.search(response.answer or ""):
             # Never expected: every CX copy is filled before delivery. Logged
             # (not rewritten) so monitoring catches the bug class.
             LOGGER.error("cx_unfilled_placeholder_delivered", failure_layer=outcome.failure_layer, kind=outcome.kind.value)
-        return self._replace_answer(response, response.answer, {"outcome": outcome.to_metadata()})
+        # compose_cx_response writes metadata["outcome"] (promoted to
+        # partial_answer when fields are unsupported) and metadata["cx_applied"]
+        # when it composes; kinds it passes through untouched still carry both.
+        missing = {
+            key: value
+            for key, value in (("outcome", outcome.to_metadata()), ("cx_applied", []))
+            if key not in response.metadata
+        }
+        return self._replace_answer(response, response.answer, missing) if missing else response
 
     def _mixed_request_response(
         self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
@@ -3973,6 +4023,42 @@ class AIOrchestrator:
                     },
                 )
         return outcome.rewritten_message, None
+
+    def _repair_or_clarify(
+        self, text: str, body: ChatRequest, correlation_id: str,
+    ) -> tuple[str, ChatResponse | None, dict[str, object]]:
+        """CX pre-retrieval hook: conversation repair, then one typo question.
+
+        A self-correction of the previous user turn ("no, I meant Ghana")
+        rewrites the question retrieval sees; the original message is what is
+        persisted, exactly as for a reference rewrite. A market repair changes
+        only the directory target: the session country still governs policy.
+        An unresolved repair changes nothing (never ask "did you mean X?" of a
+        user who just said X). A genuinely ambiguous typo of a semantic-
+        collision pair asks one localized question instead of guessing.
+        """
+        language = _answer_language(body)
+        if might_be_repair(text, language):
+            history = get_session_history(body.sessionId, correlation_id)
+            repair = detect_repair(text, language, _user_turns(history))
+            if repair is not None and repair.rewritten_question:
+                return repair.rewritten_question, None, {
+                    "conversation_repair": {"kind": repair.kind, "replacement": repair.replacement},
+                }
+        clarification = one_question([typo_clarification(text, language)])
+        if clarification is None:
+            return text, None, {}
+        answer = cx_render(clarification.key, language, options=cx_join_alternatives(clarification.options, language))
+        return text, self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "fallback": False,
+                "failure_layer": "typo_clarification",
+                "response_source": "conversation_repair",
+                "clarification_options": list(clarification.options),
+            },
+        ), {}
 
     def _early_conversation_response(
         self,

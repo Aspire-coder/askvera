@@ -423,7 +423,12 @@ def test_contact_offer_never_fires_for_a_complete_answer() -> None:
 def test_international_directory_note_names_the_target_market() -> None:
     answer = "The office phone is +254 20 2026869."
     response = _response(answer)
-    outcome = _outcome(OutcomeKind.INTERNATIONAL_DIRECTORY, country="NL", directory_target="Kenya")
+    # Coordinator, 2026-09-19: the note is added only when directory fields
+    # were requested, so this outcome now carries the phone request it models.
+    outcome = _outcome(
+        OutcomeKind.INTERNATIONAL_DIRECTORY, country="NL", directory_target="Kenya",
+        fields_requested=frozenset({"phone"}),
+    )
 
     result, applied = _compose(response, outcome, country="NL")
 
@@ -819,3 +824,13 @@ def test_none_evidence_documents_never_raises() -> None:
     )
 
     assert isinstance(result.answer, str)
+
+
+def test_international_directory_note_skipped_when_no_directory_field_was_requested() -> None:
+    answer = "Orders are usually delivered within 5 business days."
+    outcome = _outcome(OutcomeKind.INTERNATIONAL_DIRECTORY, country="NL", directory_target="Kenya")
+
+    result, applied = _compose(_response(answer), outcome, country="NL")
+
+    assert "international_directory_note" not in applied["cx_applied"]
+    assert result.answer == answer
