@@ -4,60 +4,114 @@ Status: scaffolding delivered, all xfail-safe today. See `CX_DESIGN.md` for
 the full lane breakdown and `CX_LANES.md` for the shared contract; this note
 covers only Lane 6's write scope -- `tests/conversation_pack/cx/**` (new).
 
-Revision note: an earlier version of this doc (28272cb) described a runner
-that called `app.response.outcome.derive_outcome` directly on a hand-built
-stub. Coordinator review found that this only re-proved Lane 1's own unit
-tests and would let a real wiring bug through undetected. This revision
-describes the replacement design: every case drives the real
-`AIOrchestrator.handle_chat` end to end.
+Revision history: 28272cb called `derive_outcome` on a hand-built stub
+(re-testing Lane 1's own unit tests). b398dde switched to driving the real
+`AIOrchestrator.handle_chat`, but everything was still gated behind an
+`outcome_contract_wired=False` flag because the outcome wasn't wired yet.
+This revision (v3) follows the coordinator's review of b398dde: lanes 1-7
+are now merged and the outcome contract is genuinely wired
+(`chat_orchestrator.py` calls `derive_outcome` and attaches
+`metadata["outcome"]` on every path), so `outcome_contract_wired` is now
+`True` and every case's `outcome.kind` check runs for real. Three real
+defects from that review are fixed here (below); a Lane 8 composer
+(`app/response/cx_compose.py`) that would wire the remaining additions into
+`chat_orchestrator.py` does not exist yet, so every other flag stays `False`.
 
-## What this is
+## The three defects fixed
 
-A data-driven offline test matrix covering the required CX case list, plus a
-runner (`tests/conversation_pack/cx/test_cx_pack.py`) that is safe to run on
-this branch *before* any of Lanes 2-5 and 7 are wired into
-`chat_orchestrator.py`. Every case builds real `RetrievedDocument`/
-`RetrievalResult` fixtures, a real `ChatRequest`, and calls the real
-`AIOrchestrator.handle_chat` -- the same offline harness pattern
-`tests/conversation_pack/test_conversation_pack.py` already uses (a fixture
-retriever, a fake router/model, monkeypatched session/cache/consent/audit
-hooks) -- then asserts on the real returned `ChatResponse`. This module loads
-that pack's module by file path (`tests/conversation_pack` has no
-`__init__.py`, so it isn't import-package-able) and reuses its fixture
-builders (`_policy_row`, `_global_directory_row`) and fakes (`_Validator`,
-`AIOrchestrator`, `ChatRequest`, `GovernanceDecision`, ...) rather than
-redeclaring them.
+1. **Adapters imported APIs that don't exist.** Rewritten against the real
+   modules: `app.response.cx_render.render(key, language, **placeholders)` /
+   `.join_list` / `.mixed_language_or_empty`; `app.response.partial_answer.
+   assess_field_coverage` / `.partial_answer_note`; `app.response.quality.
+   strip_leading_preamble` / `.confidence_framing_key` / `.contact_for_country`;
+   `app.response.contact_completion.contact_escalation`;
+   `app.response.suggestions.suggest_follow_ups`; `app.response.
+   personal_account.detect_personal_account_request`; `app.orchestrator.
+   conversation_repair.detect_repair` / `.typo_clarification` / `.one_question`;
+   `app.orchestrator.answer_language.resolve_answer_language` /
+   `.retrieval_language`. All are real, already-callable functions -- no
+   more lazy `ImportError`-based adapters; they're imported at module top.
+   Behaviour assertions now check `metadata["outcome"]["kind"]`,
+   `metadata["cx_applied"]` (the marker list the eventual `cx_compose.py`
+   will populate: `preamble_stripped`, `partial_note`, `personal_account_note`,
+   `contact_offer`, `international_directory_note`, `suggestions`),
+   `response.suggestions` (structured items, never appended into the answer
+   text), and the rendered text via the real `cx_render.render`.
 
-`chat_orchestrator.py` does not yet attach `ChatResponse.metadata["outcome"]`
-(`CX_LANE1_OUTCOME.md`: "The coordinator wires ... into `chat_orchestrator.py`;
-this lane does not touch that file"), so every case's primary assertion --
-`metadata["outcome"]["kind"]` -- fails today no matter how faithfully its
-fixture reproduces the real trigger condition. That is what makes it safe to
-gate every case behind the `outcome_contract_wired` flag without risking an
-accidental full pass; message-key / contact / suggestion / repair /
-answer-language / quality checks are additionally gated behind their own
-lane flags on top of that.
+2. **`pt` cannot be a `ChatRequest.language` in this worktree.** Verified,
+   not assumed: `services.market_config.get_supported_language_codes()` (the
+   set `utils.validators.ChatRequest` validates `language` against) is the
+   union of every market's languages in `config/policy_locales.json`, and
+   that union is *exactly* the 12 CX route locales -- no market publishes
+   `pt` there, so `ChatRequest(language="pt", ...)` is rejected regardless of
+   `country`. `config/markets.json` (which does list Brazil/`pt`) is a
+   *different* config, the customer-facing market list, not consulted by
+   that validator -- this is a real discrepancy between the two configs,
+   worth flagging separately from this task. Fix: the 7 `pt` state cases
+   were replaced with 7 `non_route_language_fallback` cases that call
+   `app.response.cx_render.render(key, "pt", ...)` directly (a pure
+   function untouched by `ChatRequest`) -- these need no flag and pass for
+   real today.
 
-## Verified real trigger conditions
+3. **No real AWS call, guaranteed.** `_no_real_aws` (autouse fixture) fakes
+   `app.response.cx_render.localize_reviewed_copy` (patched on `cx_render`
+   itself, since it's bound there via `from ... import`, not on
+   `services.controlled_copy`) as always returning `None` -- deterministic,
+   and it is also *how* the pt fallback cases prove the English-copy floor:
+   with translation always "failing", `render("...", "pt", ...)` has no path
+   left but the English template. `services.aws_clients.get_aws_clients` is
+   also patched to raise `AssertionError` immediately if anything ever tries
+   to create a real client, so a latent AWS call fails loudly instead of
+   hanging or raising a confusing botocore error.
 
-Each fixture was run directly (bypassing pytest's xfail wrapper) against the
-real `handle_chat` to confirm it reaches the intended code path, not just an
-intended-looking one:
+## Two kinds of check per case
 
-| Requirement | Real trigger, confirmed by running the fixture |
-|---|---|
-| `evidence_missing` | Empty `RetrievalResult` -> `app.evidence.approve_evidence` returns `reason="no_evidence"` -> `failure_layer="evidence_gate"`. |
-| `dependency_unavailable` | `RetrievalResult.availability` = `UNAVAILABLE`/`DEGRADED` (R02) -> `_route_or_approve_evidence`'s two R02 sites -> `failure_layer="dependency_unavailable"`, `retrieval_availability` recorded (both values verified). |
-| `cross_market_policy` | Two policy rows (target market + US) for a per-market company-policy question -> `approve_evidence` returns `reason="cross_market_policy_request"` (same mechanism as the base pack's `policy_rows_fr_us`/`policy_rows_jp_us`). |
-| `international_directory` | One approved `directory_kind="international_sponsoring"` record -> evidence approved, generation proceeds, the scripted answer is delivered unmodified (verified: `failure_layer` is `None`, `response.answer` equals the scripted text). |
-| `safety_refusal` (`aws_guardrail`) | Requires *approved* evidence first (confirmed: with no documents, evidence_gate short-circuits before generation ever runs) -- one approved US policy row plus a fake router returning `finish_reason="guardrail_intervened"` -> `failure_layer="aws_guardrail"`. |
-| `safety_refusal` (`local_guardrail`) | Fake governance blocks with `provider="bedrock_guardrails"` -> `_governance_failure_layer` -> `"local_guardrail"` (verified). |
-| `safety_refusal` (`risk_policy`) | Fake governance blocks with a non-`bedrock_guardrails` provider and `guardrail_action=REVIEW` -> `"risk_policy"` (verified). |
-| `personal_account` | No `failure_layer` in this worktree reaches `PERSONAL_ACCOUNT` (confirmed, matches `CX_LANE1_OUTCOME.md`'s own finding); the fixture falls through to a plain `evidence_gate`/`no_evidence` refusal. This is the documented, expected gap, not a fixture bug. |
-| `ambiguous_followup` | **Approximation, and confirmed not to reach the intended path today**: two competing approved directory candidates for a vague "the other one" follow-up are both approved and the pipeline answers with the higher-scored one instead of asking which one. The real reference-resolution trigger (`app/orchestrator/reference_resolution.py`, `candidate_flags.narrowing_fallback`) is Lane 5's, and this fixture needs revisiting once that lane exists. Documented in the case's own `notes`. |
-| `partial_answer`, `contact_escalation`, `supported_only_suggestions`, `conversation_repair`, `answer_language_parity` | All reach a real, evidence-approved, delivered answer end to end (verified: `failure_layer` is `None` and `response.answer` contains the scripted content, including the appended contact detail for `contact_escalation`). |
-| `direct_answer_first` | Reaches a real delivered answer whose text **starts with a deliberate preamble** ("Great question! ..."), not the fact -- built to fail the `answer_starts_with` check today on purpose (see below), not pass vacuously. |
-| `one_question_clarification`, `typo_tolerance` | Approximation: empty-evidence fixtures land in the same `evidence_gate` path as `evidence_missing` today, not a clarification path, because the real ambiguous-reference/typo-collision detection they depend on isn't reproduced here. Documented per-case. |
+1. **Real, unconditional.** `outcome.kind` on the real, now-wired
+   `ChatResponse.metadata["outcome"]`, plus -- where a case names one -- a
+   direct call to a real Lane 2/3/5/7 PURE function that needs no
+   orchestrator wiring at all (`detect_repair`, `typo_clarification`,
+   `confidence_framing_key`, `resolve_answer_language`,
+   `detect_personal_account_request`, `assess_field_coverage`,
+   `strip_leading_preamble`). These run regardless of `FEATURE_FLAGS`.
+2. **Flag-gated.** Whether `cx_compose.py` (not built yet) has wired a
+   lane's addition into the delivered response -- `metadata["cx_applied"]`
+   and `response.suggestions`.
+
+## Verified real outcome-kind results (a genuine finding, not assumed)
+
+Every fixture was run directly (bypassing the xfail wrapper) against the now
+fully-wired orchestrator while writing this file. Two results were
+surprising enough to be worth recording here in full:
+
+- **`app/response/outcome.py`'s international-directory promotion only
+  fires when the record's market differs from the session's own country.**
+  A US session asking about a Kenya/Ghana directory record correctly
+  promotes to `international_directory`; a DE session asking about a
+  Germany directory record stays a plain `answer`. Two cases
+  (`supported_only_suggestions`, originally written against a same-market
+  DE fixture) were corrected to expect `answer`, not
+  `international_directory`, to match this.
+- **`cross_market_policy_scope` copy is wired into `chat_orchestrator.py`
+  for Kenya but the underlying cross-market DETECTION itself
+  (`app.evidence.approve_evidence`'s `_names_another_market`) does not
+  recognise every target market this pack tried.** With the Kenya case, the
+  full path -- `OutcomeKind.CROSS_MARKET_POLICY`, and the rendered
+  `cross_market_policy_scope` copy naming Kenya verbatim in the delivered
+  answer -- passes for real with every flag on. The same fixture shape for
+  Ghana/Nigeria/"Finland/Aland"/"Sweden/Gotland"/"France/Corsica" instead
+  lands on `evidence_missing`: `_names_another_market` never recognises
+  those five as a market at all (not a copy-rendering gap -- the kind itself
+  never becomes `cross_market_policy`). This is a genuine, reproducible
+  finding worth the coordinator's attention, distinct from every other
+  "not wired yet" gap below.
+- **`config.personal_account_vocabulary`'s regexes require the possessive
+  and the account-object noun to be adjacent.** "What is the status of my
+  **last** order?" does not match in English or German (`meiner **letzten**
+  Bestellung`); "What is the status of my order?" does, in all seven
+  languages tried (verified directly). The case questions were corrected
+  accordingly, and `detect_personal_account_request` is now asserted
+  directly (unconditionally) in every `fallback_state_personal_account`
+  case.
 
 ## Case count
 
@@ -65,13 +119,14 @@ intended-looking one:
 
 | Requirement | Count | Languages |
 |---|---|---|
-| `fallback_state_evidence_missing` | 8 | en, es, fr, de, fi, sv, ru, pt |
-| `fallback_state_dependency_unavailable` | 8 | en, es, fr, de, fi, sv, ru, pt (alternates R02 `unavailable`/`degraded`) |
-| `fallback_state_cross_market_policy` | 8 | en, es, fr, de, fi, sv, ru, pt |
-| `fallback_state_international_directory` | 8 | en, es, fr, de, fi, sv, ru, pt |
-| `fallback_state_ambiguous_followup` | 8 | en, es, fr, de, fi, sv, ru, pt |
-| `fallback_state_personal_account` | 8 | en, es, fr, de, fi, sv, ru, pt |
-| `fallback_state_safety_refusal` | 8 | en, es, fr, de, fi, sv, ru, pt (cycles aws_guardrail/local_guardrail/risk_policy) |
+| `fallback_state_evidence_missing` | 7 | en, es, fr, de, fi, sv, ru |
+| `fallback_state_dependency_unavailable` | 7 | en, es, fr, de, fi, sv, ru (alternates R02 `unavailable`/`degraded`) |
+| `fallback_state_cross_market_policy` | 7 | en, es, fr, de, fi, sv, ru |
+| `fallback_state_international_directory` | 7 | en, es, fr, de, fi, sv, ru |
+| `fallback_state_ambiguous_followup` | 7 | en, es, fr, de, fi, sv, ru |
+| `fallback_state_personal_account` | 7 | en, es, fr, de, fi, sv, ru |
+| `fallback_state_safety_refusal` | 7 | en, es, fr, de, fi, sv, ru (cycles aws_guardrail/local_guardrail/risk_policy) |
+| `non_route_language_fallback` | 7 | pt only, direct `cx_render.render` calls (see defect 2) |
 | `answer_language_parity` | 8 | session language fixed `en`; message written in en/es/fr/de/fi/sv/ru/pt |
 | `direct_answer_first` | 2 | en, fi |
 | `partial_answer` | 2 | en, fr |
@@ -82,133 +137,78 @@ intended-looking one:
 | `typo_tolerance` | 2 | en (typo collision pairs are English-specific by design) |
 | `confidence_aware_language` | 2 | en, de |
 
-Every one of the seven required fallback states is covered in all seven
-CX_LANES.md route locales this brief names (en, es, fr, de, fi, sv, ru) plus
-`pt`, a non-route locale exercising the English-copy fallback path.
-`test_every_fallback_state_has_multilingual_parity` enforces both the
-seven-language floor and the non-route-language presence per state.
-
-`dependency_unavailable` alternates real `RetrievalAvailability.UNAVAILABLE`
-and `.DEGRADED` across its eight language cases (R02's two values).
-
-Session countries are always one of the codes
-`utils.validators._country_codes()` actually accepts (`US`, `DE`, ...); target
-markets named in message text or directory `record_country` metadata
-(Kenya, Ghana, "Finland/Aland", ...) are free text and are not validated,
-matching how the real directory data works.
-
-## Runner design
-
-`test_cx_pack.py` has one parametrized test, `test_cx_case`, over all 80
-cases, plus six manifest self-checks (required fields present with a
-"how this case can fail" note, every required matrix item covered, every
-fallback state has multilingual parity, `answer_language_parity` covers
-every message language, every case is subject to the shared
-`outcome_contract_wired` gate, and no case id is hardcoded in the runner
-itself).
-
-Per case, `_run_case`:
-
-1. `_run_turn` builds a `_CxRetriever`/`_CxRouter`/`_CxGovernance` from
-   `case["stub"]`, wires them into a real `AIOrchestrator` (via `_base_pack`),
-   monkeypatches the same session/cache/consent/audit seams
-   `test_conversation_pack.py::_run_isolation_session` patches, and calls the
-   real `handle_chat`.
-2. Asserts `response.metadata["outcome"]["kind"] == case["expected"]["kind"]`
-   -- today this always fails because the key is absent.
-3. If any flag in the case's effective `requires` (its own list, plus the
-   always-included `outcome_contract_wired`) is still `False`, fails cleanly
-   naming which lane(s) are missing -- the failure an `xfail(strict=True)`
-   mark, applied at parametrize time in `_case_params`, expects.
-4. Otherwise proceeds to `_assert_behaviour`, which calls the lane adapters
-   (`_render_cx`, `_partial_answer`, `_contact_supplement`, `_suggestions`,
-   `_repair`, `_answer_language`) for whatever the case's `requires` list
-   actually names, or -- for `direct_answer_first` -- asserts
-   `response.answer.startswith(expected["answer_starts_with"])` directly.
+`pt` is exercised only via `non_route_language_fallback` (defect 2); the CX
+route-locale requirement (en/es/fr/de/fi/sv/ru) is otherwise met by every
+fallback state.
 
 ## The flip mechanism
 
-`FEATURE_FLAGS` at the top of `test_cx_pack.py`:
-
 ```python
 FEATURE_FLAGS = {
-    "outcome_contract_wired": False,  # Coordinator: chat_orchestrator attaches metadata["outcome"]
-    "partial_answer": False,          # Lane 2
-    "contact_and_suggestions": False, # Lane 3
-    "personal_account": False,        # Lane 3
-    "localization": False,            # Lane 4
-    "repair": False,                  # Lane 5
-    "typo_clarify": False,            # Lane 5
-    "answer_language": False,         # Lane 7
-    "quality_checks": False,          # Lane 2 (lead-with-the-fact / preamble stripping)
+    "outcome_contract_wired": True,   # verified wired, d4547b9
+    "partial_answer": False,          # Lane 8 composer
+    "contact_and_suggestions": False, # Lane 8 composer
+    "personal_account": False,        # Lane 8 composer
+    "localization": False,            # Lane 8 composer / further chat_orchestrator wiring
+    "repair": False,                  # Lane 8 composer
+    "typo_clarify": False,            # Lane 8 composer
+    "answer_language": False,         # coordinator wiring into prompt/render language
+    "quality_checks": False,          # Lane 8 composer
 }
 ```
 
-`outcome_contract_wired` applies to every case automatically
-(`_effective_requires`); no case lists it explicitly
-(`test_every_case_requires_the_outcome_contract` enforces this). When a lane
-lands, flipping its one flag to `True` removes the xfail mark from every
-case naming that flag, and those cases must pass for real from then on --
-`strict=True` means a case passing only by accident is caught immediately as
-a false positive, and a case that still fails after the flip is caught as an
-unresolved defect. Case data never needs to change for a flip; only an
-adapter function might, if the real lane module's signature differs from its
-current best-effort guess -- and for `ambiguous_followup`,
-`one_question_clarification` and `typo_tolerance`, the fixture's *documents
-and history* likely need revisiting too, since today's approximation doesn't
-reach the intended real path (documented per-case above and in `notes`).
+`outcome_contract_wired` applies to every case automatically; no case lists
+it (`test_every_case_requires_the_outcome_contract`). When `cx_compose.py`
+wires a lane's addition into `chat_orchestrator.py`, flipping that flag
+removes the `xfail(strict=True)` mark from every case naming it, and its
+`cx_applied`/`response.suggestions` assertions must pass for real. Case data
+never needs to change for a flip unless a real signature differs from an
+adapter's guess -- verified accurate against the real modules for this
+revision (defect 1).
 
-## Every case can fail if its feature is broken
-
-Per the coordinator's second review point, each case's `notes` field states
-concretely how it can fail once wired (a defect it would actually catch),
-not just what it hopes to prove. `direct_answer_first` is the clearest
-example: its fixture's fake model deliberately returns a preamble before the
-fact ("Great question! ..."), so `answer_starts_with` fails today on its own
-merits (nothing strips the preamble yet) rather than passing vacuously
-because the scripted text happened to already start with the fact.
-
-## Cases needing LIVE validation
-
-None of these 80 cases claim anything about live model prose; every
-assertion is about the typed `OutcomeKind`, message-key presence/absence,
-question counts, contact/suggestion sets, and detected languages -- never
-exact English wording, per `CX_LANES.md`'s "Copy is data" rule, and the fake
-router always returns a scripted answer rather than a live generation. Once
-every `FEATURE_FLAGS` entry is `True` and these cases pass for real, they
-still only prove the *offline* routing/rendering/detection layer is correct
--- the same limitation `tests/conversation_pack/README.md` documents for Lane
-G: "a case that passes here has only been shown correct at the layer its
-mechanism actually exercises... never at the layer of 'did the live model
-say the right sentence.'"
-
-For the prepared live-run manifest, the CX section should include one live
-check per fallback state (does the model's actual prose match the intended
-tone for `evidence_missing_detail` / `dependency_unavailable` /
-`cross_market_policy_scope` / `international_directory_note` /
-`clarify_field` / `personal_account_limit`, and does the safety-refusal path
-actually decline rather than comply) plus one live check for
-`answer_language_parity` per non-English language (does the model's answer
-actually come out in the detected message language) -- these are not run by
-this lane.
-
-## Test run
+## Committed run (flags as shipped)
 
 ```
 pytest tests/conversation_pack/cx -q
-  -> 6 passed, 80 xfailed
+  -> 14 passed, 73 xfailed
 
 pytest tests/conversation_pack -q
-  -> 61 passed, 4 skipped, 80 xfailed
+  -> 69 passed, 4 skipped, 73 xfailed
 
-flake8 tests/conversation_pack/cx/test_cx_pack.py
+flake8 tests/conversation_pack/cx/
   -> exit 0 (clean)
 
 git diff --check
   -> exit 0 (clean)
 ```
 
-The 6 passes are this lane's manifest self-checks. All 80 cases are
-`xfail(strict=True)`, each failing on the same, verified, honest reason today
-(`ChatResponse.metadata` carries no `"outcome"` key), with `strict=True` so
-an unexpected pass would fail the suite instead of hiding a stale flag.
+The 14 passes are the 7 `non_route_language_fallback` (pt) cases (real,
+unconditional -- see defect 2) plus 7 manifest self-checks. All 73 other
+cases are `xfail(strict=True)`.
+
+## Scratch run: every flag flipped True
+
+Run separately (a temporary copy of the test module with every
+`FEATURE_FLAGS` value set `True`; not committed) to report which failures
+remain and why, per the coordinator's request. Result: **46 failed, 41
+passed** (of the 79 cases whose `requires` includes at least one composer
+flag; the 7 `pt` cases already pass unconditionally either way and are
+excluded from this count). Grouped by cause:
+
+| Cause | Count | Cases |
+|---|---|---|
+| **A. `cx_compose.py` doesn't exist -- `metadata["cx_applied"]` is always absent.** Every real pure-function check these cases also run (e.g. `strip_leading_preamble` already correctly stripping the preamble for `direct_answer_first`, `assess_field_coverage` already correctly finding the gap for `partial_answer`) passes; only the "was this ADDED to the delivered response" check fails. This is exactly the expected, intended gap -- Lane 8's whole job. | 29 | `fallback_state_evidence_missing`×7, `fallback_state_international_directory`×7, `fallback_state_personal_account`×7 (detection itself now passes; only the note), `contact_escalation`×2, `direct_answer_first`×2, `partial_answer`×2, `supported_only_suggestions`×2 |
+| **B. Reference-resolution narrowing not wired -- documented, desired-behaviour gap.** `expected.kind` is `clarification` on purpose; the real result is `international_directory` (both candidates approved, the higher-scored one answered) or `evidence_missing` (empty-evidence fixture). Was already known and written into each case's own `notes` before this scratch run. | 9 | `fallback_state_ambiguous_followup`×7, `one_question_clarification`×2 |
+| **C. Typo-collision clarification not wired -- documented, desired-behaviour gap**, same shape as B (`typo_clarification` itself correctly detects the collision, asserted unconditionally and passing; only the orchestrator routing to it is missing). | 2 | `typo_tolerance`×2 |
+| **D. `cross_market_policy` DETECTION itself doesn't recognise every market name -- a genuine product finding, not a wiring gap.** `_names_another_market` (`app/evidence.py`) resolves "Kenya" but not "Ghana"/"Nigeria"/"Finland/Aland"/"Sweden/Gotland"/"France/Corsica"; those land on `evidence_missing` instead of `cross_market_policy`. The Kenya (`en`) case passes in full, including the delivered `cross_market_policy_scope` copy naming Kenya verbatim -- confirming that copy IS wired (d4547b9), and isolating this failure to evidence approval's market-name recognition, not rendering. | 6 | `fallback_state_cross_market_policy` (es/fr/de/fi/sv/ru; `en` passes) |
+
+29 (A) + 9 (B) + 2 (C) + 6 (D) = 46, matching the run.
+
+Causes A-C are expected and already documented per-case (each case's
+`notes` states how it can fail and, for B/C, that it already does).
+**Cause D is new information from this scratch run**, worth a follow-up:
+either `_names_another_market`'s market-name table needs the missing
+countries, or (if this is deliberate scoping to markets with published
+policy documents) the CX fallback-state matrix for `cross_market_policy`
+should use only markets that table already recognises, rather than the
+same seven directory-record markets used elsewhere in this pack.
