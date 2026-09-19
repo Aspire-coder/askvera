@@ -63,7 +63,10 @@ is delivered as a patch under
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
+from app.response.outcome import ConversationOutcome, OutcomeKind
+from app.response.quality import contact_for_country
 from config.directory_field_vocabulary import normalize_language_code
 from utils.directory_fields import build_support_contact_supplement
 
@@ -273,3 +276,117 @@ def build_contact_supplement_with_fax_fallback(
         if _FAX_LABEL_RE.match(" ".join(label.split())):
             return f"{_FAX_LABEL}: {value}", [_FAX_LABEL]
     return None
+
+
+# --- Phase 3 Lane 3: contact_escalation -------------------------------
+#
+# docs/conversation-quality/phase3/CX_LANES.md's ConversationOutcome-driven
+# rendering layer. This offers the reviewed public contact (never a private
+# per-market directory record - see ``_public_contact_value`` below) for the
+# small set of outcome kinds where a reader who did not get a full answer
+# should be pointed at customer care, without ever duplicating a contact the
+# answer already carries.
+
+# Outcome kinds this function ever renders a contact_offer for. Deliberately
+# excludes safety_refusal and clarification per the Lane 3 brief: a refusal
+# is not softened by an unrelated contact offer, and a clarification
+# question is not yet a dead end. dependency_unavailable and cross_market_policy
+# are included but still fall through to "no reviewed contact" -> None when
+# ``country`` has none configured (config/public_contacts.json only lists a
+# "default" plus specific markets).
+_ESCALATION_KINDS = frozenset(
+    {
+        OutcomeKind.EVIDENCE_MISSING,
+        OutcomeKind.PERSONAL_ACCOUNT,
+        OutcomeKind.DEPENDENCY_UNAVAILABLE,
+        OutcomeKind.PARTIAL_ANSWER,
+        OutcomeKind.CROSS_MARKET_POLICY,
+    }
+)
+
+
+def _public_contact_value(contacts: dict[str, str]) -> str | None:
+    """Pick one reviewed public-contact value to fill the ``{contact}``
+    placeholder, in the same phone-then-website preference
+    ``build_support_contact_supplement`` already uses for the approved
+    per-record contact block (phone first, then email/website) - this never
+    adds a new preference order, it only applies the existing one to the
+    smaller ``contact_for_country`` shape (``customerCarePhone`` /
+    ``website``; see ``config/public_contacts.json``).
+    """
+    phone = contacts.get("customerCarePhone")
+    if phone:
+        return phone
+    website = contacts.get("website")
+    if website:
+        return website
+    return None
+
+
+def _public_contact_already_present(answer_text: str, contacts: dict[str, str]) -> bool:
+    """True when the reviewed public-contact value already appears verbatim
+    in ``answer_text``. A pure substring check (language-independent, unlike
+    :func:`recommends_contact_in_language`, which only recognizes a
+    RECOMMENDATION sentence in nine languages) so a phone/website already
+    quoted for ANY reason - including one the orchestrator's own
+    ``_apply_support_contact_supplement`` already appended earlier this
+    turn - is never duplicated here, regardless of the answer's language.
+    """
+    if not answer_text:
+        return False
+    for value in contacts.values():
+        if value and value in answer_text:
+            return True
+    return False
+
+
+def contact_escalation(
+    outcome: ConversationOutcome,
+    *,
+    country: str,
+    language: str,
+    answer_text: str,
+    render: Callable[..., str],
+) -> str | None:
+    """Return a rendered ``contact_offer`` sentence, or ``None``.
+
+    Renders the ``contact_offer`` message key (Lane 4) with ``{contact}``
+    filled from the existing reviewed public-contact source for the SESSION
+    market (``country`` - reused via :func:`app.response.quality.contact_for_country`,
+    never a new contact source): for ``cross_market_policy`` this means the
+    session's own support contact, never the other market named in the
+    question, matching the Lane 3 brief.
+
+    Never renders for an outcome kind outside :data:`_ESCALATION_KINDS`
+    (never for ``safety_refusal`` or ``clarification``), never when
+    ``country`` has no reviewed public contact at all (a missing contact
+    returns ``None``, never a placeholder), never for ``partial_answer``
+    when nothing was actually left unsupported
+    (``outcome.fields_unsupported`` empty), and never when ``answer_text``
+    already recommends or already contains that contact - reusing
+    :func:`recommends_contact_in_language` (an existing recommendation this
+    module already detects, in the languages it knows) and a plain
+    substring check (:func:`_public_contact_already_present`, language
+    independent) so a duplicate contact is never appended after the
+    orchestrator's own ``_apply_support_contact_supplement`` step already
+    added one.
+
+    ``render`` is the injected ``render(key, language, **placeholders) ->
+    str`` callable Lane 4 owns; this module never inlines English copy.
+    """
+    if outcome.kind not in _ESCALATION_KINDS:
+        return None
+    if outcome.kind == OutcomeKind.PARTIAL_ANSWER and not outcome.fields_unsupported:
+        return None
+
+    contacts = contact_for_country(country)
+    contact_value = _public_contact_value(contacts)
+    if not contact_value:
+        return None
+
+    if _public_contact_already_present(answer_text, contacts):
+        return None
+    if recommends_contact_in_language(answer_text or "", language):
+        return None
+
+    return render("contact_offer", language, contact=contact_value)
