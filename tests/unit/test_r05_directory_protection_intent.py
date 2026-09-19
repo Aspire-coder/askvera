@@ -1344,12 +1344,13 @@ def test_s2_non_romance_bare_condition_forms_also_dropped_after_sixth_follow_up(
 # --- R05/N6 sixth follow-up (2026-09-18): every reviewer idiom repro, ------
 # --- as a full-pipeline "directory" control -------------------------------
 #
-# Per the coordinator's explicit instruction: every one of the 35 probes
-# the review found (27 of which were false suppressions) is exercised here
-# as a full ``_planned_retrieval_plan`` control, each embedded in a
-# question that also names a genuine directory field (address/phone) so
-# the assertion proves not merely "not policy" but the full, correct
-# "directory"/8.0 protection outcome.
+# Per the coordinator's explicit instruction: the 16 distinct example
+# shapes the coordinator's message quoted from the review (of the 35
+# probes the review ran, 27 of which were false suppressions) are
+# exercised here as a full ``_planned_retrieval_plan`` control, each
+# embedded in a question that also names a genuine directory field
+# (address/phone) so the assertion proves not merely "not policy" but the
+# full, correct "directory"/8.0 protection outcome.
 @pytest.mark.parametrize(
     "question,country,language",
     [
@@ -1599,3 +1600,92 @@ def test_s7_localized_policy_wording_present_unit_control() -> None:
     assert p("Vad är riktlinjerna?", language="sv") is False
     assert p("politici", language="sr") is False
     assert p("uslovi", language="sr") is False
+
+
+# --- R05/N6 eighth follow-up (2026-09-18): coordinator review of a53dcae --
+# --- (three LOW findings) --------------------------------------------------
+#
+# Finding 1: whitespace collapse previously happened only in
+# _runtime_scope_intent, so "in  terms  of" (double-spaced) could still
+# leak through three other call sites that searched
+# DIRECTORY_POLICY_WORDING_RE against the raw message directly:
+# own_market_directory_route (app/retrieval/providers.py),
+# _directory_guard_topic_match and own_market_field
+# (app/retrieval/opensearch_sections.py). Also, "within terms of X" (the
+# "in" is not its own word inside "within", so the existing
+# "(?<!\bin\s)" lookbehind never excluded it) was wrongly treated as the
+# accepted "terms of X" policy-document phrasing. Fixed with a single
+# helper, ``directory_policy_wording_present`` (app/retrieval/providers.py),
+# which collapses whitespace and adds a second lookbehind excluding
+# "within terms of" too - used at all four sites, one source of truth.
+
+
+def test_s8_directory_policy_wording_present_unit_control() -> None:
+    """Unit-level control directly on the new helper, isolated from any
+    call site."""
+    from app.retrieval.providers import directory_policy_wording_present as p
+
+    assert p("within terms of the delivery cost") is False
+    assert p("in terms of the delivery cost") is False
+    assert p("the terms of service") is True
+    assert p("certain terms of service apply") is True
+    assert p("office hours in  terms  of weekends") is False  # double-spaced
+    assert p("office hours within  terms  of weekends") is False  # double-spaced
+
+
+def test_s8_runtime_scope_intent_gate_within_terms_of(monkeypatch) -> None:
+    """Gate 1: _runtime_scope_intent (via the full pipeline). "within terms
+    of" must not suppress a genuine directory question."""
+    plan = _plan(
+        monkeypatch,
+        "What are the office hours of Forever Norway within  terms  of weekends?",
+        country="NO",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s8_own_market_directory_route_gate_within_terms_of(monkeypatch) -> None:
+    """Gate 2: own_market_directory_route (app/retrieval/providers.py). A
+    no-country-named delivery-cost question using "within terms of" must
+    still resolve to "directory", exercised through the full pipeline
+    against a market with a configured own-market directory record."""
+    plan = _plan(
+        monkeypatch,
+        "What is Forever NL's delivery cost within  terms  of shipping speed?",
+        country="NL",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s8_directory_guard_topic_match_gate_within_terms_of() -> None:
+    """Gate 3: _directory_guard_topic_match (app/retrieval/opensearch_sections.py),
+    tested directly. "within terms of" must not be treated as policy
+    wording, so the topic gate still fires on the address wording present
+    in the same question."""
+    from app.retrieval.opensearch_sections import _directory_guard_topic_match
+
+    assert _directory_guard_topic_match(
+        "What is the office address within  terms  of the delivery schedule?"
+    ) is True
+    # Control: genuine policy wording still suppresses the gate.
+    assert _directory_guard_topic_match(
+        "What are the regulations for the office address?"
+    ) is False
+
+
+def test_s8_own_market_field_gate_within_terms_of() -> None:
+    """Gate 4: own_market_field, inside _directory_target_country_names
+    (app/retrieval/opensearch_sections.py), tested directly against a
+    market configured with its own directory record (NL). "within terms
+    of" must not block the own-market fallback."""
+    within_result = _directory_target_country_names(
+        "What is the delivery cost within  terms  of shipping speed?", "NL"
+    )
+    policy_result = _directory_target_country_names(
+        "What are the regulations on the delivery cost?", "NL"
+    )
+
+    assert within_result  # non-empty: own-market fallback still applies
+    assert not policy_result  # empty: genuine policy wording still suppresses it

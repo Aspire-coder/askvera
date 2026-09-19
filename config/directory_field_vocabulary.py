@@ -514,13 +514,17 @@ DIRECTORY_INTENT_SYNONYM_TERMS: dict[str, dict[str, tuple[str, ...]]] = {
 #   ("Bestimmung meiner Sendung" = "destination of my shipment") is a
 #   genuine directory/logistics question, not "provision/regulation".
 # - Serbian's oblique-case additions (politici/politiku/politikom,
-#   pravilima, and their Cyrillic equivalents) are also reverted here:
-#   the coordinator's explicit KEEP list names only "the ru oblique cases
+#   pravilima, and their Cyrillic equivalents) were reverted here at first:
+#   the coordinator's explicit KEEP list named only "the ru oblique cases
 #   of политика/правила", not Serbian's - so, to implement the decision
 #   exactly rather than extrapolate an unstated equivalence, Serbian
-#   reverts to precisely its original F1 set. This is a deliberate,
-#   conservative choice pending an explicit future review of Serbian's
-#   own oblique forms, not a claim that they are unsafe.
+#   reverted to precisely its original F1 set. A follow-up coordinator
+#   review then restored "pravilima"/"правилима" specifically (it is
+#   rules-family - the oblique plural of "pravila" = rules - not
+#   guideline/condition-family): see the seventh follow-up's own comment
+#   directly above the "sr" entry in ``POLICY_WORDING_TERMS`` below.
+#   politika's own oblique forms (politici/politiku/politikom, Cyrillic
+#   equivalents) remain reverted; only pravilima's were restored.
 #
 # A form dropped here is treated the same as before this whole task
 # existed - "ambiguous", not "policy" - which only risks losing directory

@@ -208,11 +208,50 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
 # (``config/directory_field_vocabulary.py`` - see that module's own,
 # larger comment for the full non-English rationale and the reopened
 # "bare conditions" limitation this accepts, honestly, in both languages).
+# R05/N6 eighth follow-up (2026-09-18, coordinator review of a53dcae, LOW
+# finding 1): "(?<!\bin\s)" only excluded "terms of" when the immediately
+# preceding word is "in" - it missed the sibling idiom "within terms of X"
+# ("within" ends in the letters "in", but that "in" is not its own word, so
+# "\bin\s" never matched there and "within terms of" was wrongly treated as
+# the accepted "terms of X" policy-document phrasing). A second, separate
+# fixed-width lookbehind, "(?<!\bwithin\s)", excludes that sibling idiom the
+# same way, without changing the first lookbehind's own behaviour (each
+# lookbehind is independently fixed-width, so Python allows two in
+# sequence). Also fixed here: whitespace collapse used to happen only in
+# ``_runtime_scope_intent``, so "in  terms  of" (irregular/doubled
+# whitespace) could still leak through the other three call sites below
+# that read ``DIRECTORY_POLICY_WORDING_RE`` directly against the raw,
+# uncollapsed message. ``directory_policy_wording_present`` is now the one
+# source of truth for "does this text use policy/rules-document wording",
+# used at every one of the four call sites (this module's own
+# ``_runtime_scope_intent`` and ``own_market_directory_route``, plus
+# ``app/retrieval/opensearch_sections.py``'s ``_directory_guard_topic_match``
+# and ``own_market_field``) instead of each site calling
+# ``DIRECTORY_POLICY_WORDING_RE.search`` on a differently (or not at all)
+# normalized string. The regex itself stays exported - a unit test in
+# ``tests/unit/test_r05_directory_protection_intent.py`` imports it
+# directly to test the pattern in isolation from whitespace collapsing.
 DIRECTORY_POLICY_WORDING_RE = re.compile(
     r"\bpolic(?:y|ies)\b|\brules?\b|\bregulations?\b|"
-    r"\bterms\s+and\s+conditions\b|(?<!\bin\s)\bterms\s+of\b",
+    r"\bterms\s+and\s+conditions\b|(?<!\bin\s)(?<!\bwithin\s)\bterms\s+of\b",
     re.IGNORECASE,
 )
+
+
+def directory_policy_wording_present(text: str) -> bool:
+    """Whitespace-normalized single source of truth for ``DIRECTORY_POLICY_WORDING_RE``.
+
+    Collapses any run of whitespace to a single space
+    (``" ".join(text.split())``) before searching, so irregular/doubled
+    whitespace (e.g. "in  terms  of", double-spaced) cannot defeat the
+    regex's own fixed-width negative lookbehinds, which only recognize
+    exactly one space between "in"/"within" and "terms". Every call site
+    that needs to know whether a message uses policy/rules-document
+    wording should call this function rather than searching the regex
+    directly against a possibly-uncollapsed string.
+    """
+    return bool(DIRECTORY_POLICY_WORDING_RE.search(" ".join((text or "").split())))
+
 
 # These values are emitted only from the runtime query-planning boundary.  They
 # deliberately describe routing, not an answer or an expected benchmark label.
@@ -307,11 +346,25 @@ def _runtime_scope_intent(
     threaded to - ``directory_field_intent_present``,
     ``localized_policy_wording_present``) benefits identically, since none
     of their own patterns depend on preserving original whitespace runs.
+
+    R05/N6 eighth follow-up (2026-09-18, coordinator review of a53dcae):
+    this whitespace collapse was previously local to this function only -
+    the other three call sites that read ``DIRECTORY_POLICY_WORDING_RE``
+    directly (``own_market_directory_route`` below,
+    ``opensearch_sections._directory_guard_topic_match``, and
+    ``opensearch_sections``'s ``own_market_field``) did not collapse
+    whitespace themselves, so the same "in  terms  of" leak was still
+    possible through those three routes. ``directory_policy_wording_present``
+    (this module) is now the single source of truth: it collapses
+    whitespace and searches the regex in one place, called from all four
+    sites, so the collapse below is redundant with that helper's own but
+    kept for the other regexes (``is_policy_safety_question``,
+    ``SPONSORING_QUESTION_RE``) this function also matches against.
     """
     text = " ".join((message or "").split())
     if (
         is_policy_safety_question(text)
-        or DIRECTORY_POLICY_WORDING_RE.search(text)
+        or directory_policy_wording_present(text)
         or localized_policy_wording_present(text, language=language)
     ):
         intent, source = "policy", "deterministic_policy_route"
@@ -802,7 +855,7 @@ def _planned_retrieval_plan(
         ) and bool(FOREVER_NAMED_RECORD_RE.search(message or "") or named_markets or shared_office_markets)
         own_market_directory_route = (
             bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
-            and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
+            and not directory_policy_wording_present(message)
             and bool(_directory_target_country_names(message, country))
         )
         # R05/N6: the same topical gate that already decides whether the

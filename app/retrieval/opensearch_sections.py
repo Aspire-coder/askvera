@@ -47,12 +47,12 @@ from utils.opensearch_fields import exact_term_query, exact_terms_query
 from .models import RetrievedDocument, RetrievalAvailability, RetrievalResult
 from .providers import (
     DIRECTORY_OPERATIONAL_QUESTION_RE,
-    DIRECTORY_POLICY_WORDING_RE,
     OWN_MARKET_DIRECTORY_FIELD_RE,
     RetrievalQueryPlan,
     _document_relevance,
     _planned_retrieval_plan,
     _tokens,
+    directory_policy_wording_present,
 )
 from utils.directory_fields import parse_directory_fields
 from .section_index import _character_overlap, _confidence_from_documents, _source_score
@@ -828,9 +828,10 @@ _DIRECTORY_DOMINANCE_MIN_COUNTRY_BONUS = 6.0
 # paid their bonus in Kyrgyzstan?") and the same operational class as
 # `tests/fixtures/benchmark_cases.json`'s "Can a foreign FBO receive bonuses
 # from Forever Algeria?". A question using policy/rules wording
-# (`DIRECTORY_POLICY_WORDING_RE`) never matches, even when it also contains
-# one of these words, so "company policy on sponsoring" and "sponsoring
-# rules" keep resolving through the selector, never this guard.
+# (`directory_policy_wording_present`, backed by `DIRECTORY_POLICY_WORDING_RE`)
+# never matches, even when it also contains one of these words, so "company
+# policy on sponsoring" and "sponsoring rules" keep resolving through the
+# selector, never this guard.
 _DIRECTORY_GUARD_TOPIC_RE = re.compile(
     _DIRECTORY_DETAIL_RE.pattern + r"|" + DIRECTORY_OPERATIONAL_QUESTION_RE.pattern + r"|\bbonus(?:es)?\b",
     re.IGNORECASE,
@@ -839,11 +840,18 @@ _DIRECTORY_GUARD_TOPIC_RE = re.compile(
 
 def _directory_guard_topic_match(message: str) -> bool:
     """True when the question wants directory/contact/logistics detail
-    content rather than a general policy/rules question naming a country."""
-    text = message or ""
-    if DIRECTORY_POLICY_WORDING_RE.search(text):
+    content rather than a general policy/rules question naming a country.
+
+    R05/N6 eighth follow-up (2026-09-18, coordinator review of a53dcae):
+    uses `directory_policy_wording_present` (whitespace-collapsing, single
+    source of truth - see that function's own docstring in
+    `app/retrieval/providers.py`) rather than searching
+    `DIRECTORY_POLICY_WORDING_RE` directly against the raw, possibly
+    irregularly-whitespaced message.
+    """
+    if directory_policy_wording_present(message):
         return False
-    return bool(_DIRECTORY_GUARD_TOPIC_RE.search(text))
+    return bool(_DIRECTORY_GUARD_TOPIC_RE.search(message or ""))
 
 
 def _dominant_directory_row(
@@ -989,7 +997,7 @@ def _directory_target_country_names(message: str, selected_country: str) -> set[
         str(selected_country or "").upper()
         in {str(market.get("code") or "").upper() for market in load_global_directory_markets()}
         and bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
-        and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
+        and not directory_policy_wording_present(message)
     )
     if (
         not mentioned_codes
