@@ -31,7 +31,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from services.market_config import find_sponsoring_directory_alias_countries, market_display_name
+from services.market_config import (
+    find_market_mentions,
+    find_sponsoring_directory_alias_countries,
+    market_display_name,
+)
 from utils.directory_fields import _requested_directory_field_set
 from utils.directory_records import record_matches_any_target
 
@@ -189,7 +193,40 @@ def _session_market_target_names(country: str) -> list[str]:
     return aliases or [session_name]
 
 
-def _international_directory_target(evidence_decision: object | None, country: str) -> str | None:
+def _question_market_target_names(question: str) -> list[str]:
+    """Return the canonical market name(s) the QUESTION itself names.
+
+    Mirrors `_session_market_target_names`, but resolves from the question
+    text instead of the session country, reusing the same two mechanisms
+    chat_orchestrator.py's `_resolve_directory_field_target_names` already
+    combines for this job: the general market catalog
+    (`find_market_mentions` + `market_display_name`) and the directory's own
+    section-name aliases (`find_sponsoring_directory_alias_countries`),
+    checked against the question text directly too (a market may be named
+    only via a directory alias term - "East Africa", "Nairobi" - that is not
+    itself a configured market name). No new alias vocabulary is added.
+    """
+    target_names: list[str] = []
+    for code in sorted(find_market_mentions(question)):
+        name = market_display_name(code)
+        if not name:
+            continue
+        aliases = sorted(find_sponsoring_directory_alias_countries(name))
+        target_names.extend(aliases or [name])
+    target_names.extend(sorted(find_sponsoring_directory_alias_countries(question)))
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for name in target_names:
+        key = name.casefold()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(name)
+    return deduped
+
+
+def _international_directory_target(
+    evidence_decision: object | None, country: str, question: str
+) -> str | None:
     """Return the target market of an approved international-sponsoring
     record naming a market OTHER than the session's own.
 
@@ -198,14 +235,23 @@ def _international_directory_target(evidence_decision: object | None, country: s
     `record_country` metadata, resolved canonically against the session
     `country` through the existing market catalog. Returns None when no
     approved document is an international-sponsoring directory record (the
-    ordinary case), when the record names the session's own market, or when
-    the session market cannot be resolved at all (fails closed to "not
-    international" rather than guessing).
+    ordinary case), when every such record names the session's own market,
+    or when the session market cannot be resolved at all (fails closed to
+    "not international" rather than guessing).
+
+    When more than one non-session international record is approved (a
+    turn's evidence can legitimately hold several directory rows), the
+    record picked is the one the QUESTION itself names - never just the
+    first one in evidence order. If the question names no market, a single
+    remaining candidate is used; with several and no market named, this
+    returns None rather than guessing. A question naming a market that
+    matches none, or more than one, of the candidates also returns None.
     """
     evidence: Sequence[Any] = getattr(evidence_decision, "evidence", None) or ()
     session_target_names = _session_market_target_names(country)
     if not session_target_names:
         return None
+    candidates: list[str] = []
     for document in evidence:
         document_metadata: Mapping[str, Any] = getattr(document, "metadata", None) or {}
         if not _is_directory_shaped(document_metadata):
@@ -217,8 +263,15 @@ def _international_directory_target(evidence_decision: object | None, country: s
             continue
         if _record_names_any_target(record_country, session_target_names):
             continue
-        return record_country
-    return None
+        if record_country not in candidates:
+            candidates.append(record_country)
+    if not candidates:
+        return None
+    question_target_names = _question_market_target_names(question)
+    if question_target_names:
+        matches = [name for name in candidates if _record_names_any_target(name, question_target_names)]
+        return matches[0] if len(matches) == 1 else None
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _clarification_subject(failure_layer: str | None, metadata: Mapping[str, Any]) -> str | None:
@@ -275,7 +328,7 @@ def derive_outcome(
         # Fail safe: an unrecognised failure_layer never becomes "answer".
         kind = _FAILURE_LAYER_KINDS.get(failure_layer, OutcomeKind.EVIDENCE_MISSING)
 
-    directory_target = _international_directory_target(evidence_decision, country)
+    directory_target = _international_directory_target(evidence_decision, country, question)
     if kind == OutcomeKind.ANSWER and directory_target is not None:
         kind = OutcomeKind.INTERNATIONAL_DIRECTORY
 
