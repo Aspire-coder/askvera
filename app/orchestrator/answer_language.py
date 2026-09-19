@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from functools import lru_cache
 from typing import NamedTuple
 
 # The 12 route-copy languages (config/conversation_routes.json's "locales"
@@ -99,7 +100,7 @@ _RAW_MARKER_WORDS: dict[str, str] = {
     "fr": (
         "le la les un une des du et ou mais est sont etait je tu il elle nous "
         "vous ils mon ma que qui quoi ou quand pourquoi comment combien pas "
-        "pour avec dans de"
+        "pour avec dans de au aux par quel quels quelle quelles ce cette ces"
     ),
     "es": (
         "el la los las un una y o pero es son era yo tu el ella nosotros "
@@ -187,6 +188,92 @@ def _build_word_weights() -> dict[str, dict[str, float]]:
 # language -> {normalized marker word: overlap-discounted weight}
 MARKER_WORD_WEIGHTS: dict[str, dict[str, float]] = _build_word_weights()
 
+# Every normalized word that is a recognized marker for ANY language -
+# used only to make sure the capitalized-proper-noun heuristic below never
+# masks a genuine, capitalized closed-class word ("Quel", "Wie", "Was" at a
+# sentence's start).
+ALL_MARKER_WORDS: frozenset[str] = frozenset(
+    word for weights in MARKER_WORD_WEIGHTS.values() for word in weights
+)
+
+# --- Non-signal tokens: market/country names and the brand -----------------
+# A real customer question routinely names a market ("Forever Kenya",
+# "...au Kenya ?", "...i Norge?") or the brand ("Forever", "Aloe Vera").
+# These are proper nouns spelled the same (or near-same) regardless of the
+# writer's language, so they carry no language signal - and worse, a short
+# market/country name can coincidentally collide with an unrelated
+# language's closed-class word (this is exactly the defect
+# ``config/alias_function_word_guard.py`` already documents and guards
+# against for a different consumer, Estonian "Tai" colliding with Finnish
+# "tai" = "or"). Excluding them from SCORING (coordinator review,
+# 2026-09-19) stops a proper noun from diluting or tilting the margin
+# between candidates; they are still counted toward MIN_TOKENS (message
+# length), since that gate is about message length, not language evidence.
+#
+# Reused, not duplicated: every market/country name and its localized
+# aliases already live in ``services.market_config`` (``markets.json``,
+# ``global_directory_markets.json``, ``market_name_aliases.json`` via
+# ``_localized_market_names()``, which already applies the function-word
+# collision guard above). No new alias list is created here - this only
+# flattens the existing names into single-word tokens for a membership
+# check. The brand/product terms have no existing configured vocabulary
+# (this repository has no product catalogue - see ``catalogue_scope`` in
+# ``config/conversation_routes.json``, which says AskVera holds no product
+# prices/catalogue at all), so the five-word brand list below is the
+# smallest possible literal supplement, not an alias list.
+_BRAND_TOKENS: frozenset[str] = frozenset({"forever", "living", "aloe", "vera", "fbo"})
+
+
+@lru_cache(maxsize=1)
+def _market_name_tokens() -> frozenset[str]:
+    """Every configured market/country name, and every localized alias
+    language ``services.market_config`` already loads, that is itself a
+    SINGLE word ("Kenya", "Ghana", "Norge", "Sverige") - built once; the
+    JSON it reads never changes within a process.
+
+    Deliberately NOT split into word fragments. An earlier version split
+    every name on whitespace, which turned a multi-word name into
+    single-word fragments that can themselves be ordinary content or even
+    function words in some language - "Costa Rica" produced the fragment
+    "costa", which collided with the Italian verb "costa" ("it costs") and
+    silently erased real Italian evidence from a sentence that merely
+    mentioned an unrelated country. A multi-word name is therefore left
+    alone here entirely (not masked) rather than risk that class of
+    collision again; only a single, whole-word name is excluded, which
+    cannot fragment into anything else.
+    """
+    from services.market_config import (
+        _localized_market_names,
+        load_global_directory_markets,
+        load_market_config,
+    )
+
+    names: set[str] = set()
+    for market in load_market_config()["markets"]:
+        names.add(str(market.get("name", "")))
+    for market in load_global_directory_markets():
+        names.add(str(market.get("name", "")))
+    for alias_list in _localized_market_names().values():
+        names.update(alias_list)
+
+    tokens: set[str] = set()
+    for name in names:
+        normalized = _normalize_marker(name)
+        # A whole-name normalized form with no internal whitespace/punctuation
+        # left is a single word; anything else (spaces, "&", "-", "/", "(")
+        # is a multi-word or compound name and is skipped entirely.
+        if normalized and re.fullmatch(r"[a-z]+", normalized) and len(normalized) >= 4:
+            if normalized not in ALL_MARKER_WORDS:
+                tokens.add(normalized)
+    return frozenset(tokens)
+
+
+def _is_non_signal_token(token: str) -> bool:
+    """True for a token that is the brand or a configured market/country
+    name (in any language) - excluded from marker-word scoring only."""
+    return token in _BRAND_TOKENS or token in _market_name_tokens()
+
+
 # --- Distinctive-character evidence -----------------------------------------
 # Characters checked against the RAW message (accents intact), because
 # accent-stripping is exactly what would erase this signal. Each set lists
@@ -270,6 +357,45 @@ def _tokenize(message: str) -> tuple[str, ...]:
     return tuple(_WORD_PATTERN.findall(normalized))
 
 
+def _mask_non_signal_spans(message: str) -> str:
+    """Blank out (replace with spaces, preserving length and every other
+    character) every word span that is the brand or a configured
+    market/country name. A real customer question routinely mixes a Latin
+    brand name into an otherwise Cyrillic sentence ("Forever Кению") - unmasked,
+    that would make the WHOLE message look script-mixed (ambiguous) even
+    though the brand name carries no language signal either way. Masking
+    before the script check, the marker-word scoring and the distinctive-
+    character bonus (coordinator review, 2026-09-19) keeps all three
+    consistent: a brand/market word is excluded from every kind of language
+    evidence, not just word-counting.
+
+    Beyond the configured brand/market list, a CAPITALIZED Latin-script word
+    that is not itself a recognized marker word for any language (checked
+    against ``ALL_MARKER_WORDS``, so a sentence-initial capitalized function
+    word such as French "Quel" or German "Wie" is never touched) is masked
+    too - it is very likely a proper noun or product/program name written in
+    Latin script by convention regardless of the surrounding language
+    ("Forever Bright Toothgel", "Forever Freedom"), the same situation the
+    configured brand list exists for, just for a name not on that short
+    list. This is a structural rule (capitalization + not-a-known-word), not
+    a new word list, so it needs no per-word addition as new products or
+    market names appear."""
+    text = message or ""
+
+    def _mask(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        normalized = _normalize_marker(raw)
+        if not normalized:
+            return raw
+        if _is_non_signal_token(normalized):
+            return " " * len(raw)
+        if len(normalized) >= 3 and raw[:1].isupper() and _LATIN_PATTERN.match(raw[:1]) and normalized not in ALL_MARKER_WORDS:
+            return " " * len(raw)
+        return raw
+
+    return _WORD_PATTERN.sub(_mask, text)
+
+
 def _script_signal(message: str) -> str:
     """Classify the message's letters as "cyrillic", "latin", "mixed" (both
     present - ambiguous per the X1 decision) or "none" (no letters at all,
@@ -315,7 +441,20 @@ def detect_message_language(
     fixed vocabulary lookups, regexes and arithmetic - no model call, no
     network, no per-run state.
     """
-    script = _script_signal(message)
+    tokens = _tokenize(message)
+    if not tokens:
+        return Detection(None, 0.0, 0.0, "no_tokens")
+
+    # Brand and market/country-name words carry no language signal and must
+    # not dilute or tilt the margin between candidates, and must not make an
+    # otherwise single-script sentence look script-mixed just because the
+    # brand name is conventionally spelled in Latin script (coordinator
+    # review, 2026-09-19) - masked out of every kind of evidence (script
+    # signal, marker-word scoring, distinctive-character bonus) alike.
+    # MIN_TOKENS in resolve_answer_language still counts the raw message.
+    masked_message = _mask_non_signal_spans(message)
+
+    script = _script_signal(masked_message)
     if script == "mixed":
         return Detection(None, 0.0, 0.0, "mixed_script")
     if script == "none":
@@ -326,15 +465,13 @@ def detect_message_language(
     else:
         eligible = tuple(language for language in candidates if language not in _CYRILLIC_ONLY_LANGUAGES)
 
-    tokens = _tokenize(message)
-    if not tokens:
-        return Detection(None, 0.0, 0.0, "no_tokens")
+    scoring_tokens = _tokenize(masked_message)
 
     scores: dict[str, float] = {}
     for language in eligible:
         weights = MARKER_WORD_WEIGHTS.get(language, {})
-        word_score = sum(weights.get(token, 0.0) for token in tokens)
-        scores[language] = word_score + _distinctive_bonus(language, message)
+        word_score = sum(weights.get(token, 0.0) for token in scoring_tokens)
+        scores[language] = word_score + _distinctive_bonus(language, masked_message)
 
     if not scores:
         return Detection(None, 0.0, 0.0, "no_eligible_candidates")
@@ -436,7 +573,13 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
         if detection.language == "sr":
             required_margin += _SERBIAN_EXTRA_MARGIN
 
-    if detection.score < required_score or margin < required_margin:
+    # Scores are sums of float weights (0.2/0.3/0.5/1.0/1.5/2.0/3.0 etc.), so
+    # a margin that is mathematically exactly the threshold can land a hair
+    # under it due to binary floating-point rounding (e.g. 3.1 - 2.1 ==
+    # 0.9999999999999996 in IEEE 754 double precision). A tiny epsilon
+    # absorbs that rounding without weakening the documented threshold.
+    _EPSILON = 1e-9
+    if detection.score < required_score - _EPSILON or margin < required_margin - _EPSILON:
         return AnswerLanguage(selected_language, False, "below_threshold")
 
     return AnswerLanguage(detection.language, True, "strong_signal")
