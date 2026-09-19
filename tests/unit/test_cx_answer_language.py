@@ -33,7 +33,7 @@ class TestDetectMessageLanguage:
     def test_numbers_only_message_has_no_language(self):
         detection = detect_message_language("12345 67890 2026 18")
         assert detection.language is None
-        assert detection.reason == "no_letters"
+        assert detection.reason == "no_tokens"
 
     def test_empty_message_has_no_language(self):
         detection = detect_message_language("")
@@ -415,3 +415,182 @@ class TestAcceptanceSet:
         assert wrong_language_switches == 0, "a switch happened to the wrong language"
         assert precision == 1.0
         assert recall >= 0.85, f"recall {recall:.2%} below the documented 0.85 bar (correct={correct}/{total})"
+
+
+# ---------------------------------------------------------------------------
+# Brand/market extension (coordinator review, 2026-09-19): a realistic
+# customer question routinely names the brand ("Forever", "Aloe Vera") and a
+# market ("Forever Kenya", "...au Kenya ?", "Forever Norge"), sometimes
+# together with a product term ("Forever Bright Toothgel", "Forever
+# Freedom"). These proper nouns carry no language signal and must not dilute
+# or tilt the margin between candidates. At least 4 such questions per
+# language (widget=en), plus 4 English ones (non-en widget), covering the
+# same topics as the base acceptance set.
+# ---------------------------------------------------------------------------
+
+BRAND_MARKET_POSITIVE_CASES: dict[str, tuple[str, ...]] = {
+    "da": (
+        "Hvad koster det at sende Forever Aloe Vera Gel til Forever Danmark?",
+        "Hvordan kan jeg returnere Forever Bright Toothgel, som jeg bestilte hos Forever Norge?",
+        "Hvilke betalingsmetoder accepterer Forever Sverige for Forever Freedom-bestillinger?",
+        "Hvem hos Forever Living Norge kan jeg kontakte om min Aloe Vera Gel-ordre?",
+    ),
+    "de": (
+        "Wie viel kostet der Versand von Forever Aloe Vera Gel nach Forever Kenia?",
+        "Wie kann ich Forever Bright Toothgel zurückgeben, das ich bei Forever Ghana bestellt habe?",
+        "Welche Zahlungsmethoden akzeptiert Forever Norwegen für Forever Freedom-Bestellungen?",
+        "Wer bei Forever Living Schweden kann mir bei meiner Aloe Vera Gel Bestellung helfen?",
+    ),
+    "es": (
+        "¿Cuánto cuesta enviar Forever Aloe Vera Gel a Forever Kenia?",
+        "¿Cómo puedo devolver Forever Bright Toothgel que pedí en Forever Ghana?",
+        "¿Qué métodos de pago acepta Forever Noruega para los pedidos de Forever Freedom?",
+        "¿Quién en Forever Living Suecia puede ayudarme con mi pedido de Aloe Vera Gel?",
+    ),
+    "fi": (
+        "Paljonko Forever Aloe Vera Gelin toimitus Forever Kenialle maksaa?",
+        "Miten voin palauttaa Forever Bright Toothgelin, jonka tilasin Forever Ghanalta?",
+        "Mitä maksutapoja Forever Norja hyväksyy Forever Freedom -tilauksissa?",
+        "Kuka Forever Living Ruotsissa voi auttaa minua Aloe Vera Gel -tilauksessani?",
+    ),
+    "fr": (
+        "Quel est le coût de livraison de Forever Aloe Vera Gel vers Forever Kenya ?",
+        "Comment puis-je retourner Forever Bright Toothgel que j'ai commandé chez Forever Ghana ?",
+        "Quels sont les moyens de paiement acceptés par Forever Kenya ?",
+        "Quels sont les moyens de paiement acceptés par la société Forever au Kenya ?",
+    ),
+    "it": (
+        "Quanto costa spedire Forever Aloe Vera Gel a Forever Kenya?",
+        "Come posso restituire Forever Bright Toothgel che ho ordinato da Forever Ghana?",
+        "Quali metodi di pagamento accetta Forever Norvegia per gli ordini Forever Freedom?",
+        "Chi di Forever Living Svezia può aiutarmi con il mio ordine di Aloe Vera Gel?",
+    ),
+    "nl": (
+        "Wat kost het verzenden van Forever Aloe Vera Gel naar Forever Kenia?",
+        "Hoe kan ik Forever Bright Toothgel retourneren dat ik bij Forever Ghana heb besteld?",
+        "Welke betaalmethoden accepteert Forever Noorwegen voor Forever Freedom-bestellingen?",
+        "Wie bij Forever Living Zweden kan mij helpen met mijn Aloe Vera Gel bestelling?",
+    ),
+    "no": (
+        "Hva koster det å sende Forever Aloe Vera Gel til Forever Kenya?",
+        "Hvordan kan jeg returnere Forever Bright Toothgel som jeg bestilte hos Forever Ghana?",
+        "Hvilke betalingsmåter godtar Forever Norge for Forever Freedom-bestillinger?",
+        "Hvem hos Forever Living Sverige kan hjelpe meg med Aloe Vera Gel-bestillingen min?",
+    ),
+    "ru": (
+        "Сколько стоит доставка Forever Aloe Vera Gel в Forever Кению?",
+        "Как я могу вернуть Forever Bright Toothgel, который я заказал у Forever Гана?",
+        "Какие способы оплаты принимает Forever Норвегия для заказов Forever Freedom?",
+        "Кто в Forever Living Швеция может помочь мне с заказом Aloe Vera Gel?",
+    ),
+    "sr": (
+        "Koliko košta slanje Forever Aloe Vera Gela u Forever Keniju?",
+        "Kako mogu da vratim Forever Bright Toothgel koji sam naručio od Forever Gane?",
+        "Koje načine plaćanja prihvata Forever Norveška za Forever Freedom porudžbine?",
+        "Ko iz Forever Living Švedske može da mi pomogne oko porudžbine Aloe Vera Gela?",
+    ),
+    "sv": (
+        "Vad kostar det att skicka Forever Aloe Vera Gel till Forever Kenya?",
+        "Hur kan jag returnera Forever Bright Toothgel som jag beställde från Forever Ghana?",
+        "Vilka betalningsmetoder accepterar Forever Norge för Forever Freedom-beställningar?",
+        "Vem på Forever Living Sverige kan hjälpa mig med min Aloe Vera Gel-beställning?",
+    ),
+}
+
+# 4 English "Forever + market + product" questions, each with a different
+# non-en widget; must switch to en.
+BRAND_MARKET_ENGLISH_SWITCH_CASES: tuple[tuple[str, str], ...] = (
+    ("de", "How much does it cost to ship Forever Aloe Vera Gel to Forever Norway?"),
+    ("fr", "How can I return Forever Bright Toothgel that I ordered from Forever Sweden?"),
+    ("es", "Which payment methods does Forever Kenya accept for Forever Freedom orders?"),
+    ("ru", "Who at Forever Living Ghana can help me with my Aloe Vera Gel order today?"),
+)
+
+
+class TestBrandMarketAcceptanceSet:
+    """Coordinator review, 2026-09-19: recall on REALISTIC customer questions
+    (which name the brand and a market, sometimes a product) was far too low
+    because those proper nouns diluted or tilted the score. This set is
+    deliberately harder than TestAcceptanceSet's (every sentence carries 2-4
+    proper-noun tokens the detector must see through), so its recall bar is
+    lower, but precision must stay perfect: a proper noun must never cause a
+    switch to the WRONG language, only, at worst, no switch at all."""
+
+    def test_no_wrong_language_switch_anywhere_in_the_brand_market_set(self):
+        failures = []
+        for language, questions in BRAND_MARKET_POSITIVE_CASES.items():
+            for question in questions:
+                result = resolve_answer_language(question, "en")
+                if result.switched and result.answer_language != language:
+                    failures.append((language, question, result))
+        for widget, question in BRAND_MARKET_ENGLISH_SWITCH_CASES:
+            result = resolve_answer_language(question, widget)
+            if result.switched and result.answer_language != "en":
+                failures.append(("en", question, result))
+        assert not failures, f"{len(failures)} wrong-language switches in the brand/market set: {failures}"
+
+    def test_the_two_originally_reported_probes_now_switch_to_french(self):
+        # The exact two sentences the coordinator reported as failing.
+        first = resolve_answer_language(
+            "Quels sont les moyens de paiement acceptés par Forever Kenya ?", "en"
+        )
+        second = resolve_answer_language(
+            "Quels sont les moyens de paiement acceptés par la société Forever au Kenya ?", "en"
+        )
+        assert first == AnswerLanguage("fr", True, "strong_signal")
+        assert second == AnswerLanguage("fr", True, "strong_signal")
+
+    def test_brand_market_recall_meets_the_documented_bar(self):
+        """Aggregate recall/precision over the brand/market set, reported
+        for the coordinator (see docs/conversation-quality/phase3/
+        CX_LANE7_ANSWER_LANGUAGE.md for the full before/after table)."""
+        total = 0
+        correct = 0
+        wrong = 0
+        for language, questions in BRAND_MARKET_POSITIVE_CASES.items():
+            for question in questions:
+                total += 1
+                result = resolve_answer_language(question, "en")
+                if result.switched and result.answer_language == language:
+                    correct += 1
+                elif result.switched:
+                    wrong += 1
+        for widget, question in BRAND_MARKET_ENGLISH_SWITCH_CASES:
+            total += 1
+            result = resolve_answer_language(question, widget)
+            if result.switched and result.answer_language == "en":
+                correct += 1
+            elif result.switched:
+                wrong += 1
+
+        recall = correct / total
+        assert wrong == 0, "a switch happened to the wrong language in the brand/market set"
+        assert recall >= 0.70, f"brand/market recall {recall:.2%} below the documented 0.70 bar ({correct}/{total})"
+
+
+class TestMarketNameExclusion:
+    """Directly exercises the exclusion mechanism, independent of any one
+    sentence's overall outcome."""
+
+    def test_market_name_alone_contributes_no_score(self):
+        # A message that is ONLY brand/market words has no scoring tokens
+        # left and therefore no language evidence at all.
+        detection = detect_message_language("Forever Aloe Vera Kenya Ghana Norway")
+        assert detection.language is None
+
+    def test_short_single_word_country_name_fragment_is_not_excluded(self):
+        # Regression guard for the "Costa Rica" -> "costa" defect found while
+        # tuning this set: multi-word market names must never be split into
+        # single-word fragments that can collide with an unrelated language's
+        # ordinary word (Italian "costa" = "it costs").
+        result = resolve_answer_language(
+            "Quanto costa spedire questo prodotto in Costa Rica e quanto tempo richiede?", "en"
+        )
+        assert result == AnswerLanguage("it", True, "strong_signal")
+
+    def test_latin_brand_name_inside_cyrillic_sentence_is_not_mixed_script(self):
+        detection = detect_message_language(
+            "Сколько стоит доставка Forever Aloe Vera Gel в Forever Кению?"
+        )
+        assert detection.reason != "mixed_script"
+        assert detection.language == "ru"
