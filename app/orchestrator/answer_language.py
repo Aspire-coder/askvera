@@ -196,6 +196,149 @@ ALL_MARKER_WORDS: frozenset[str] = frozenset(
     word for weights in MARKER_WORD_WEIGHTS.values() for word in weights
 )
 
+# --- "None of the above" SINK languages (Fable CX review finding F1, ------
+# 2026-09-19) --------------------------------------------------------------
+# Reachable TODAY: every non-route market's widget still sends "en" (the
+# other 27 configured languages aren't in ChatRequest's enum), so a message
+# actually written in one of them arrives on an "en" widget - exactly the
+# case the F1 probes exercise. The winner-share gate (below) cannot fix
+# this alone: Portuguese and Spanish share enough real function words that
+# a genuinely Portuguese sentence can score "es" with a perfectly healthy
+# winner_share, because from the detector's perspective those words ARE
+# Spanish - it has no Portuguese model to compare against.
+#
+# The fix is to give it one: a small closed marker table (function words +
+# distinctive letters), one entry per likely non-route language, scored
+# ALONGSIDE the 12 real candidates by the exact same mechanism - but a sink
+# language can never itself become ``answer_language``. If a sink's score
+# rivals or beats the route winner's, or a sink's distinctive letter is
+# anywhere in the message, that is itself the signal: the message probably
+# ISN'T written in any of the 12, so the safest answer is not to switch at
+# all (reason "non_route_language_likely") - never a guess at which of the
+# 12 relatives it might be.
+#
+# Not exhaustive (config/markets.json configures languages beyond this
+# list, e.g. ar/el/et/he/ka/ku/kz/ky/lt/lv/uz), but these are the languages
+# Fable's review found actually colliding with a route-copy language's
+# vocabulary; the rest already fail closed today via the winner-share gate
+# and the selected-language gate (S4) - a sink is an extra safety net for
+# the specific collisions found, not a claim of covering every non-route
+# language there is.
+_SINK_LANGUAGES: tuple[str, ...] = ("pt", "hu", "ro", "pl", "cs", "sk", "tr", "hr", "bs", "sq", "mk", "bg", "uk")
+
+# Cyrillic-script sinks (checked only against a Cyrillic-script message);
+# every other sink above is Latin-script.
+_CYRILLIC_SINK_LANGUAGES: frozenset[str] = frozenset({"mk", "bg", "uk"})
+
+_SINK_RAW_MARKER_WORDS: dict[str, str] = {
+    # Portuguese: coordinator-supplied word list verbatim.
+    "pt": "nao sao voce os das dos uma um o com qual para que",
+    "hu": "a az es hogy nem milyen mi hogyan",
+    "ro": "si un o sunt este cu pentru ce cum unde cand nu",
+    "pl": "i nie jest sa na do z co jak ale",
+    "cs": "a je jsou na co jak pro ale",
+    "sk": "a je su na co ako pre ale",
+    "tr": "ve bir bu ne icin mi nasil ile",
+    # Croatian/Bosnian: essentially the same closed-class vocabulary as
+    # Latin Serbian (they are the same pluricentric language for this
+    # purpose - see _SERBIAN_EXTRA_MARGIN's own note), which is exactly
+    # why they need to be a sink against "sr" specifically: the same
+    # evidence that scores "sr" scores these too, so it must never be
+    # treated as proof the message IS Serbian rather than one of these.
+    "hr": "i ili ali je su bio bila ja ti on ona mi vi oni moj tvoj sta kako gde kada zasto ko koji koliko ne za sa u na tko gdje",
+    "bs": "i ili ali je su bio bila ja ti on ona mi vi oni moj tvoj sta kako gdje kada zasto ko koji koliko ne za sa u na",
+    "sq": "dhe eshte nuk kjo kush sa si per ku kur",
+    "mk": "и или но а што е се на за како кој која кое колку не со од да го",
+    "bg": "и или но а какво е на за с кой коя кое колко не със този",
+    "uk": "і або але а що це як на для з цей ця це не зі",
+}
+
+_SINK_DISTINCTIVE_STRONG: dict[str, frozenset[str]] = {
+    # NOTE: adding Spanish's own accented vowels (á/í/ó/ú) here was tried
+    # and reverted - Portuguese and Spanish share that whole accent
+    # inventory closely enough (both Iberian Romance) that crediting it to
+    # the sink vetoed genuinely Spanish sentences too, not just the
+    # Portuguese false positives. Portuguese is distinguished from Spanish
+    # by its own exclusive letters and marker words only; some genuinely
+    # Portuguese sentences with no ã/õ/ç and thin word overlap remain a
+    # documented miss (see CX_LANE7_ANSWER_LANGUAGE.md).
+    "pt": frozenset("ãõçÃÕÇ"),
+    "hu": frozenset("őűŐŰ"),
+    "ro": frozenset("ășțâîĂȘȚÂÎ"),
+    "pl": frozenset("ąęłńśźżĄĘŁŃŚŹŻ"),
+    "cs": frozenset("ěřůťďĚŘŮŤĎ"),
+    "sk": frozenset("ľĺĽĹěťďĚŤĎ"),
+    "tr": frozenset("ğşıİĞŞ"),
+    "hr": frozenset("đĐ"),
+    "bs": frozenset("đĐ"),
+    "sq": frozenset("ëË"),
+    "mk": frozenset("ѓќѕЃЌЅ"),
+    "uk": frozenset("іїєґІЇЄҐ"),
+    # Bulgarian has no letter that is reliably exclusive to it among these
+    # candidates; see _BULGARIAN_MEDIAL_YER below for its own, positional
+    # signal instead (coordinator: "'ъ' in word-medial position is
+    # bg-typical").
+}
+
+# Every sink language's distinctive letters, flattened into one set, for the
+# blanket veto in resolve_answer_language ("distinctive letters of a sink
+# present -> no switch") - deliberately unconditional and independent of
+# which sink they belong to, since the point is only "this doesn't look
+# like any of the 12".
+_ALL_SINK_DISTINCTIVE_LETTERS: frozenset[str] = frozenset(
+    character for letters in _SINK_DISTINCTIVE_STRONG.values() for character in letters
+)
+
+# Bulgarian's "ъ" (yer) is an ordinary, frequent VOWEL sitting between two
+# consonants within a word ("България", "мъж", "връзка") - unlike Russian,
+# where "ъ" only ever appears as a separator sign directly after a prefix
+# and before an iotated vowel (е/ё/ю/я), e.g. "объект", "подъезд". Matching
+# "a Cyrillic consonant, ъ, a Cyrillic consonant" (never followed by one of
+# the four iotated vowels, which would instead point to the Russian
+# separator-sign pattern) is a reasonable, if imperfect, proxy for the
+# Bulgarian shape; an occasional Russian false match only ever makes the
+# sink veto fire when it need not (the safe direction - see module
+# docstring on sinks above).
+_BULGARIAN_MEDIAL_YER = re.compile(
+    r"(?i)[бвгджзйклмнпрстфхцчшщ]ъ[бвгджзйклмнпрстфхцчшщ](?![еёюя])"
+)
+_BULGARIAN_MEDIAL_YER_WEIGHT = 2.0
+_BULGARIAN_MEDIAL_YER_MAX_CREDITS = 2
+
+
+def _build_sink_word_weights() -> dict[str, dict[str, float]]:
+    """Same overlap-discount mechanism as ``_build_word_weights``, but scoped
+    to the sink table alone - a word shared between two SINKS (e.g. "je"
+    between cs/sk) is discounted the same way; a sink word that also happens
+    to be a route-copy marker word is NOT discounted against the route
+    table, because sinks are never compared against each other for identity,
+    only used as a veto against a route winner (see module docstring)."""
+    per_language: dict[str, frozenset[str]] = {
+        language: frozenset(_normalize_marker(word) for word in raw.split())
+        for language, raw in _SINK_RAW_MARKER_WORDS.items()
+    }
+    overlap_counts: dict[str, int] = {}
+    for words in per_language.values():
+        for word in words:
+            overlap_counts[word] = overlap_counts.get(word, 0) + 1
+    weights: dict[str, dict[str, float]] = {}
+    for language, words in per_language.items():
+        weights[language] = {word: _word_overlap_weight(overlap_counts[word]) for word in words}
+    return weights
+
+
+SINK_MARKER_WORD_WEIGHTS: dict[str, dict[str, float]] = _build_sink_word_weights()
+
+# Every normalized word that is a recognized marker for ANY sink language -
+# used the same way ALL_MARKER_WORDS is: so the capitalized-proper-noun
+# heuristic in _mask_non_signal_spans never masks a genuine, capitalized
+# closed-class SINK word either (e.g. Portuguese "Qual" at a sentence's
+# start) - without this, that heuristic would erase the very word evidence
+# the F1 sink fix depends on.
+ALL_SINK_MARKER_WORDS: frozenset[str] = frozenset(
+    word for weights in SINK_MARKER_WORD_WEIGHTS.values() for word in weights
+)
+
 # --- Non-signal tokens: market/country names and the brand -----------------
 # A real customer question routinely names a market ("Forever Kenya",
 # "...au Kenya ?", "...i Norge?") or the brand ("Forever", "Aloe Vera").
@@ -349,6 +492,27 @@ def _distinctive_bonus(language: str, raw_message: str) -> float:
     return bonus
 
 
+def _sink_distinctive_bonus(language: str, raw_message: str) -> float:
+    """Same mechanism as ``_distinctive_bonus``, scoped to the sink table -
+    see ``_SINK_DISTINCTIVE_STRONG`` and ``_BULGARIAN_MEDIAL_YER`` above."""
+    bonus = 0.0
+    strong = _SINK_DISTINCTIVE_STRONG.get(language)
+    if strong:
+        bonus += _STRONG_CHAR_WEIGHT * sum(1 for char in strong if char in raw_message)
+    if language == "bg":
+        matches = len(_BULGARIAN_MEDIAL_YER.findall(raw_message))
+        bonus += _BULGARIAN_MEDIAL_YER_WEIGHT * min(matches, _BULGARIAN_MEDIAL_YER_MAX_CREDITS)
+    return bonus
+
+
+def _any_sink_distinctive_letter_present(raw_message: str) -> bool:
+    """True when the raw message contains ANY sink language's distinctive
+    letter, anywhere - the unconditional half of the sink veto (coordinator:
+    "Distinctive letters of a sink present -> no switch"), independent of
+    score comparisons."""
+    return any(character in raw_message for character in _ALL_SINK_DISTINCTIVE_LETTERS)
+
+
 # A tokenizer that returns letter-only words (Unicode-aware; digits and
 # punctuation are never tokens), normalized the same way as the marker
 # tables, so a numeric/code-only message tokenizes to nothing and can never
@@ -399,7 +563,13 @@ def _mask_non_signal_spans(message: str) -> str:
             return raw
         if _is_non_signal_token(normalized):
             return " " * len(raw)
-        if len(normalized) >= 3 and raw[:1].isupper() and _LATIN_PATTERN.match(raw[:1]) and normalized not in ALL_MARKER_WORDS:
+        if (
+            len(normalized) >= 3
+            and raw[:1].isupper()
+            and _LATIN_PATTERN.match(raw[:1])
+            and normalized not in ALL_MARKER_WORDS
+            and normalized not in ALL_SINK_MARKER_WORDS
+        ):
             return " " * len(raw)
         return raw
 
@@ -442,8 +612,12 @@ class Detection(NamedTuple):
     message's words match nothing in Spanish at all). ``winner_letter_evidence``
     is the distinctive-character/pattern bonus alone (see
     ``_distinctive_bonus``) that contributed to ``language``'s score - 0.0
-    when its score is built entirely from marker words. ``reason`` documents
-    which branch produced the result.
+    when its score is built entirely from marker words. ``sink_language`` and
+    ``sink_score`` are the best-scoring "none of the above" SINK candidate
+    (see ``_SINK_LANGUAGES``, Fable CX review finding F1, 2026-09-19) and its
+    score - never a switch target itself, only evidence that the message
+    probably isn't written in any of the 12 route-copy languages at all.
+    ``reason`` documents which branch produced the result.
     """
 
     language: str | None
@@ -452,6 +626,8 @@ class Detection(NamedTuple):
     reason: str
     winner_share: float = 0.0
     winner_letter_evidence: float = 0.0
+    sink_language: str | None = None
+    sink_score: float = 0.0
 
 
 def detect_message_language(
@@ -487,8 +663,10 @@ def detect_message_language(
 
     if script == "cyrillic":
         eligible = tuple(language for language in candidates if language in {"ru", "sr"})
+        sink_eligible = tuple(language for language in _SINK_LANGUAGES if language in _CYRILLIC_SINK_LANGUAGES)
     else:
         eligible = tuple(language for language in candidates if language not in _CYRILLIC_ONLY_LANGUAGES)
+        sink_eligible = tuple(language for language in _SINK_LANGUAGES if language not in _CYRILLIC_SINK_LANGUAGES)
 
     scoring_tokens = _tokenize(masked_message)
 
@@ -505,18 +683,45 @@ def detect_message_language(
         hit_count = sum(1 for token in scoring_tokens if token in weights)
         hit_shares[language] = (hit_count / token_count) if token_count else 0.0
 
+    # SINK languages (F1): scored the same way, from the same masked tokens,
+    # but never eligible to win the detection itself - only reported so
+    # resolve_answer_language can veto a switch when one of them rivals the
+    # route winner. See module docstring above _SINK_LANGUAGES.
+    sink_scores: dict[str, float] = {
+        language: (
+            sum(SINK_MARKER_WORD_WEIGHTS.get(language, {}).get(token, 0.0) for token in scoring_tokens)
+            + _sink_distinctive_bonus(language, masked_message)
+        )
+        for language in sink_eligible
+    }
+    sink_language: str | None = None
+    sink_score = 0.0
+    if sink_scores:
+        best_sink_language, best_sink_score = max(sink_scores.items(), key=lambda item: item[1])
+        if best_sink_score > 0:
+            sink_language, sink_score = best_sink_language, best_sink_score
+
     if not scores:
-        return Detection(None, 0.0, 0.0, "no_eligible_candidates")
+        return Detection(None, 0.0, 0.0, "no_eligible_candidates", sink_language=sink_language, sink_score=sink_score)
 
     ordered = sorted(scores.items(), key=lambda item: (-item[1], candidates.index(item[0])))
     top_language, top_score = ordered[0]
     runner_up_score = ordered[1][1] if len(ordered) > 1 else 0.0
 
     if top_score <= 0:
-        return Detection(None, 0.0, runner_up_score, "no_marker_hits")
+        return Detection(
+            None, 0.0, runner_up_score, "no_marker_hits", sink_language=sink_language, sink_score=sink_score
+        )
 
     return Detection(
-        top_language, top_score, runner_up_score, "scored", hit_shares[top_language], letter_evidence[top_language]
+        top_language,
+        top_score,
+        runner_up_score,
+        "scored",
+        hit_shares[top_language],
+        letter_evidence[top_language],
+        sink_language,
+        sink_score,
     )
 
 
@@ -598,6 +803,16 @@ MIN_WINNER_SHARE = 0.1
 # letter-less; the letter-bearing ones use the lenient bar instead).
 CYRILLIC_MIN_WINNER_SHARE_WORDS_ONLY = 0.3
 
+# Fable CX review finding F1 (2026-09-19): the margin a "none of the above"
+# SINK language must be beaten by, for resolve_answer_language's sink veto.
+# Deliberately the plain base margin (MIN_MARGIN), not whatever
+# near-pair/Serbian-inflated `required_margin` the route winner itself had
+# to clear - the sink veto is a separate safety net, not a repeat of the
+# same near-pair logic (reusing the inflated margin would veto nearly every
+# genuine Latin-Serbian sentence against its own hr/bs sink, whose marker
+# words mirror Serbian's almost exactly by construction).
+SINK_VETO_MARGIN = MIN_MARGIN
+
 
 def _normalize_language_code(code: str) -> str:
     """Fold a BCP-47-ish language tag down to its base subtag, casefolded
@@ -621,6 +836,75 @@ class AnswerLanguage(NamedTuple):
     answer_language: str
     switched: bool
     reason: str
+
+
+_EPSILON = 1e-9
+
+
+def _required_thresholds(detection: Detection, script: str, normalized_selected: str) -> tuple[float, float, float]:
+    """The (required_score, required_margin, required_share) a winning
+    ``detection`` must clear, given the message's script and the selected
+    widget language - split out of ``resolve_answer_language`` purely to
+    keep that function's own branching manageable."""
+    required_share = MIN_WINNER_SHARE
+
+    if script == "cyrillic":
+        if detection.language == "ru" and detection.winner_letter_evidence <= 0:
+            # No Russian-exclusive letter (ы/э/ъ/ё) anywhere in the message:
+            # the score is built entirely from marker words Russian shares
+            # with its closest Cyrillic-script relatives (Ukrainian,
+            # Bulgarian, Kazakh, Kyrgyz), so the low floor below - tuned for
+            # genuine word-sparse Russian questions - is not trustworthy
+            # here (Fable S4). Fall back to the stricter, words-only bar.
+            required_score = CYRILLIC_MIN_SCORE_WORDS_ONLY
+            required_margin = CYRILLIC_MIN_MARGIN_WORDS_ONLY
+            required_share = CYRILLIC_MIN_WINNER_SHARE_WORDS_ONLY
+        else:
+            required_score = CYRILLIC_MIN_SCORE_WITH_LETTER_EVIDENCE
+            required_margin = CYRILLIC_MIN_MARGIN_WITH_LETTER_EVIDENCE
+        if detection.language == "sr":
+            required_margin += CYRILLIC_SERBIAN_EXTRA_MARGIN
+        return required_score, required_margin, required_share
+
+    required_score = MIN_SCORE
+    required_margin = MIN_MARGIN
+    if frozenset({detection.language, normalized_selected}) <= _NEAR_LANGUAGE_GROUP:
+        required_margin += _NEAR_PAIR_EXTRA_MARGIN
+    if detection.language == "sr":
+        required_margin += _SERBIAN_EXTRA_MARGIN
+    return required_score, required_margin, required_share
+
+
+def _sink_veto_reason(detection: Detection, message: str) -> str | None:
+    """"None of the above" SINK veto (Fable CX review finding F1,
+    2026-09-19): a message actually written in a non-route language
+    (Portuguese, Hungarian, Croatian, ...) can score a real route-copy
+    relative highly enough to pass every other gate, because the
+    relative's vocabulary genuinely overlaps. Two independent signals
+    block the switch instead of guessing which of the 12 the message
+    "really" is:
+      1. any sink language's distinctive letter is present anywhere in the
+         message (unconditional - see _any_sink_distinctive_letter_present);
+      2. the best-scoring sink rivals the route winner - it either
+         outscores it outright, or sits within SINK_VETO_MARGIN of it.
+    Returns the veto reason string, or None when the switch may proceed.
+    """
+    if _any_sink_distinctive_letter_present(message):
+        return "non_route_language_likely"
+    if detection.sink_language is None:
+        return None
+    # A dedicated margin, not the (possibly inflated) `required_margin` the
+    # route winner itself had to clear: hr/bs are sinks against "sr"
+    # specifically BECAUSE their marker words mirror it almost exactly (see
+    # _SINK_RAW_MARKER_WORDS' "hr"/"bs" note), so reusing _SERBIAN_EXTRA_MARGIN
+    # here too would veto nearly every genuine Latin-Serbian sentence
+    # outright. SINK_VETO_MARGIN is the plain base margin every route pair
+    # must already clear against ANOTHER route candidate - the sink is held
+    # to that same bar, no more, no less.
+    sink_margin = detection.score - detection.sink_score
+    if detection.sink_score >= detection.score or sink_margin < SINK_VETO_MARGIN - _EPSILON:
+        return "non_route_language_likely"
+    return None
 
 
 def resolve_answer_language(message: str, selected_language: str) -> AnswerLanguage:
@@ -662,31 +946,7 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
 
     script = _script_signal(message)
     margin = detection.score - detection.runner_up
-    required_share = MIN_WINNER_SHARE
-
-    if script == "cyrillic":
-        if detection.language == "ru" and detection.winner_letter_evidence <= 0:
-            # No Russian-exclusive letter (ы/э/ъ/ё) anywhere in the message:
-            # the score is built entirely from marker words Russian shares
-            # with its closest Cyrillic-script relatives (Ukrainian,
-            # Bulgarian, Kazakh, Kyrgyz), so the low floor below - tuned for
-            # genuine word-sparse Russian questions - is not trustworthy
-            # here (Fable S4). Fall back to the stricter, words-only bar.
-            required_score = CYRILLIC_MIN_SCORE_WORDS_ONLY
-            required_margin = CYRILLIC_MIN_MARGIN_WORDS_ONLY
-            required_share = CYRILLIC_MIN_WINNER_SHARE_WORDS_ONLY
-        else:
-            required_score = CYRILLIC_MIN_SCORE_WITH_LETTER_EVIDENCE
-            required_margin = CYRILLIC_MIN_MARGIN_WITH_LETTER_EVIDENCE
-        if detection.language == "sr":
-            required_margin += CYRILLIC_SERBIAN_EXTRA_MARGIN
-    else:
-        required_score = MIN_SCORE
-        required_margin = MIN_MARGIN
-        if frozenset({detection.language, normalized_selected}) <= _NEAR_LANGUAGE_GROUP:
-            required_margin += _NEAR_PAIR_EXTRA_MARGIN
-        if detection.language == "sr":
-            required_margin += _SERBIAN_EXTRA_MARGIN
+    required_score, required_margin, required_share = _required_thresholds(detection, script, normalized_selected)
 
     # The winner must not just outscore the runner-up; its OWN evidence must
     # be a real fraction of the message (Fable S4) - otherwise a handful of
@@ -701,9 +961,12 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
     # under it due to binary floating-point rounding (e.g. 3.1 - 2.1 ==
     # 0.9999999999999996 in IEEE 754 double precision). A tiny epsilon
     # absorbs that rounding without weakening the documented threshold.
-    _EPSILON = 1e-9
     if detection.score < required_score - _EPSILON or margin < required_margin - _EPSILON:
         return AnswerLanguage(selected_language, False, "below_threshold")
+
+    sink_veto = _sink_veto_reason(detection, message)
+    if sink_veto is not None:
+        return AnswerLanguage(selected_language, False, sink_veto)
 
     return AnswerLanguage(detection.language, True, "strong_signal")
 

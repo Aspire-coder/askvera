@@ -210,6 +210,21 @@ class TestRetrievalLanguageInvariant:
 
 _NO_DA_AMBIGUOUS_PAIR = frozenset({"no", "da"})
 
+# Known, documented miss within ACCEPTANCE_POSITIVE_CASES (Fable CX review
+# finding F4, 2026-09-19): an earlier revision silently SWAPPED this
+# sentence out for one that switches, when removing the (incorrect) Latin
+# Serbian diacritic bonus made it stop switching - without saying so in
+# CX_LANE7's "unchanged" recall claim. It is restored here, kept in the
+# table (not deleted again) so a future change that makes it start
+# switching - right OR wrong - is visible, and so the recall bar stays
+# honest about exactly what it covers. It genuinely IS ambiguous with
+# Croatian/Bosnian (see the hr/bs sink in answer_language.py), so staying
+# unswitched is the correct, safe outcome, not a defect - see
+# TestAcceptanceSet.test_known_miss_sr_sentence_stays_unswitched.
+_KNOWN_MISS_CASES: frozenset[tuple[str, str]] = frozenset(
+    {("sr", "Koje načine plaćanja prihvatate za porudžbine na internetu?")}
+)
+
 # 4 questions per language x 12 languages = 48, covering shipping cost,
 # returns, payment methods and contact/sponsorship.
 ACCEPTANCE_POSITIVE_CASES: dict[str, tuple[str, ...]] = {
@@ -270,6 +285,9 @@ ACCEPTANCE_POSITIVE_CASES: dict[str, tuple[str, ...]] = {
     "sr": (
         "Koliko košta dostava porudžbine u Srbiju i koliko to traje?",
         "Kako mogu da vratim proizvod koji sam naručio prošle nedelje?",
+        # Known miss - see _KNOWN_MISS_CASES above (Fable F4): restored,
+        # not deleted, and excluded from the "must switch" assertion below.
+        "Koje načine plaćanja prihvatate za porudžbine na internetu?",
         "Da li prihvatate sve načine plaćanja za porudžbine na internetu?",
         "Ko je moj sponzor i kako mogu da ga kontaktiram?",
     ),
@@ -322,17 +340,33 @@ class TestAcceptanceSet:
 
     def test_every_non_near_pair_language_switches_correctly(self):
         """Every language outside the no/da ambiguous pair must switch to
-        exactly the expected language for every one of its 4 questions
-        (recall == 1.0, and never a WRONG language - precision == 1.0)."""
+        exactly the expected language for every one of its questions except
+        the documented _KNOWN_MISS_CASES (recall == 1.0 on the rest, and
+        never a WRONG language anywhere - precision == 1.0)."""
         failures = []
         for language, questions in ACCEPTANCE_POSITIVE_CASES.items():
             if language in _NO_DA_AMBIGUOUS_PAIR:
                 continue
             for question in questions:
+                if (language, question) in _KNOWN_MISS_CASES:
+                    continue
                 result = resolve_answer_language(question, "en")
                 if not (result.switched and result.answer_language == language):
                     failures.append((language, question, result))
         assert not failures, f"{len(failures)} acceptance-set failures: {failures}"
+
+    def test_known_miss_sr_sentence_stays_unswitched(self):
+        """Fable CX review finding F4 (2026-09-19): this sentence is a
+        genuine, documented non-switch - restored after an earlier revision
+        silently swapped it for one that switches instead of saying so. It
+        is ambiguous with Croatian/Bosnian (their marker words mirror
+        Serbian's almost exactly - see answer_language.py's "hr"/"bs" sink
+        note), so staying unswitched is the correct, safe outcome, never a
+        wrong-language switch."""
+        for language, question in _KNOWN_MISS_CASES:
+            result = resolve_answer_language(question, "en")
+            assert result.switched is False, (language, question, result)
+            assert result.answer_language == "en", (language, question, result)
 
     def test_no_da_pair_never_crosses_to_the_wrong_member(self):
         """no/da may legitimately stay unswitched on a genuinely ambiguous
@@ -776,3 +810,177 @@ class TestPortugueseCroatianUkrainianTurkishOnEnglishWidget:
         ):
             result = resolve_answer_language(message, "en")
             assert result.answer_language not in ("fr", "de"), (message, result)
+
+
+# ---------------------------------------------------------------------------
+# "None of the above" SINK languages (Fable CX review finding F1,
+# 2026-09-19): reachable TODAY, because every non-route market's widget
+# still sends "en" (the other configured languages aren't in ChatRequest's
+# enum), so a message actually written in one of them lands on an "en"
+# widget. The winner-share gate (S4) alone cannot separate a genuinely
+# Portuguese/Hungarian/Croatian/... sentence from its closest route-copy
+# relative, because the vocabulary genuinely overlaps - fixed with a small,
+# closed marker table per likely non-route language (function words +
+# distinctive letters), scored alongside the 12 real candidates but never
+# eligible to become answer_language itself; if a sink rivals the route
+# winner, or a sink's distinctive letter appears anywhere, the turn stays
+# unswitched (reason "non_route_language_likely").
+# ---------------------------------------------------------------------------
+
+# The exact three sentences the coordinator reported as failing.
+FABLE_F1_EXACT_SENTENCES: tuple[str, ...] = (
+    "Qual é o custo de entrega para a Forever Portugal?",
+    "Quais são os métodos de pagamento aceites?",
+    "Milyen fizetési módokat fogadnak el?",
+)
+
+# >=5 realistic customer questions (shipping cost, returns, payment methods,
+# sponsorship/contact) in each of the 10 sink languages named in the
+# coordinator's fix, widget="en" - must not switch.
+SINK_LANGUAGE_NEGATIVE_CASES: dict[str, tuple[str, ...]] = {
+    "pt": (
+        "Qual é o custo de entrega para a Forever Portugal?",
+        "Quais são os métodos de pagamento aceites?",
+        "Como posso devolver um produto que encomendei há uma semana?",
+        "Quem é o meu patrocinador e como posso contactá-lo?",
+        "Quanto tempo demora a entrega de uma encomenda normal?",
+    ),
+    "hu": (
+        "Milyen fizetési módokat fogadnak el?",
+        "Mennyibe kerül egy rendelés kiszállítása?",
+        "Hogyan tudom visszaküldeni a terméket, amit rendeltem?",
+        "Ki a szponzorom és hogyan léphetek vele kapcsolatba?",
+        "Mennyi ideig tart a szállítás általában?",
+    ),
+    "ro": (
+        "Cât costă livrarea unei comenzi?",
+        "Cum pot returna un produs pe care l-am comandat?",
+        "Ce metode de plată acceptați pentru comenzile online?",
+        "Cine este sponsorul meu și cum pot să îl contactez?",
+        "Cât timp durează livrarea de obicei?",
+    ),
+    "pl": (
+        "Ile kosztuje dostawa zamówienia?",
+        "Jak mogę zwrócić produkt, który zamówiłem?",
+        "Jakie metody płatności akceptujecie przy zamówieniach online?",
+        "Kto jest moim sponsorem i jak mogę się z nim skontaktować?",
+        "Jak długo trwa zwykle dostawa?",
+    ),
+    "tr": (
+        "Bir siparişin teslimat ücreti ne kadar?",
+        "Sipariş ettiğim bir ürünü nasıl iade edebilirim?",
+        "Çevrimiçi siparişler için hangi ödeme yöntemlerini kabul ediyorsunuz?",
+        "Sponsorum kim ve onunla nasıl iletişime geçebilirim?",
+        "Teslimat genellikle ne kadar sürer?",
+    ),
+    "hr": (
+        "Koliko košta dostava narudžbe?",
+        "Kako mogu vratiti proizvod koji sam naručio?",
+        "Koje načine plaćanja prihvaćate za narudžbe putem interneta?",
+        "Tko je moj sponzor i kako ga mogu kontaktirati?",
+        "Koliko obično traje dostava?",
+    ),
+    "sq": (
+        "Cilat metoda pagese pranoni për porositë në internet?",
+        "Sa kushton dërgesa e një porosie?",
+        "Si mund ta kthej një produkt që porosita?",
+        "Kush është sponsori im dhe si mund ta kontaktoj?",
+        "Sa kohë zgjat zakonisht dërgesa?",
+    ),
+    "mk": (
+        "Кои начини на плаќање ги прифаќате за нарачки преку интернет?",
+        "Колку чини достава на нарачка?",
+        "Како можам да го вратам производот што го нарачав?",
+        "Кој е мојот спонзор и како можам да го контактирам?",
+        "Колку време обично трае доставата?",
+    ),
+    "bg": (
+        "Какви методи на плащане приемате за поръчки онлайн?",
+        "Колко струва доставката на поръчка?",
+        "Как мога да върна продукт, който съм поръчал?",
+        "Кой е моят спонсор и как мога да се свържа с него?",
+        "Колко време обикновено отнема доставката?",
+    ),
+    "uk": (
+        "Які способи оплати ви приймаєте для замовлень онлайн?",
+        "Скільки коштує доставка замовлення?",
+        "Як я можу повернути товар, який я замовив?",
+        "Хто мій спонсор і як я можу з ним зв'язатися?",
+        "Скільки зазвичай триває доставка?",
+    ),
+}
+
+# Disclosed, documented remaining misses (coordinator: "a small drop is
+# acceptable; state it") - both still switch to "es" despite the sink fix.
+# Neither could be closed without collateral damage to genuine Spanish
+# recall: strengthening the Portuguese/Hungarian sink's shared accented
+# vowels (á/é/í/ó/ú) to compensate for Spanish's own letter bonus also
+# vetoed genuinely Spanish sentences elsewhere in the acceptance set (or,
+# for Hungarian, collided with French's very common "é") once tried - see
+# answer_language.py's "pt"/"hu" _SINK_DISTINCTIVE_STRONG notes. Both are
+# short sentences with only one matching sink marker word each.
+SINK_LANGUAGE_KNOWN_MISSES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("pt", "Quem é o meu patrocinador e como posso contactá-lo?"),
+        ("hu", "Milyen fizetési módokat fogadnak el?"),
+    }
+)
+
+
+class TestSinkLanguages:
+    """Fable CX review finding F1 (2026-09-19)."""
+
+    def test_fable_exact_sentences_no_longer_switch_to_spanish_except_the_documented_miss(self):
+        for message in FABLE_F1_EXACT_SENTENCES:
+            result = resolve_answer_language(message, "en")
+            is_known_miss = any(message == miss_message for _, miss_message in SINK_LANGUAGE_KNOWN_MISSES)
+            if is_known_miss:
+                continue
+            assert result.switched is False, (message, result)
+            assert result.answer_language == "en", (message, result)
+
+    def test_sink_language_negatives_never_switch_except_the_documented_misses(self):
+        failures = []
+        for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
+            for question in questions:
+                if (language, question) in SINK_LANGUAGE_KNOWN_MISSES:
+                    continue
+                result = resolve_answer_language(question, "en")
+                if result.switched:
+                    failures.append((language, question, result))
+        assert not failures, f"{len(failures)} sink-language false switches: {failures}"
+
+    def test_recall_of_the_sink_negative_set(self):
+        """Aggregate count for the coordinator report: how many of the 50
+        realistic non-route-language questions correctly stay unswitched."""
+        total = 0
+        correct = 0
+        for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
+            for question in questions:
+                total += 1
+                result = resolve_answer_language(question, "en")
+                if not result.switched:
+                    correct += 1
+        # Recorded for the coordinator report: correct/total == 48/50 (96%);
+        # the 2 misses are SINK_LANGUAGE_KNOWN_MISSES, disclosed above.
+        assert total == 50
+        assert correct >= 48, f"only {correct}/{total} sink negatives stayed unswitched"
+
+    def test_disclosed_known_misses_behave_as_documented(self):
+        """The two remaining false switches are asserted explicitly (not
+        silently tolerated) so a future change that fixes - or worsens -
+        either one is immediately visible here."""
+        for language, question in SINK_LANGUAGE_KNOWN_MISSES:
+            result = resolve_answer_language(question, "en")
+            assert result.switched is True, (language, question, result)
+            assert result.answer_language == "es", (language, question, result)
+
+    def test_no_wrong_language_switch_in_the_sink_negative_set(self):
+        """Precision floor: even the two disclosed misses only ever switch
+        to "es" (never some other, arbitrary language), and nothing in the
+        set switches to anything but "es"."""
+        for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
+            for question in questions:
+                result = resolve_answer_language(question, "en")
+                if result.switched:
+                    assert result.answer_language == "es", (language, question, result)
