@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import re
+import unicodedata
 from collections.abc import Iterable
 
 from utils.sentence_spans import sentence_boundaries
@@ -210,8 +211,50 @@ _DIRECTORY_INTENT_SYNONYM_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
 # inflected word, so - like _DIRECTORY_INTENT_SYNONYM_PATTERNS above, and
 # unlike the compound-stem LANGUAGE_FIELD_TERMS - both a leading and a
 # trailing boundary are used.
+#
+# R05/N6 third follow-up (2026-09-18, coordinator review of 88da3cc): a
+# Spanish/French/Portuguese/etc. question that omits its accents entirely
+# ("Cual es la politica de Forever Norway sobre los metodos de pago?" -
+# no accent on "politica") did not match POLICY_WORDING_TERMS at all (it
+# only spelled "política" accented), while LANGUAGE_FIELD_TERMS's own
+# "metodos de pago" pattern (``m[eé]todos?\s+de\s+pago``) tolerates the
+# missing accent via an explicit character class - so the question still
+# fell through to the (accent-tolerant) field disjunct and was wrongly
+# promoted to "directory". There is no single shared runtime normalizer to
+# import here for this: the field vocabulary's own accent tolerance is
+# built pattern-by-pattern (explicit accented/unaccented literal pairs, or
+# an ``[eé]``-style character class per term), not a text-normalization
+# pass, and the closest thing to a reusable fold function
+# (``app/retrieval/providers.py``'s ``_fold_search_text``, NFKD-decompose +
+# strip combining marks + casefold) cannot be imported here without a
+# circular import (``providers.py`` already imports this module). Fixed
+# instead by folding both sides - the POLICY_WORDING_TERMS literals (at
+# compile time) and the question text (at match time) - through the
+# identical NFKD/strip-combining/casefold recipe ``_fold_search_text`` uses,
+# so a single accented spelling in the vocabulary matches its accentless,
+# NFC, and NFD-decomposed variants alike, without hand-maintaining a second
+# accentless literal or character class per term. NFKD only decomposes
+# characters that have a compatibility decomposition; Cyrillic letters (ru,
+# sr) have none, so this folding is a no-op for them and does not disturb
+# those entries.
+
+
+def _fold_diacritics(text: str) -> str:
+    """NFKD-decompose, drop combining marks, casefold - the same recipe
+    ``app/retrieval/providers.py._fold_search_text`` uses for its own local
+    query-expansion heuristics, duplicated here (not imported, to avoid a
+    circular import: ``providers.py`` imports this module) so an accented,
+    accentless, or NFD-decomposed spelling of the same word all fold to one
+    comparable form."""
+    decomposed = unicodedata.normalize("NFKD", text or "").casefold()
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
 _POLICY_WORDING_PATTERNS: dict[str, re.Pattern[str]] = {
-    language: re.compile(r"(?<!\w)(?:" + "|".join(terms) + r")(?!\w)", re.IGNORECASE | re.UNICODE)
+    language: re.compile(
+        r"(?<!\w)(?:" + "|".join(re.escape(_fold_diacritics(term)) for term in terms) + r")(?!\w)",
+        re.IGNORECASE | re.UNICODE,
+    )
     for language, terms in POLICY_WORDING_TERMS.items()
 }
 
@@ -241,11 +284,22 @@ def localized_policy_wording_present(question: str, *, language: str = "en") -> 
     itself) returns ``False`` here - the same "not recognized" default
     :func:`directory_field_intent_present` uses for its own English-only
     synonym disjunct - never worse than before this addition.
+
+    The question is matched in its accent-folded form (:func:`_fold_diacritics`,
+    the same NFKD/strip-combining/casefold recipe the compiled patterns'
+    terms were folded with), so an accented spelling ("politica" vs.
+    "política"), an accentless spelling users routinely type, and an
+    NFD-decomposed spelling of either all match identically. This mirrors -
+    without duplicating each term by hand - the accent tolerance
+    ``LANGUAGE_FIELD_TERMS`` already gets pattern-by-pattern (explicit
+    accented/unaccented literal pairs, or an ``[eé]``-style character
+    class); see the third R05/N6 follow-up note above
+    ``_POLICY_WORDING_PATTERNS`` for why folding, not import, was used.
     """
     pattern = _POLICY_WORDING_PATTERNS.get(normalize_language_code(language))
     if pattern is None:
         return False
-    return bool(pattern.search(question or ""))
+    return bool(pattern.search(_fold_diacritics(question or "")))
 
 
 def directory_field_intent_present(question: str, *, language: str = "en") -> bool:

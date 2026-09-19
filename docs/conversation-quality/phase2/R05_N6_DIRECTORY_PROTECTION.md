@@ -473,3 +473,94 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   only**, not `LANGUAGE_FIELD_TERMS`'s compound stems, which still
   intentionally omit a trailing boundary for the documented inflection
   reasons in `config/directory_field_vocabulary.py`'s own docstring.
+
+## Third follow-up (2026-09-18): coordinator review of 88da3cc - accent folding
+
+A coordinator review of the F1 fix (commit `88da3cc`) found a symmetric gap:
+`POLICY_WORDING_TERMS` only spelled its accented forms ("política"), so a
+question that omits accents entirely - which users routinely do - did not
+match it, while `LANGUAGE_FIELD_TERMS`'s own field patterns already tolerate
+missing accents (e.g. Spanish `m[eé]todos?\s+de\s+pago` matches "metodos de
+pago" via an explicit character class). Probe:
+`localized_policy_wording_present("Cual es la politica de Forever Norway
+sobre los metodos de pago?", language="es")` returned `False` while
+`directory_field_intent_present` returned `True` for the same text, so the
+question still resolved to `directory`/8.0 - reopening F1's own bug for
+accentless input.
+
+**Fix:** rather than hand-maintaining a second accentless literal or
+character class per `POLICY_WORDING_TERMS` term (which the field vocabulary
+does, pattern-by-pattern, and which does not generalize), both the
+vocabulary's terms (at compile time) and the question text (at match time)
+are folded through the same NFKD-decompose/strip-combining-marks/casefold
+recipe `app/retrieval/providers.py`'s own `_fold_search_text` already uses
+for its local query-expansion heuristics. That exact function could not be
+imported into `utils/directory_fields.py` (`providers.py` already imports
+*from* that module, so importing back would be circular), so a private
+`_fold_diacritics` duplicate was added there instead, documented as
+intentionally mirroring `_fold_search_text` rather than reinventing it. This
+folding also transparently handles NFD-decomposed input (a base letter plus
+a separate combining-mark codepoint, one of two valid Unicode encodings of
+the same accented text) without any special-casing, since NFKD decomposition
+subsumes NFD. Cyrillic letters (ru, sr) have no compatibility decomposition,
+so folding is a no-op for those entries and they are unaffected.
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| "Cual es la politica de Forever Norway sobre los metodos de pago?" (es, accentless) | `directory` (8.0) | `policy` (0.0) |
+| "Quelles sont les regles de Forever Norge sur l'adresse de livraison ?" (fr, accentless) | `directory` (8.0) | `policy` (0.0) |
+| "Qual e a politica de Forever Ghana sobre as formas de pagamento?" (pt, accentless) | `directory` (8.0) | `policy` (0.0) |
+| NFD-decomposed form of the accented Spanish F1 repro | `ambiguous` (0.0)* | `policy` (0.0) |
+| "¿Cuál es la política ...?" (es, accented, precomposed - F1 control) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| "Welche Regeln ...?" (de, control - already accentless) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+
+\* Before this fix, NFD-decomposed accented Spanish text also broke the
+(unfolded) field-intent match - `directory_field_intent_present`'s own
+character-class patterns expect a single precomposed accented character, not
+a base letter plus a separate combining mark - so that specific probe landed
+on `ambiguous`, not `directory`. This is a separate, narrower, pre-existing
+gap in the field disjunct for NFD input specifically; it is not addressed
+here (out of scope for this coordinator review), but the policy-wording fix
+resolves the question correctly regardless, because it is checked first.
+
+### Third follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 8 new accent-folding tests, on `utils/directory_fields.py` reverted
+   via `git stash` (tests kept): **6 failed, 2 passed, `EXIT=1`** - the 2
+   pre-existing passes are the German control (no accent to begin with) and
+   the accented-Portuguese control (already matched via the literal,
+   unfolded term added in the second follow-up); the 6 failures are the
+   genuine accentless/NFD-decomposed reproductions. `git stash pop` restored
+   the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **658 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **8982 passed, 13
+   xfailed, `EXIT=0`**, 387.63s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): **no output,
+   `FLAKE8_EXIT=0`** (one `E302` blank-line finding was caught and fixed
+   during this follow-up before the final run).
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Third follow-up limitations
+
+- **The NFD-input gap in `directory_field_intent_present` itself (see the
+  table footnote above) is not fixed here** - it is masked for policy
+  questions because the policy check runs first, but a genuinely
+  directory-intentioned question typed with NFD-decomposed accents (an
+  uncommon but valid input encoding) would still not be recognized by the
+  field disjunct. Flagged as a candidate for a future, narrower follow-up if
+  NFD input is confirmed to occur in practice; not in this review's scope.
+- **`_fold_diacritics` is a small, private duplicate of
+  `app/retrieval/providers.py._fold_search_text`**, not a shared import,
+  specifically to avoid a circular import between that module and
+  `utils/directory_fields.py`. If a third caller needs the same fold in the
+  future, it should move to a shared, dependency-free location rather than
+  being duplicated a third time.
