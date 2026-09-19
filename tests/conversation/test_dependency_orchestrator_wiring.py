@@ -193,20 +193,37 @@ def test_metric_does_not_fire_for_a_guardrail_block(recorded_calls):
     assert recorded_calls == []
 
 
+# Coordinator, 2026-09-18 (CX, approval 6 option B): the answer now follows the
+# language the message is written in, so each case writes its question in the
+# widget's language. The English-message/French-widget case is asserted
+# explicitly below instead of being implied here.
 @pytest.mark.parametrize(
-    "language,expected_phrase",
+    "language,message,expected_phrase",
     [
-        ("en", "technical hiccup"),
-        ("fr", "difficulté technique"),
-        ("es", "problema técnico"),
+        ("en", "How do I qualify as a Recognized Manager?", "technical hiccup"),
+        ("fr", "Comment est-ce que je peux devenir Recognized Manager ?", "difficulté technique"),
+        ("es", "¿Cómo puedo calificar como Recognized Manager?", "problema técnico"),
     ],
 )
-def test_dependency_copy_is_localized_and_never_the_missing_evidence_text(language, expected_phrase, recorded_calls):
-    response = _handle(
-        _RetrieverWithEvidence(), _RouterRaisesBedrockTimeout(), "How do I qualify as a Recognized Manager?",
-        language=language,
-    )
+def test_dependency_copy_is_localized_and_never_the_missing_evidence_text(
+    language, message, expected_phrase, recorded_calls
+):
+    response = _handle(_RetrieverWithEvidence(), _RouterRaisesBedrockTimeout(), message, language=language)
     assert response.metadata.get("failure_layer") == "dependency_unavailable"
     assert expected_phrase in response.answer.lower()
     assert "do not contain enough information" not in response.answer
     assert "ne contiennent pas suffisamment d'informations" not in response.answer.lower()
+
+
+def test_dependency_copy_follows_the_message_language_not_the_widget(recorded_calls):
+    # Approval 6 option B: an English question typed with the widget set to
+    # French gets the English dependency copy; only presentation switches.
+    response = _handle(
+        _RetrieverWithEvidence(), _RouterRaisesBedrockTimeout(),
+        "How do I qualify as a Recognized Manager in my country?", language="fr",
+    )
+    assert response.metadata.get("failure_layer") == "dependency_unavailable"
+    assert "technical hiccup" in response.answer.lower()
+    assert response.metadata["answer_language"] == {
+        "selected": "fr", "answer": "en", "reason": response.metadata["answer_language"]["reason"],
+    }

@@ -32,6 +32,7 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
+from app.orchestrator.answer_language import resolve_answer_language
 from app.response.cx_render import render as cx_render
 from app.response.outcome import derive_outcome
 from app.response.quality import (
@@ -983,6 +984,26 @@ _UNFILLED_CX_PLACEHOLDER_RE = re.compile(r"\{(?:country|topic|fields|options|con
 # to derive the conversation outcome. Set in _route_or_approve_evidence; scoped
 # to one turn by _handle_chat (set to None on entry, reset in finally).
 _TURN_EVIDENCE: ContextVar[EvidenceDecision | None] = ContextVar("askvera_turn_evidence", default=None)
+# CX (approval 6, option B): the language the ANSWER is written in, resolved
+# once per turn from the message. Presentation only - the prompt, localized
+# copy, answer post-processing and output validation. Retrieval, evidence
+# approval, governance and source eligibility keep body.language (the widget's
+# selected language), unchanged. None outside a turn.
+_ANSWER_LANGUAGE: ContextVar[str | None] = ContextVar("askvera_answer_language", default=None)
+
+
+def _answer_language(body: ChatRequest) -> str:
+    """The turn's answer language; the selected language when not switched."""
+    return _ANSWER_LANGUAGE.get() or body.language
+
+
+def _cache_language(body: ChatRequest) -> str:
+    """Cache-key language: distinct when the answer language was switched, so a
+    switched answer is never served to a request answered in the selected one."""
+    answer = _answer_language(body)
+    return body.language if answer == body.language else f"{body.language}>{answer}"
+
+
 _CAPTURED_DOCUMENT_METADATA = (
     "section_id", "parent_section_id", "access_scope", "document_type", "parent_bound_child",
     "ingestion_id", "logical_document_id", "content_hash",
@@ -1248,6 +1269,8 @@ class AIOrchestrator:
             preserve_person_names=True,
         )
         evidence_token = _TURN_EVIDENCE.set(None)
+        answer_language = resolve_answer_language(scrubbed_input, body.language)
+        language_token = _ANSWER_LANGUAGE.set(answer_language.answer_language)
         try:
             resolved_input, reference_clarification = self._resolve_unresolved_reference(
                 scrubbed_input, body, correlation_id
@@ -1259,7 +1282,14 @@ class AIOrchestrator:
                 if response is None:
                     response = self._handle_scrubbed_chat(body, resolved_input, correlation_id, candidate_flags)
             response = self._attach_conversation_outcome(response, body, resolved_input)
+            if answer_language.switched:
+                response = self._replace_answer(
+                    response, response.answer,
+                    {"answer_language": {"selected": body.language, "answer": answer_language.answer_language,
+                                         "reason": answer_language.reason}},
+                )
         finally:
+            _ANSWER_LANGUAGE.reset(language_token)
             _TURN_EVIDENCE.reset(evidence_token)
         # Persist the original request (never a reference-resolution rewrite) and
         # the actual delivered response exactly once, including refusals, cache
@@ -1284,7 +1314,7 @@ class AIOrchestrator:
         """
         outcome = derive_outcome(
             metadata=response.metadata,
-            language=body.language,
+            language=_answer_language(body),
             country=body.country,
             question=question,
             answer_text=response.answer,
@@ -1354,7 +1384,7 @@ class AIOrchestrator:
             metadata["retrieval_availability"] = retrieval_availability
         return self._validate_response(
             self.response_builder.fallback(
-                localized_conversation_response("bedrock_error", body.language)
+                localized_conversation_response("bedrock_error", _answer_language(body))
                 or FALLBACK_RESPONSES["bedrock_error"],
                 correlation_id,
                 metadata=metadata,
@@ -1448,7 +1478,7 @@ class AIOrchestrator:
                 governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
             )
 
-        cache_key = build_cache_key(request_query, body.country, body.language, body.role)
+        cache_key = build_cache_key(request_query, body.country, _cache_language(body), body.role)
         cached_response = self._cached_response(
             cache_key, body, correlation_id, scrubbed_input, resolved_request=request_query
         )
@@ -1481,7 +1511,7 @@ class AIOrchestrator:
             user_question=scrubbed_input,
             conversation=history,
             country=body.country,
-            language=body.language,
+            language=_answer_language(body),
             role=body.role,
             retrieval_result=retrieval_result,
             metadata={"correlation_id": correlation_id},
@@ -1501,7 +1531,7 @@ class AIOrchestrator:
                     )
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language, body.message, body.country),
+                    self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -1548,7 +1578,7 @@ class AIOrchestrator:
 
         if model_response.finish_reason == "guardrail_intervened":
             return self.response_builder.fallback(
-                localized_conversation_response("guardrail_blocked", body.language)
+                localized_conversation_response("guardrail_blocked", _answer_language(body))
                 or (
                     "I couldn't provide that response because it did not pass AskVera's safety checks. "
                     "Please rephrase the question without private information or unsafe claims."
@@ -1564,7 +1594,7 @@ class AIOrchestrator:
         if contracted_response is None:
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language, body.message, body.country),
+                    self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": "evidence_contract"},
                 ),
@@ -1590,7 +1620,7 @@ class AIOrchestrator:
         chat_response = self._secure_and_complete_response(
             chat_response,
             retrieval_result,
-            body.language,
+            _answer_language(body),
             correlation_id,
             user_question=body.message,
             country=body.country,
@@ -2091,7 +2121,7 @@ class AIOrchestrator:
         chat_response = self._secure_and_complete_response(
             self.response_builder.from_cached(cached, correlation_id),
             evidence,
-            body.language,
+            _answer_language(body),
             correlation_id,
             user_question=body.message,
             country=body.country,
@@ -2137,7 +2167,7 @@ class AIOrchestrator:
         cached = get_semantic_cache_value(
             retrieval_query,
             body.country,
-            body.language,
+            _cache_language(body),
             body.role,
             retrieval_result,
             correlation_id,
@@ -3881,7 +3911,7 @@ class AIOrchestrator:
         if not contact_lines:
             return None
 
-        lead_in = localized_conversation_response("office_contact_lead_in", body.language) or (
+        lead_in = localized_conversation_response("office_contact_lead_in", _answer_language(body)) or (
             "In the meantime, here is a direct way to reach that office:"
         )
         return f"{lead_in}\n" + "\n".join(contact_lines)
@@ -3897,7 +3927,7 @@ class AIOrchestrator:
             body.message, body.language, relaxed_typo_tolerance=candidate_flags.wider_typo_tolerance
         )
         if not answer:
-            answer = localized_conversation_response("greeting", body.language) or "Hello, I'm AskVera. How can I help?"
+            answer = localized_conversation_response("greeting", _answer_language(body)) or "Hello, I'm AskVera. How can I help?"
         return self.response_builder.fallback(
             answer,
             correlation_id,
@@ -3929,7 +3959,7 @@ class AIOrchestrator:
         history = get_session_history(body.sessionId, correlation_id)
         outcome = resolve_reference(scrubbed_input, history, body.language)
         if outcome.clarification_candidates:
-            answer = localized_conversation_response("reference_clarification", body.language)
+            answer = localized_conversation_response("reference_clarification", _answer_language(body))
             if answer:
                 candidates = " / ".join(outcome.clarification_candidates)
                 return scrubbed_input, self.response_builder.fallback(
@@ -3954,7 +3984,7 @@ class AIOrchestrator:
         """Handle privacy and exact zero-token conversation routes before retrieval."""
         if contains_sensitive_pii_placeholder(scrubbed_input):
             return self.response_builder.fallback(
-                localized_conversation_response("sensitive_pii", body.language)
+                localized_conversation_response("sensitive_pii", _answer_language(body))
                 or (
                     "For your privacy, I removed sensitive personal information from your message. "
                     "AskVera does not use or save government IDs, payment details, passwords, or other "
@@ -3995,7 +4025,7 @@ class AIOrchestrator:
         risks confidently using the wrong market's policies with no visible
         signal to the user, so this always asks rather than assumes.
         """
-        template = localized_conversation_response("country_typo_confirmation", body.language) or (
+        template = localized_conversation_response("country_typo_confirmation", _answer_language(body)) or (
             'Did you mean "{country}"? Please confirm, or rephrase your question with the country name.'
         )
         answer = template.replace("{country}", probable_country)
@@ -4024,7 +4054,7 @@ class AIOrchestrator:
 
         if client_action == "open_support_form":
             return self.response_builder.fallback(
-                localized_conversation_response("support_request", body.language)
+                localized_conversation_response("support_request", _answer_language(body))
                 or "Opening the support request form.",
                 correlation_id,
                 metadata={
@@ -4070,7 +4100,7 @@ class AIOrchestrator:
         elif intent == "medical_claim":
             if candidate_flags.in_voice_guardrail:
                 candidate = self._candidate_guardrail_phrasing(
-                    "medical_claim", body.language, body.country, correlation_id
+                    "medical_claim", _answer_language(body), body.country, correlation_id
                 )
                 if candidate:
                     return self.response_builder.fallback(
@@ -4082,7 +4112,7 @@ class AIOrchestrator:
                             "response_source": "candidate_guardrail_phrasing",
                         },
                     )
-            answer, claim_scope = localized_claim_response(body.message, intent, body.country, body.language)
+            answer, claim_scope = localized_claim_response(body.message, intent, body.country, _answer_language(body))
             if answer:
                 return self.response_builder.fallback(
                     answer,
@@ -4096,7 +4126,7 @@ class AIOrchestrator:
             response_key = intent
         elif intent in {"income_claim", "off_topic"}:
             if candidate_flags.in_voice_guardrail:
-                candidate = self._candidate_guardrail_phrasing(intent, body.language, body.country, correlation_id)
+                candidate = self._candidate_guardrail_phrasing(intent, _answer_language(body), body.country, correlation_id)
                 if candidate:
                     return self.response_builder.fallback(
                         candidate,
@@ -4188,7 +4218,7 @@ class AIOrchestrator:
         if evidence_decision.approved:
             unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
             if unsupported_years:
-                template = localized_conversation_response("period_not_covered", body.language) or (
+                template = localized_conversation_response("period_not_covered", _answer_language(body)) or (
                     "The approved documents available to me do not contain information for {period}. "
                     "I cannot speculate about policy changes outside the documented period."
                 )
@@ -4232,11 +4262,11 @@ class AIOrchestrator:
                 return narrowing_response, approved_result, evidence_decision
         if evidence_decision.reason == "cross_market_policy_request":
             fallback_message = self._cross_market_scope_message(
-                body.language, body.message, body.country
+                _answer_language(body), body.message, body.country
             )
         else:
             fallback_message = self._insufficient_evidence_message(
-                body.language, body.message, body.country
+                _answer_language(body), body.message, body.country
             )
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:
@@ -4375,7 +4405,7 @@ class AIOrchestrator:
                 model_response=model_response,
                 retrieval_result=retrieval_result,
                 country=body.country,
-                language=body.language,
+                language=_answer_language(body),
                 role=body.role,
                 correlation_id=correlation_id,
             )
@@ -4466,7 +4496,7 @@ class AIOrchestrator:
                             model_response=model_response,
                             retrieval_result=retrieval_result,
                             country=body.country,
-                            language=body.language,
+                            language=_answer_language(body),
                             role=body.role,
                             correlation_id=correlation_id,
                         )
@@ -4519,7 +4549,7 @@ class AIOrchestrator:
             _record_diagnostic_validation(chat_response, result, "critical_fallback", numeric_repair_attempt)
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(body.language, body.message, body.country),
+                    self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -4648,7 +4678,7 @@ class AIOrchestrator:
             set_semantic_cache_value(
                 retrieval_query,
                 body.country,
-                body.language,
+                _cache_language(body),
                 body.role,
                 retrieval_result,
                 cache_value,

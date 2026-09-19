@@ -207,3 +207,58 @@ def test_an_unfilled_placeholder_is_logged_not_rewritten(run, monkeypatch):
                    answer="For {country}, Forever Kenya accepts bank deposit.")
     assert "cx_unfilled_placeholder_delivered" in errors
     assert "{country}" in response.answer  # logged, never silently rewritten
+
+
+class _RecordingRetriever(_Retriever):
+    def __init__(self, documents):
+        super().__init__(documents)
+        self.calls = []
+
+    def retrieve(self, message, country, language, *args, **kwargs):
+        self.calls.append((country, language))
+        return super().retrieve()
+
+
+def test_answer_language_switch_never_changes_retrieval_eligibility_or_shares_a_cache_key(monkeypatch):
+    """Approval 6 option B: presentation follows the message; eligibility never does."""
+    monkeypatch.setattr(settings, "CHAT_MEMORY_BACKEND", "memory")
+    for name, value in {
+        "validate_and_touch_session": lambda *_: None, "has_valid_consent": lambda *_: True,
+        "scrub_pii": lambda text, *_, **__: text, "get_session_history": lambda *_: "",
+        "get_cache_value": lambda *_: None, "set_cache_value": lambda *_: None,
+        "semantic_cache_active": lambda: False, "append_session_turn": lambda *_: None,
+        "write_audit_event": lambda *_: None,
+    }.items():
+        monkeypatch.setattr(chat_orchestrator, name, value)
+    approvals, cache_keys, prompt_languages = [], [], []
+    real_approve = chat_orchestrator.approve_evidence
+    monkeypatch.setattr(chat_orchestrator, "approve_evidence",
+                        lambda q, r, country, language: approvals.append((country, language)) or real_approve(q, r, country, language))
+    monkeypatch.setattr(chat_orchestrator, "build_cache_key",
+                        lambda q, country, language, role: cache_keys.append(language) or f"{q}|{country}|{language}|{role}")
+
+    def _run(message, widget_language):
+        retriever = _RecordingRetriever([_kenya_directory_row()])
+        orchestrator = AIOrchestrator(retriever=retriever, router=_Router("Forever Kenya accepts Mpesa."),
+                                      validator=_Validator(), governance=_Governance())
+        real_build = orchestrator.prompt_builder.build
+        orchestrator.prompt_builder.build = lambda *a, **k: prompt_languages.append(k.get("language")) or real_build(*a, **k)
+        body = ChatRequest(message=message, sessionId="s", country="US", language=widget_language)
+        return orchestrator.handle_chat(body, "cid"), retriever
+
+    # A question that clearly switches today; Lane 7 is improving recall on
+    # questions containing brand and market names (e.g. "…par Forever Kenya ?").
+    switched, retriever = _run("Comment est-ce que je peux payer ma commande chez Forever Kenya ?", "en")
+    assert switched.metadata["answer_language"]["answer"] == "fr"
+    assert switched.metadata["outcome"]["language"] == "fr"
+    assert retriever.calls and all(language == "en" for _, language in retriever.calls)
+    assert approvals and all(language == "en" for _, language in approvals)
+    assert prompt_languages[-1] == "fr"
+    assert cache_keys[-1] == "en>fr"
+
+    unswitched, retriever = _run("What payment methods does Forever Kenya accept?", "en")
+    assert "answer_language" not in unswitched.metadata
+    assert all(language == "en" for _, language in retriever.calls)
+    assert prompt_languages[-1] == "en"
+    assert cache_keys[-1] == "en"
+    assert chat_orchestrator._ANSWER_LANGUAGE.get() is None
