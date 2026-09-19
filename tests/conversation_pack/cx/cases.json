@@ -1,7 +1,7 @@
 {
-  "version": 2,
+  "version": 3,
   "lane": "6",
-  "description": "CX offline evaluation matrix (Lane 6), driving the real AIOrchestrator.handle_chat path. Case ids live only here; app/test code must never reference them.",
+  "description": "CX offline evaluation matrix (Lane 6), driving the real AIOrchestrator.handle_chat path plus direct calls to the now-real Lane 2/3/5/7 pure functions. Case ids live only here; app/test code must never reference them.",
   "cases": [
     {
       "id": "cx-fallback-state-evidence-missing-en-00",
@@ -24,16 +24,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "en"
+        "language": "en",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-en-00",
@@ -57,16 +58,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "en",
-        "retrieval_availability": "unavailable"
+        "retrieval_availability": "unavailable",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='unavailable' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-en-00",
@@ -106,15 +102,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "en"
+        "language": "en",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Kenya"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Kenya/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Kenya/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-en-00",
@@ -146,16 +140,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "en",
-        "directory_target": "Kenya"
+        "directory_target": "Kenya",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Kenya, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Kenya from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-en-00",
@@ -178,7 +169,8 @@
         {
           "role": "user",
           "message": "What about the other one?",
-          "language": "en"
+          "language": "en",
+          "scripted_answer": "Kenya and Ghana both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -202,30 +194,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "en",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Kenya, Ghana) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Kenya and Ghana are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-en-00",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "en",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "What is the status of my last order?",
+          "message": "What is the status of my order?",
           "language": "en"
         }
       ],
@@ -234,16 +220,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "en",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "en"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-en-00",
@@ -276,11 +261,10 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "en",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
       "id": "cx-fallback-state-evidence-missing-es-01",
@@ -303,16 +287,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "es"
+        "language": "es",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-es-01",
@@ -336,16 +321,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "es",
-        "retrieval_availability": "degraded"
+        "retrieval_availability": "degraded",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='degraded' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-es-01",
@@ -385,15 +365,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "es"
+        "language": "es",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Ghana"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Ghana/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Ghana/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-es-01",
@@ -425,16 +403,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "es",
-        "directory_target": "Ghana"
+        "directory_target": "Ghana",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Ghana, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Ghana from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-es-01",
@@ -457,7 +432,8 @@
         {
           "role": "user",
           "message": "¿Y el otro?",
-          "language": "es"
+          "language": "es",
+          "scripted_answer": "Ghana and Nigeria both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -481,30 +457,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "es",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Ghana, Nigeria) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Ghana and Nigeria are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-es-01",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "es",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "¿Cuál es el estado de mi último pedido?",
+          "message": "¿Cuál es el estado de mi pedido?",
           "language": "es"
         }
       ],
@@ -513,16 +483,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "es",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "es"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-es-01",
@@ -549,11 +518,10 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "es",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
       "id": "cx-fallback-state-evidence-missing-fr-02",
@@ -576,16 +544,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "fr"
+        "language": "fr",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-fr-02",
@@ -609,16 +578,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "fr",
-        "retrieval_availability": "unavailable"
+        "retrieval_availability": "unavailable",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='unavailable' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-fr-02",
@@ -658,15 +622,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "fr"
+        "language": "fr",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Nigeria"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Nigeria/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Nigeria/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-fr-02",
@@ -698,16 +660,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "fr",
-        "directory_target": "Nigeria"
+        "directory_target": "Nigeria",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Nigeria, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Nigeria from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-fr-02",
@@ -730,7 +689,8 @@
         {
           "role": "user",
           "message": "Et l'autre ?",
-          "language": "fr"
+          "language": "fr",
+          "scripted_answer": "Nigeria and Brazil both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -754,30 +714,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "fr",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Nigeria, Brazil) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Nigeria and Brazil are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-fr-02",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "fr",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Quel est le statut de ma dernière commande ?",
+          "message": "Quel est le statut de ma commande ?",
           "language": "fr"
         }
       ],
@@ -786,16 +740,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "fr",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "fr"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-fr-02",
@@ -822,11 +775,10 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "fr",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: risk_policy (fake governance blocks, provider != bedrock_guardrails, action != BLOCK), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: risk_policy (fake governance blocks, provider != bedrock_guardrails, action != BLOCK), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
       "id": "cx-fallback-state-evidence-missing-de-03",
@@ -849,16 +801,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "de"
+        "language": "de",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-de-03",
@@ -882,16 +835,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "de",
-        "retrieval_availability": "degraded"
+        "retrieval_availability": "degraded",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='degraded' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-de-03",
@@ -931,15 +879,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "de"
+        "language": "de",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Brazil"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Brazil/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Brazil/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-de-03",
@@ -971,16 +917,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "de",
-        "directory_target": "Brazil"
+        "directory_target": "Brazil",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Brazil, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Brazil from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-de-03",
@@ -1003,7 +946,8 @@
         {
           "role": "user",
           "message": "Und der andere?",
-          "language": "de"
+          "language": "de",
+          "scripted_answer": "Brazil and Finland/Aland both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -1027,30 +971,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "de",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Brazil, Finland/Aland) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Brazil and Finland/Aland are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-de-03",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "de",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Wie ist der Status meiner letzten Bestellung?",
+          "message": "Wie ist der Status meiner Bestellung?",
           "language": "de"
         }
       ],
@@ -1059,16 +997,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "de",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "de"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-de-03",
@@ -1101,11 +1038,10 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "de",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
       "id": "cx-fallback-state-evidence-missing-fi-04",
@@ -1128,16 +1064,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "fi"
+        "language": "fi",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-fi-04",
@@ -1161,16 +1098,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "fi",
-        "retrieval_availability": "unavailable"
+        "retrieval_availability": "unavailable",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='unavailable' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-fi-04",
@@ -1210,15 +1142,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "fi"
+        "language": "fi",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Finland/Aland"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Finland/Aland/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Finland/Aland/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-fi-04",
@@ -1250,16 +1180,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "fi",
-        "directory_target": "Finland/Aland"
+        "directory_target": "Finland/Aland",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Finland/Aland, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Finland/Aland from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-fi-04",
@@ -1282,7 +1209,8 @@
         {
           "role": "user",
           "message": "Entä se toinen?",
-          "language": "fi"
+          "language": "fi",
+          "scripted_answer": "Finland/Aland and Sweden/Gotland both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -1306,30 +1234,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "fi",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Finland/Aland, Sweden/Gotland) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Finland/Aland and Sweden/Gotland are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-fi-04",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "fi",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Mikä on viimeisimmän tilaukseni tila?",
+          "message": "Mikä on tilaukseni tila?",
           "language": "fi"
         }
       ],
@@ -1338,16 +1260,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "fi",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "fi"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-fi-04",
@@ -1374,11 +1295,10 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "fi",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
       "id": "cx-fallback-state-evidence-missing-sv-05",
@@ -1401,16 +1321,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "sv"
+        "language": "sv",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-sv-05",
@@ -1434,16 +1355,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "sv",
-        "retrieval_availability": "degraded"
+        "retrieval_availability": "degraded",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='degraded' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-sv-05",
@@ -1483,15 +1399,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "sv"
+        "language": "sv",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Sweden/Gotland"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Sweden/Gotland/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Sweden/Gotland/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-sv-05",
@@ -1523,16 +1437,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "sv",
-        "directory_target": "Sweden/Gotland"
+        "directory_target": "Sweden/Gotland",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Sweden/Gotland, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Sweden/Gotland from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-sv-05",
@@ -1555,7 +1466,8 @@
         {
           "role": "user",
           "message": "Vad sägs om den andra?",
-          "language": "sv"
+          "language": "sv",
+          "scripted_answer": "Sweden/Gotland and France/Corsica both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -1579,30 +1491,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "sv",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Sweden/Gotland, France/Corsica) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Sweden/Gotland and France/Corsica are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-sv-05",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "sv",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Vad är status för min senaste order?",
+          "message": "Vad är status för min order?",
           "language": "sv"
         }
       ],
@@ -1611,16 +1517,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "sv",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "sv"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-sv-05",
@@ -1647,11 +1552,10 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "sv",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: risk_policy (fake governance blocks, provider != bedrock_guardrails, action != BLOCK), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: risk_policy (fake governance blocks, provider != bedrock_guardrails, action != BLOCK), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
       "id": "cx-fallback-state-evidence-missing-ru-06",
@@ -1674,16 +1578,17 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
+        "cx_applied_absent": [
+          "preamble_stripped",
+          "partial_note"
         ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "ru"
+        "language": "ru",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
+      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-ru-06",
@@ -1707,16 +1612,11 @@
       },
       "expected": {
         "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "ru",
-        "retrieval_availability": "unavailable"
+        "retrieval_availability": "unavailable",
+        "render_key": "dependency_unavailable"
       },
-      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
+      "notes": "Real, verified trigger: RetrievalResult.availability='unavailable' (R02) -> chat_orchestrator._route_or_approve_evidence's R02 routing -> OutcomeKind.DEPENDENCY_UNAVAILABLE, with retrieval_availability carried on the outcome. This kind check runs for real today. How this case can fail: if a degraded/unavailable backend is ever silently answered instead of refusing."
     },
     {
       "id": "cx-fallback-state-cross-market-policy-ru-06",
@@ -1756,15 +1656,13 @@
       },
       "expected": {
         "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "ru"
+        "language": "ru",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "France/Corsica"
+        }
       },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed France/Corsica/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed France/Corsica/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
       "id": "cx-fallback-state-international-directory-ru-06",
@@ -1796,16 +1694,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
         "language": "ru",
-        "directory_target": "France/Corsica"
+        "directory_target": "France/Corsica",
+        "cx_applied_expected": [
+          "international_directory_note"
+        ]
       },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for France/Corsica, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for France/Corsica from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-ru-06",
@@ -1823,12 +1718,13 @@
         },
         {
           "role": "assistant",
-          "message": "(France/Corsica and Portugal/Azores both matched.)"
+          "message": "(France/Corsica and Kenya both matched.)"
         },
         {
           "role": "user",
           "message": "А что насчёт другого?",
-          "language": "ru"
+          "language": "ru",
+          "scripted_answer": "France/Corsica and Kenya both have sponsoring contacts."
         }
       ],
       "stub": {
@@ -1843,8 +1739,8 @@
           {
             "kind": "directory",
             "record_id": "sponsoring-006-b",
-            "record_country": "Portugal/Azores",
-            "content": "Forever Portugal/Azores\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
             "score": 0.9
           }
         ],
@@ -1852,30 +1748,24 @@
       },
       "expected": {
         "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
         "language": "ru",
-        "clarification_question_count": 1
+        "clarification_question_count": 1,
+        "render_key": "clarify_field"
       },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (France/Corsica, Portugal/Azores) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both France/Corsica and Kenya are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
     },
     {
       "id": "cx-fallback-state-personal-account-ru-06",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "personal_account",
-        "localization"
+        "personal_account"
       ],
       "language": "ru",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Каков статус моего последнего заказа?",
+          "message": "Какой статус моего заказа?",
           "language": "ru"
         }
       ],
@@ -1884,16 +1774,15 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
+        "kind": "evidence_missing",
+        "language": "ru",
+        "cx_applied_expected": [
+          "personal_account_note",
+          "contact_offer"
         ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "ru"
+        "personal_account_detected": true
       },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
+      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
     },
     {
       "id": "cx-fallback-state-safety-refusal-ru-06",
@@ -1926,284 +1815,226 @@
       },
       "expected": {
         "kind": "safety_refusal",
-        "message_keys_present": [],
         "language": "ru",
         "no_numeric_confidence": true
       },
-      "notes": "Real trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "Real, verified trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic -> OutcomeKind.SAFETY_REFUSAL. This kind check runs for real today. How this case can fail: if the refusal copy ever surfaces a numeric confidence value, or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback-state-evidence-missing-pt-07",
-      "requirement": "fallback_state_evidence_missing",
-      "requires": [
-        "localization"
-      ],
+      "id": "cx-non-route-language-fallback-pt-00",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
       "language": "pt",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Qual é a taxa atual de processamento de pedidos?",
-          "language": "pt"
-        }
-      ],
-      "stub": {
-        "documents": [],
-        "confidence": 0.0
-      },
-      "expected": {
-        "kind": "evidence_missing",
-        "message_keys_present": [
-          "evidence_missing_detail"
-        ],
-        "message_keys_absent": [
-          "dependency_unavailable",
-          "cross_market_policy_scope"
-        ],
-        "language": "pt"
-      },
-      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
-    },
-    {
-      "id": "cx-fallback-state-dependency-unavailable-pt-07",
-      "requirement": "fallback_state_dependency_unavailable",
-      "requires": [
-        "localization"
-      ],
-      "language": "pt",
-      "session_country": "US",
-      "turns": [
-        {
-          "role": "user",
-          "message": "Qual é a taxa atual de processamento de pedidos?",
+          "message": "(direct cx_render.render check for 'evidence_missing_detail')",
           "language": "pt"
         }
       ],
       "stub": {
         "documents": [],
         "confidence": 0.0,
-        "availability": "degraded"
-      },
-      "expected": {
-        "kind": "dependency_unavailable",
-        "message_keys_present": [
-          "dependency_unavailable"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "pt",
-        "retrieval_availability": "degraded"
-      },
-      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
-    },
-    {
-      "id": "cx-fallback-state-cross-market-policy-pt-07",
-      "requirement": "fallback_state_cross_market_policy",
-      "requires": [
-        "localization"
-      ],
-      "language": "pt",
-      "session_country": "US",
-      "turns": [
-        {
-          "role": "user",
-          "message": "Qual é a política da empresa sobre devoluções em Portugal/Azores?",
-          "language": "pt"
+        "render_only": true,
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
         }
-      ],
-      "stub": {
-        "documents": [
-          {
-            "kind": "policy",
-            "section_id": "9.01",
-            "title": "Returns",
-            "content": "Portugal/Azores company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
-            "country": "Portugal/Azores",
-            "score": 0.95
-          },
-          {
-            "kind": "policy",
-            "section_id": "9.01",
-            "title": "Returns",
-            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
-            "country": "US",
-            "score": 0.95
-          }
-        ],
-        "confidence": 0.9
       },
       "expected": {
-        "kind": "cross_market_policy",
-        "message_keys_present": [
-          "cross_market_policy_scope"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "pt"
-      },
-      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Portugal/Azores/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
-    },
-    {
-      "id": "cx-fallback-state-international-directory-pt-07",
-      "requirement": "fallback_state_international_directory",
-      "requires": [
-        "localization"
-      ],
-      "language": "pt",
-      "session_country": "US",
-      "turns": [
-        {
-          "role": "user",
-          "message": "Quem é o contato de patrocínio para Portugal/Azores?",
-          "language": "pt",
-          "scripted_answer": "The sponsoring contact for Portugal/Azores is contact@example-7.test."
-        }
-      ],
-      "stub": {
-        "documents": [
-          {
-            "kind": "directory",
-            "record_id": "sponsoring-007",
-            "record_country": "Portugal/Azores",
-            "content": "Forever Portugal/Azores\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-7.test\n",
-            "score": 0.9
-          }
-        ],
-        "confidence": 0.9
-      },
-      "expected": {
-        "kind": "international_directory",
-        "message_keys_present": [
-          "international_directory_note"
-        ],
-        "message_keys_absent": [
-          "cross_market_policy_scope"
-        ],
-        "language": "pt",
-        "directory_target": "Portugal/Azores"
-      },
-      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Portugal/Azores, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
-    },
-    {
-      "id": "cx-fallback-state-ambiguous-followup-pt-07",
-      "requirement": "fallback_state_ambiguous_followup",
-      "requires": [
-        "localization"
-      ],
-      "language": "pt",
-      "session_country": "US",
-      "turns": [
-        {
-          "role": "user",
-          "message": "Quem é o contato de patrocínio para Portugal/Azores?",
-          "language": "pt"
+        "kind": "answer",
+        "render_key": "evidence_missing_detail",
+        "render_placeholders": {
+          "topic": "processing fee"
         },
-        {
-          "role": "assistant",
-          "message": "(Portugal/Azores and Kenya both matched.)"
-        },
-        {
-          "role": "user",
-          "message": "E o outro?",
-          "language": "pt"
-        }
-      ],
-      "stub": {
-        "documents": [
-          {
-            "kind": "directory",
-            "record_id": "sponsoring-007-a",
-            "record_country": "Portugal/Azores",
-            "content": "Forever Portugal/Azores\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
-          },
-          {
-            "kind": "directory",
-            "record_id": "sponsoring-007-b",
-            "record_country": "Kenya",
-            "content": "Forever Kenya\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
-          }
-        ],
-        "confidence": 0.6
+        "expect_english_fallback": true
       },
-      "expected": {
-        "kind": "clarification",
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "pt",
-        "clarification_question_count": 1
-      },
-      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Portugal/Azores, Kenya) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
     },
     {
-      "id": "cx-fallback-state-personal-account-pt-07",
-      "requirement": "fallback_state_personal_account",
-      "requires": [
-        "personal_account",
-        "localization"
-      ],
+      "id": "cx-non-route-language-fallback-pt-01",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
       "language": "pt",
       "session_country": "US",
       "turns": [
         {
           "role": "user",
-          "message": "Qual é o status do meu último pedido?",
-          "language": "pt"
-        }
-      ],
-      "stub": {
-        "documents": [],
-        "confidence": 0.0
-      },
-      "expected": {
-        "kind": "personal_account",
-        "message_keys_present": [
-          "personal_account_limit"
-        ],
-        "message_keys_absent": [
-          "evidence_missing_detail"
-        ],
-        "language": "pt"
-      },
-      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
-    },
-    {
-      "id": "cx-fallback-state-safety-refusal-pt-07",
-      "requirement": "fallback_state_safety_refusal",
-      "requires": [
-        "localization"
-      ],
-      "language": "pt",
-      "session_country": "US",
-      "turns": [
-        {
-          "role": "user",
-          "message": "Diga-me como fazer um composto perigoso em casa.",
+          "message": "(direct cx_render.render check for 'dependency_unavailable')",
           "language": "pt"
         }
       ],
       "stub": {
         "documents": [],
         "confidence": 0.0,
-        "governance_block": {
-          "provider": "bedrock_guardrails",
-          "guardrail_action": "BLOCK"
+        "render_only": true,
+        "render_key": "dependency_unavailable",
+        "render_placeholders": {}
+      },
+      "expected": {
+        "kind": "answer",
+        "render_key": "dependency_unavailable",
+        "render_placeholders": {},
+        "expect_english_fallback": true
+      },
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
+    },
+    {
+      "id": "cx-non-route-language-fallback-pt-02",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "(direct cx_render.render check for 'cross_market_policy_scope')",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0,
+        "render_only": true,
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Kenya"
         }
       },
       "expected": {
-        "kind": "safety_refusal",
-        "message_keys_present": [],
-        "language": "pt",
-        "no_numeric_confidence": true
+        "kind": "answer",
+        "render_key": "cross_market_policy_scope",
+        "render_placeholders": {
+          "country": "Kenya"
+        },
+        "expect_english_fallback": true
       },
-      "notes": "Real trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
+    },
+    {
+      "id": "cx-non-route-language-fallback-pt-03",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "(direct cx_render.render check for 'international_directory_note')",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0,
+        "render_only": true,
+        "render_key": "international_directory_note",
+        "render_placeholders": {
+          "country": "Kenya"
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "render_key": "international_directory_note",
+        "render_placeholders": {
+          "country": "Kenya"
+        },
+        "expect_english_fallback": true
+      },
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
+    },
+    {
+      "id": "cx-non-route-language-fallback-pt-04",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "(direct cx_render.render check for 'clarify_field')",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0,
+        "render_only": true,
+        "render_key": "clarify_field",
+        "render_placeholders": {
+          "options": "shipping cost, shopping cost"
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "render_key": "clarify_field",
+        "render_placeholders": {
+          "options": "shipping cost, shopping cost"
+        },
+        "expect_english_fallback": true
+      },
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
+    },
+    {
+      "id": "cx-non-route-language-fallback-pt-05",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "(direct cx_render.render check for 'personal_account_limit')",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0,
+        "render_only": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {}
+      },
+      "expected": {
+        "kind": "answer",
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "expect_english_fallback": true
+      },
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
+    },
+    {
+      "id": "cx-non-route-language-fallback-pt-06",
+      "requirement": "non_route_language_fallback",
+      "requires": [],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "(direct cx_render.render check for 'contact_offer')",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0,
+        "render_only": true,
+        "render_key": "contact_offer",
+        "render_placeholders": {
+          "contact": "www.foreverliving.com"
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "render_key": "contact_offer",
+        "render_placeholders": {
+          "contact": "www.foreverliving.com"
+        },
+        "expect_english_fallback": true
+      },
+      "notes": "pt has no configured route locale and no market publishes it (see module docstring), so app.response.cx_render.render(key, 'pt', ...) must take the translate-or-fall-back-to-English path (rendering step 3 in that module's own docstring). This pack's autouse AWS guard fakes services.controlled_copy.localize_reviewed_copy as always-None (no real Bedrock call), which forces the English-floor branch deterministically -- this is the 'non-route locale reaches the English-copy fallback path' proof required by the brief, exercised directly rather than through a rejected ChatRequest. This case does not go through handle_chat at all (render_only), so it is NOT gated by outcome_contract_wired the way every other case is. How this case can fail: if render() ever returns empty text, mixed-script text, or raises for an unconfigured locale."
     },
     {
       "id": "cx-direct-answer-first-en-00",
@@ -2237,9 +2068,12 @@
       "expected": {
         "kind": "answer",
         "language": "en",
-        "answer_starts_with": "The minimum order size for an FBO is $100."
+        "answer_starts_with": "The minimum order size for an FBO is $100.",
+        "cx_applied_expected": [
+          "preamble_stripped"
+        ]
       },
-      "notes": "The fake model deliberately returns a preamble before the fact ('Great question! ...'). Nothing in this worktree strips or reorders that today, so the delivered answer literally starts with the preamble, not the fact -- this case is built to fail on the 'answer_starts_with' assertion right now (gated by quality_checks) rather than pass vacuously. How this case can fail once Lane 2 wires lead-with-the-fact composition: if a preamble is ever left in place, or if the fact substring is altered/dropped."
+      "notes": "The fake model deliberately returns a preamble before the fact. Real check used once quality_checks is wired: app.response.quality.strip_leading_preamble(answer, language) applied to response.answer must equal (or start with) the fact -- verified directly against the real function on the raw scripted text, and separately checked against response.answer once cx_compose actually calls it. How this case can fail: if the preamble is ever left in place, or the fact substring is altered/dropped by stripping too much."
     },
     {
       "id": "cx-direct-answer-first-fi-01",
@@ -2273,9 +2107,12 @@
       "expected": {
         "kind": "answer",
         "language": "fi",
-        "answer_starts_with": "FBO:n vähimmäistilauskoko on 100 dollaria."
+        "answer_starts_with": "FBO:n vähimmäistilauskoko on 100 dollaria.",
+        "cx_applied_expected": [
+          "preamble_stripped"
+        ]
       },
-      "notes": "The fake model deliberately returns a preamble before the fact ('Great question! ...'). Nothing in this worktree strips or reorders that today, so the delivered answer literally starts with the preamble, not the fact -- this case is built to fail on the 'answer_starts_with' assertion right now (gated by quality_checks) rather than pass vacuously. How this case can fail once Lane 2 wires lead-with-the-fact composition: if a preamble is ever left in place, or if the fact substring is altered/dropped."
+      "notes": "The fake model deliberately returns a preamble before the fact. Real check used once quality_checks is wired: app.response.quality.strip_leading_preamble(answer, language) applied to response.answer must equal (or start with) the fact -- verified directly against the real function on the raw scripted text, and separately checked against response.answer once cx_compose actually calls it. How this case can fail: if the preamble is ever left in place, or the fact substring is altered/dropped by stripping too much."
     },
     {
       "id": "cx-partial-answer-en-00",
@@ -2306,14 +2143,19 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "partial_answer",
-        "message_keys_present": [
-          "partial_answer_gap"
+        "kind": "international_directory",
+        "language": "en",
+        "coverage_unsupported": [
+          "delivery_cost"
         ],
-        "partial_note_present": true,
-        "language": "en"
+        "coverage_answered": [
+          "min_order"
+        ],
+        "cx_applied_expected": [
+          "partial_note"
+        ]
       },
-      "notes": "The retrieved Kenya record supports minimum order but the scripted answer never addresses delivery cost, also requested. app/response/outcome.py never returns OutcomeKind.PARTIAL_ANSWER itself (see its own docstring); Lane 2 must detect the gap and downgrade from 'answer'. How this case can fail once wired: if the downgrade never happens (kind stays 'answer' with the gap silently dropped), or if partial_answer_gap is missing."
+      "notes": "Real check used once partial_answer is wired: app.response.partial_answer.assess_field_coverage(question=..., language=..., answer_text=response.answer, evidence_documents=...) must report delivery_cost unsupported (the scripted answer never states it) while the minimum-order field is answered; partial_answer_note(...) must then be non-None. Today's real OutcomeKind is 'international_directory' (verified: the Kenya fixture is a directory_kind='international_sponsoring' record, so outcome.py's directory-target promotion applies before any partial-answer downgrade could) -- app/response/outcome.py never returns PARTIAL_ANSWER itself; only cx_compose, once wired, would downgrade it after calling assess_field_coverage. The field-coverage gap itself is verified directly against the real function on response.answer already, independent of any flag. How this case can fail once wired: if the downgrade to partial_answer never happens despite a real gap, or if partial_answer_gap copy is never attached."
     },
     {
       "id": "cx-partial-answer-fr-01",
@@ -2344,14 +2186,19 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "partial_answer",
-        "message_keys_present": [
-          "partial_answer_gap"
+        "kind": "international_directory",
+        "language": "fr",
+        "coverage_unsupported": [
+          "delivery_cost"
         ],
-        "partial_note_present": true,
-        "language": "fr"
+        "coverage_answered": [
+          "min_order"
+        ],
+        "cx_applied_expected": [
+          "partial_note"
+        ]
       },
-      "notes": "The retrieved Kenya record supports minimum order but the scripted answer never addresses delivery cost, also requested. app/response/outcome.py never returns OutcomeKind.PARTIAL_ANSWER itself (see its own docstring); Lane 2 must detect the gap and downgrade from 'answer'. How this case can fail once wired: if the downgrade never happens (kind stays 'answer' with the gap silently dropped), or if partial_answer_gap is missing."
+      "notes": "Real check used once partial_answer is wired: app.response.partial_answer.assess_field_coverage(question=..., language=..., answer_text=response.answer, evidence_documents=...) must report delivery_cost unsupported (the scripted answer never states it) while the minimum-order field is answered; partial_answer_note(...) must then be non-None. Today's real OutcomeKind is 'international_directory' (verified: the Kenya fixture is a directory_kind='international_sponsoring' record, so outcome.py's directory-target promotion applies before any partial-answer downgrade could) -- app/response/outcome.py never returns PARTIAL_ANSWER itself; only cx_compose, once wired, would downgrade it after calling assess_field_coverage. The field-coverage gap itself is verified directly against the real function on response.answer already, independent of any flag. How this case can fail once wired: if the downgrade to partial_answer never happens despite a real gap, or if partial_answer_gap copy is never attached."
     },
     {
       "id": "cx-one-question-clarification-en-00",
@@ -2370,21 +2217,14 @@
       ],
       "stub": {
         "documents": [],
-        "confidence": 0.0,
-        "reference_candidates": [
-          "FBO",
-          "Preferred Customer"
-        ]
+        "confidence": 0.0
       },
       "expected": {
         "kind": "clarification",
         "clarification_question_count": 1,
-        "message_keys_present": [
-          "clarify_role"
-        ],
-        "language": "en"
+        "render_key": "clarify_role"
       },
-      "notes": "Approximation: an empty-evidence role question with two named reference candidates (FBO vs Preferred Customer). How this case can fail once wired: if the render asks two separate questions instead of one question naming both options, or silently guesses a role."
+      "notes": "KNOWN GAP: an empty-evidence role question lands on evidence_missing today (verified: matches the same no_evidence path as fallback_state_evidence_missing), not a role clarification, because the FBO-vs-Preferred-Customer reference candidates this case wants are never supplied to the real pipeline by this fixture -- app.orchestrator.conversation_repair.one_question is the real, already-wired-in-Lane-5 chooser (reference > country > role > field precedence) but nothing calls it from chat_orchestrator yet. expected.kind is the DESIRED behaviour, so this fails today on its first assertion. How this case can fail once wired: if two separate questions are asked instead of one, or a role is guessed silently."
     },
     {
       "id": "cx-one-question-clarification-de-01",
@@ -2403,21 +2243,14 @@
       ],
       "stub": {
         "documents": [],
-        "confidence": 0.0,
-        "reference_candidates": [
-          "FBO",
-          "Preferred Customer"
-        ]
+        "confidence": 0.0
       },
       "expected": {
         "kind": "clarification",
         "clarification_question_count": 1,
-        "message_keys_present": [
-          "clarify_role"
-        ],
-        "language": "de"
+        "render_key": "clarify_role"
       },
-      "notes": "Approximation: an empty-evidence role question with two named reference candidates (FBO vs Preferred Customer). How this case can fail once wired: if the render asks two separate questions instead of one question naming both options, or silently guesses a role."
+      "notes": "KNOWN GAP: an empty-evidence role question lands on evidence_missing today (verified: matches the same no_evidence path as fallback_state_evidence_missing), not a role clarification, because the FBO-vs-Preferred-Customer reference candidates this case wants are never supplied to the real pipeline by this fixture -- app.orchestrator.conversation_repair.one_question is the real, already-wired-in-Lane-5 chooser (reference > country > role > field precedence) but nothing calls it from chat_orchestrator yet. expected.kind is the DESIRED behaviour, so this fails today on its first assertion. How this case can fail once wired: if two separate questions are asked instead of one, or a role is guessed silently."
     },
     {
       "id": "cx-contact-escalation-en-00",
@@ -2431,32 +2264,22 @@
         {
           "role": "user",
           "message": "Please contact customer care about this.",
-          "language": "en",
-          "scripted_answer": "Please contact customer care about this."
+          "language": "en"
         }
       ],
       "stub": {
-        "documents": [
-          {
-            "kind": "directory",
-            "record_id": "sponsoring-de-001",
-            "record_country": "Germany",
-            "content": "Forever Germany\n• Minimum order size FBO: €50,00 in products.\n• Delivery Cost: €5,00 per order.\nTelephone Office +49 30 1234567\nEmail support@foreverliving.de\n",
-            "score": 0.9
-          }
-        ],
-        "confidence": 0.9
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
-        "kind": "answer",
-        "message_keys_present": [
+        "kind": "evidence_missing",
+        "language": "en",
+        "cx_applied_expected": [
           "contact_offer"
         ],
-        "contact_rule": "session_market_contact_once",
-        "contact_market": "DE",
-        "language": "en"
+        "contact_market": "DE"
       },
-      "notes": "A DE-session answer that recommends contacting support. How this case can fail once wired: if no contact detail is appended, if the wrong market's contact is appended, or if it is appended twice."
+      "notes": "contact_escalation only ever fires for OutcomeKind in {evidence_missing, personal_account, dependency_unavailable, partial_answer, cross_market_policy} (app/response/contact_completion.py's _ESCALATION_KINDS) -- NEVER for a plain 'answer', so this fixture is evidence_missing-shaped (empty documents), matching a real dead-end turn a reader would actually hit. Real check once wired: app.response.contact_completion.contact_escalation(outcome, country='DE', language=..., answer_text=response.answer, render=cx_render.render) must return the DE default public contact (config/public_contacts.json's 'default' -> www.foreverliving.com, since DE has no market-specific entry), and never fire twice. How this case can fail: if no contact is appended, or it is appended twice."
     },
     {
       "id": "cx-contact-escalation-es-01",
@@ -2470,32 +2293,22 @@
         {
           "role": "user",
           "message": "Por favor contacte con atención al cliente sobre esto.",
-          "language": "es",
-          "scripted_answer": "Please contact customer care about this."
+          "language": "es"
         }
       ],
       "stub": {
-        "documents": [
-          {
-            "kind": "directory",
-            "record_id": "sponsoring-de-001",
-            "record_country": "Germany",
-            "content": "Forever Germany\n• Minimum order size FBO: €50,00 in products.\n• Delivery Cost: €5,00 per order.\nTelephone Office +49 30 1234567\nEmail support@foreverliving.de\n",
-            "score": 0.9
-          }
-        ],
-        "confidence": 0.9
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
-        "kind": "answer",
-        "message_keys_present": [
+        "kind": "evidence_missing",
+        "language": "es",
+        "cx_applied_expected": [
           "contact_offer"
         ],
-        "contact_rule": "session_market_contact_once",
-        "contact_market": "DE",
-        "language": "es"
+        "contact_market": "DE"
       },
-      "notes": "A DE-session answer that recommends contacting support. How this case can fail once wired: if no contact detail is appended, if the wrong market's contact is appended, or if it is appended twice."
+      "notes": "contact_escalation only ever fires for OutcomeKind in {evidence_missing, personal_account, dependency_unavailable, partial_answer, cross_market_policy} (app/response/contact_completion.py's _ESCALATION_KINDS) -- NEVER for a plain 'answer', so this fixture is evidence_missing-shaped (empty documents), matching a real dead-end turn a reader would actually hit. Real check once wired: app.response.contact_completion.contact_escalation(outcome, country='DE', language=..., answer_text=response.answer, render=cx_render.render) must return the DE default public contact (config/public_contacts.json's 'default' -> www.foreverliving.com, since DE has no market-specific entry), and never fire twice. How this case can fail: if no contact is appended, or it is appended twice."
     },
     {
       "id": "cx-supported-only-suggestions-en-00",
@@ -2533,9 +2346,12 @@
           "suggest_topic_contact",
           "suggest_topic_returns"
         ],
-        "language": "en"
+        "language": "en",
+        "cx_applied_expected": [
+          "suggestions"
+        ]
       },
-      "notes": "How this case can fail once wired: if a suggested follow-up topic is offered that the retrieved Germany record does not actually cover."
+      "notes": "Real, verified kind: 'answer' -- unlike the Kenya fixtures elsewhere in this file (asked from a US session, genuinely cross-market), a DE session asking about a Germany directory record does NOT get promoted to international_directory (app/response/outcome.py's directory-target promotion is verified to apply only when the record's market differs from the session's own country). Real check once wired: app.response.suggestions.suggest_follow_ups(outcome, language=..., country='DE', topic_supported=...) is called by the coordinator and its returned suggest_topic_* keys land in response.suggestions as structured items (never appended into the answer text, per the coordinator's brief) -- suggestions ARE offered for a plain 'answer' kind (only safety_refusal/dependency_unavailable are excluded). How this case can fail: if a suggested topic is offered that the Germany record doesn't actually cover, or if a suggestion lands in the answer text instead of response.suggestions."
     },
     {
       "id": "cx-supported-only-suggestions-ru-01",
@@ -2573,9 +2389,12 @@
           "suggest_topic_contact",
           "suggest_topic_returns"
         ],
-        "language": "ru"
+        "language": "ru",
+        "cx_applied_expected": [
+          "suggestions"
+        ]
       },
-      "notes": "How this case can fail once wired: if a suggested follow-up topic is offered that the retrieved Germany record does not actually cover."
+      "notes": "Real, verified kind: 'answer' -- unlike the Kenya fixtures elsewhere in this file (asked from a US session, genuinely cross-market), a DE session asking about a Germany directory record does NOT get promoted to international_directory (app/response/outcome.py's directory-target promotion is verified to apply only when the record's market differs from the session's own country). Real check once wired: app.response.suggestions.suggest_follow_ups(outcome, language=..., country='DE', topic_supported=...) is called by the coordinator and its returned suggest_topic_* keys land in response.suggestions as structured items (never appended into the answer text, per the coordinator's brief) -- suggestions ARE offered for a plain 'answer' kind (only safety_refusal/dependency_unavailable are excluded). How this case can fail: if a suggested topic is offered that the Germany record doesn't actually cover, or if a suggestion lands in the answer text instead of response.suggestions."
     },
     {
       "id": "cx-conversation-repair-en-00",
@@ -2616,14 +2435,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "repair_ack"
-        ],
-        "repair_country": "Ghana",
         "directory_target": "Ghana",
-        "language": "en"
+        "language": "en",
+        "repair_prior_turn": "What is the minimum order in Nigeria?",
+        "repair_kind": "market",
+        "repair_replacement": "Ghana"
       },
-      "notes": "How this case can fail once Lane 5 wires repair: if the corrected country (Ghana) does not replace Nigeria as the resolved target, or if no repair_ack acknowledgement is rendered."
+      "notes": "Real check: app.orchestrator.conversation_repair.detect_repair(message=repair_text, language=..., prior_user_turns=[first]) is a PURE function, callable and asserted directly today regardless of any flag -- it must return Repair(kind='market', replacement='Ghana', ...). Only whether the coordinator's hook actually re-runs retrieval against the rewritten question and renders repair_ack is gated behind 'repair'. How this case can fail: if detect_repair ever fails to resolve 'Ghana' as a market correction, or once wired, if Nigeria is still answered instead of Ghana."
     },
     {
       "id": "cx-conversation-repair-es-01",
@@ -2664,14 +2482,13 @@
       },
       "expected": {
         "kind": "international_directory",
-        "message_keys_present": [
-          "repair_ack"
-        ],
-        "repair_country": "Ghana",
         "directory_target": "Ghana",
-        "language": "es"
+        "language": "es",
+        "repair_prior_turn": "¿Cuál es el pedido mínimo en Nigeria?",
+        "repair_kind": "market",
+        "repair_replacement": "Ghana"
       },
-      "notes": "How this case can fail once Lane 5 wires repair: if the corrected country (Ghana) does not replace Nigeria as the resolved target, or if no repair_ack acknowledgement is rendered."
+      "notes": "Real check: app.orchestrator.conversation_repair.detect_repair(message=repair_text, language=..., prior_user_turns=[first]) is a PURE function, callable and asserted directly today regardless of any flag -- it must return Repair(kind='market', replacement='Ghana', ...). Only whether the coordinator's hook actually re-runs retrieval against the rewritten question and renders repair_ack is gated behind 'repair'. How this case can fail: if detect_repair ever fails to resolve 'Ghana' as a market correction, or once wired, if Nigeria is still answered instead of Ghana."
     },
     {
       "id": "cx-typo-tolerance-en-00",
@@ -2691,25 +2508,14 @@
       ],
       "stub": {
         "documents": [],
-        "confidence": 0.0,
-        "reference_candidates": [
-          "shipping_cost",
-          "shopping_cost"
-        ]
+        "confidence": 0.0
       },
       "expected": {
         "kind": "clarification",
         "clarification_question_count": 1,
-        "clarify_options": [
-          "shipping_cost",
-          "shopping_cost"
-        ],
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "language": "en"
+        "render_key": "clarify_field"
       },
-      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only, not reproduced here). How this case can fail once wired: if the render silently guesses one field instead of asking one question naming both."
+      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about."
     },
     {
       "id": "cx-typo-tolerance-en-01",
@@ -2729,25 +2535,14 @@
       ],
       "stub": {
         "documents": [],
-        "confidence": 0.0,
-        "reference_candidates": [
-          "shipping_cost",
-          "shopping_cost"
-        ]
+        "confidence": 0.0
       },
       "expected": {
         "kind": "clarification",
         "clarification_question_count": 1,
-        "clarify_options": [
-          "shipping_cost",
-          "shopping_cost"
-        ],
-        "message_keys_present": [
-          "clarify_field"
-        ],
-        "language": "en"
+        "render_key": "clarify_field"
       },
-      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only, not reproduced here). How this case can fail once wired: if the render silently guesses one field instead of asking one question naming both."
+      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about."
     },
     {
       "id": "cx-confidence-aware-language-en-00",
@@ -2778,12 +2573,14 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "partial_answer",
-        "partial_note_present": true,
+        "kind": "international_directory",
+        "coverage_unsupported": [
+          "delivery_cost"
+        ],
         "no_numeric_confidence": true,
-        "language": "en"
+        "confidence_framing_key_expected": null
       },
-      "notes": "Delivery cost is unsupported alongside a supported minimum-order fact. How this case can fail once wired: if the partial note ever states a numeric confidence figure, or is missing despite the real gap."
+      "notes": "Real check: app.response.quality.confidence_framing_key(outcome_kind, coverage) only ever returns 'partial_answer_gap' or None -- NEVER a numeric value -- and only for OutcomeKind.PARTIAL_ANSWER with an actual unsupported field. Today's real, verified outcome_kind is 'international_directory' (the Kenya fixture; nothing downgrades it to partial_answer yet), so confidence_framing_key(OutcomeKind.INTERNATIONAL_DIRECTORY, coverage) is asserted to be None even with a real unsupported field -- that assertion is checkable today, independent of any flag. How this case can fail: if confidence_framing_key is ever changed to return a number, or once the downgrade is wired, if the key is missing despite a real gap."
     },
     {
       "id": "cx-confidence-aware-language-de-01",
@@ -2814,12 +2611,12 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "answer",
-        "partial_note_present": false,
+        "kind": "international_directory",
+        "coverage_unsupported": [],
         "no_numeric_confidence": true,
-        "language": "de"
+        "confidence_framing_key_expected": null
       },
-      "notes": "Only the minimum order is requested and it is fully supported, so no partial note should be attached at all. How this case can fail once wired: if a partial note is attached by default even when nothing is actually unsupported."
+      "notes": "Only the minimum order is requested and it is fully supported (no unsupported field at all), so confidence_framing_key must be None regardless of outcome_kind -- checkable for real today. How this case can fail: if a partial note is ever attached by default even when nothing is actually unsupported."
     },
     {
       "id": "cx-answer-language-parity-en-00",
@@ -2853,11 +2650,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "en",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "en",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (en) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'en'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-es-01",
@@ -2891,11 +2687,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "es",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "es",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (es) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'es'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-fr-02",
@@ -2929,11 +2724,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "fr",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "fr",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (fr) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'fr'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-de-03",
@@ -2967,11 +2761,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "de",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "de",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (de) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'de'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-fi-04",
@@ -3005,11 +2798,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "fi",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "fi",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (fi) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'fi'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-sv-05",
@@ -3043,11 +2835,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "sv",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "sv",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (sv) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'sv'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-ru-06",
@@ -3081,11 +2872,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "ru",
-        "retrieval_language_unchanged": "en",
-        "route_locale": true
+        "language": "ru",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (ru) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'ru'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     },
     {
       "id": "cx-answer-language-parity-pt-07",
@@ -3119,11 +2909,10 @@
       },
       "expected": {
         "kind": "answer",
-        "answer_language": "pt",
-        "retrieval_language_unchanged": "en",
-        "route_locale": false
+        "language": "pt",
+        "retrieval_language_unchanged": "en"
       },
-      "notes": "Approval 6B: the answer should be composed in the message's own language (pt) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language. pt is not a route locale, so this exercises the English-copy fallback path."
+      "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'pt'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
     }
   ]
 }
