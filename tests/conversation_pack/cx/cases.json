@@ -121,9 +121,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "Who is the sponsoring contact for Kenya?",
+          "message": "What is the sponsoring contact phone number for Kenya?",
           "language": "en",
-          "scripted_answer": "The sponsoring contact for Kenya is contact@example-0.test."
+          "scripted_answer": "The sponsoring contact phone number is +1 555 0100."
         }
       ],
       "stub": {
@@ -146,7 +146,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Kenya from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Kenya from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-en-00",
@@ -384,9 +384,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "¿Quién es el contacto de patrocinio para Ghana?",
+          "message": "¿Cuál es el número de teléfono del contacto de patrocinio para Ghana?",
           "language": "es",
-          "scripted_answer": "The sponsoring contact for Ghana is contact@example-1.test."
+          "scripted_answer": "El número de teléfono del contacto de patrocinio es +1 555 0100."
         }
       ],
       "stub": {
@@ -409,7 +409,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Ghana from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Ghana from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-es-01",
@@ -641,9 +641,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "Qui est le contact de parrainage pour Nigeria ?",
+          "message": "Quel est le numéro de téléphone du contact de parrainage pour Nigeria ?",
           "language": "fr",
-          "scripted_answer": "The sponsoring contact for Nigeria is contact@example-2.test."
+          "scripted_answer": "Le numéro de téléphone du contact de parrainage est +1 555 0100."
         }
       ],
       "stub": {
@@ -666,7 +666,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Nigeria from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Nigeria from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-fr-02",
@@ -898,9 +898,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wer ist der Sponsoring-Kontakt für Brazil?",
+          "message": "Wie lautet die Telefonnummer des Sponsoring-Kontakts für Brazil?",
           "language": "de",
-          "scripted_answer": "The sponsoring contact for Brazil is contact@example-3.test."
+          "scripted_answer": "Die Telefonnummer des Sponsoring-Kontakts ist +1 555 0100."
         }
       ],
       "stub": {
@@ -923,7 +923,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Brazil from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Brazil from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-de-03",
@@ -1161,9 +1161,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "Kuka on sponsorointiyhteyshenkilö maassa Finland/Aland?",
+          "message": "Mikä on sponsorointiyhteyshenkilön puhelinnumero maassa Finland/Aland?",
           "language": "fi",
-          "scripted_answer": "The sponsoring contact for Finland/Aland is contact@example-4.test."
+          "scripted_answer": "Sponsorointiyhteyshenkilön puhelinnumero on +1 555 0100."
         }
       ],
       "stub": {
@@ -1186,7 +1186,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Finland/Aland from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Finland/Aland from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-fi-04",
@@ -1418,9 +1418,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vem är sponsringskontakten för Sweden/Gotland?",
+          "message": "Vad är telefonnumret till sponsringskontakten för Sweden/Gotland?",
           "language": "sv",
-          "scripted_answer": "The sponsoring contact for Sweden/Gotland is contact@example-5.test."
+          "scripted_answer": "Telefonnumret till sponsringskontakten är +1 555 0100."
         }
       ],
       "stub": {
@@ -1443,7 +1443,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Sweden/Gotland from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for Sweden/Gotland from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-sv-05",
@@ -1675,9 +1675,9 @@
       "turns": [
         {
           "role": "user",
-          "message": "Кто является контактным лицом по спонсорству для France/Corsica?",
+          "message": "Какой номер телефона у контактного лица по спонсорству в France/Corsica?",
           "language": "ru",
-          "scripted_answer": "The sponsoring contact for France/Corsica is contact@example-6.test."
+          "scripted_answer": "Номер телефона контактного лица: +1 555 0100."
         }
       ],
       "stub": {
@@ -1700,7 +1700,7 @@
           "international_directory_note"
         ]
       },
-      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for France/Corsica from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY (the exemption from the cross-market scope refusal). How this case can fail: if the exemption regresses into a cross_market_policy refusal, or once cx_compose is wired, if international_directory_note is not applied."
+      "notes": "Real, verified trigger: an approved directory_kind='international_sponsoring' record for France/Corsica from a US session -> OutcomeKind.INTERNATIONAL_DIRECTORY. The question now explicitly asks for the phone number (utils.directory_fields._requested_directory_field_set recognises this as fields_requested={'phone'}), matching app/response/cx_compose.py's 2026-09-19 gate: the international_directory_note is only added when a directory field was actually asked for. An earlier version of this case asked 'Who is the sponsoring contact', which names no canonical field, so the note never fired -- that was a case defect (a design change this pack hadn't caught up to), not a product defect. How this case can fail: if the exemption regresses into a cross_market_policy refusal, or if the note stops being applied for a genuinely field-requesting question."
     },
     {
       "id": "cx-fallback-state-ambiguous-followup-ru-06",
@@ -2125,7 +2125,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "What is the minimum order and the delivery cost in Kenya?",
+          "message": "What is the minimum order and the payment methods in Kenya?",
           "language": "en",
           "scripted_answer": "The minimum order in Kenya is $100 worth of products when joining."
         }
@@ -2143,10 +2143,10 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "international_directory",
+        "kind": "partial_answer",
         "language": "en",
         "coverage_unsupported": [
-          "delivery_cost"
+          "payment_methods"
         ],
         "coverage_answered": [
           "min_order"
@@ -2155,7 +2155,7 @@
           "partial_note"
         ]
       },
-      "notes": "Real check used once partial_answer is wired: app.response.partial_answer.assess_field_coverage(question=..., language=..., answer_text=response.answer, evidence_documents=...) must report delivery_cost unsupported (the scripted answer never states it) while the minimum-order field is answered; partial_answer_note(...) must then be non-None. Today's real OutcomeKind is 'international_directory' (verified: the Kenya fixture is a directory_kind='international_sponsoring' record, so outcome.py's directory-target promotion applies before any partial-answer downgrade could) -- app/response/outcome.py never returns PARTIAL_ANSWER itself; only cx_compose, once wired, would downgrade it after calling assess_field_coverage. The field-coverage gap itself is verified directly against the real function on response.answer already, independent of any flag. How this case can fail once wired: if the downgrade to partial_answer never happens despite a real gap, or if partial_answer_gap copy is never attached."
+      "notes": "v4 fix: the requested-but-missing field is now payment_methods, not delivery_cost -- the Kenya fixture's own content states a delivery cost value, so that field was actually OMITTED (evidence had it, the scripted answer just didn't say it), never UNSUPPORTED; app/response/partial_answer.py's FieldCoverage deliberately keeps those two states distinct, and cx_compose's gap note only ever covers 'unsupported' (app/response/cx_compose.py's _partial_answer_gap_note). The earlier version was a case/fixture defect (conflating omitted with unsupported), not a product one. payment_methods genuinely has no value anywhere in this fixture's content. How this case can fail: if the gap note is ever attached for a field that IS supported, or missing despite a real, genuine gap."
     },
     {
       "id": "cx-partial-answer-fr-01",
@@ -2168,7 +2168,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Quel est le montant minimum de commande et le coût de livraison au Kenya ?",
+          "message": "Quel est le montant minimum de commande et les moyens de paiement au Kenya ?",
           "language": "fr",
           "scripted_answer": "The minimum order in Kenya is $100 worth of products when joining."
         }
@@ -2186,10 +2186,10 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "international_directory",
+        "kind": "partial_answer",
         "language": "fr",
         "coverage_unsupported": [
-          "delivery_cost"
+          "payment_methods"
         ],
         "coverage_answered": [
           "min_order"
@@ -2198,7 +2198,7 @@
           "partial_note"
         ]
       },
-      "notes": "Real check used once partial_answer is wired: app.response.partial_answer.assess_field_coverage(question=..., language=..., answer_text=response.answer, evidence_documents=...) must report delivery_cost unsupported (the scripted answer never states it) while the minimum-order field is answered; partial_answer_note(...) must then be non-None. Today's real OutcomeKind is 'international_directory' (verified: the Kenya fixture is a directory_kind='international_sponsoring' record, so outcome.py's directory-target promotion applies before any partial-answer downgrade could) -- app/response/outcome.py never returns PARTIAL_ANSWER itself; only cx_compose, once wired, would downgrade it after calling assess_field_coverage. The field-coverage gap itself is verified directly against the real function on response.answer already, independent of any flag. How this case can fail once wired: if the downgrade to partial_answer never happens despite a real gap, or if partial_answer_gap copy is never attached."
+      "notes": "v4 fix: the requested-but-missing field is now payment_methods, not delivery_cost -- the Kenya fixture's own content states a delivery cost value, so that field was actually OMITTED (evidence had it, the scripted answer just didn't say it), never UNSUPPORTED; app/response/partial_answer.py's FieldCoverage deliberately keeps those two states distinct, and cx_compose's gap note only ever covers 'unsupported' (app/response/cx_compose.py's _partial_answer_gap_note). The earlier version was a case/fixture defect (conflating omitted with unsupported), not a product one. payment_methods genuinely has no value anywhere in this fixture's content. How this case can fail: if the gap note is ever attached for a field that IS supported, or missing despite a real, genuine gap."
     },
     {
       "id": "cx-one-question-clarification-en-00",
@@ -2513,9 +2513,12 @@
       "expected": {
         "kind": "clarification",
         "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "render_key": "clarify_field",
+        "render_placeholders": {
+          "options": "shipping cost or shopping cost"
+        }
       },
-      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about."
+      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about. (v4 fix: expected.render_placeholders now supplies the filled {options} value -- cx_render.join_alternatives(['shipping cost', 'shopping cost'], 'en') -- matching how the real delivered clarification fills it; the earlier version compared against the unfilled template by mistake, a case/adapter defect, not a product one: the real kind, failure_layer='typo_clarification', and rendered text all verified correct once flipped.)"
     },
     {
       "id": "cx-typo-tolerance-en-01",
@@ -2540,9 +2543,12 @@
       "expected": {
         "kind": "clarification",
         "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "render_key": "clarify_field",
+        "render_placeholders": {
+          "options": "shipping cost or shopping cost"
+        }
       },
-      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about."
+      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about. (v4 fix: expected.render_placeholders now supplies the filled {options} value -- cx_render.join_alternatives(['shipping cost', 'shopping cost'], 'en') -- matching how the real delivered clarification fills it; the earlier version compared against the unfilled template by mistake, a case/adapter defect, not a product one: the real kind, failure_layer='typo_clarification', and rendered text all verified correct once flipped.)"
     },
     {
       "id": "cx-confidence-aware-language-en-00",
@@ -2555,7 +2561,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "What is the minimum order and the delivery cost in Kenya?",
+          "message": "What is the minimum order and the payment methods in Kenya?",
           "language": "en",
           "scripted_answer": "The minimum order in Kenya is $100 worth of products when joining."
         }
@@ -2573,14 +2579,17 @@
         "confidence": 0.9
       },
       "expected": {
-        "kind": "international_directory",
+        "kind": "partial_answer",
         "coverage_unsupported": [
-          "delivery_cost"
+          "payment_methods"
         ],
         "no_numeric_confidence": true,
-        "confidence_framing_key_expected": null
+        "confidence_framing_key_expected": "partial_answer_gap",
+        "cx_applied_expected": [
+          "partial_note"
+        ]
       },
-      "notes": "Real check: app.response.quality.confidence_framing_key(outcome_kind, coverage) only ever returns 'partial_answer_gap' or None -- NEVER a numeric value -- and only for OutcomeKind.PARTIAL_ANSWER with an actual unsupported field. Today's real, verified outcome_kind is 'international_directory' (the Kenya fixture; nothing downgrades it to partial_answer yet), so confidence_framing_key(OutcomeKind.INTERNATIONAL_DIRECTORY, coverage) is asserted to be None even with a real unsupported field -- that assertion is checkable today, independent of any flag. How this case can fail: if confidence_framing_key is ever changed to return a number, or once the downgrade is wired, if the key is missing despite a real gap."
+      "notes": "v4 fix: the requested-but-missing field is now payment_methods, not delivery_cost -- the Kenya fixture's own content states a delivery cost value, so that field was actually OMITTED (evidence had it, the scripted answer just didn't say it), never UNSUPPORTED; app/response/partial_answer.py's FieldCoverage deliberately keeps those two states distinct, and cx_compose's gap note only ever covers 'unsupported' (app/response/cx_compose.py's _partial_answer_gap_note). The earlier version was a case/fixture defect (conflating omitted with unsupported), not a product one. payment_methods genuinely has no value anywhere in this fixture's content. How this case can fail: if the gap note is ever attached for a field that IS supported, or missing despite a real, genuine gap."
     },
     {
       "id": "cx-confidence-aware-language-de-01",

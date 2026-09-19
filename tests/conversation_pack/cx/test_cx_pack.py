@@ -99,6 +99,9 @@ _base_pack = importlib.util.module_from_spec(_spec)
 sys.modules.setdefault("_cx_base_pack", _base_pack)
 _spec.loader.exec_module(_base_pack)  # type: ignore[union-attr]
 
+import boto3  # noqa: E402
+
+import app.evidence as evidence_module  # noqa: E402
 from app.models.responses import ModelResponse  # noqa: E402
 from app.orchestrator import answer_language  # noqa: E402
 from app.orchestrator import conversation_repair  # noqa: E402
@@ -108,53 +111,88 @@ from app.response import quality  # noqa: E402
 from app.response.outcome import ConversationOutcome, OutcomeKind  # noqa: E402
 from app.response.personal_account import detect_personal_account_request  # noqa: E402
 from app.retrieval.models import RetrievalAvailability, RetrievalResult  # noqa: E402
-import services.aws_clients as aws_clients_module  # noqa: E402
 
 # --- no real AWS, ever --------------------------------------------------------
+#
+# services/controlled_copy.py's localize_reviewed_copy is imported with
+# `from ... import` into BOTH app/response/cx_render.py AND app/evidence.py
+# (the latter via app.evidence.localized_conversation_response) -- each
+# holds its OWN bound reference, so both call sites must be patched
+# separately; patching services.controlled_copy itself would not reach
+# either already-bound name. boto3.client / boto3.session.Session.client
+# are also patched directly as a last-resort net: if some future call site
+# reaches AWS through neither of the above, client construction itself
+# fails loudly instead of a live call or a confusing botocore error.
 
 
-def _raise_on_real_aws_client() -> None:
+def _raise_on_real_aws_client(*_a: object, **_k: object) -> None:
     raise AssertionError(
-        "tests/conversation_pack/cx attempted a real AWS client (services.aws_clients."
-        "get_aws_clients) -- every case must be reachable through a fixture/fake instead."
+        "tests/conversation_pack/cx attempted a real AWS client -- every case "
+        "must be reachable through a fixture/fake instead."
     )
 
 
 @pytest.fixture(autouse=True)
 def _no_real_aws(monkeypatch: pytest.MonkeyPatch) -> None:
-    # app/response/cx_render.py does `from services.controlled_copy import
-    # localize_reviewed_copy`, binding the name into ITS OWN module
-    # namespace -- patching services.controlled_copy would not affect that
-    # already-bound reference, so cx_render's own attribute is patched.
     monkeypatch.setattr(cx_render, "localize_reviewed_copy", lambda *_, **__: None)
-    monkeypatch.setattr(
-        aws_clients_module, "get_aws_clients",
-        lambda: _raise_on_real_aws_client(),
-    )
+    monkeypatch.setattr(evidence_module, "localize_reviewed_copy", lambda *_, **__: None)
+    monkeypatch.setattr(boto3, "client", _raise_on_real_aws_client)
+    monkeypatch.setattr(boto3.session.Session, "client", _raise_on_real_aws_client)
 
 
 # --- the flip mechanism ------------------------------------------------------
-
+#
+# v4 (coordinator review of c58ccbc: lanes 1-8 wired on b95abc9, "commit with
+# the flags set True for every REQUIREMENT whose cases ALL pass, False for
+# the rest"). Flags are keyed by `case["requirement"]` directly now, not by
+# a shared lane concept: with the composer actually wired, requirements that
+# used to share one lane flag (e.g. "localization") turned out to have
+# different real pass/fail results (fallback_state_international_directory
+# passes in full; fallback_state_evidence_missing does not, for a real
+# product reason -- see CX_LANE6_EVALUATION.md's product-defect list). A
+# shared flag could not represent that split, so each requirement gets its
+# own. `case["requires"]` is kept in the case data as a historical/
+# documentation field (which lane(s) a case's assertions touch) but no
+# longer drives gating.
 FEATURE_FLAGS: dict[str, bool] = {
-    # Coordinator: chat_orchestrator.py attaches ChatResponse.metadata["outcome"].
+    # Coordinator: chat_orchestrator.py attaches ChatResponse.metadata["outcome"]
+    # on every path -- verified, applies to every case automatically.
     "outcome_contract_wired": True,
-    "partial_answer": False,  # Lane 8 composer applies partial_answer's downgrade + note
-    "contact_and_suggestions": False,  # Lane 8 composer applies contact_escalation / suggest_follow_ups
-    "personal_account": False,  # Lane 8 composer applies personal_account_note
-    "localization": False,  # Lane 8 composer / further chat_orchestrator wiring of the CX message keys
-    "repair": False,  # Lane 8 composer re-runs retrieval against detect_repair's rewritten question
-    "typo_clarify": False,  # Lane 8 composer routes typo_clarification into the delivered clarification
-    "answer_language": False,  # Coordinator wires resolve_answer_language into the prompt/render language
-    "quality_checks": False,  # Lane 8 composer applies strip_leading_preamble to the delivered answer
+    # Blocked by a real product defect (CX_LANE6_EVALUATION.md P1): chat_orchestrator's
+    # plain evidence_gate fallback (_insufficient_evidence_message) never renders
+    # the evidence_missing_detail key.
+    "fallback_state_evidence_missing": False,
+    "fallback_state_dependency_unavailable": True,
+    # Blocked by a real product defect (P3): app.evidence._names_another_market
+    # does not recognise every market name tried (only Kenya passes).
+    "fallback_state_cross_market_policy": False,
+    "fallback_state_international_directory": True,
+    # Blocked by a real product gap (P4): reference-narrowing between two
+    # approved directory candidates is not wired; the higher-scored one is
+    # answered instead of asking which one.
+    "fallback_state_ambiguous_followup": False,
+    # Blocked by a real product defect (P2): cx_compose.py only adds
+    # personal_account_limit for an answer-shaped outcome; the realistic
+    # personal-account question (no evidence exists for it) is evidence_missing.
+    "fallback_state_personal_account": False,
+    "fallback_state_safety_refusal": True,
+    "non_route_language_fallback": True,
+    "answer_language_parity": True,
+    "direct_answer_first": True,
+    "partial_answer": True,
+    # Blocked by the same reference-narrowing gap as fallback_state_ambiguous_followup (P4).
+    "one_question_clarification": False,
+    "contact_escalation": True,
+    "supported_only_suggestions": True,
+    "conversation_repair": True,
+    "typo_tolerance": True,
+    "confidence_aware_language": True,
 }
 
 
-def _effective_requires(case: dict[str, Any]) -> list[str]:
-    return ["outcome_contract_wired", *case["requires"]]
-
-
 def _missing_flags(case: dict[str, Any]) -> list[str]:
-    return [flag for flag in _effective_requires(case) if not FEATURE_FLAGS.get(flag, False)]
+    flags = ["outcome_contract_wired", case["requirement"]]
+    return [flag for flag in flags if not FEATURE_FLAGS.get(flag, False)]
 
 
 def _outcome_from_metadata(meta: dict[str, Any]) -> ConversationOutcome:
