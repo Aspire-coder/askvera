@@ -437,9 +437,15 @@ def _label(answer: str, *, language: str = "en", required=(), **run) -> dict:
 
 
 def test_refusal_copy_is_labelled_by_the_kind_of_refusal():
-    from app.orchestrator.chat_orchestrator import CROSS_MARKET_POLICY_SCOPE_RESPONSE
-
-    assert _label(CROSS_MARKET_POLICY_SCOPE_RESPONSE, abstained=True)["outcome"] == "foreign_policy_refusal"
+    # Updated 2026-09-18 (Phase 3, Lane 4): config/conversation_routes.json
+    # now carries a reviewed "cross_market_policy_scope" key for "en" (the
+    # CX_LANES.md message-key table), which scripts/run_benchmark.py's
+    # classify_outcome already looked up via _cross_market_scope_copy before
+    # this key existed anywhere. CROSS_MARKET_POLICY_SCOPE_RESPONSE is the
+    # orchestrator's own hardcoded English-only ultimate fallback, used only
+    # when no reviewed copy exists for a locale -- no longer true for "en" -
+    # so this test now checks the actual reviewed copy classify_outcome sees.
+    assert _label(_copy("cross_market_policy_scope"), abstained=True)["outcome"] == "foreign_policy_refusal"
     assert _label(_copy("off_topic"), abstained=True)["outcome"] == "out_of_scope_refusal"
     assert _label(_copy("off_topic", "fr"), language="fr", abstained=True)["outcome"] == "out_of_scope_refusal"
     assert _label(_copy("catalogue_scope"), abstained=True)["basis"] == "catalogue_scope"
@@ -658,15 +664,19 @@ def _configured(key: str, language: str) -> str:
 
 @pytest.mark.parametrize("language", UNREVIEWED_COPY_LOCALES)
 def test_labelling_never_asks_for_a_translation_and_labels_stay_correct(translation_forbidden, language):
-    from app.orchestrator.chat_orchestrator import CROSS_MARKET_POLICY_SCOPE_RESPONSE
-
     expectations = [
         (_configured("insufficient_evidence", language), {"abstained": True, "sections": []}, "retrieval_failure"),
         (_configured("off_topic", language), {"abstained": True}, "out_of_scope_refusal"),
         (_configured("catalogue_scope", language), {"abstained": True}, "out_of_scope_refusal"),
         (_configured("period_not_covered", language), {"abstained": True}, "out_of_scope_refusal"),
         (_configured("country_typo_confirmation", language).replace("{country}", "Tunisia"), {}, "other"),
-        (CROSS_MARKET_POLICY_SCOPE_RESPONSE, {"abstained": True}, "foreign_policy_refusal"),
+        # Updated 2026-09-18 (Phase 3, Lane 4): "cross_market_policy_scope" is
+        # now reviewed copy for every locale (CX_LANES.md), not just English,
+        # so this checks the actual per-locale configured copy -- still via
+        # _configured (configured_conversation_response), which never
+        # translates -- rather than the orchestrator's English-only
+        # CROSS_MARKET_POLICY_SCOPE_RESPONSE fallback constant.
+        (_configured("cross_market_policy_scope", language), {"abstained": True}, "foreign_policy_refusal"),
         ("Minimitilaus on 2 Case Credits.", {}, "answered"),
     ]
 
