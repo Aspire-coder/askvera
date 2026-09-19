@@ -305,3 +305,67 @@ New tests cover every example in the coordinator's report (English,
 Spanish, German, French) keeping its first sentence, plus two positive
 controls ("Of course! Returns are accepted..." and "¡Claro! Puedes...")
 confirming genuine pleasantries still strip after the fix.
+
+## Fix 3 (coordinator BLOCKER, 2026-09-19, on `cx/lane2b-20260918`): bulleted facts read as `unsupported`
+
+Wiring `assess_field_coverage` against the real Kenya directory record
+surfaced a defect that would have shown customers "I couldn't find payment
+methods" under an otherwise correct, complete answer.
+
+**Cause:** the record states payment methods, delivery cost, delivery time
+and minimum order as bulleted "• Label: value" lines. `_document_field_values`
+only ever read `utils.directory_fields.parse_directory_fields` (or the
+`metadata["directory_fields"]` map `app/retrieval/opensearch_sections.py:2424`
+builds with that same parser), and that parser -- see `_INLINE_FIELD_RE` --
+only recognises the contact-style fields (phone/email/website/address/
+business hours). It never saw a bullet, so every bulleted field came back
+with no value, and the old code treated "no value" as `unsupported`
+unconditionally.
+
+**Fix, in `app/response/partial_answer.py` only** (`parse_directory_fields`
+itself is shared and untouched):
+
+1. `_label_line_field_values` reads bulleted fact lines directly, reusing
+   `utils.directory_fields._FIELD_ALLOWED_LINE_FRAGMENTS` -- the same label
+   vocabulary `remove_unrequested_directory_fields` already matches against,
+   imported rather than copied -- tolerant of a leading bullet/dash/asterisk
+   marker, with the value read after the line's `:`/`#`/`-` separator plus
+   any non-labeled continuation lines. Its results are merged with
+   `_document_field_values`'s.
+2. **Safety rule:** `assess_field_coverage` now only ever places a field in
+   `unsupported` when BOTH (a) every approved document is directory-shaped
+   (`_all_evidence_is_directory_shaped`, reusing `app.response.outcome`'s
+   own `_is_directory_shaped` predicate -- imported, not re-derived) AND
+   (b) the field's label does not appear anywhere in any document's content
+   at all (`_field_mentioned_anywhere`, a raw fragment search independent of
+   whether a clean value could be parsed). Every other case -- no evidence,
+   any non-directory/prose evidence present, or a label mentioned in some
+   unparsed shape -- falls back to `omitted` instead: "no value collected",
+   never the stronger, wrong claim "this fact does not exist". This is the
+   safe direction: it can only ever under-report a real gap, never fabricate
+   one for a fact the evidence actually states.
+
+New tests (`tests/unit/test_cx_partial_answer.py`) cover: the real Kenya
+record shape (bulleted minimum order, delivery cost, payment methods, then
+a contact block) -- payment_methods/delivery_cost answered when the answer
+uses the value, omitted (never unsupported) when it does not; a field the
+same record genuinely lacks (delivery_time) -- still correctly
+`unsupported`; policy-prose-only evidence -- never `unsupported`; mixed
+directory + policy evidence -- never `unsupported`; no evidence at all --
+never `unsupported`; es/fr/de questions against the bulleted fields.
+
+**Test run:**
+```
+pytest tests/unit/test_cx_partial_answer.py tests/unit/test_cx_answer_quality.py
+       tests/conversation -q
+                                                          -> 419 passed
+pytest tests/unit/test_cx_compose.py -q                  -> 51 passed
+pytest tests/unit/test_cx_outcome_wiring.py -q           -> 13 passed (no
+       failures found -- `fields_answered`/`fields_unsupported` are not yet
+       wired into `derive_outcome`'s call sites in this worktree, so nothing
+       in that file currently exercises this module's output; nothing to
+       report back to the coordinator)
+flake8 app/response/partial_answer.py tests/unit/test_cx_partial_answer.py
+                                                          -> exit 0 (clean)
+git diff --check                                          -> exit 0 (clean)
+```
