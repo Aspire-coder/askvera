@@ -507,15 +507,38 @@ DIRECTORY_INTENT_SYNONYM_TERMS: dict[str, dict[str, tuple[str, ...]]] = {
 # consonant gradation (t/d) is captured for this one pair by listing both
 # the nominative and the gradated plural explicitly, but no further oblique
 # case of it is covered.
+# R05/N6 fifth follow-up (2026-09-18, coordinator review of d77c13f): the
+# singular condition-family noun is deliberately absent from es/fr/it/pt
+# below (only the plural - "condiciones"/"conditions"/"condizioni"/
+# "condições" - is kept), mirroring the English fix to
+# ``DIRECTORY_POLICY_WORDING_RE`` (plural-only "conditions",
+# ``app/retrieval/providers.py``). In these four Romance languages the
+# singular noun is genuinely ambiguous between the policy sense ("condicion
+# de venta" = "condition of sale") and an ordinary physical-condition sense
+# ("el telefono esta en buena condicion" = "the phone is in good
+# condition") that has nothing to do with a policy document, so it would
+# false-suppress a genuine directory question the way English's singular
+# did ("Is the office in good condition?"). The plural is not ambiguous
+# this way in ordinary usage (a policy's "conditions"/plural is the normal
+# phrasing; a physical object being "in good conditions"/plural is not
+# idiomatic in any of the four). German (Bedingung/Bedingungen), Dutch
+# (voorwaarde/voorwaarden), Finnish (ehto/ehdot), Russian
+# (uslovie/uslovija), and Serbian (uslov/uslovi) keep their singular forms:
+# none of those languages uses that same noun for a physical/product
+# condition (German/Dutch use Zustand/staat, Finnish uses kunto, Russian
+# uses sostoyanie, Serbian uses stanje for that sense), so the singular
+# carries no equivalent false-suppression risk there. The Scandinavian
+# vilkar/villkor entries are grammatically invariant (identical singular
+# and plural), so this distinction does not apply to them either way.
 POLICY_WORDING_TERMS: dict[str, tuple[str, ...]] = {
     "es": (
         "política", "políticas", "norma", "normas", "regla", "reglas",
-        "reglamento", "reglamentos", "condición", "condiciones",
+        "reglamento", "reglamentos", "condiciones",
         "directriz", "directrices",
     ),
     "fr": (
         "politique", "politiques", "règle", "règles", "règlement", "règlements",
-        "condition", "conditions", "directive", "directives",
+        "conditions", "directive", "directives",
     ),
     "de": (
         "richtlinie", "richtlinien", "regel", "regeln", "regelung", "regelungen",
@@ -528,11 +551,11 @@ POLICY_WORDING_TERMS: dict[str, tuple[str, ...]] = {
     ),
     "it": (
         "politica", "politiche", "regola", "regole", "regolamento", "regolamenti",
-        "condizione", "condizioni", "linea guida", "linee guida",
+        "condizioni", "linea guida", "linee guida",
     ),
     "pt": (
         "política", "políticas", "regra", "regras", "regulamento", "regulamentos",
-        "condição", "condições", "diretriz", "diretrizes",
+        "condições", "diretriz", "diretrizes",
     ),
     "fi": (
         "käytäntö", "käytännön", "käytäntöä", "sääntö", "säännöt", "säännön",

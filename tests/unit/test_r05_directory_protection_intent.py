@@ -1086,3 +1086,115 @@ def test_s1_localized_policy_wording_present_unit_new_terms() -> None:
     assert p("условима", language="sr") is True
     # Not a false positive: an unrelated question in a covered language.
     assert p("Cual es el telefono?", language="es") is False
+
+
+# --- R05/N6 fifth follow-up (2026-09-18): coordinator review of d77c13f ----
+#
+# Two English false-suppression leaks in the fourth follow-up's own
+# DIRECTORY_POLICY_WORDING_RE widening: (1) "terms of" matched *inside* the
+# unrelated "in terms of X" idiom, not just the intended "terms of
+# service"/"terms of payment" phrasing; (2) singular "condition" matched a
+# genuine physical-condition question with no policy-document sense at all.
+
+OFFICE_HOURS_IN_TERMS_OF_WEEKENDS_QUESTION = (
+    "What are the office hours of Forever Norway in terms of weekends?"
+)
+PHONE_AND_GOOD_CONDITION_QUESTION = (
+    "What is the phone number of Forever Norway? Is the office in good condition?"
+)
+TERMS_OF_PAYMENT_QUESTION = "What are the terms of payment at Forever Norway?"
+
+
+def test_s2_reviewer_repro_in_terms_of_idiom_stays_directory(monkeypatch) -> None:
+    """Fail-before (S2a): "in terms of weekends" is the exact "in terms of
+    X" idiom the fourth follow-up's "terms of" addition was supposed to
+    exclude, but did not - it wrongly suppressed a genuine office-hours
+    directory question to "policy". Must stay "directory"/8.0."""
+    plan = _plan(monkeypatch, OFFICE_HOURS_IN_TERMS_OF_WEEKENDS_QUESTION, country="NO")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s2_reviewer_repro_singular_condition_stays_directory(monkeypatch) -> None:
+    """Fail-before (S2b): "in good condition" is a genuine physical-condition
+    question (about the office itself, not a policy document) that the
+    fourth follow-up's singular "condition" wrongly suppressed. Must stay
+    "directory"/8.0 - the phone-number mention alone already establishes
+    directory intent."""
+    plan = _plan(monkeypatch, PHONE_AND_GOOD_CONDITION_QUESTION, country="NO")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s2_terms_of_payment_still_stays_policy(monkeypatch) -> None:
+    """Control: the genuine "terms of X" policy-document phrasing (not
+    preceded by "in") must still resolve to "policy" after the lookbehind
+    fix - only the "in terms of X" idiom is excluded, not "terms of"
+    generally."""
+    plan = _plan(monkeypatch, TERMS_OF_PAYMENT_QUESTION, country="NO")
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_s2_directory_policy_wording_regex_unit_controls() -> None:
+    """Unit-level control directly on DIRECTORY_POLICY_WORDING_RE, isolated
+    from the full retrieval-plan pipeline."""
+    from app.retrieval.providers import DIRECTORY_POLICY_WORDING_RE as policy_re
+
+    assert policy_re.search(OFFICE_HOURS_IN_TERMS_OF_WEEKENDS_QUESTION) is None
+    assert policy_re.search(PHONE_AND_GOOD_CONDITION_QUESTION) is None
+    assert policy_re.search(TERMS_OF_PAYMENT_QUESTION) is not None
+    assert policy_re.search("What are the terms and conditions of Forever Norway?") is not None
+    assert policy_re.search("certain terms of service apply") is not None
+    assert policy_re.search("What is the return policy?") is not None
+
+
+@pytest.mark.parametrize(
+    "text,language,expected",
+    [
+        ("¿Está el teléfono en buena condición?", "es", False),
+        ("¿Cuáles son las condiciones de venta?", "es", True),
+        ("Le téléphone est en bonne condition ?", "fr", False),
+        ("Quelles sont les conditions de vente ?", "fr", True),
+        ("Il telefono è in buona condizione?", "it", False),
+        ("Quali sono le condizioni di vendita?", "it", True),
+        ("O telefone está em boa condição?", "pt", False),
+        ("Quais são as condições de venda?", "pt", True),
+    ],
+    ids=[
+        "es-singular-physical-not-policy", "es-plural-policy",
+        "fr-singular-physical-not-policy", "fr-plural-policy",
+        "it-singular-physical-not-policy", "it-plural-policy",
+        "pt-singular-physical-not-policy", "pt-plural-policy",
+    ],
+)
+def test_s2_romance_language_singular_condition_dropped_plural_kept(text, language, expected) -> None:
+    """The same singular/plural distinction as English, applied to the four
+    Romance languages the coordinator flagged: the ambiguous physical-
+    condition singular ("condicion"/"condition"/"condizione"/"condicao")
+    must NOT trigger policy wording, while the (unambiguous, policy-only in
+    ordinary usage) plural still does."""
+    from utils.directory_fields import localized_policy_wording_present as p
+
+    assert p(text, language=language) is expected
+
+
+@pytest.mark.parametrize(
+    "text,language",
+    [
+        ("Welche Bedingung gilt hier?", "de"),
+        ("Wat is de voorwaarde?", "nl"),
+        ("Mikä on ehto?", "fi"),
+        ("Какое условие?", "ru"),
+        ("Koji je uslov?", "sr"),
+    ],
+    ids=["german-singular-kept", "dutch-singular-kept", "finnish-singular-kept", "russian-singular-kept", "serbian-singular-kept"],
+)
+def test_s2_non_romance_singular_condition_forms_unchanged(text, language) -> None:
+    """Control: German/Dutch/Finnish/Russian/Serbian keep their singular
+    condition-family form, since none of those languages uses that noun for
+    a physical/product condition (they use a separate word for that sense),
+    so there is no equivalent false-suppression risk to fix there."""
+    from utils.directory_fields import localized_policy_wording_present as p
+
+    assert p(text, language=language) is True

@@ -688,12 +688,131 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   covered; an unlisted spelling falls back to "ambiguous", the same
   behaviour as before this task existed - it can only cost directory
   protection for that spelling, never wrongly grant it.
-- **The "som regel"/"in terms of X" idiom trade-off (point 3 above) is
-  accepted, not fixed**, symmetric between English and Scandinavian, and
-  documented in both `DIRECTORY_POLICY_WORDING_RE`'s own comment
-  (`app/retrieval/providers.py`) and `POLICY_WORDING_TERMS`'s docstring
-  (`config/directory_field_vocabulary.py`).
+- **The "som regel"/"in terms of X" idiom trade-off (point 3 above) was
+  originally accepted for both English and Scandinavian - the fifth
+  follow-up below fixes the English "in terms of X" half with a targeted
+  lookbehind (a coordinator review found the "accepted" framing was
+  actually a false-suppression bug, not a tolerable trade-off) and leaves
+  the Scandinavian "som regel" half accepted, since "regel"/"regler" have
+  no equivalent narrow exclusion available without losing the genuine
+  "policy" sense they exist to catch.**
 - **The Finnish "ehto"/"ehdot" pair is flagged medium-to-low confidence**
   specifically: Finnish consonant gradation (t/d) is handled for this one
   pair by listing both forms explicitly, but no further oblique case of it
   is covered.
+
+## Fifth follow-up (2026-09-18): coordinator review of d77c13f
+
+A coordinator review of the fourth follow-up found two English
+false-suppression leaks in its own widening of
+`DIRECTORY_POLICY_WORDING_RE`:
+
+- **S2a:** the new `terms\s+of` branch matched *inside* the unrelated "in
+  terms of X" idiom too broadly - not just the intended "terms of
+  service"/"terms of payment" phrasing the addition was meant for. Probe:
+  "What are the office hours in terms of weekends?" resolved to
+  `policy`/0.0 instead of `directory`/8.0.
+- **S2b:** the new singular `condition` matched a genuine physical-condition
+  question with no policy-document sense at all. Probe: "Is the office in
+  good condition?" resolved to `policy`/0.0 instead of `directory`/8.0.
+
+**Fix:**
+
+1. `terms\s+of` is now guarded by a fixed-width negative lookbehind,
+   `(?<!\bin\s)\bterms\s+of\b` (Python requires fixed-width lookbehinds;
+   `\bin\s` is exactly 3 characters wide since `\b` itself consumes none).
+   This excludes only "in terms of X" (where "terms" is immediately
+   preceded by the standalone word "in") while still matching "terms of
+   service"/"terms of payment"/any other "terms of X" phrasing. The
+   lookbehind's own `\b` means a word merely *ending* in "...in "
+   (e.g. "certain terms of service") is not excluded, since "in" there is
+   not its own word. This was chosen over an explicit "terms of
+   (sale|service|use|payment|business|membership)" phrase list as the
+   simpler, still-auditable fix: one general pattern that excludes exactly
+   the one problem idiom, rather than an open-ended list needing its own
+   upkeep as new "terms of ..." phrasings appear. `terms and conditions`
+   is unaffected (no lookbehind needed - it does not appear inside the "in
+   terms of X" idiom).
+2. `conditions?` narrows to plural-only `conditions` (English). Genuine
+   English "terms and conditions" usage is itself always plural, so the
+   singular added no real recall and only false-suppressed physical-
+   condition questions like "Is the office in good condition?".
+3. The same singular/plural asymmetry is applied to the four Romance
+   languages that share the identical ambiguity from Latin: es
+   ("condición" dropped, "condiciones" kept), fr ("condition" dropped,
+   "conditions" kept), it ("condizione" dropped, "condizioni" kept), pt
+   ("condição" dropped, "condições" kept) - in each, the singular noun is
+   also the ordinary word for a physical/product condition ("el telefono
+   esta en buena condicion"), while the plural is not idiomatic that way.
+   German (Bedingung/Bedingungen), Dutch (voorwaarde/voorwaarden), Finnish
+   (ehto/ehdot), Russian (uslovie/uslovija), and Serbian (uslov/uslovi)
+   keep their singular forms unchanged: none of those languages uses that
+   noun for a physical condition (they use a separate word - Zustand/staat/
+   kunto/sostoyanie/stanje respectively), so there is no equivalent risk.
+   The Scandinavian vilkar/villkor entries are grammatically invariant
+   (identical singular and plural), so the distinction does not apply.
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| "What are the office hours of Forever Norway in terms of weekends?" (en) | `policy` (0.0) | `directory` (8.0) |
+| "What is the phone number of Forever Norway? Is the office in good condition?" (en) | `policy` (0.0) | `directory` (8.0) |
+| "What are the terms of payment at Forever Norway?" (en, control) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| "¿Está el teléfono en buena condición?" (es, singular) | `policy` (0.0) | `directory`-eligible (0.0 suppression removed)* |
+| "¿Cuáles son las condiciones de venta?" (es, plural, control) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| Equivalent fr/it/pt singular-physical / plural-policy pairs | same pattern | same pattern |
+| German/Dutch/Finnish/Russian/Serbian singular condition-family forms | `policy` (0.0), unchanged | `policy` (0.0), unchanged (no risk in these languages) |
+
+\* The table's Spanish/French/Italian/Portuguese rows are unit-level
+`localized_policy_wording_present` results (True -> False), not full
+`_runtime_scope_intent` results - no existing test fixture pairs a
+Romance-language singular-condition question with a directory field in a
+way that would flip a full pipeline result, so the fix is proven at the
+function level, matching the coordinator's own repro shape.
+
+### Fixture/conversation-pack note
+
+The coordinator's earlier fixture grep (fourth follow-up section, above)
+already covered `condition`/`conditions` and every non-English word this
+follow-up touches; no new grep was needed since this follow-up only
+*removes* recognition (singular condition forms, the "in terms of" idiom)
+rather than adding any new word.
+
+### Fifth follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 17 new S2 tests, on `config/directory_field_vocabulary.py` and
+   `app/retrieval/providers.py` reverted via `git stash` (tests kept):
+   **7 failed, 10 passed, `EXIT=1`** - the 7 failures are the genuine S2a/
+   S2b leaks and their four Romance-language siblings; the 10 pre-existing
+   passes are controls unaffected by this specific bug (the non-Romance
+   singular-kept controls, the "terms of payment" policy control, etc.).
+   `git stash pop` restored the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **691 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **9015 passed, 13
+   xfailed, `EXIT=0`**, 404.10s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): **no output,
+   `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Fifth follow-up limitations
+
+- **The negative lookbehind excludes only the literal, standalone word
+  "in" immediately before "terms of".** A different preposition-like idiom
+  this task's reviewers have not yet identified (if one exists) would not
+  be caught by this specific exclusion and would need its own review.
+- **The Romance-language singular/plural fix is a coarse binary per
+  language**, not a semantic disambiguator - a genuinely policy-document
+  singular use in Spanish/French/Italian/Portuguese ("la condicion
+  principal del contrato es...") is now also not recognized, exactly
+  mirroring English's own choice to drop the singular entirely rather than
+  attempt to disambiguate sense from a bare word. This trades a small
+  amount of recall for eliminating the physical-condition false positive,
+  the same trade-off English's fix makes.
