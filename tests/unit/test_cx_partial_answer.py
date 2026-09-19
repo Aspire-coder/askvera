@@ -39,6 +39,21 @@ def _directory_document(
     )
 
 
+def _policy_document(content: str, *, country: str = "KE") -> RetrievedDocument:
+    """A non-directory-shaped approved document (plain policy/prose) --
+    carries none of directory_kind/directory_section/directory_fields, so
+    app.response.outcome._is_directory_shaped is False for it."""
+    return RetrievedDocument(
+        id=f"policy-{country.lower()}",
+        title=f"{country} policy",
+        content=content,
+        source=f"s3://approved/{country.lower()}/policy.pdf",
+        country=country,
+        language="en",
+        metadata={},
+    )
+
+
 def _fake_render(key: str, language: str, **placeholders: object) -> str:
     """A minimal stand-in for the not-yet-written app/response/cx_render.py
     (Lane 4). Returns a deterministic, inspectable string rather than real
@@ -206,6 +221,178 @@ def test_unrecognised_language_requests_nothing() -> None:
         evidence_documents=[document],
     )
     assert coverage == FieldCoverage(frozenset(), frozenset(), frozenset(), frozenset())
+
+
+# --- assess_field_coverage: bulleted fact lines (coordinator BLOCKER fix, --
+# --- 2026-09-19) -------------------------------------------------------------
+
+# The real Kenya directory record shape: bulleted facts
+# (minimum order/delivery cost/payment methods), THEN a contact block --
+# parse_directory_fields only ever saw the contact block; the bullets above
+# it were silently dropped, which is exactly what made a real, stated
+# payment-methods answer come back "unsupported".
+_KENYA_RECORD_CONTENT = (
+    "Forever Living Kenya\n"
+    "• Minimum order size FBO: 50 CV\n"
+    "• Delivery Cost: 500 KES\n"
+    "• Payment methods accepted: Bank deposit, Credit Card, "
+    "Mobile Money Transfer (Mpesa).\n"
+    "Telephone Office: +254 20 2026869\n"
+    "Email: info@kenya.example\n"
+)
+
+
+def test_kenya_record_payment_methods_bullet_is_answered() -> None:
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="What payment methods are accepted?",
+        language="en",
+        answer_text="They accept Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).",
+        evidence_documents=[document],
+    )
+    assert coverage.requested == frozenset({"payment_methods"})
+    assert coverage.answered == frozenset({"payment_methods"})
+    assert coverage.unsupported == frozenset()
+
+
+def test_kenya_record_delivery_cost_bullet_is_answered() -> None:
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="What is the delivery cost?",
+        language="en",
+        answer_text="The delivery cost is 500 KES.",
+        evidence_documents=[document],
+    )
+    assert coverage.requested == frozenset({"delivery_cost"})
+    assert coverage.answered == frozenset({"delivery_cost"})
+    assert coverage.unsupported == frozenset()
+
+
+def test_kenya_record_payment_methods_bullet_never_unsupported_even_if_dropped_from_answer() -> None:
+    # The record states it, but the generated answer never used the value --
+    # omitted (a real gap to consider filling), never the stronger, wrong
+    # claim "unsupported" (no evidence for it at all).
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="What payment methods are accepted?",
+        language="en",
+        answer_text="Please contact the office for more details.",
+        evidence_documents=[document],
+    )
+    assert coverage.unsupported == frozenset()
+    assert coverage.omitted == frozenset({"payment_methods"})
+
+
+def test_kenya_record_missing_field_is_genuinely_unsupported() -> None:
+    # The record has no delivery-time bullet at all (only minimum order,
+    # delivery cost, payment methods, then contacts) -- this is the one case
+    # that SHOULD still be unsupported.
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="What is the delivery time?",
+        language="en",
+        answer_text="This is not stated in our records.",
+        evidence_documents=[document],
+    )
+    assert coverage.requested == frozenset({"delivery_time"})
+    assert coverage.unsupported == frozenset({"delivery_time"})
+
+
+def test_policy_prose_evidence_is_never_unsupported() -> None:
+    # Prose can state a fact without ever using the field's own label line --
+    # this module has no free-text extraction for that shape (only the
+    # labeled-line vocabulary), so it lands as "omitted" (no value
+    # collected), never the stronger, wrong claim "unsupported".
+    document = _policy_document(
+        "Members may pay for their orders by card, bank transfer or mobile money."
+    )
+    coverage = assess_field_coverage(
+        question="What payment methods are accepted?",
+        language="en",
+        answer_text="You can pay by card, bank transfer or mobile money.",
+        evidence_documents=[document],
+    )
+    assert coverage.unsupported == frozenset()
+    assert coverage.omitted == frozenset({"payment_methods"})
+
+
+def test_policy_prose_evidence_with_no_stated_value_is_omitted_not_unsupported() -> None:
+    document = _policy_document("Orders are processed within two business days.")
+    coverage = assess_field_coverage(
+        question="What payment methods are accepted?",
+        language="en",
+        answer_text="This is not covered in the policy.",
+        evidence_documents=[document],
+    )
+    assert coverage.unsupported == frozenset()
+    assert coverage.omitted == frozenset({"payment_methods"})
+
+
+def test_mixed_directory_and_policy_evidence_is_never_unsupported() -> None:
+    # A directory record that lacks delivery_time entirely, alongside a
+    # policy document -- mixed evidence must never report unsupported, even
+    # for the field the directory record itself does not have.
+    directory_document = _directory_document(_KENYA_RECORD_CONTENT)
+    policy_document = _policy_document("Standard shipping applies across East Africa.")
+    coverage = assess_field_coverage(
+        question="What is the delivery time and the payment methods?",
+        language="en",
+        answer_text="They accept Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).",
+        evidence_documents=[directory_document, policy_document],
+    )
+    assert coverage.unsupported == frozenset()
+    assert coverage.answered == frozenset({"payment_methods"})
+    assert coverage.omitted == frozenset({"delivery_time"})
+
+
+def test_no_evidence_at_all_is_never_unsupported() -> None:
+    coverage = assess_field_coverage(
+        question="What is the delivery time?",
+        language="en",
+        answer_text="We do not have this information.",
+        evidence_documents=[],
+    )
+    assert coverage.unsupported == frozenset()
+    assert coverage.omitted == frozenset({"delivery_time"})
+
+
+def test_spanish_question_for_bulleted_payment_methods_is_answered() -> None:
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="Cuales son los metodos de pago aceptados?",
+        language="es",
+        answer_text="Aceptan Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).",
+        evidence_documents=[document],
+    )
+    assert coverage.requested == frozenset({"payment_methods"})
+    assert coverage.answered == frozenset({"payment_methods"})
+    assert coverage.unsupported == frozenset()
+
+
+def test_french_question_for_bulleted_delivery_cost_is_answered() -> None:
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="Quel est le cout de livraison?",
+        language="fr",
+        answer_text="Le cout de livraison est de 500 KES.",
+        evidence_documents=[document],
+    )
+    assert coverage.requested == frozenset({"delivery_cost"})
+    assert coverage.answered == frozenset({"delivery_cost"})
+    assert coverage.unsupported == frozenset()
+
+
+def test_german_question_for_bulleted_payment_methods_is_answered() -> None:
+    document = _directory_document(_KENYA_RECORD_CONTENT)
+    coverage = assess_field_coverage(
+        question="Welche Zahlungsmethoden werden akzeptiert?",
+        language="de",
+        answer_text="Akzeptiert werden Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).",
+        evidence_documents=[document],
+    )
+    assert coverage.requested == frozenset({"payment_methods"})
+    assert coverage.answered == frozenset({"payment_methods"})
+    assert coverage.unsupported == frozenset()
 
 
 # --- partial_answer_note ----------------------------------------------------

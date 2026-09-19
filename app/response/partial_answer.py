@@ -17,23 +17,46 @@ label -> canonical-field mapping and label parsing
 ``app/orchestrator/chat_orchestrator.py`` already uses for its own directory
 field repairs (``_support_contact_approved_fields``,
 ``utils.directory_fields._label_canonical_field``,
-``utils.directory_fields.parse_directory_fields``) rather than a second,
-parallel reading of ``RetrievedDocument.metadata``. "Is the field's value
-already in the answer text" reuses
-``utils.directory_fields._value_is_present`` (the same fuzzy/digit-aware
-comparison ``restore_missing_directory_contacts`` uses), so a value that
-survived generation in a slightly different format (spacing, punctuation) is
-not wrongly reported as unsupported.
+``utils.directory_fields.parse_directory_fields``) plus, for the bulleted
+fact lines ``parse_directory_fields`` does not parse (payment methods,
+delivery cost/time, minimum order -- see
+:func:`_label_line_field_values` below), the same
+``utils.directory_fields._FIELD_ALLOWED_LINE_FRAGMENTS`` label vocabulary
+``remove_unrequested_directory_fields`` already uses -- never a second,
+parallel field vocabulary. "Is the field's value already in the answer
+text" reuses ``utils.directory_fields._value_is_present`` (the same
+fuzzy/digit-aware comparison ``restore_missing_directory_contacts`` uses),
+so a value that survived generation in a slightly different format
+(spacing, punctuation) is not wrongly reported as unsupported.
+
+Fix (coordinator BLOCKER report, 2026-09-19, wiring `cx/lane2b-20260918`
+onto the merged `cx/conversation-experience-20260918`): the real Kenya
+directory record states payment methods, delivery cost, delivery time and
+minimum order as bulleted "• Label: value" lines
+(``app/retrieval/opensearch_sections.py:2424``'s own
+``metadata["directory_fields"]`` is built with the same
+``parse_directory_fields`` this module already called, and that parser --
+see its own docstring and ``_INLINE_FIELD_RE`` -- only recognises the
+contact-style fields, never a bullet). Reading only that structured map
+therefore marked every such field ``unsupported`` even when the record
+plainly stated it, which would have shown the reader "I couldn't find
+payment methods" under a correct answer. Two changes fix this:
+:func:`_label_line_field_values` reads the bulleted fact lines too, and
+:func:`assess_field_coverage` only ever reports a field ``unsupported``
+when it can be reasonably sure the field is truly absent -- see that
+function's own docstring for the exact safety rule.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app.response.outcome import OutcomeKind
+from app.response.outcome import OutcomeKind, _is_directory_shaped
 from app.retrieval.models import RetrievedDocument
 from utils.directory_fields import (
+    _FIELD_ALLOWED_LINE_FRAGMENTS,
     _label_canonical_field,
     _requested_directory_field_set,
     _value_is_present,
@@ -123,12 +146,126 @@ def _document_field_values(document: RetrievedDocument) -> dict[str, str]:
     to parsing the raw content with the same
     :func:`utils.directory_fields.parse_directory_fields` the orchestrator
     uses, rather than inventing a second reader of directory content.
+
+    Covers only the contact-style fields ``parse_directory_fields`` itself
+    recognises (see that function's docstring); the bulleted fact lines
+    (payment methods, delivery cost/time, minimum order) are a second,
+    complementary source -- see :func:`_label_line_field_values`.
     """
     metadata = getattr(document, "metadata", None) or {}
     directory_fields_value = metadata.get("directory_fields")
     if isinstance(directory_fields_value, dict):
         return directory_fields_value
     return parse_directory_fields(getattr(document, "content", "") or "")
+
+
+# A leading bullet, dash or asterisk marker (plus whitespace) that a directory
+# record's fact lines carry ("• Payment methods accepted: ...") but that
+# utils.directory_fields.parse_directory_fields's own label recognition does
+# not strip before matching a label. Stripped here only for this function's
+# own bulleted-line matching -- parse_directory_fields itself is untouched.
+_BULLET_PREFIX_RE = re.compile(r"^[\s•*–—-]+")
+
+
+def _is_directory_label_line(stripped_line: str) -> bool:
+    """True when ``stripped_line`` (bullet already removed) opens with any
+    known field label -- used only to stop a value's continuation lines at
+    the next labeled fact, never to classify a field itself."""
+    return any(
+        re.match(rf"(?:{fragment})\s*[:#-]", stripped_line, re.IGNORECASE)
+        for fragment in _FIELD_ALLOWED_LINE_FRAGMENTS.values()
+    )
+
+
+def _label_line_field_values(content: str) -> dict[str, list[str]]:
+    """Extract "Label: value" fact lines a directory record states as bullets.
+
+    ``utils.directory_fields.parse_directory_fields`` only recognises the
+    contact-style fields (phone, email, website, address, business hours --
+    see its own docstring and ``_INLINE_FIELD_RE``); it never sees a
+    bulleted fact like "• Payment methods accepted: Bank deposit, Credit
+    Card, Mobile Money Transfer (Mpesa)." -- the real shape
+    ``app/retrieval/opensearch_sections.py`` produces for Kenya's record.
+    This reuses the SAME label vocabulary
+    (``utils.directory_fields._FIELD_ALLOWED_LINE_FRAGMENTS``, the fragments
+    ``remove_unrequested_directory_fields`` already matches against) rather
+    than inventing a second one, only tolerant of a leading bullet/dash/
+    asterisk marker before the label. The value is the text after the
+    line's ":"/"#"/"-" separator, plus any following non-blank lines up to
+    (but not including) the next labeled line -- a cheap continuation, not a
+    full re-implementation of ``parse_directory_fields``'s own multi-line
+    value collection.
+    """
+    lines = (content or "").splitlines()
+    values: dict[str, list[str]] = {}
+    total = len(lines)
+    for index, raw_line in enumerate(lines):
+        stripped = _BULLET_PREFIX_RE.sub("", raw_line).strip()
+        if not stripped:
+            continue
+        matched_field: str | None = None
+        matched_value = ""
+        for field, fragment in _FIELD_ALLOWED_LINE_FRAGMENTS.items():
+            match = re.match(rf"(?:{fragment})\s*[:#-]\s*(?P<value>.+)$", stripped, re.IGNORECASE)
+            if match:
+                matched_field = field
+                matched_value = match.group("value").strip()
+                break
+        if matched_field is None:
+            continue
+        parts = [matched_value] if matched_value else []
+        cursor = index + 1
+        while cursor < total:
+            continuation = _BULLET_PREFIX_RE.sub("", lines[cursor]).strip()
+            if not continuation or _is_directory_label_line(continuation):
+                break
+            parts.append(continuation)
+            cursor += 1
+        value = " ".join(part for part in parts if part).strip()
+        if value:
+            values.setdefault(matched_field, []).append(value)
+    return values
+
+
+def _field_mentioned_anywhere(evidence_documents: list[RetrievedDocument], fields: set[str]) -> set[str]:
+    """Return the subset of ``fields`` whose label appears ANYWHERE in any
+    document's content, even where no clean "Label: value" line could be
+    parsed. Used only by the ``unsupported`` safety rule below -- a field
+    the record merely mentions (in prose, an odd layout, a run-on line) must
+    never be reported as missing outright, only left unclassified as a
+    value ("omitted", see :func:`assess_field_coverage`)."""
+    remaining = set(fields)
+    mentioned: set[str] = set()
+    if not remaining:
+        return mentioned
+    for document in evidence_documents:
+        content = getattr(document, "content", "") or ""
+        for field in list(remaining):
+            fragment = _FIELD_ALLOWED_LINE_FRAGMENTS.get(field)
+            if fragment and re.search(fragment, content, re.IGNORECASE):
+                mentioned.add(field)
+                remaining.discard(field)
+        if not remaining:
+            break
+    return mentioned
+
+
+def _all_evidence_is_directory_shaped(evidence_documents: list[RetrievedDocument]) -> bool:
+    """True only when there IS evidence and every document is directory-shaped.
+
+    Reuses ``app.response.outcome``'s own directory-record predicate (Lane 1)
+    rather than a second copy. Deliberately ``False`` for an empty
+    ``evidence_documents`` -- "no evidence at all" is an ``evidence_missing``
+    outcome elsewhere in the pipeline, never a partial answer, so this
+    module must not report an ``unsupported`` field for it either (see the
+    safety rule in :func:`assess_field_coverage`).
+    """
+    if not evidence_documents:
+        return False
+    return all(
+        _is_directory_shaped(getattr(document, "metadata", None) or {})
+        for document in evidence_documents
+    )
 
 
 def assess_field_coverage(
@@ -151,6 +288,35 @@ def assess_field_coverage(
     ``None``/empty -- a plain policy question, an ambiguous or compound
     request that function itself declines to guess at), every set here is
     empty: nothing is a "gap" for a question that never asked for a field.
+
+    Field values are read from two complementary sources, merged: the
+    contact-style structured map (:func:`_document_field_values`, via
+    ``parse_directory_fields``/``metadata["directory_fields"]``) and the
+    bulleted fact lines that parser does not see
+    (:func:`_label_line_field_values` -- payment methods, delivery cost/
+    time, minimum order).
+
+    **Safety rule for ``unsupported``** (coordinator BLOCKER fix,
+    2026-09-19): a field is only ever placed in ``unsupported`` when BOTH
+    (a) every approved evidence document is directory-shaped
+    (:func:`_all_evidence_is_directory_shaped`, reusing
+    ``app.response.outcome``'s own predicate), AND (b) the field's label
+    does not appear ANYWHERE in any document's content at all
+    (:func:`_field_mentioned_anywhere`), not merely in a shape this module's
+    two extractors failed to parse into a clean value. Every other case --
+    no evidence at all, any non-directory (prose/policy) evidence present,
+    or a directory record that merely mentions the field in some
+    unparsed shape -- falls back to ``omitted`` instead: never a confident
+    "this fact does not exist" claim, only "no value collected for it
+    here" (which triggers no partial-answer gap note --
+    :func:`partial_answer_note` only reads ``unsupported``). This is
+    deliberately the SAFE direction: it can only ever under-report a gap
+    the reader should be told about, never fabricate one for a fact the
+    evidence actually states -- the exact defect this fix corrects (the
+    real Kenya record states payment methods, delivery cost and delivery
+    time as bulleted facts; misreading that as "no evidence" would have
+    shown the reader "I couldn't find payment methods" under an otherwise
+    correct, complete answer).
     """
     requested = _requested_directory_field_set(question, language=language) or set()
     if not requested:
@@ -166,16 +332,36 @@ def assess_field_coverage(
                 continue
             values_by_field.setdefault(canonical, []).append(value)
 
+        content = getattr(document, "content", "") or ""
+        for field, field_values in _label_line_field_values(content).items():
+            if field not in requested:
+                continue
+            for value in field_values:
+                if value:
+                    values_by_field.setdefault(field, []).append(value)
+
+    fields_without_a_value = requested - set(values_by_field)
+    directory_only_evidence = _all_evidence_is_directory_shaped(evidence_documents)
+    mentioned_without_a_value = (
+        _field_mentioned_anywhere(evidence_documents, fields_without_a_value)
+        if directory_only_evidence and fields_without_a_value
+        else set()
+    )
+
     answer_text = answer_text or ""
     answered: set[str] = set()
     unsupported: set[str] = set()
     omitted: set[str] = set()
     for field in requested:
         values = values_by_field.get(field)
-        if not values:
+        if values:
+            if any(_value_is_present(answer_text, value) for value in values):
+                answered.add(field)
+            else:
+                omitted.add(field)
+            continue
+        if directory_only_evidence and field not in mentioned_without_a_value:
             unsupported.add(field)
-        elif any(_value_is_present(answer_text, value) for value in values):
-            answered.add(field)
         else:
             omitted.add(field)
 
