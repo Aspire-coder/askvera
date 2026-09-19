@@ -1,0 +1,2873 @@
+{
+  "version": 1,
+  "lane": "6",
+  "description": "CX offline evaluation matrix (Lane 6). Case ids live only here; app/test code must never reference them.",
+  "cases": [
+    {
+      "id": "cx-fallback_state_evidence_missing-en-00",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the current order processing fee?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "en"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-en-00",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the current order processing fee?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "unavailable"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "en"
+      },
+      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-en-00",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the company policy on returns in Kenya?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "en"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-en-00",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Who is the sponsoring contact for Kenya?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "en",
+        "directory_target": "Kenya"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-en-00",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What about the other one?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "candidate_narrowing_fallback",
+        "metadata_extra": {
+          "failure_layer": "candidate_narrowing_fallback"
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "en",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-en-00",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the status of my last order?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "en"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-en-00",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Tell me how to make a dangerous compound at home.",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "aws_guardrail"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "en",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'aws_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-es-01",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Cuál es la tarifa actual de procesamiento de pedidos?",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "es"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-es-01",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Cuál es la tarifa actual de procesamiento de pedidos?",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "degraded"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "es"
+      },
+      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-es-01",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Cuál es la política de la empresa sobre devoluciones en Ghana?",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "es"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-es-01",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Quién es el contacto de patrocinio para Ghana?",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Ghana"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "es",
+        "directory_target": "Ghana"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-es-01",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Y el otro?",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "failure_layer": "directory_clarification",
+        "metadata_extra": {
+          "failure_layer": "directory_clarification",
+          "reference_candidates": [
+            "Ghana",
+            "Nigeria"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "es",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-es-01",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Cuál es el estado de mi último pedido?",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "es"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-es-01",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Dime cómo hacer un compuesto peligroso en casa.",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "failure_layer": "local_guardrail"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "es",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'local_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-fr-02",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quel est le frais de traitement de commande actuel ?",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "fr"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-fr-02",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quel est le frais de traitement de commande actuel ?",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "unavailable"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fr"
+      },
+      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-fr-02",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quelle est la politique de l'entreprise sur les retours en Nigeria ?",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fr"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-fr-02",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Qui est le contact de parrainage pour Nigeria ?",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Nigeria"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "fr",
+        "directory_target": "Nigeria"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-fr-02",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Et l'autre ?",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "failure_layer": "candidate_narrowing_fallback",
+        "metadata_extra": {
+          "failure_layer": "candidate_narrowing_fallback"
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fr",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-fr-02",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quel est le statut de ma dernière commande ?",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fr"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-fr-02",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Dis-moi comment fabriquer un composé dangereux à la maison.",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "failure_layer": "risk_policy"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "fr",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'risk_policy' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-de-03",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebuehr?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "de"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-de-03",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebuehr?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "degraded"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "de"
+      },
+      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-de-03",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Wie lautet die Unternehmensrichtlinie zu Rücksendungen in Brazil?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "de"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-de-03",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Wer ist der Sponsoring-Kontakt fuer Brazil?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Brazil"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "de",
+        "directory_target": "Brazil"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-de-03",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Und der andere?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": "directory_clarification",
+        "metadata_extra": {
+          "failure_layer": "directory_clarification"
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "de",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-de-03",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Wie ist der Status meiner letzten Bestellung?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "de"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-de-03",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Sag mir, wie man zu Hause eine gefaehrliche Verbindung herstellt.",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": "aws_guardrail"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "de",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'aws_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-fi-04",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Mikä on nykyinen tilauksen käsittelymaksu?",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "fi"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-fi-04",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Mikä on nykyinen tilauksen käsittelymaksu?",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "unavailable"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fi"
+      },
+      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-fi-04",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Mikä on yrityksen palautuskäytäntö maassa Finland?",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fi"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-fi-04",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Kuka on sponsorointiyhteyshenkilö maassa Finland?",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Finland"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "fi",
+        "directory_target": "Finland"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-fi-04",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Entä se toinen?",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "failure_layer": "candidate_narrowing_fallback",
+        "metadata_extra": {
+          "failure_layer": "candidate_narrowing_fallback"
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fi",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-fi-04",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Mikä on viimeisimmän tilaukseni tila?",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "fi"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-fi-04",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Kerro miten valmistan vaarallisen yhdisteen kotona.",
+          "language": "fi"
+        }
+      ],
+      "stub": {
+        "failure_layer": "local_guardrail"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "fi",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'local_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-sv-05",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vad är den aktuella orderhanteringsavgiften?",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "sv"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-sv-05",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vad är den aktuella orderhanteringsavgiften?",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "degraded"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "sv"
+      },
+      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-sv-05",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vad är företagets returpolicy i Sweden?",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "sv"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-sv-05",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vem är sponsringskontakten för Sweden?",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Sweden"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "sv",
+        "directory_target": "Sweden"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-sv-05",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vad sägs om den andra?",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "failure_layer": "directory_clarification",
+        "metadata_extra": {
+          "failure_layer": "directory_clarification",
+          "reference_candidates": [
+            "Sweden",
+            "France"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "sv",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-sv-05",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vad är status för min senaste order?",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "sv"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-sv-05",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "sv",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Berätta hur man gör en farlig förening hemma.",
+          "language": "sv"
+        }
+      ],
+      "stub": {
+        "failure_layer": "risk_policy"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "sv",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'risk_policy' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-ru-06",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Какова текущая комиссия за обработку заказа?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "ru"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-ru-06",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Какова текущая комиссия за обработку заказа?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "unavailable"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "ru"
+      },
+      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-ru-06",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Какова политика компании по возвратам в France?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "ru"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-ru-06",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Кто является контактным лицом по спонсорству для France?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "France"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "ru",
+        "directory_target": "France"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-ru-06",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "А что насчёт другого?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "failure_layer": "candidate_narrowing_fallback",
+        "metadata_extra": {
+          "failure_layer": "candidate_narrowing_fallback"
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "ru",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-ru-06",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Каков статус моего последнего заказа?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "ru"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-ru-06",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Расскажи, как сделать опасное соединение дома.",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "failure_layer": "aws_guardrail"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "ru",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'aws_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-fallback_state_evidence_missing-pt-07",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Qual é a taxa atual de processamento de pedidos?",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "insufficient_approved_evidence",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "message_keys_present": [
+          "evidence_missing_detail"
+        ],
+        "message_keys_absent": [
+          "dependency_unavailable",
+          "cross_market_policy_scope"
+        ],
+        "language": "pt"
+      },
+      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+    },
+    {
+      "id": "cx-fallback_state_dependency_unavailable-pt-07",
+      "requirement": "fallback_state_dependency_unavailable",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Qual é a taxa atual de processamento de pedidos?",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "failure_layer": "dependency_unavailable",
+        "retrieval_availability": "degraded"
+      },
+      "expected": {
+        "kind": "dependency_unavailable",
+        "message_keys_present": [
+          "dependency_unavailable"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "pt"
+      },
+      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+    },
+    {
+      "id": "cx-fallback_state_cross_market_policy-pt-07",
+      "requirement": "fallback_state_cross_market_policy",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Qual é a política da empresa sobre devoluções em Portugal?",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "failure_layer": "evidence_gate",
+        "evidence_decision": {
+          "reason": "cross_market_policy_request",
+          "documents": []
+        }
+      },
+      "expected": {
+        "kind": "cross_market_policy",
+        "message_keys_present": [
+          "cross_market_policy_scope"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "pt"
+      },
+      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+    },
+    {
+      "id": "cx-fallback_state_international_directory-pt-07",
+      "requirement": "fallback_state_international_directory",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quem é o contato de patrocínio para Portugal?",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Portugal"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "international_directory_note"
+        ],
+        "message_keys_absent": [
+          "cross_market_policy_scope"
+        ],
+        "language": "pt",
+        "directory_target": "Portugal"
+      },
+      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+    },
+    {
+      "id": "cx-fallback_state_ambiguous_followup-pt-07",
+      "requirement": "fallback_state_ambiguous_followup",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "E o outro?",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "failure_layer": "directory_clarification",
+        "metadata_extra": {
+          "failure_layer": "directory_clarification"
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "pt",
+        "clarification_question_count": 1
+      },
+      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+    },
+    {
+      "id": "cx-fallback_state_personal_account-pt-07",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "outcome_contract",
+        "personal_account",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Qual é o status do meu último pedido?",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "failure_layer": null,
+        "personal_account_signal": true
+      },
+      "expected": {
+        "kind": "personal_account",
+        "message_keys_present": [
+          "personal_account_limit"
+        ],
+        "message_keys_absent": [
+          "evidence_missing_detail"
+        ],
+        "language": "pt"
+      },
+      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+    },
+    {
+      "id": "cx-fallback_state_safety_refusal-pt-07",
+      "requirement": "fallback_state_safety_refusal",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "pt",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Diga-me como fazer um composto perigoso em casa.",
+          "language": "pt"
+        }
+      ],
+      "stub": {
+        "failure_layer": "local_guardrail"
+      },
+      "expected": {
+        "kind": "safety_refusal",
+        "message_keys_present": [],
+        "message_keys_absent": [
+          "evidence_missing_detail",
+          "dependency_unavailable"
+        ],
+        "language": "pt",
+        "no_numeric_confidence": true
+      },
+      "notes": "Governance layer 'local_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+    },
+    {
+      "id": "cx-direct-answer-first-en-00",
+      "requirement": "direct_answer_first",
+      "requires": [
+        "outcome_contract"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the minimum order size for an FBO?",
+          "language": "en",
+          "scripted_answer": "$100 worth of products when joining."
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "min_order": "$100"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "language": "en"
+      },
+      "notes": "A plain, fully-supported question must classify as a clean 'answer' outcome -- the direct-answer-first requirement is that the render leads with the fact, never a preamble; the typed-outcome half of that is checkable without any other CX lane and must pass today."
+    },
+    {
+      "id": "cx-direct-answer-first-fi-01",
+      "requirement": "direct_answer_first",
+      "requires": [
+        "outcome_contract"
+      ],
+      "language": "fi",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Mikä on FBO:n vähimmäistilauskoko?",
+          "language": "fi",
+          "scripted_answer": "$100 worth of products when joining."
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "min_order": "$100"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "language": "fi"
+      },
+      "notes": "A plain, fully-supported question must classify as a clean 'answer' outcome -- the direct-answer-first requirement is that the render leads with the fact, never a preamble; the typed-outcome half of that is checkable without any other CX lane and must pass today."
+    },
+    {
+      "id": "cx-partial-answer-en-00",
+      "requirement": "partial_answer",
+      "requires": [
+        "outcome_contract",
+        "partial_answer"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the minimum order and the delivery cost in Kenya?",
+          "language": "en",
+          "scripted_answer": "The minimum order is $100."
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "partial_answer",
+        "message_keys_present": [
+          "partial_answer_gap"
+        ],
+        "partial_note_present": true,
+        "language": "en"
+      },
+      "notes": "Minimum order is supported by evidence; delivery cost is not. Lane 2 (app/response/partial_answer.py) downgrades the outcome from 'answer' to 'partial_answer' and supplies partial_answer_gap; app/response/outcome.py never produces this kind itself."
+    },
+    {
+      "id": "cx-partial-answer-fr-01",
+      "requirement": "partial_answer",
+      "requires": [
+        "outcome_contract",
+        "partial_answer"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quel est le montant minimum de commande et le coût de livraison au Kenya ?",
+          "language": "fr",
+          "scripted_answer": "The minimum order is $100."
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "partial_answer",
+        "message_keys_present": [
+          "partial_answer_gap"
+        ],
+        "partial_note_present": true,
+        "language": "fr"
+      },
+      "notes": "Minimum order is supported by evidence; delivery cost is not. Lane 2 (app/response/partial_answer.py) downgrades the outcome from 'answer' to 'partial_answer' and supplies partial_answer_gap; app/response/outcome.py never produces this kind itself."
+    },
+    {
+      "id": "cx-one-question-clarification-en-00",
+      "requirement": "one_question_clarification",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What are the requirements?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "directory_clarification",
+        "metadata_extra": {
+          "reference_candidates": [
+            "FBO",
+            "Preferred Customer"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "clarification_question_count": 1,
+        "message_keys_present": [
+          "clarify_role"
+        ],
+        "language": "en"
+      },
+      "notes": "Two live reference candidates (FBO vs Preferred Customer); the render must still ask exactly one question naming both options, never a pair of separate questions."
+    },
+    {
+      "id": "cx-one-question-clarification-de-01",
+      "requirement": "one_question_clarification",
+      "requires": [
+        "outcome_contract",
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Was sind die Anforderungen?",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "failure_layer": "directory_clarification",
+        "metadata_extra": {
+          "reference_candidates": [
+            "FBO",
+            "Preferred Customer"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "clarification_question_count": 1,
+        "message_keys_present": [
+          "clarify_role"
+        ],
+        "language": "de"
+      },
+      "notes": "Two live reference candidates (FBO vs Preferred Customer); the render must still ask exactly one question naming both options, never a pair of separate questions."
+    },
+    {
+      "id": "cx-contact-escalation-en-00",
+      "requirement": "contact_escalation",
+      "requires": [
+        "outcome_contract",
+        "contact_and_suggestions"
+      ],
+      "language": "en",
+      "session_country": "KE",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Please contact customer care about this.",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya/East Africa"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "message_keys_present": [
+          "contact_offer"
+        ],
+        "contact_rule": "session_market_contact_once",
+        "contact_market": "KE",
+        "language": "en"
+      },
+      "notes": "The answer recommends contacting support; exactly one session-market contact detail is appended, never duplicated across a repeated offer."
+    },
+    {
+      "id": "cx-contact-escalation-es-01",
+      "requirement": "contact_escalation",
+      "requires": [
+        "outcome_contract",
+        "contact_and_suggestions"
+      ],
+      "language": "es",
+      "session_country": "KE",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Por favor contacte con atención al cliente sobre esto.",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya/East Africa"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "message_keys_present": [
+          "contact_offer"
+        ],
+        "contact_rule": "session_market_contact_once",
+        "contact_market": "KE",
+        "language": "es"
+      },
+      "notes": "The answer recommends contacting support; exactly one session-market contact detail is appended, never duplicated across a repeated offer."
+    },
+    {
+      "id": "cx-supported-only-suggestions-en-00",
+      "requirement": "supported_only_suggestions",
+      "requires": [
+        "outcome_contract",
+        "contact_and_suggestions"
+      ],
+      "language": "en",
+      "session_country": "KE",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the delivery cost in Kenya?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya/East Africa"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "suggestion_allowed_topics": [
+          "suggest_topic_delivery_cost",
+          "suggest_topic_payment_methods",
+          "suggest_topic_contact",
+          "suggest_topic_returns"
+        ],
+        "language": "en"
+      },
+      "notes": "Follow-up suggestions offered after a Kenya directory answer must be drawn only from the closed, evidence-supported topic set -- never a topic the retrieved record doesn't cover."
+    },
+    {
+      "id": "cx-supported-only-suggestions-ru-01",
+      "requirement": "supported_only_suggestions",
+      "requires": [
+        "outcome_contract",
+        "contact_and_suggestions"
+      ],
+      "language": "ru",
+      "session_country": "KE",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Какова стоимость доставки в Кении?",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya/East Africa"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "suggestion_allowed_topics": [
+          "suggest_topic_delivery_cost",
+          "suggest_topic_payment_methods",
+          "suggest_topic_contact",
+          "suggest_topic_returns"
+        ],
+        "language": "ru"
+      },
+      "notes": "Follow-up suggestions offered after a Kenya directory answer must be drawn only from the closed, evidence-supported topic set -- never a topic the retrieved record doesn't cover."
+    },
+    {
+      "id": "cx-conversation-repair-en-00",
+      "requirement": "conversation_repair",
+      "requires": [
+        "outcome_contract",
+        "repair"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the minimum order in Nigeria?",
+          "language": "en"
+        },
+        {
+          "role": "assistant",
+          "message": "(directory answer for Nigeria)"
+        },
+        {
+          "role": "user",
+          "message": "No, I meant Ghana.",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Ghana"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "repair_ack"
+        ],
+        "repair_country": "Ghana",
+        "directory_target": "Ghana",
+        "language": "en"
+      },
+      "notes": "A same-turn country correction; the corrected country (Ghana) must replace Nigeria in the resolved target, acknowledged with repair_ack, never answered for Nigeria."
+    },
+    {
+      "id": "cx-conversation-repair-es-01",
+      "requirement": "conversation_repair",
+      "requires": [
+        "outcome_contract",
+        "repair"
+      ],
+      "language": "es",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Cuál es el pedido mínimo en Nigeria?",
+          "language": "es"
+        },
+        {
+          "role": "assistant",
+          "message": "(directory answer for Nigeria)"
+        },
+        {
+          "role": "user",
+          "message": "No, quise decir Ghana.",
+          "language": "es"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Ghana"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "international_directory",
+        "message_keys_present": [
+          "repair_ack"
+        ],
+        "repair_country": "Ghana",
+        "directory_target": "Ghana",
+        "language": "es"
+      },
+      "notes": "A same-turn country correction; the corrected country (Ghana) must replace Nigeria in the resolved target, acknowledged with repair_ack, never answered for Nigeria."
+    },
+    {
+      "id": "cx-typo-tolerance-en-00",
+      "requirement": "typo_tolerance",
+      "requires": [
+        "outcome_contract",
+        "typo_clarify",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What's the shoping cost?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "candidate_narrowing_fallback",
+        "metadata_extra": {
+          "reference_candidates": [
+            "shipping_cost",
+            "shopping_cost"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "clarification_question_count": 1,
+        "clarify_options": [
+          "shipping_cost",
+          "shopping_cost"
+        ],
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "language": "en"
+      },
+      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only). The CX render must ask one question naming both candidate fields, never silently pick one."
+    },
+    {
+      "id": "cx-typo-tolerance-en-01",
+      "requirement": "typo_tolerance",
+      "requires": [
+        "outcome_contract",
+        "typo_clarify",
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "How much is shoping in total?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "failure_layer": "candidate_narrowing_fallback",
+        "metadata_extra": {
+          "reference_candidates": [
+            "shipping_cost",
+            "shopping_cost"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "clarification",
+        "clarification_question_count": 1,
+        "clarify_options": [
+          "shipping_cost",
+          "shopping_cost"
+        ],
+        "message_keys_present": [
+          "clarify_field"
+        ],
+        "language": "en"
+      },
+      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only). The CX render must ask one question naming both candidate fields, never silently pick one."
+    },
+    {
+      "id": "cx-confidence-aware-language-en-00",
+      "requirement": "confidence_aware_language",
+      "requires": [
+        "outcome_contract",
+        "partial_answer"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the minimum order and the delivery cost in Kenya?",
+          "language": "en",
+          "scripted_answer": "The minimum order is $100."
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "partial_answer",
+        "partial_note_present": true,
+        "no_numeric_confidence": true,
+        "language": "en"
+      },
+      "notes": "Delivery cost is unsupported alongside a supported minimum-order fact: a plain-language partial note is expected, but it must never state a numeric confidence figure."
+    },
+    {
+      "id": "cx-confidence-aware-language-de-01",
+      "requirement": "confidence_aware_language",
+      "requires": [
+        "outcome_contract",
+        "partial_answer"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Was ist die Mindestbestellung in Kenia?",
+          "language": "de",
+          "scripted_answer": "Die Mindestbestellung betraegt $100."
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_kind": "international_sponsoring",
+              "record_country": "Kenya"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "partial_note_present": false,
+        "no_numeric_confidence": true,
+        "language": "de"
+      },
+      "notes": "Every requested field (just minimum order) is supported here, so no partial note should be attached at all -- the note is present only when a field is actually unsupported, never as a default."
+    },
+    {
+      "id": "cx-answer-language-parity-en-00",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "What is the current order processing fee?",
+          "message_language": "en"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "en",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-es-01",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "¿Cuál es la tarifa actual de procesamiento de pedidos?",
+          "message_language": "es"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "es",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-fr-02",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Quel est le frais de traitement de commande actuel ?",
+          "message_language": "fr"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "fr",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-de-03",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebuehr?",
+          "message_language": "de"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "de",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-fi-04",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Mikä on nykyinen tilauksen käsittelymaksu?",
+          "message_language": "fi"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "fi",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-sv-05",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Vad är den aktuella orderhanteringsavgiften?",
+          "message_language": "sv"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "sv",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-ru-06",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Какова текущая комиссия за обработку заказа?",
+          "message_language": "ru"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "ru",
+        "retrieval_language_unchanged": "en",
+        "route_locale": true
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+    },
+    {
+      "id": "cx-answer-language-parity-pt-07",
+      "requirement": "answer_language_parity",
+      "requires": [
+        "outcome_contract",
+        "answer_language"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Qual é a taxa atual de processamento de pedidos?",
+          "message_language": "pt"
+        }
+      ],
+      "stub": {
+        "evidence_decision": {
+          "reason": "approved",
+          "documents": [
+            {
+              "directory_section": "office",
+              "directory_fields": {
+                "processing_fee": "$5"
+              },
+              "record_country": "United States"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "kind": "answer",
+        "answer_language": "pt",
+        "retrieval_language_unchanged": "en",
+        "route_locale": false
+      },
+      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant). pt is not one of the 12 route locales, so this exercises the English-copy fallback path (services.controlled_copy)."
+    }
+  ]
+}
