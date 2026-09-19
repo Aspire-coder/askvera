@@ -159,7 +159,49 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
     r"\bpayment\s+methods?\b",
     re.IGNORECASE,
 )
-DIRECTORY_POLICY_WORDING_RE = re.compile(r"\bpolic(?:y|ies)\b|\brules?\b", re.IGNORECASE)
+# R05/N6 fourth follow-up (2026-09-18, coordinator review of 88da3cc/0b1f0e3,
+# finding S1): "policy"/"rules" alone missed common English policy-document
+# synonyms - "regulations", "guidelines", "conditions", and the
+# "terms and conditions"/"terms of" phrase (as in "terms of service") - so a
+# question like "What are the regulations of Forever Norway on the delivery
+# address?" fell through to the multilingual directory disjunct and was
+# wrongly promoted to "directory". A bare "\bterms\b" is deliberately NOT
+# added: "terms" alone is dominated by the unrelated "in terms of X" idiom
+# ("in terms of delivery cost") and would suppress genuine directory
+# questions on that idiom alone.
+#
+# R05/N6 fifth follow-up (2026-09-18, coordinator review of d77c13f): the
+# fourth follow-up's own "terms of" addition still matched *inside* that
+# same "in terms of X" idiom ("What are the office hours in terms of
+# weekends?" - directory_topic_route via "office hours" wrongly suppressed
+# to "policy"), because "terms of" is a literal substring of "in terms of".
+# Fixed with a fixed-width negative lookbehind, "(?<!\bin\s)" - Python
+# requires a fixed-width lookbehind, and "\bin\s" is exactly 3 characters
+# wide (\b itself consumes none) - so "terms of" still matches "terms of
+# service"/"terms of payment" (nothing "in "-prefixed immediately before
+# "terms") but not "in terms of X" (where "terms" is immediately preceded
+# by the standalone word "in "). The lookbehind's own "\b" before "in"
+# means a word merely ending in "...in " (e.g. "certain terms of service")
+# is not excluded, since "in" there is not its own word. This was chosen
+# over an explicit "terms of (sale|service|use|payment|business|
+# membership)" phrase list as the simpler, still-auditable fix: it keeps
+# one general "terms of X" pattern (matching any policy-document object,
+# not just a hand-picked list) while surgically excluding only the one
+# idiom that caused the false suppression, rather than trading a
+# single-line regex for an open-ended list that would need its own upkeep
+# as new "terms of ..." policy-document phrasings appear.
+#
+# Also fixed here: plural-only "conditions" (singular "condition" removed).
+# "Is the office in good condition?" is a genuine physical-condition
+# question with no policy-document sense at all, and English's normal
+# "terms and conditions" usage is itself always plural, so the singular
+# added no real recall and only false-suppressed physical-condition
+# questions.
+DIRECTORY_POLICY_WORDING_RE = re.compile(
+    r"\bpolic(?:y|ies)\b|\brules?\b|\bregulations?\b|\bguidelines?\b|\bconditions\b|"
+    r"\bterms\s+and\s+conditions\b|(?<!\bin\s)\bterms\s+of\b",
+    re.IGNORECASE,
+)
 
 # These values are emitted only from the runtime query-planning boundary.  They
 # deliberately describe routing, not an answer or an expected benchmark label.

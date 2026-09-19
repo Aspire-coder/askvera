@@ -409,7 +409,7 @@ DIRECTORY_INTENT_SYNONYM_TERMS: dict[str, dict[str, tuple[str, ...]]] = {
 # Symmetric counterpart to ``DIRECTORY_INTENT_SYNONYM_TERMS`` above and to
 # ``LANGUAGE_FIELD_TERMS``: an independent review found that
 # ``app/retrieval/providers.py``'s policy-wording suppression check
-# (``DIRECTORY_POLICY_WORDING_RE`` = ``policy|rules``, plus
+# (``DIRECTORY_POLICY_WORDING_RE``, plus
 # ``services.guardrails.is_policy_safety_question``) is English-only, while
 # the field-intent RECOGNITION check added by the first R05/N6 follow-up
 # (``directory_field_intent_present``, via ``LANGUAGE_FIELD_TERMS``) is
@@ -419,40 +419,171 @@ DIRECTORY_INTENT_SYNONYM_TERMS: dict[str, dict[str, tuple[str, ...]]] = {
 # pago" = payment methods) fell through the English-only policy check,
 # matched the field-intent disjunct instead, and was wrongly promoted to
 # "directory" with the full country bonus - reopening the N6 class of bug
-# for non-English policy questions. The English equivalent ("What is the
-# policy of Forever Norway on payment methods?") already correctly resolves
-# to "policy"/0.0 via ``DIRECTORY_POLICY_WORDING_RE``.
+# for non-English policy questions. The English equivalent already
+# correctly resolves to "policy"/0.0 via ``DIRECTORY_POLICY_WORDING_RE``.
+#
+# What is actually covered (fixed by the fourth R05/N6 follow-up,
+# 2026-09-18, coordinator review finding S1 - the original docstring here
+# claimed "policy/rules/regulations/terms" coverage that did not exist yet;
+# this now states exactly what each language's tuple below contains):
+#
+# - **"policy" sense** (a company policy/rulebook): es politica/normas/
+#   reglas/reglamento; fr politique/regles/reglement; de Richtlinie/Regel/
+#   Regelung/Vorschrift/Bestimmung; nl beleid/regel/reglement; it politica/
+#   regola/regolamento; pt politica/regra/regulamento; fi kaytanto/saanto/
+#   maarays; no/da retningslinje/regel; sv riktlinje/regel; ru politika/
+#   pravilo; sr politika/pravilo (Latin and Cyrillic).
+# - **"regulation(s)" sense** as a distinct synonym, where the language has
+#   one: de Vorschrift(en)/Bestimmung(en) (both added alongside Regelung,
+#   which already covered this sense); fi maarays/maaraykset.
+# - **"guideline(s)" sense**: fr directive(s); it "linea guida"/"linee
+#   guida" (multi-word, matched as a literal phrase); pt diretriz(es); fi
+#   ohje/ohjeet; nl richtlijn(en) (already present for "guideline", not new
+#   here); es directriz/directrices; no/da retningslinje(r) and its
+#   definite forms retningslinjene/retningslinjerne (already present); sv
+#   riktlinje(r) and riktlinjerna (already present).
+# - **"condition(s)"/"terms" sense** (as in "terms and conditions"): es
+#   condicion/condiciones; fr condition(s); de Bedingung(en); nl
+#   voorwaarde(n); it condizione/condizioni; pt condicao/condicoes; fi
+#   ehto/ehdot; no/da/sv vilkar/villkor (invariant singular=plural in all
+#   three); ru uslovie/uslovija/uslovijah (nominative + locative); sr
+#   uslov/uslovi/uslova/uslovima (Latin and Cyrillic).
+# - **Oblique/definite grammatical forms**, where the review's own repros
+#   needed them: ru political/pravila's dative/accusative/instrumental
+#   cases (politike/politiku/politikoj, pravilam/pravilami/pravilah); sr
+#   the equivalent oblique forms of politika/pravila (politici/politiku/
+#   politikom, pravilima), Latin and Cyrillic; no/da/sv definite plural
+#   forms of regel/retningslinje/riktlinje (reglene/retningslinjene,
+#   reglerne/retningslinjerne, reglerna/riktlinjerna).
 #
 # Deliberately narrow and closed, exactly like ``DIRECTORY_INTENT_SYNONYM_TERMS``:
-# only "policy"/"rules"/"regulations"/"terms" and their per-language
-# equivalents, spelled out as explicit inflected forms (not open stems) so
-# every entry is auditable and matched as a whole word
+# spelled out as explicit inflected forms (not open stems, except where a
+# language's own grammar makes an explicit list impractical - see below),
+# so every entry is auditable and matched as a whole word
 # (``utils.directory_fields._POLICY_WORDING_PATTERNS`` wraps each with both
-# a leading and a trailing boundary) rather than approximated the way the
-# field-request stems above are. Covers every language
-# ``LANGUAGE_FIELD_TERMS`` already covers except English itself (English's
-# own ``DIRECTORY_POLICY_WORDING_RE`` stays the sole English source,
-# unchanged, exactly as ``LANGUAGE_FIELD_TERMS`` leaves English to
+# a leading and a trailing boundary, and folds accents - see
+# ``utils.directory_fields._fold_diacritics`` - so one accented spelling
+# also matches its accentless and NFD-decomposed variants without a
+# separate entry) rather than approximated the way the field-request stems
+# above are. Covers every language ``LANGUAGE_FIELD_TERMS`` already covers
+# except English itself (English's own ``DIRECTORY_POLICY_WORDING_RE``
+# stays the sole English source, unchanged, exactly as
+# ``LANGUAGE_FIELD_TERMS`` leaves English to
 # ``utils.directory_fields._FIELD_REQUEST_PATTERNS``).
 #
+# **Not covered, on purpose:** every other inflected case a language's
+# grammar can produce beyond the forms listed above (e.g. Finnish's
+# remaining oblique cases of "kaytanto"/"saanto"/"ehto"/"maarays"/"ohje"
+# beyond the ones spelled out; German/Dutch/Romance-language genitive or
+# other compound-forming inflections). A form not in this list is treated
+# the same as before this task existed - "ambiguous", not "policy" - which
+# only risks losing directory *protection* for that specific unlisted
+# spelling, never wrongly granting it (this table is read only by the
+# suppression side, never by anything that recognizes directory intent).
+#
+# **Accepted idiom trade-off (coordinator review note N1):** "regel"/
+# "regler" (no/da) and "riktlinje"/"regel" family forms also match inside
+# the idiom "som regel" ("as a rule", not a reference to a policy
+# document), so a genuinely directory-intentioned Norwegian/Danish/Swedish
+# question that happens to use that idiom would be wrongly suppressed to
+# "policy". This is deliberately accepted, not fixed, for the same reason
+# English's own widened ``DIRECTORY_POLICY_WORDING_RE`` accepts "terms of"
+# firing inside the unrelated "in terms of X" idiom (see that regex's own
+# comment in ``app/retrieval/providers.py``): the genuine policy-document
+# sense dominates real usage, and narrowing either pattern to dodge its own
+# idiom risks missing the genuine sense it exists to catch. Over-suppression
+# here only costs the country-match *bonus* on a country-named row, never
+# retrieval inclusion (the row can still be found and returned).
+#
 # Confidence: reuses the same high/medium split as ``LANGUAGE_FIELD_TERMS``'s
-# own docstring - French/German/Dutch/Spanish/Italian/Swedish forms are
-# ordinary, unambiguous dictionary words; Portuguese/Finnish/Norwegian/
-# Danish/Russian/Serbian forms are this module's own first pass (medium
-# confidence, same caveat as the payment/delivery-cost-vs-time split above -
-# a native reviewer should check these before they gate anything
-# destructive in production).
+# own docstring - French/German/Dutch/Spanish/Italian/Swedish forms
+# (including this follow-up's regulation/condition/guideline additions to
+# them) are ordinary, unambiguous dictionary words (high confidence);
+# Portuguese/Finnish/Norwegian/Danish/Russian/Serbian forms remain this
+# module's own first pass (medium confidence, same caveat as the
+# payment/delivery-cost-vs-time split above - a native reviewer should
+# check these before they gate anything destructive in production). The
+# Finnish "ehto"/"ehdot" pair is explicitly flagged medium-to-low: Finnish
+# consonant gradation (t/d) is captured for this one pair by listing both
+# the nominative and the gradated plural explicitly, but no further oblique
+# case of it is covered.
+# R05/N6 fifth follow-up (2026-09-18, coordinator review of d77c13f): the
+# singular condition-family noun is deliberately absent from es/fr/it/pt
+# below (only the plural - "condiciones"/"conditions"/"condizioni"/
+# "condições" - is kept), mirroring the English fix to
+# ``DIRECTORY_POLICY_WORDING_RE`` (plural-only "conditions",
+# ``app/retrieval/providers.py``). In these four Romance languages the
+# singular noun is genuinely ambiguous between the policy sense ("condicion
+# de venta" = "condition of sale") and an ordinary physical-condition sense
+# ("el telefono esta en buena condicion" = "the phone is in good
+# condition") that has nothing to do with a policy document, so it would
+# false-suppress a genuine directory question the way English's singular
+# did ("Is the office in good condition?"). The plural is not ambiguous
+# this way in ordinary usage (a policy's "conditions"/plural is the normal
+# phrasing; a physical object being "in good conditions"/plural is not
+# idiomatic in any of the four). German (Bedingung/Bedingungen), Dutch
+# (voorwaarde/voorwaarden), Finnish (ehto/ehdot), Russian
+# (uslovie/uslovija), and Serbian (uslov/uslovi) keep their singular forms:
+# none of those languages uses that same noun for a physical/product
+# condition (German/Dutch use Zustand/staat, Finnish uses kunto, Russian
+# uses sostoyanie, Serbian uses stanje for that sense), so the singular
+# carries no equivalent false-suppression risk there. The Scandinavian
+# vilkar/villkor entries are grammatically invariant (identical singular
+# and plural), so this distinction does not apply to them either way.
 POLICY_WORDING_TERMS: dict[str, tuple[str, ...]] = {
-    "es": ("política", "políticas", "norma", "normas", "regla", "reglas"),
-    "fr": ("politique", "politiques", "règle", "règles", "règlement", "règlements"),
-    "de": ("richtlinie", "richtlinien", "regel", "regeln", "regelung", "regelungen"),
-    "nl": ("beleid", "regel", "regels"),
-    "it": ("politica", "politiche", "regola", "regole"),
-    "pt": ("política", "políticas", "regra", "regras"),
-    "fi": ("käytäntö", "käytännön", "käytäntöä", "sääntö", "säännöt", "säännön"),
-    "no": ("retningslinje", "retningslinjer", "regel", "regler"),
-    "da": ("retningslinje", "retningslinjer", "regel", "regler"),
-    "sv": ("riktlinje", "riktlinjer", "regel", "regler"),
-    "ru": ("политика", "политики", "правило", "правила"),
-    "sr": ("politika", "politike", "pravilo", "pravila", "политика", "правило", "правила"),
+    "es": (
+        "política", "políticas", "norma", "normas", "regla", "reglas",
+        "reglamento", "reglamentos", "condiciones",
+        "directriz", "directrices",
+    ),
+    "fr": (
+        "politique", "politiques", "règle", "règles", "règlement", "règlements",
+        "conditions", "directive", "directives",
+    ),
+    "de": (
+        "richtlinie", "richtlinien", "regel", "regeln", "regelung", "regelungen",
+        "vorschrift", "vorschriften", "bestimmung", "bestimmungen",
+        "bedingung", "bedingungen",
+    ),
+    "nl": (
+        "beleid", "regel", "regels", "voorwaarde", "voorwaarden",
+        "richtlijn", "richtlijnen", "reglement",
+    ),
+    "it": (
+        "politica", "politiche", "regola", "regole", "regolamento", "regolamenti",
+        "condizioni", "linea guida", "linee guida",
+    ),
+    "pt": (
+        "política", "políticas", "regra", "regras", "regulamento", "regulamentos",
+        "condições", "diretriz", "diretrizes",
+    ),
+    "fi": (
+        "käytäntö", "käytännön", "käytäntöä", "sääntö", "säännöt", "säännön",
+        "ehto", "ehdot", "määräys", "määräykset", "ohje", "ohjeet",
+    ),
+    "no": (
+        "retningslinje", "retningslinjer", "retningslinjene",
+        "regel", "regler", "reglene", "vilkår",
+    ),
+    "da": (
+        "retningslinje", "retningslinjer", "retningslinjerne",
+        "regel", "regler", "reglerne", "vilkår",
+    ),
+    "sv": (
+        "riktlinje", "riktlinjer", "riktlinjerna",
+        "regel", "regler", "reglerna", "villkor",
+    ),
+    "ru": (
+        "политика", "политики", "политике", "политику", "политикой",
+        "правило", "правила", "правилам", "правилами", "правилах",
+        "условие", "условия", "условиях",
+    ),
+    "sr": (
+        "politika", "politike", "politici", "politiku", "politikom",
+        "pravilo", "pravila", "pravilima",
+        "uslov", "uslovi", "uslova", "uslovima",
+        "политика", "политике", "политици", "политику", "политиком",
+        "правило", "правила", "правилима",
+        "услов", "услови", "услова", "условима",
+    ),
 }
