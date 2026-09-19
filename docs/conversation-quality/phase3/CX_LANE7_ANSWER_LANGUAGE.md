@@ -309,12 +309,93 @@ pins recall at `>= 0.70`. The base acceptance set's 53/58 (91.4%) and 12/12
 negatives are unchanged by this fix (verified by rerunning `TestAcceptanceSet`
 after every change below).
 
-## Verification run (2026-09-19, worktree `askvera-cx-lane7`, branch `cx/lane7-20260918`)
+## Fable CX review finding S4 (fixed 2026-09-19, worktree `askvera-cx-lane7`, branch `cx/lane7-fable-20260919`, integrated head `9e384bc`)
 
-- `pytest tests/unit/test_cx_answer_language.py` - 36 passed.
-- `pytest tests/unit/test_cx_answer_language.py tests/conversation` - 386 passed
-  (unchanged in `tests/conversation`; confirms no regression from this lane,
-  which touches no shared code path yet).
+**Finding.** `resolve_answer_language` had no "none of the above": when the
+SELECTED widget language is outside `ROUTE_COPY_LANGUAGES` (today
+unreachable via `ChatRequest`, which accepts only the 12 - but latent the
+moment any of the other 27 languages `config/markets.json` already
+configures is enabled), the detector cannot recognise that language, so it
+cannot tell the message ISN'T already written in it - "matches_selected"
+can never fire. It instead confidently detects the closest route-copy
+relative and switches: `pt -> es`, `hr/bs/sl/mk/sr-ME -> sr`,
+`uk/bg/kk/ky -> ru`, `hu/cs/sk -> es`, `tr/az -> fr/de`, `sq -> it`,
+`ku -> fr` - 42 of 68 same-language probes switched wrongly when replayed
+against the pre-fix code (see below).
+
+**Fix (1) - selected-language gate.** `_normalize_language_code` folds a
+BCP-47-ish tag to its base subtag (`pt-BR` -> `pt`, `sr-Latn`/`sr-ME` -> `sr`).
+`resolve_answer_language` now checks this normalized form against
+`ROUTE_COPY_LANGUAGES` BEFORE ever calling `detect_message_language`; when
+it isn't a member, the turn returns unswitched with reason
+`selected_language_not_route_copy`, unconditionally - this holds regardless
+of message content, which is what makes `TestNonRouteCopySelectedLanguage`'s
+68-probe set pass trivially and completely (0/68 wrong switches, vs. 42/68
+before).
+
+**Fix (2) - winner-share gate.** Fix (1) alone does not help when the
+WIDGET is already a route-copy language (e.g. `en`) but the message is
+written in a different, unrecognised language that merely resembles one of
+the 12 lexically - `detect_message_language` can still "win" on a couple of
+cognates with no real competition. `Detection` gained two new fields:
+`winner_share` (the fraction of the message's word tokens that are
+literally a marker word of the winning language, unweighted - not the
+overlap-discounted score) and `winner_letter_evidence` (the distinctive-
+character/pattern bonus alone). `resolve_answer_language` now requires
+`winner_share >= MIN_WINNER_SHARE` (0.1) before ever reaching the
+score/margin gates - a couple of shared cognates with nothing else backing
+them can no longer carry a switch.
+
+**Two further defects found while reproducing the coordinator's exact
+Croatian/Ukrainian probes:**
+
+- `_DISTINCTIVE_STRONG["sr"]` credited `đ š ž č ć` (Latin) as
+  "Serbian-exclusive" - they are NOT: Croatian, Bosnian and Montenegrin
+  Latin script use exactly the same letters. This alone made an ordinary
+  Croatian sentence ("Koliko košta dostava narudžbe...") score `sr 8.5` and
+  switch. Fixed by keeping only the genuinely Serbian-exclusive Cyrillic
+  letters (`ђ ј љ њ ћ џ`) in that set; Latin-script Serbian is now
+  distinguished by its marker words plus the existing `_SERBIAN_EXTRA_MARGIN`
+  alone, same as before this defect was introduced.
+- The Cyrillic branch's ultra-low floor (`CYRILLIC_MIN_SCORE`/`MARGIN` = 0.5,
+  added 2026-09-18 for genuine word-sparse Russian questions) could not
+  distinguish a real thin Russian signal from a Ukrainian message that
+  merely shares a common Cyrillic pronoun ("я") with Russian - a probed
+  Ukrainian sentence scored HIGHER on both score and margin than the
+  weakest genuine Russian acceptance-set sentence, so no threshold on those
+  two alone could separate them. What DOES separate them:
+  `winner_letter_evidence` - every surviving genuine Russian probe contains
+  a Russian-EXCLUSIVE Cyrillic letter (ы/э/ъ/ё, absent from Ukrainian,
+  Bulgarian, Kazakh, Kyrgyz and Serbian Cyrillic), while the Ukrainian
+  false positive contains none. `resolve_answer_language` now uses the
+  lenient floor only when `winner_letter_evidence > 0`; without it, Russian
+  must clear a stricter words-only tier
+  (`CYRILLIC_MIN_SCORE_WORDS_ONLY`/`MARGIN_WORDS_ONLY` = 1.5,
+  `CYRILLIC_MIN_WINNER_SHARE_WORDS_ONLY` = 0.3).
+
+**Recall before/after** (pre-fix code = commit `edcb14b`, replayed against
+the CURRENT, slightly extended test fixtures for a fair comparison; 0 wrong
+switches in both the base and brand/market sets, before and after - only
+the new probe/conservative sets go from unsafe to safe):
+
+| Set | Before | After | Note |
+|---|---|---|---|
+| Base acceptance (`TestAcceptanceSet`, 54 cases) | 49/54 (90.7%) | 49/54 (90.7%) | unchanged - the one Latin-`sr` sentence that lost its (incorrect) diacritic bonus was replaced with an equally realistic one using the "da li" idiom, restoring the count exactly |
+| Brand/market (`TestBrandMarketAcceptanceSet`, 48 cases) | 36/48 (75.0%) | 33/48 (68.75%) | real recall cost of the winner-share gate, the corrected Serbian letter set and the stricter words-only Cyrillic tier - documented bar lowered 0.70 -> 0.65 |
+| Non-route-copy same-language probes (68 cases, `TestNonRouteCopySelectedLanguage`) | 42/68 WRONGLY switched | 0/68 switched | fix (1) |
+| Conservative en-widget probes (pt/hr/uk/tr, `TestPortugueseCroatianUkrainianTurkishOnEnglishWidget`) | pt->it (wrong), hr->sr (wrong), uk->ru (wrong), tr stayed unswitched by chance | all 4 correctly unswitched | fixes (1)+(2) plus the two defect fixes above |
+
+Precision (zero wrong-language switches) was already 100% on the base and
+brand/market sets before this fix and remains 100% after - the recall
+changes above are the entire cost of closing the S4 finding, exactly as the
+coordinator asked to trade.
+
+## Verification run (2026-09-19, worktree `askvera-cx-lane7`, branch `cx/lane7-fable-20260919`)
+
+- `pytest tests/unit/test_cx_answer_language.py` - 43 passed.
+- `pytest tests/unit/test_cx_answer_language.py tests/unit/test_cx_outcome_wiring.py tests/conversation` -
+  419 passed (both unchanged outside this lane's own file; confirms no
+  regression from this lane, which touches no shared code path yet).
 - No `tests/unit/test_prompt*.py` files exist in this worktree to re-run.
 - `flake8 app/orchestrator/answer_language.py tests/unit/test_cx_answer_language.py` - clean.
 - `git diff --check` - clean.

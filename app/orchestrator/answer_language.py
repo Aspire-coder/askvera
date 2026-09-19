@@ -285,7 +285,17 @@ _DISTINCTIVE_STRONG: dict[str, frozenset[str]] = {
     "de": frozenset("ß"),
     "fr": frozenset("çÇœŒâêîôûÂÊÎÔÛ"),
     "ru": frozenset("ыэъёЫЭЪЁ"),  # Cyrillic letters Serbian's alphabet does not have
-    "sr": frozenset("đšžčćĐŠŽČĆђјљњћџЂЈЉЊЋЏ"),  # Latin+Cyrillic letters unique to Serbian here
+    # Cyrillic only: ђ ј љ њ ћ џ are genuinely Serbian-exclusive here (a
+    # Cyrillic message using them cannot be any other route-copy language).
+    # The Latin diacritics đ š ž č ć were REMOVED (Fable CX review finding
+    # S4, 2026-09-19): they are NOT Serbian-specific at all - Croatian,
+    # Bosnian and Montenegrin Latin script use exactly the same letters, so
+    # crediting them made an ordinary Croatian sentence ("Koliko košta...")
+    # look strongly Serbian and switch to it even on an English widget.
+    # Latin-script Serbian is distinguished by its marker WORDS
+    # (_RAW_MARKER_WORDS["sr"]) plus _SERBIAN_EXTRA_MARGIN /
+    # MIN_WINNER_SHARE, never by these shared letters.
+    "sr": frozenset("ђјљњћџЂЈЉЊЋЏ"),
 }
 _DISTINCTIVE_MODERATE: dict[str, frozenset[str]] = {
     "es": frozenset("áéíóúÁÉÍÓÚ"),
@@ -420,13 +430,28 @@ class Detection(NamedTuple):
     ``score`` is its weighted evidence total (marker-word overlap weights
     plus distinctive-character/pattern bonuses); ``runner_up`` is the
     next-highest candidate's score (0.0 when there is no other candidate).
-    ``reason`` documents which branch produced the result.
+    ``winner_share`` is the fraction of the message's (non-brand/market)
+    word tokens that are literally a marker word of ``language`` (unweighted
+    membership, not the overlap-discounted score) - see
+    ``resolve_answer_language``'s MIN_WINNER_SHARE gate, which uses this to
+    require the winner's OWN evidence to dominate the message, not merely
+    outscore weaker competitors (Fable CX review finding S4, 2026-09-19: a
+    message in an unrecognised but closely related language - e.g.
+    Portuguese, not a route-copy language - can rack up just enough
+    Spanish-cognate score to clear the margin gate while most of the
+    message's words match nothing in Spanish at all). ``winner_letter_evidence``
+    is the distinctive-character/pattern bonus alone (see
+    ``_distinctive_bonus``) that contributed to ``language``'s score - 0.0
+    when its score is built entirely from marker words. ``reason`` documents
+    which branch produced the result.
     """
 
     language: str | None
     score: float
     runner_up: float
     reason: str
+    winner_share: float = 0.0
+    winner_letter_evidence: float = 0.0
 
 
 def detect_message_language(
@@ -468,10 +493,17 @@ def detect_message_language(
     scoring_tokens = _tokenize(masked_message)
 
     scores: dict[str, float] = {}
+    hit_shares: dict[str, float] = {}
+    letter_evidence: dict[str, float] = {}
+    token_count = len(scoring_tokens)
     for language in eligible:
         weights = MARKER_WORD_WEIGHTS.get(language, {})
         word_score = sum(weights.get(token, 0.0) for token in scoring_tokens)
-        scores[language] = word_score + _distinctive_bonus(language, masked_message)
+        bonus = _distinctive_bonus(language, masked_message)
+        scores[language] = word_score + bonus
+        letter_evidence[language] = bonus
+        hit_count = sum(1 for token in scoring_tokens if token in weights)
+        hit_shares[language] = (hit_count / token_count) if token_count else 0.0
 
     if not scores:
         return Detection(None, 0.0, 0.0, "no_eligible_candidates")
@@ -483,7 +515,9 @@ def detect_message_language(
     if top_score <= 0:
         return Detection(None, 0.0, runner_up_score, "no_marker_hits")
 
-    return Detection(top_language, top_score, runner_up_score, "scored")
+    return Detection(
+        top_language, top_score, runner_up_score, "scored", hit_shares[top_language], letter_evidence[top_language]
+    )
 
 
 # --- Switch thresholds (documented; tuned against the Lane 7 acceptance set
@@ -503,23 +537,76 @@ MIN_MARGIN = 1.0
 _NEAR_PAIR_EXTRA_MARGIN = 1.5
 
 # Serbian Latin shares short function words with unrelated Latin-script
-# languages by coincidence more than most pairs here; require extra margin
-# whenever Serbian is the candidate winning against any other candidate.
+# languages by coincidence more than most pairs here - and shares almost ALL
+# of them with Croatian/Bosnian specifically, since Latin-script Serbian,
+# Croatian and Bosnian are the same pluricentric language for this purpose;
+# require extra margin whenever Serbian is the candidate winning against any
+# other candidate. Kept at 1.5 even after removing the (incorrectly
+# Serbian-attributed) diacritic bonus - see _DISTINCTIVE_STRONG's "sr" entry
+# - specifically because a lower value let a genuine Croatian sentence
+# ("Kako mogu vratiti proizvod...") cross into "sr" (Fable S4, 2026-09-19).
 _SERBIAN_EXTRA_MARGIN = 1.5
 
 # Cyrillic-script messages: ru and sr are the only eligible candidates (see
 # detect_message_language), so the false-positive risk that justifies the
 # higher Latin-script floor (many languages' function words overlapping)
 # does not apply the same way - the real risk is ru/sr confusion, which the
-# distinctive-letter evidence (_DISTINCTIVE_STRONG) is built to resolve. A
-# Cyrillic message with any Russian-only-letter or Russian-function-word
-# evidence, and no Serbian evidence at all, switches to Russian even on a
-# thin score - this is what lets short, mostly-content-word Russian customer
-# questions (few closed-class words relative to their length) still switch,
-# per coordinator review 2026-09-18.
-CYRILLIC_MIN_SCORE = 0.5
-CYRILLIC_MIN_MARGIN = 0.5
+# distinctive-letter evidence (_DISTINCTIVE_STRONG) is built to resolve.
 CYRILLIC_SERBIAN_EXTRA_MARGIN = 1.5
+
+# A Cyrillic Russian message with a Russian-EXCLUSIVE letter (ы/э/ъ/ё) or,
+# for Serbian, Serbian-exclusive letters (see _DISTINCTIVE_STRONG) switches
+# even on a thin score - this is what lets short, mostly-content-word
+# customer questions (few closed-class words relative to their length)
+# still switch (coordinator review, 2026-09-18). Below this, the ultra-low
+# floor is not trustworthy any more (Fable S4, 2026-09-19 - see the
+# words-only tier below).
+# was tuned for genuine, short, word-sparse Russian questions, but it is
+# equally happy to wave through a Ukrainian (or Bulgarian/Kazakh/Kyrgyz)
+# message that merely shares a common Cyrillic pronoun/preposition with
+# Russian and nothing else - neither score nor margin can tell those two
+# situations apart (a probed Ukrainian sentence scored HIGHER on both than
+# the weakest genuine Russian one). What DOES separate them is
+# ``winner_letter_evidence``: every genuine-but-thin Russian probe that
+# survives this gate contains at least one Russian-EXCLUSIVE Cyrillic letter
+# (ы/э/ъ/ё - not used in Ukrainian, Bulgarian, Kazakh, Kyrgyz or Serbian
+# Cyrillic at all), while the false-positive Ukrainian probe contains none.
+# So: with letter evidence, the existing ultra-low floor still applies
+# (unchanged behaviour for the case it was built for); WITHOUT it, Russian
+# must clear the same winner-share bar every other language does.
+CYRILLIC_MIN_SCORE_WITH_LETTER_EVIDENCE = 0.5
+CYRILLIC_MIN_MARGIN_WITH_LETTER_EVIDENCE = 0.5
+CYRILLIC_MIN_SCORE_WORDS_ONLY = 1.5
+CYRILLIC_MIN_MARGIN_WORDS_ONLY = 1.5
+
+# Fable CX review finding S4 (2026-09-19): beating the runner-up is not
+# enough on its own - the winner's OWN evidence must be a real fraction of
+# the message, not a couple of cognates that happen to have no competition.
+# This is what stops a Portuguese message (Portuguese is not a route-copy
+# language, so it is never itself a candidate) from being waved through to
+# Spanish just because Portuguese and Spanish share enough vocabulary to
+# clear MIN_SCORE/MIN_MARGIN while most of the message's words match
+# nothing in Spanish at all. Tuned against both acceptance sets in
+# tests/unit/test_cx_answer_language.py (kept at 100% precision, unchanged
+# recall) and against the non-route-copy negative set (pt/hr/uk/tr messages
+# on an "en" widget - see TestNonRouteCopySelectedLanguage).
+MIN_WINNER_SHARE = 0.1
+# The stricter share bar for a Cyrillic winner with no letter evidence at
+# all (see CYRILLIC_MIN_SCORE_WORDS_ONLY above) - set just above the
+# false-positive Ukrainian probe's own share (0.2) and just below the
+# genuine word-heavy Russian brand/market probes' shares (>= 0.375 once
+# letter-less; the letter-bearing ones use the lenient bar instead).
+CYRILLIC_MIN_WINNER_SHARE_WORDS_ONLY = 0.3
+
+
+def _normalize_language_code(code: str) -> str:
+    """Fold a BCP-47-ish language tag down to its base subtag, casefolded
+    ("pt-BR" -> "pt", "sr-Latn" -> "sr", "sr-ME" -> "sr", "SR_RS" -> "sr").
+    Used only to compare the SELECTED widget language against
+    ``ROUTE_COPY_LANGUAGES`` - the returned ``AnswerLanguage.answer_language``
+    on a non-switch is always the original, un-normalized ``selected_language``
+    the caller passed, never this folded form."""
+    return (code or "").strip().split("-")[0].split("_")[0].casefold()
 
 
 class AnswerLanguage(NamedTuple):
@@ -547,11 +634,27 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
     if len(tokens) < MIN_TOKENS:
         return AnswerLanguage(selected_language, False, "too_short")
 
+    # Fable CX review finding S4 (2026-09-19): the detector can only ever
+    # recognise the 12 ROUTE_COPY_LANGUAGES. If the SELECTED widget language
+    # is some other configured language (e.g. Portuguese, Croatian,
+    # Ukrainian, Turkish - today unreachable via ChatRequest, but latent the
+    # moment config/markets.json's other configured languages are enabled),
+    # the detector cannot tell that the message is ALREADY written in the
+    # selected language - "matches_selected" below can never fire for it -
+    # so it would confidently "detect" the closest route-copy relative
+    # instead (Portuguese -> Spanish, Croatian/Ukrainian -> Serbian/Russian,
+    # Turkish -> French/German, ...) and switch to a language the user never
+    # asked for. There is no safe detection to attempt here: bail out before
+    # ever calling detect_message_language.
+    normalized_selected = _normalize_language_code(selected_language)
+    if normalized_selected not in ROUTE_COPY_LANGUAGES:
+        return AnswerLanguage(selected_language, False, "selected_language_not_route_copy")
+
     detection = detect_message_language(message, candidates=ROUTE_COPY_LANGUAGES)
     if detection.language is None:
         return AnswerLanguage(selected_language, False, detection.reason)
 
-    if detection.language == selected_language:
+    if detection.language == normalized_selected:
         return AnswerLanguage(selected_language, False, "matches_selected")
 
     if detection.language not in ROUTE_COPY_LANGUAGES:
@@ -559,19 +662,39 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
 
     script = _script_signal(message)
     margin = detection.score - detection.runner_up
+    required_share = MIN_WINNER_SHARE
 
     if script == "cyrillic":
-        required_score = CYRILLIC_MIN_SCORE
-        required_margin = CYRILLIC_MIN_MARGIN
+        if detection.language == "ru" and detection.winner_letter_evidence <= 0:
+            # No Russian-exclusive letter (ы/э/ъ/ё) anywhere in the message:
+            # the score is built entirely from marker words Russian shares
+            # with its closest Cyrillic-script relatives (Ukrainian,
+            # Bulgarian, Kazakh, Kyrgyz), so the low floor below - tuned for
+            # genuine word-sparse Russian questions - is not trustworthy
+            # here (Fable S4). Fall back to the stricter, words-only bar.
+            required_score = CYRILLIC_MIN_SCORE_WORDS_ONLY
+            required_margin = CYRILLIC_MIN_MARGIN_WORDS_ONLY
+            required_share = CYRILLIC_MIN_WINNER_SHARE_WORDS_ONLY
+        else:
+            required_score = CYRILLIC_MIN_SCORE_WITH_LETTER_EVIDENCE
+            required_margin = CYRILLIC_MIN_MARGIN_WITH_LETTER_EVIDENCE
         if detection.language == "sr":
             required_margin += CYRILLIC_SERBIAN_EXTRA_MARGIN
     else:
         required_score = MIN_SCORE
         required_margin = MIN_MARGIN
-        if frozenset({detection.language, selected_language}) <= _NEAR_LANGUAGE_GROUP:
+        if frozenset({detection.language, normalized_selected}) <= _NEAR_LANGUAGE_GROUP:
             required_margin += _NEAR_PAIR_EXTRA_MARGIN
         if detection.language == "sr":
             required_margin += _SERBIAN_EXTRA_MARGIN
+
+    # The winner must not just outscore the runner-up; its OWN evidence must
+    # be a real fraction of the message (Fable S4) - otherwise a handful of
+    # cognates with no real competition (Portuguese scored as Spanish) can
+    # clear the margin gate below on evidence that barely touches the
+    # message at all.
+    if detection.winner_share < required_share:
+        return AnswerLanguage(selected_language, False, "below_winner_share")
 
     # Scores are sums of float weights (0.2/0.3/0.5/1.0/1.5/2.0/3.0 etc.), so
     # a margin that is mathematically exactly the threshold can land a hair
