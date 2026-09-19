@@ -18,62 +18,75 @@ from app.orchestrator.conversation_repair import (
 )
 
 
-# --- typo_clarification: positives ------------------------------------------
+# --- typo_clarification: positives -------------------------------------------
+#
+# Fable CX review finding S2 (2026-09-19): "shiping"/"shippng"/"shoping" are
+# each within edit distance 1 of only ONE collision member (distance 2 from
+# the other) - app.retrieval.typo_safety.safe_typo_ranking_queries already
+# silently repairs each of them to that one word (verified directly against
+# that function; see also the negative tests below and this module's own
+# _is_collision_ambiguous_token docstring). Asking about them would discard
+# a question base retrieval already answered correctly, so they must NOT be
+# used as "asks a question" examples any more. A genuinely ambiguous token -
+# equally close (same bounded distance) to BOTH members - is a third-vowel
+# substitution ("shepping", "shapping", "shupping") or the shared vowel
+# position deleted outright ("shpping"); these ARE the positive examples now
+# (confirmed by brute-force enumeration in this module's docstring/history).
 
 
-def test_typo_clarification_english_shoping_asks_one_question():
-    result = typo_clarification("what is the shoping cost", "en")
+def test_typo_clarification_english_shepping_asks_one_question():
+    result = typo_clarification("what is the shepping cost", "en")
     assert result == Clarification(
         kind="field", key="clarify_field", options=("shipping cost", "shopping cost")
     )
 
 
-def test_typo_clarification_english_shippng_asks():
-    result = typo_clarification("how much is the shippng cost", "en")
+def test_typo_clarification_english_shapping_asks():
+    result = typo_clarification("how much is the shapping cost", "en")
     assert result is not None
     assert result.key == "clarify_field"
     assert set(result.options) == {"shipping cost", "shopping cost"}
 
 
-def test_typo_clarification_english_misspelling_shiping_asks():
-    result = typo_clarification("what is the shiping fee", "en")
+def test_typo_clarification_english_shupping_asks():
+    result = typo_clarification("what is the shupping fee", "en")
     assert result is not None
     assert result.key == "clarify_field"
 
 
-def test_typo_clarification_english_misspelling_shpping_asks():
+def test_typo_clarification_english_shpping_asks():
     result = typo_clarification("shpping cost?", "en")
     assert result is not None
     assert result.key == "clarify_field"
 
 
 def test_typo_clarification_spanish_positive():
-    result = typo_clarification("cual es el costo de shoping", "es")
+    result = typo_clarification("cual es el costo de shepping", "es")
     assert result is not None
     assert result.key == "clarify_field"
     assert len(result.options) == 2
 
 
 def test_typo_clarification_french_positive():
-    result = typo_clarification("quel est le prix du shoping", "fr")
+    result = typo_clarification("quel est le prix du shepping", "fr")
     assert result is not None
     assert result.key == "clarify_field"
 
 
 def test_typo_clarification_german_positive():
-    result = typo_clarification("was kostet das shoping", "de")
+    result = typo_clarification("was kostet das shepping", "de")
     assert result is not None
     assert result.key == "clarify_field"
 
 
 def test_typo_clarification_finnish_positive():
-    result = typo_clarification("mika on shoping hinta", "fi")
+    result = typo_clarification("mika on shepping hinta", "fi")
     assert result is not None
     assert result.key == "clarify_field"
 
 
 def test_typo_clarification_swedish_positive():
-    result = typo_clarification("vad kostar shoping", "sv")
+    result = typo_clarification("vad kostar shepping", "sv")
     assert result is not None
     assert result.key == "clarify_field"
 
@@ -117,38 +130,67 @@ def test_typo_clarification_none_when_no_collision_token():
     assert typo_clarification("what is the business hours", "en") is None
 
 
+# --- S2 regression: a single-sided misspelling must stay silent -------------
+#
+# "shiping"/"shippng" are distance 1 from "shipping" but distance 2 from
+# "shopping"; "shoping" is distance 1 from "shopping" but distance 2 from
+# "shipping". typo_safety.safe_typo_ranking_queries silently repairs each of
+# these to its one nearby word - confirmed directly against that function
+# (app/retrieval/typo_safety.py, unchanged, Codex-owned) - so this module
+# must never turn that already-answered question into a clarification.
+
+
+def test_typo_clarification_none_for_single_sided_misspelling_shiping():
+    assert typo_clarification("What is the shiping cost for Forever Kenya?", "en") is None
+
+
+def test_typo_clarification_none_for_single_sided_misspelling_shiping_address():
+    assert typo_clarification("shiping address", "en") is None
+
+
+def test_typo_clarification_none_for_single_sided_misspelling_shippng():
+    assert typo_clarification("how much is the shippng cost", "en") is None
+
+
+def test_typo_clarification_none_for_single_sided_misspelling_shoping():
+    assert typo_clarification("what is the shoping cost", "en") is None
+
+
 def test_typo_clarification_none_when_delivery_context_present_english():
     # "delivery" disambiguates toward shipping - typo_safety's own silent
-    # repair handles the rest; this module must not also ask.
-    assert typo_clarification("what is the shoping cost for delivery", "en") is None
+    # repair handles the rest; this module must not also ask. Uses a
+    # genuinely ambiguous token ("shepping") so the test actually exercises
+    # context suppression of an otherwise-ambiguous case, not a token that
+    # was already single-sided (see the S2 regression tests above).
+    assert typo_clarification("what is the shepping cost for delivery", "en") is None
 
 
 def test_typo_clarification_none_when_courier_context_present_english():
-    assert typo_clarification("shoping cost via courier", "en") is None
+    assert typo_clarification("shepping cost via courier", "en") is None
 
 
 def test_typo_clarification_none_when_purchase_context_present_english():
-    assert typo_clarification("shoping cost when I buy online", "en") is None
+    assert typo_clarification("shepping cost when I buy online", "en") is None
 
 
 def test_typo_clarification_none_when_delivery_context_present_spanish():
-    assert typo_clarification("costo de shoping por entrega", "es") is None
+    assert typo_clarification("costo de shepping por entrega", "es") is None
 
 
 def test_typo_clarification_none_when_delivery_context_present_french():
-    assert typo_clarification("prix du shoping pour la livraison", "fr") is None
+    assert typo_clarification("prix du shepping pour la livraison", "fr") is None
 
 
 def test_typo_clarification_none_when_delivery_context_present_german():
-    assert typo_clarification("shoping kosten fuer die lieferung", "de") is None
+    assert typo_clarification("shepping kosten fuer die lieferung", "de") is None
 
 
 def test_typo_clarification_none_when_delivery_context_present_finnish():
-    assert typo_clarification("shoping hinta toimitus", "fi") is None
+    assert typo_clarification("shepping hinta toimitus", "fi") is None
 
 
 def test_typo_clarification_none_when_delivery_context_present_swedish():
-    assert typo_clarification("shoping kostnad leverans", "sv") is None
+    assert typo_clarification("shepping kostnad leverans", "sv") is None
 
 
 def test_typo_clarification_none_for_exact_shipping_spanish():
@@ -174,8 +216,8 @@ def test_typo_clarification_none_for_unknown_language():
 
 
 def test_typo_clarification_is_deterministic():
-    first = typo_clarification("shoping cost", "en")
-    second = typo_clarification("shoping cost", "en")
+    first = typo_clarification("shepping cost", "en")
+    second = typo_clarification("shepping cost", "en")
     assert first == second
 
 

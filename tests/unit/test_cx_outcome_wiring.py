@@ -324,8 +324,16 @@ def test_a_repair_rewrites_retrieval_persists_the_original_and_keeps_the_policy_
 
 
 @pytest.mark.parametrize("message,language", [
-    ("What is the shoping cost?", "en"),
-    ("¿Cuál es el costo de shoping?", "es"),
+    # "shoping" was replaced here (Fable CX review finding S2, 2026-09-19):
+    # it is distance 1 from "shopping" but distance 2 from "shipping", so
+    # app.retrieval.typo_safety.safe_typo_ranking_queries silently repairs
+    # it to "shopping" and this wiring test's own premise (never retrieves)
+    # no longer held - base retrieval already answers it. "shepping" is
+    # genuinely ambiguous (same bounded edit distance to both collision
+    # members; see conversation_repair._is_collision_ambiguous_token), so it
+    # is the correct case for "asks one question and never retrieves".
+    ("What is the shepping cost?", "en"),
+    ("¿Cuál es el costo de shepping?", "es"),
 ])
 def test_an_ambiguous_typo_asks_one_question_and_never_retrieves(monkeypatch, message, language):
     _repair_harness(monkeypatch, "")

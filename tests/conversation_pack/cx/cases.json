@@ -2539,7 +2539,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "What's the shoping cost?",
+          "message": "What's the shepping cost?",
           "language": "en"
         }
       ],
@@ -2555,7 +2555,7 @@
           "options": "shipping cost or shopping cost"
         }
       },
-      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about. (v4 fix: expected.render_placeholders now supplies the filled {options} value -- cx_render.join_alternatives(['shipping cost', 'shopping cost'], 'en') -- matching how the real delivered clarification fills it; the earlier version compared against the unfilled template by mistake, a case/adapter defect, not a product one: the real kind, failure_layer='typo_clarification', and rendered text all verified correct once flipped.)"
+      "notes": "Updated 2026-09-19 (Fable CX review finding S2): 'shoping' was replaced with 'shepping'. 'shoping' is distance 1 from 'shopping' but distance 2 from 'shipping', so app.retrieval.typo_safety.safe_typo_ranking_queries silently repairs it to 'shopping' and it must NOT clarify (see app.orchestrator.conversation_repair._is_collision_ambiguous_token, and tests/unit/test_cx_repair.py's S2 regression tests); 'shepping' is genuinely ambiguous (same bounded edit distance to both collision members) and is the correct case for this requirement. Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shepping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about. (v4 fix: expected.render_placeholders now supplies the filled {options} value -- cx_render.join_alternatives(['shipping cost', 'shopping cost'], 'en') -- matching how the real delivered clarification fills it; the earlier version compared against the unfilled template by mistake, a case/adapter defect, not a product one: the real kind, failure_layer='typo_clarification', and rendered text all verified correct once flipped.)"
     },
     {
       "id": "cx-typo-tolerance-en-01",
@@ -2569,7 +2569,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "How much is shoping in total?",
+          "message": "How much is shepping in total?",
           "language": "en"
         }
       ],
@@ -2585,7 +2585,7 @@
           "options": "shipping cost or shopping cost"
         }
       },
-      "notes": "Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shoping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about. (v4 fix: expected.render_placeholders now supplies the filled {options} value -- cx_render.join_alternatives(['shipping cost', 'shopping cost'], 'en') -- matching how the real delivered clarification fills it; the earlier version compared against the unfilled template by mistake, a case/adapter defect, not a product one: the real kind, failure_layer='typo_clarification', and rendered text all verified correct once flipped.)"
+      "notes": "Updated 2026-09-19 (Fable CX review finding S2): 'shoping' was replaced with 'shepping'. 'shoping' is distance 1 from 'shopping' but distance 2 from 'shipping', so app.retrieval.typo_safety.safe_typo_ranking_queries silently repairs it to 'shopping' and it must NOT clarify (see app.orchestrator.conversation_repair._is_collision_ambiguous_token, and tests/unit/test_cx_repair.py's S2 regression tests); 'shepping' is genuinely ambiguous (same bounded edit distance to both collision members) and is the correct case for this requirement. Real check: app.orchestrator.conversation_repair.typo_clarification(question=phrasing, language='en') is a PURE function, callable and asserted directly today regardless of any flag -- it must return a Clarification(kind='field', key='clarify_field', options=(shipping label, shopping label)) for this exact 'shepping' collision. Only whether chat_orchestrator's real evidence_gate path (this fixture: empty documents) ever routes through this clarification instead of the plain evidence_missing copy is gated behind 'typo_clarify' + 'localization' -- verified: today's real kind is evidence_missing, not clarification. How this case can fail: if typo_clarification stops recognising the collision, or once wired, if a field is silently guessed instead of asked about. (v4 fix: expected.render_placeholders now supplies the filled {options} value -- cx_render.join_alternatives(['shipping cost', 'shopping cost'], 'en') -- matching how the real delivered clarification fills it; the earlier version compared against the unfilled template by mistake, a case/adapter defect, not a product one: the real kind, failure_layer='typo_clarification', and rendered text all verified correct once flipped.)"
     },
     {
       "id": "cx-confidence-aware-language-en-00",
