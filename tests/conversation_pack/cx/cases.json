@@ -14,7 +14,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "What is the current order processing fee?",
+          "message": "What are the payment methods?",
           "language": "en"
         }
       ],
@@ -24,17 +24,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "en",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "payment methods"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('payment methods', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-en-00",
@@ -159,18 +158,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Who is the sponsoring contact for Kenya?",
-          "language": "en"
+          "message": "Who is the sponsoring contact for Kenya?"
         },
         {
           "role": "assistant",
-          "message": "(Kenya and Ghana both matched.)"
+          "message": "A."
+        },
+        {
+          "role": "user",
+          "message": "And for Ghana?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
         },
         {
           "role": "user",
           "message": "What about the other one?",
-          "language": "en",
-          "scripted_answer": "Kenya and Ghana both have sponsoring contacts."
+          "language": "en"
         }
       ],
       "stub": {
@@ -179,15 +184,13 @@
             "kind": "directory",
             "record_id": "sponsoring-000-a",
             "record_country": "Kenya",
-            "content": "Forever Kenya\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-000-b",
             "record_country": "Ghana",
-            "content": "Forever Ghana\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -195,10 +198,9 @@
       "expected": {
         "kind": "clarification",
         "language": "en",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Kenya or Ghana"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Kenya and Ghana are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Kenya, then Ghana), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Kenya or Ghana'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently."
     },
     {
       "id": "cx-fallback-state-personal-account-en-00",
@@ -211,7 +213,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "What is the status of my order?",
+          "message": "Has my payment been received?",
           "language": "en"
         }
       ],
@@ -220,15 +222,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "en",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'en'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-en-00",
@@ -277,7 +281,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "¿Cuál es la tarifa actual de procesamiento de pedidos?",
+          "message": "¿Cuáles son los métodos de pago?",
           "language": "es"
         }
       ],
@@ -287,17 +291,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "es",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "métodos de pago"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('métodos de pago', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-es-01",
@@ -371,7 +374,8 @@
           "country": "Ghana"
         }
       },
-      "notes": "Real, verified trigger: mixed Ghana/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Ghana/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name. v5 (coordinator P3): confirmed NOT a CX defect -- app/evidence.py's company-policy phrase gate (_COMPANY_POLICY_REQUEST_RE) only recognises the English words 'company|local|national policy', so a non-English company-policy question never reaches _names_another_market at all and falls to the generic copy; retrieval eligibility itself is still correctly enforced. Out of CX scope (evidence approval), raised as a separate task; pinned here as a named, expected xfail rather than folded into this requirement's pass/fail.",
+      "xfail_reason": "P3: app/evidence company-policy gate is English-only (separate task)"
     },
     {
       "id": "cx-fallback-state-international-directory-es-01",
@@ -422,18 +426,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "¿Quién es el contacto de patrocinio para Ghana?",
-          "language": "es"
+          "message": "¿Quién es el contacto de patrocinio para Ghana?"
         },
         {
           "role": "assistant",
-          "message": "(Ghana and Nigeria both matched.)"
+          "message": "A."
+        },
+        {
+          "role": "user",
+          "message": "¿Y para Nigeria?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
         },
         {
           "role": "user",
           "message": "¿Y el otro?",
-          "language": "es",
-          "scripted_answer": "Ghana and Nigeria both have sponsoring contacts."
+          "language": "es"
         }
       ],
       "stub": {
@@ -442,15 +452,13 @@
             "kind": "directory",
             "record_id": "sponsoring-001-a",
             "record_country": "Ghana",
-            "content": "Forever Ghana\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-001-b",
             "record_country": "Nigeria",
-            "content": "Forever Nigeria\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -458,10 +466,9 @@
       "expected": {
         "kind": "clarification",
         "language": "es",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Ghana o Nigeria"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Ghana and Nigeria are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Ghana, then Nigeria), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Ghana o Nigeria'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently."
     },
     {
       "id": "cx-fallback-state-personal-account-es-01",
@@ -474,7 +481,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "¿Cuál es el estado de mi pedido?",
+          "message": "¿Se ha recibido mi pago?",
           "language": "es"
         }
       ],
@@ -483,15 +490,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "es",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "Los documentos de política aprobados disponibles actualmente no contienen información suficiente para responder claramente a esta pregunta. Reformula la pregunta o contacta con el soporte de Forever Living para obtener una respuesta oficial."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'es'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-es-01",
@@ -534,7 +543,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Quel est le frais de traitement de commande actuel ?",
+          "message": "Quels sont les moyens de paiement ?",
           "language": "fr"
         }
       ],
@@ -544,17 +553,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "fr",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "moyens de paiement"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('moyens de paiement', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-fr-02",
@@ -628,7 +636,8 @@
           "country": "Nigeria"
         }
       },
-      "notes": "Real, verified trigger: mixed Nigeria/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Nigeria/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name. v5 (coordinator P3): confirmed NOT a CX defect -- app/evidence.py's company-policy phrase gate (_COMPANY_POLICY_REQUEST_RE) only recognises the English words 'company|local|national policy', so a non-English company-policy question never reaches _names_another_market at all and falls to the generic copy; retrieval eligibility itself is still correctly enforced. Out of CX scope (evidence approval), raised as a separate task; pinned here as a named, expected xfail rather than folded into this requirement's pass/fail.",
+      "xfail_reason": "P3: app/evidence company-policy gate is English-only (separate task)"
     },
     {
       "id": "cx-fallback-state-international-directory-fr-02",
@@ -679,18 +688,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Qui est le contact de parrainage pour Nigeria ?",
-          "language": "fr"
+          "message": "Qui est le contact de parrainage pour Nigeria ?"
         },
         {
           "role": "assistant",
-          "message": "(Nigeria and Brazil both matched.)"
+          "message": "A."
+        },
+        {
+          "role": "user",
+          "message": "Et pour Kenya ?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
         },
         {
           "role": "user",
           "message": "Et l'autre ?",
-          "language": "fr",
-          "scripted_answer": "Nigeria and Brazil both have sponsoring contacts."
+          "language": "fr"
         }
       ],
       "stub": {
@@ -699,15 +714,13 @@
             "kind": "directory",
             "record_id": "sponsoring-002-a",
             "record_country": "Nigeria",
-            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-002-b",
-            "record_country": "Brazil",
-            "content": "Forever Brazil\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -715,10 +728,9 @@
       "expected": {
         "kind": "clarification",
         "language": "fr",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Nigeria ou Kenya"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Nigeria and Brazil are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Nigeria, then Kenya), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Nigeria ou Kenya'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently."
     },
     {
       "id": "cx-fallback-state-personal-account-fr-02",
@@ -731,7 +743,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Quel est le statut de ma commande ?",
+          "message": "Mon paiement a-t-il été reçu ?",
           "language": "fr"
         }
       ],
@@ -740,15 +752,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "fr",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "Les documents de politique approuvés actuellement disponibles ne contiennent pas suffisamment d'informations pour répondre clairement à cette question. Veuillez reformuler la question ou contacter le support Forever Living pour obtenir une réponse officielle."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'fr'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-fr-02",
@@ -791,7 +805,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebühr?",
+          "message": "Welche Zahlungsmethoden gibt es?",
           "language": "de"
         }
       ],
@@ -801,17 +815,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "de",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "Zahlungsmethoden"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('Zahlungsmethoden', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-de-03",
@@ -885,7 +898,8 @@
           "country": "Brazil"
         }
       },
-      "notes": "Real, verified trigger: mixed Brazil/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Brazil/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name. v5 (coordinator P3): confirmed NOT a CX defect -- app/evidence.py's company-policy phrase gate (_COMPANY_POLICY_REQUEST_RE) only recognises the English words 'company|local|national policy', so a non-English company-policy question never reaches _names_another_market at all and falls to the generic copy; retrieval eligibility itself is still correctly enforced. Out of CX scope (evidence approval), raised as a separate task; pinned here as a named, expected xfail rather than folded into this requirement's pass/fail.",
+      "xfail_reason": "P3: app/evidence company-policy gate is English-only (separate task)"
     },
     {
       "id": "cx-fallback-state-international-directory-de-03",
@@ -936,18 +950,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wer ist der Sponsoring-Kontakt für Brazil?",
-          "language": "de"
+          "message": "Wer ist der Sponsoring-Kontakt für Kenya?"
         },
         {
           "role": "assistant",
-          "message": "(Brazil and Finland/Aland both matched.)"
+          "message": "A."
+        },
+        {
+          "role": "user",
+          "message": "Und für Ghana?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
         },
         {
           "role": "user",
           "message": "Und der andere?",
-          "language": "de",
-          "scripted_answer": "Brazil and Finland/Aland both have sponsoring contacts."
+          "language": "de"
         }
       ],
       "stub": {
@@ -955,16 +975,14 @@
           {
             "kind": "directory",
             "record_id": "sponsoring-003-a",
-            "record_country": "Brazil",
-            "content": "Forever Brazil\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-003-b",
-            "record_country": "Finland/Aland",
-            "content": "Forever Finland/Aland\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -972,10 +990,9 @@
       "expected": {
         "kind": "clarification",
         "language": "de",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Kenya oder Ghana"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Brazil and Finland/Aland are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Kenya, then Ghana), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Kenya oder Ghana'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently."
     },
     {
       "id": "cx-fallback-state-personal-account-de-03",
@@ -988,7 +1005,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wie ist der Status meiner Bestellung?",
+          "message": "Ist meine Zahlung eingegangen?",
           "language": "de"
         }
       ],
@@ -997,15 +1014,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "de",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "Die derzeit verfügbaren freigegebenen Richtliniendokumente enthalten nicht genügend Informationen, um diese Frage eindeutig zu beantworten. Formulieren Sie die Frage neu oder wenden Sie sich an den Forever Living Support, um eine offizielle Antwort zu erhalten."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'de'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-de-03",
@@ -1054,7 +1073,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Mikä on nykyinen tilauksen käsittelymaksu?",
+          "message": "Mikä on maksutapa?",
           "language": "fi"
         }
       ],
@@ -1064,17 +1083,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "fi",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "maksutavat"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('maksutavat', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-fi-04",
@@ -1148,7 +1166,8 @@
           "country": "Finland/Aland"
         }
       },
-      "notes": "Real, verified trigger: mixed Finland/Aland/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Finland/Aland/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name. v5 (coordinator P3): confirmed NOT a CX defect -- app/evidence.py's company-policy phrase gate (_COMPANY_POLICY_REQUEST_RE) only recognises the English words 'company|local|national policy', so a non-English company-policy question never reaches _names_another_market at all and falls to the generic copy; retrieval eligibility itself is still correctly enforced. Out of CX scope (evidence approval), raised as a separate task; pinned here as a named, expected xfail rather than folded into this requirement's pass/fail.",
+      "xfail_reason": "P3: app/evidence company-policy gate is English-only (separate task)"
     },
     {
       "id": "cx-fallback-state-international-directory-fi-04",
@@ -1199,18 +1218,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Kuka on sponsorointiyhteyshenkilö maassa Finland/Aland?",
-          "language": "fi"
+          "message": "Kuka on sponsorointiyhteyshenkilö maassa Ghana?"
         },
         {
           "role": "assistant",
-          "message": "(Finland/Aland and Sweden/Gotland both matched.)"
+          "message": "A."
+        },
+        {
+          "role": "user",
+          "message": "Entä maassa Nigeria?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
         },
         {
           "role": "user",
           "message": "Entä se toinen?",
-          "language": "fi",
-          "scripted_answer": "Finland/Aland and Sweden/Gotland both have sponsoring contacts."
+          "language": "fi"
         }
       ],
       "stub": {
@@ -1218,16 +1243,14 @@
           {
             "kind": "directory",
             "record_id": "sponsoring-004-a",
-            "record_country": "Finland/Aland",
-            "content": "Forever Finland/Aland\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-004-b",
-            "record_country": "Sweden/Gotland",
-            "content": "Forever Sweden/Gotland\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "record_country": "Nigeria",
+            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -1235,10 +1258,9 @@
       "expected": {
         "kind": "clarification",
         "language": "fi",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Ghana vai Nigeria"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Finland/Aland and Sweden/Gotland are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Ghana, then Nigeria), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Ghana vai Nigeria'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently."
     },
     {
       "id": "cx-fallback-state-personal-account-fi-04",
@@ -1251,7 +1273,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Mikä on tilaukseni tila?",
+          "message": "Onko maksuni vastaanotettu?",
           "language": "fi"
         }
       ],
@@ -1260,15 +1282,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "fi",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'fi'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-fi-04",
@@ -1311,7 +1335,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vad är den aktuella orderhanteringsavgiften?",
+          "message": "Vilka är betalningsmetoderna?",
           "language": "sv"
         }
       ],
@@ -1321,17 +1345,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "sv",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "betalningsmetoder"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('betalningsmetoder', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-sv-05",
@@ -1405,7 +1428,8 @@
           "country": "Sweden/Gotland"
         }
       },
-      "notes": "Real, verified trigger: mixed Sweden/Gotland/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed Sweden/Gotland/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name. v5 (coordinator P3): confirmed NOT a CX defect -- app/evidence.py's company-policy phrase gate (_COMPANY_POLICY_REQUEST_RE) only recognises the English words 'company|local|national policy', so a non-English company-policy question never reaches _names_another_market at all and falls to the generic copy; retrieval eligibility itself is still correctly enforced. Out of CX scope (evidence approval), raised as a separate task; pinned here as a named, expected xfail rather than folded into this requirement's pass/fail.",
+      "xfail_reason": "P3: app/evidence company-policy gate is English-only (separate task)"
     },
     {
       "id": "cx-fallback-state-international-directory-sv-05",
@@ -1456,18 +1480,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vem är sponsringskontakten för Sweden/Gotland?",
-          "language": "sv"
+          "message": "Vem är sponsringskontakten för Nigeria?"
         },
         {
           "role": "assistant",
-          "message": "(Sweden/Gotland and France/Corsica both matched.)"
+          "message": "A."
         },
         {
           "role": "user",
-          "message": "Vad sägs om den andra?",
-          "language": "sv",
-          "scripted_answer": "Sweden/Gotland and France/Corsica both have sponsoring contacts."
+          "message": "Och för Kenya?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
+        },
+        {
+          "role": "user",
+          "message": "Och den andra?",
+          "language": "sv"
         }
       ],
       "stub": {
@@ -1475,16 +1505,14 @@
           {
             "kind": "directory",
             "record_id": "sponsoring-005-a",
-            "record_country": "Sweden/Gotland",
-            "content": "Forever Sweden/Gotland\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "record_country": "Nigeria",
+            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-005-b",
-            "record_country": "France/Corsica",
-            "content": "Forever France/Corsica\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -1492,10 +1520,9 @@
       "expected": {
         "kind": "clarification",
         "language": "sv",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Nigeria eller Kenya"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both Sweden/Gotland and France/Corsica are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Nigeria, then Kenya), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Nigeria eller Kenya'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently."
     },
     {
       "id": "cx-fallback-state-personal-account-sv-05",
@@ -1508,7 +1535,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vad är status för min order?",
+          "message": "Har min betalning mottagits?",
           "language": "sv"
         }
       ],
@@ -1517,15 +1544,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "sv",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'sv'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-sv-05",
@@ -1568,7 +1597,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Какова текущая комиссия за обработку заказа?",
+          "message": "Какие способы оплаты?",
           "language": "ru"
         }
       ],
@@ -1578,17 +1607,16 @@
       },
       "expected": {
         "kind": "evidence_missing",
-        "cx_applied_absent": [
-          "preamble_stripped",
-          "partial_note"
-        ],
         "language": "ru",
+        "cx_applied_expected": [
+          "evidence_missing_detail"
+        ],
         "render_key": "evidence_missing_detail",
         "render_placeholders": {
-          "topic": "processing fee"
+          "topic": "способы оплаты"
         }
       },
-      "notes": "Real, verified trigger: an EMPTY RetrievalResult -> app.evidence.approve_evidence returns reason='no_evidence' -> failure_layer='evidence_gate' -> OutcomeKind.EVIDENCE_MISSING (app/response/outcome.py, now wired into ChatResponse.metadata['outcome'] for real -- this kind check runs for real today). How this case can fail: if the kind ever stops being evidence_missing for an empty-evidence turn, or once localization is wired, if evidence_missing_detail copy is not the one delivered."
+      "notes": "v5 fix (coordinator P1, CX wiring 6, 1599757): app/response/cx_compose.py's evidence_missing_detail swap only fires when the question requested a known directory field (utils.directory_fields._requested_directory_field_set); a free-text topic like 'processing fee' is never named because free-text topic extraction isn't reliable (coordinator). This question asks for payment methods, a recognised field, with no evidence at all -> the reviewed generic sentence is swapped for evidence_missing_detail naming it ('способы оплаты', lower-cased mid-sentence per cx_compose._label_in_sentence -- German keeps the capital noun). Verified by running this exact fixture. How this case can fail: if the swap stops firing for a genuinely field-requesting question, or names the wrong field."
     },
     {
       "id": "cx-fallback-state-dependency-unavailable-ru-06",
@@ -1662,7 +1690,8 @@
           "country": "France/Corsica"
         }
       },
-      "notes": "Real, verified trigger: mixed France/Corsica/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name."
+      "notes": "Real, verified trigger: mixed France/Corsica/US policy rows for a per-market company-policy question from a US session -> approve_evidence reason='cross_market_policy_request' -> OutcomeKind.CROSS_MARKET_POLICY. Note: cross_market_policy_scope copy is ALREADY wired directly into chat_orchestrator.py (d4547b9, outside cx_compose) but only when the question names exactly one other market by a name cx_render's country resolver recognises -- the 'localization' flag here therefore also covers verifying that wiring, not only the future composer. How this case can fail: if the scope refusal regresses into answering with the session-market policy under the other country's name. v5 (coordinator P3): confirmed NOT a CX defect -- app/evidence.py's company-policy phrase gate (_COMPANY_POLICY_REQUEST_RE) only recognises the English words 'company|local|national policy', so a non-English company-policy question never reaches _names_another_market at all and falls to the generic copy; retrieval eligibility itself is still correctly enforced. Out of CX scope (evidence approval), raised as a separate task; pinned here as a named, expected xfail rather than folded into this requirement's pass/fail.",
+      "xfail_reason": "P3: app/evidence company-policy gate is English-only (separate task)"
     },
     {
       "id": "cx-fallback-state-international-directory-ru-06",
@@ -1713,18 +1742,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Кто является контактным лицом по спонсорству для France/Corsica?",
-          "language": "ru"
+          "message": "Кто является контактным лицом по спонсорству в Kenya?"
         },
         {
           "role": "assistant",
-          "message": "(France/Corsica and Kenya both matched.)"
+          "message": "A."
+        },
+        {
+          "role": "user",
+          "message": "А для Ghana?"
+        },
+        {
+          "role": "assistant",
+          "message": "B."
         },
         {
           "role": "user",
           "message": "А что насчёт другого?",
-          "language": "ru",
-          "scripted_answer": "France/Corsica and Kenya both have sponsoring contacts."
+          "language": "ru"
         }
       ],
       "stub": {
@@ -1732,16 +1767,14 @@
           {
             "kind": "directory",
             "record_id": "sponsoring-006-a",
-            "record_country": "France/Corsica",
-            "content": "Forever France/Corsica\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
-            "score": 0.9
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           },
           {
             "kind": "directory",
             "record_id": "sponsoring-006-b",
-            "record_country": "Kenya",
-            "content": "Forever Kenya\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
-            "score": 0.9
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\nTelephone Office +1 555 0100\nEmail contact@example.test\n"
           }
         ],
         "confidence": 0.6
@@ -1749,10 +1782,10 @@
       "expected": {
         "kind": "clarification",
         "language": "ru",
-        "clarification_question_count": 1,
-        "render_key": "clarify_field"
+        "clarification_market_join": "Kenya или Ghana"
       },
-      "notes": "KNOWN GAP, verified by running this fixture: today it does NOT reach 'clarification' -- both France/Corsica and Kenya are approved and the pipeline answers using the higher-scored candidate (real result: kind='international_directory', directory_target set to whichever candidate scored higher) instead of asking which one, because the real reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced by this fixture. expected.kind is intentionally left at the DESIRED behaviour ('clarification'), so this case fails today on its very first assertion, documenting a real, currently-unaddressed gap -- not because the fixture is broken. How this case can fail once Lane 5's narrowing is actually wired end to end: if it still fails."
+      "notes": "v5 fix (coordinator P4): realistic two-turn history -- two real user questions each naming one market (Kenya, then Ghana), matching how the real orchestrator's reference resolution actually works (verified: real handle_chat clarifies correctly with exactly this shape, joined with a localized 'or': 'Kenya или Ghana'). The earlier version used a pseudo assistant-narrated turn ('(X and Y both matched.)') and compound market names ('Finland/Aland') that a real user would never type -- neither reaches the real reference-resolution trigger at all, which was a fixture defect, not a product one. How this case can fail: if the clarification stops firing for two real, approved candidates, or answers with one silently. v5 correction: Russian has no reference-resolution vocabulary at all (config/reference_vocabulary.py has no ru entry), verified directly -- pinned as a named xfail rather than folded into the requirement.",
+      "xfail_reason": "P4: app/orchestrator/reference_resolution.py has no Russian entry in config/reference_vocabulary.py (LOCALIZED_CONTRASTIVE_TOKENS/LOCALIZED_NON_CONTENT_TOKENS) -- a real, separate gap, not a fixture defect"
     },
     {
       "id": "cx-fallback-state-personal-account-ru-06",
@@ -1765,7 +1798,7 @@
       "turns": [
         {
           "role": "user",
-          "message": "Какой статус моего заказа?",
+          "message": "Получен ли мой платёж?",
           "language": "ru"
         }
       ],
@@ -1774,15 +1807,17 @@
         "confidence": 0.0
       },
       "expected": {
-        "kind": "evidence_missing",
+        "kind": "personal_account",
         "language": "ru",
         "cx_applied_expected": [
-          "personal_account_note",
-          "contact_offer"
+          "personal_account_limit"
         ],
-        "personal_account_detected": true
+        "personal_account_detected": true,
+        "render_key": "personal_account_limit",
+        "render_placeholders": {},
+        "answer_starts_with_generic": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
       },
-      "notes": "personal_account is an ADDITIVE note, never its own OutcomeKind (app/response/personal_account.py's own docstring: 'This is not a refusal ... It only tells the coordinator whether to ADD the personal_account_limit note'). expected.kind is therefore the NATURAL underlying kind for this empty-evidence fixture (evidence_missing), verified by running it, not 'personal_account'. config.personal_account_vocabulary.matches_personal_account_shape should recognise this question today (checked directly, not gated by any flag); only the cx_compose wiring that would ADD the note to the delivered response is gated behind 'personal_account'. How this case can fail: if the question stops matching the personal-account shape, or once wired, if the note/contact_offer is never appended."
+      "notes": "v5 fix (coordinator P2, CX wiring 6, 1599757): a payment-received/balance lookup has no evidence at all (a real personal-account question, verified: config.personal_account_vocabulary.matches_personal_account_shape accepts this exact phrasing in 'ru'), so it hits the GENERIC insufficient_evidence copy, not a specialised scope copy -- app/response/cx_compose.py's personal_eligible gate (2026-09-19) then adds personal_account_limit on top and promotes the outcome to OutcomeKind.PERSONAL_ACCOUNT. Verified by running this exact fixture. How this case can fail: if the note stops being added for a genuine personal lookup with no evidence, or the promotion doesn't happen."
     },
     {
       "id": "cx-fallback-state-safety-refusal-ru-06",
@@ -2224,7 +2259,8 @@
         "clarification_question_count": 1,
         "render_key": "clarify_role"
       },
-      "notes": "KNOWN GAP: an empty-evidence role question lands on evidence_missing today (verified: matches the same no_evidence path as fallback_state_evidence_missing), not a role clarification, because the FBO-vs-Preferred-Customer reference candidates this case wants are never supplied to the real pipeline by this fixture -- app.orchestrator.conversation_repair.one_question is the real, already-wired-in-Lane-5 chooser (reference > country > role > field precedence) but nothing calls it from chat_orchestrator yet. expected.kind is the DESIRED behaviour, so this fails today on its first assertion. How this case can fail once wired: if two separate questions are asked instead of one, or a role is guessed silently."
+      "notes": "KNOWN GAP: an empty-evidence role question lands on evidence_missing today (verified: matches the same no_evidence path as fallback_state_evidence_missing), not a role clarification, because the FBO-vs-Preferred-Customer reference candidates this case wants are never supplied to the real pipeline by this fixture -- app.orchestrator.conversation_repair.one_question is the real, already-wired-in-Lane-5 chooser (reference > country > role > field precedence) but nothing calls it from chat_orchestrator yet. expected.kind is the DESIRED behaviour, so this fails today on its first assertion. How this case can fail once wired: if two separate questions are asked instead of one, or a role is guessed silently. v5 (coordinator P4): the real orchestrator's role-clarification path (candidate_narrowing_fallback) is reachable only when CandidateFlags.narrowing_fallback is enabled (an admin control, off by default) -- pinned as a named xfail rather than exercising an admin-only code path from this offline evaluation pack.",
+      "xfail_reason": "P4: candidate_narrowing_fallback is gated behind an admin-only, default-off flag (services.candidate_control.CandidateFlags); not enabled by this offline pack"
     },
     {
       "id": "cx-one-question-clarification-de-01",
@@ -2250,7 +2286,8 @@
         "clarification_question_count": 1,
         "render_key": "clarify_role"
       },
-      "notes": "KNOWN GAP: an empty-evidence role question lands on evidence_missing today (verified: matches the same no_evidence path as fallback_state_evidence_missing), not a role clarification, because the FBO-vs-Preferred-Customer reference candidates this case wants are never supplied to the real pipeline by this fixture -- app.orchestrator.conversation_repair.one_question is the real, already-wired-in-Lane-5 chooser (reference > country > role > field precedence) but nothing calls it from chat_orchestrator yet. expected.kind is the DESIRED behaviour, so this fails today on its first assertion. How this case can fail once wired: if two separate questions are asked instead of one, or a role is guessed silently."
+      "notes": "KNOWN GAP: an empty-evidence role question lands on evidence_missing today (verified: matches the same no_evidence path as fallback_state_evidence_missing), not a role clarification, because the FBO-vs-Preferred-Customer reference candidates this case wants are never supplied to the real pipeline by this fixture -- app.orchestrator.conversation_repair.one_question is the real, already-wired-in-Lane-5 chooser (reference > country > role > field precedence) but nothing calls it from chat_orchestrator yet. expected.kind is the DESIRED behaviour, so this fails today on its first assertion. How this case can fail once wired: if two separate questions are asked instead of one, or a role is guessed silently. v5 (coordinator P4): the real orchestrator's role-clarification path (candidate_narrowing_fallback) is reachable only when CandidateFlags.narrowing_fallback is enabled (an admin control, off by default) -- pinned as a named xfail rather than exercising an admin-only code path from this offline evaluation pack.",
+      "xfail_reason": "P4: candidate_narrowing_fallback is gated behind an admin-only, default-off flag (services.candidate_control.CandidateFlags); not enabled by this offline pack"
     },
     {
       "id": "cx-contact-escalation-en-00",
@@ -2922,6 +2959,150 @@
         "retrieval_language_unchanged": "en"
       },
       "notes": "Real check: app.orchestrator.answer_language.resolve_answer_language(message, selected_language='en') and .retrieval_language(selected, answer_language) are PURE functions, callable and asserted directly today regardless of any flag (ChatRequest.language stays 'en' throughout, so this never hits the pt/ChatRequest validation problem documented above). resolve_answer_language only switches on a strong, unambiguous signal (min token count, score/margin thresholds) -- this case's message may or may not clear that bar for 'pt'; either real outcome is asserted, not assumed. retrieval_language must equal 'en' regardless (the eligibility invariant). How this case can fail: if switching the answer language ever also changes retrieval_language."
+    },
+    {
+      "id": "cx-fallback-state-evidence-missing-generic-copy-en-00",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "localization"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Tell me about the company's history.",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "language": "en",
+        "cx_applied_absent": [
+          "evidence_missing_detail"
+        ],
+        "answer_contains": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
+      },
+      "notes": "v5 addition (coordinator P1 control): a question naming no known directory field must keep the reviewed GENERIC copy -- free-text topic extraction isn't reliable enough to name 'the company's history' as a topic, so evidence_missing_detail is never substituted (app/response/cx_compose.py: _name_missing_fields only swaps when outcome.fields_requested is non-empty). How this case can fail: if a future change starts guessing a free-text topic and names the wrong thing, or drops the reviewed generic copy's exact wording."
+    },
+    {
+      "id": "cx-fallback-state-evidence-missing-generic-copy-fr-01",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "localization"
+      ],
+      "language": "fr",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Parlez-moi de l'histoire de l'entreprise.",
+          "language": "fr"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "language": "fr",
+        "cx_applied_absent": [
+          "evidence_missing_detail"
+        ],
+        "answer_contains": "Les documents de politique approuvés actuellement disponibles ne contiennent pas suffisamment d'informations pour répondre clairement à cette question. Veuillez reformuler la question ou contacter le support Forever Living pour obtenir une réponse officielle."
+      },
+      "notes": "v5 addition (coordinator P1 control): a question naming no known directory field must keep the reviewed GENERIC copy -- free-text topic extraction isn't reliable enough to name 'the company's history' as a topic, so evidence_missing_detail is never substituted (app/response/cx_compose.py: _name_missing_fields only swaps when outcome.fields_requested is non-empty). How this case can fail: if a future change starts guessing a free-text topic and names the wrong thing, or drops the reviewed generic copy's exact wording."
+    },
+    {
+      "id": "cx-fallback-state-evidence-missing-generic-copy-de-02",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "localization"
+      ],
+      "language": "de",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Erzählen Sie mir etwas über die Geschichte des Unternehmens.",
+          "language": "de"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "language": "de",
+        "cx_applied_absent": [
+          "evidence_missing_detail"
+        ],
+        "answer_contains": "Die derzeit verfügbaren freigegebenen Richtliniendokumente enthalten nicht genügend Informationen, um diese Frage eindeutig zu beantworten. Formulieren Sie die Frage neu oder wenden Sie sich an den Forever Living Support, um eine offizielle Antwort zu erhalten."
+      },
+      "notes": "v5 addition (coordinator P1 control): a question naming no known directory field must keep the reviewed GENERIC copy -- free-text topic extraction isn't reliable enough to name 'the company's history' as a topic, so evidence_missing_detail is never substituted (app/response/cx_compose.py: _name_missing_fields only swaps when outcome.fields_requested is non-empty). How this case can fail: if a future change starts guessing a free-text topic and names the wrong thing, or drops the reviewed generic copy's exact wording."
+    },
+    {
+      "id": "cx-fallback-state-evidence-missing-generic-copy-ru-03",
+      "requirement": "fallback_state_evidence_missing",
+      "requires": [
+        "localization"
+      ],
+      "language": "ru",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Расскажите мне об истории компании.",
+          "language": "ru"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "language": "ru",
+        "cx_applied_absent": [
+          "evidence_missing_detail"
+        ],
+        "answer_contains": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
+      },
+      "notes": "v5 addition (coordinator P1 control): a question naming no known directory field must keep the reviewed GENERIC copy -- free-text topic extraction isn't reliable enough to name 'the company's history' as a topic, so evidence_missing_detail is never substituted (app/response/cx_compose.py: _name_missing_fields only swaps when outcome.fields_requested is non-empty). How this case can fail: if a future change starts guessing a free-text topic and names the wrong thing, or drops the reviewed generic copy's exact wording."
+    },
+    {
+      "id": "cx-fallback-state-personal-account-no-duplicate-en-00",
+      "requirement": "fallback_state_personal_account",
+      "requires": [
+        "personal_account"
+      ],
+      "language": "en",
+      "session_country": "US",
+      "turns": [
+        {
+          "role": "user",
+          "message": "Where is my order?",
+          "language": "en"
+        }
+      ],
+      "stub": {
+        "documents": [],
+        "confidence": 0.0
+      },
+      "expected": {
+        "kind": "evidence_missing",
+        "language": "en",
+        "cx_applied_absent": [
+          "personal_account_limit"
+        ]
+      },
+      "notes": "v5 addition (coordinator P2 control): 'Where is my order?' matches the ENGLISH-only catalogue/order-status scope_terms (config/conversation_routes.json), so chat_orchestrator routes it to the specialised 'I don't have product prices, the catalogue, stock levels or order status...' copy, which already says this -- app/response/cx_compose.py's personal_eligible gate then correctly withholds personal_account_limit (it only adds on top of the GENERIC insufficient_evidence copy, never the specialised one), so the outcome stays evidence_missing, not promoted. Verified by running this exact fixture. How this case can fail: if the note is ever duplicated on top of the specialised scope copy."
     }
   ]
 }

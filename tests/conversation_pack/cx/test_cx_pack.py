@@ -142,45 +142,42 @@ def _no_real_aws(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # --- the flip mechanism ------------------------------------------------------
 #
-# v4 (coordinator review of c58ccbc: lanes 1-8 wired on b95abc9, "commit with
-# the flags set True for every REQUIREMENT whose cases ALL pass, False for
-# the rest"). Flags are keyed by `case["requirement"]` directly now, not by
-# a shared lane concept: with the composer actually wired, requirements that
-# used to share one lane flag (e.g. "localization") turned out to have
-# different real pass/fail results (fallback_state_international_directory
-# passes in full; fallback_state_evidence_missing does not, for a real
-# product reason -- see CX_LANE6_EVALUATION.md's product-defect list). A
-# shared flag could not represent that split, so each requirement gets its
-# own. `case["requires"]` is kept in the case data as a historical/
-# documentation field (which lane(s) a case's assertions touch) but no
-# longer drives gating.
+# v5 (coordinator's P1-P4 realignment, CX wiring 6 @ 1599757). P1
+# (evidence_missing_detail names a requested directory field; free-text
+# topics correctly keep the generic copy), P2 (personal_account_limit now
+# applies on top of the generic evidence_missing copy too) and P4's
+# ambiguous_followup (realistic two-turn history reaches the real
+# clarification path) all turned out to be FIXED, not blocked -- the v4
+# "product defect" reports were resolved by CX wiring 6, and this pack's own
+# fixtures needed realigning to match the real, reviewed design (see
+# CX_LANE6_EVALUATION.md). Flags are keyed by `case["requirement"]`;
+# `case["requires"]` stays as a documentation field only.
+#
+# Two gaps remain, both pinned as individual `xfail_reason` entries on the
+# specific cases they affect (never folded into a whole requirement's
+# flag, since the requirement's OTHER cases genuinely pass):
+#   P3: fallback_state_cross_market_policy's 6 non-English cases (app.evidence's
+#       company-policy phrase gate is English-only -- out of CX scope).
+#   P4: one_question_clarification's 2 cases (candidate_narrowing_fallback is
+#       gated behind an admin-only, default-off flag not enabled here).
 FEATURE_FLAGS: dict[str, bool] = {
     # Coordinator: chat_orchestrator.py attaches ChatResponse.metadata["outcome"]
     # on every path -- verified, applies to every case automatically.
     "outcome_contract_wired": True,
-    # Blocked by a real product defect (CX_LANE6_EVALUATION.md P1): chat_orchestrator's
-    # plain evidence_gate fallback (_insufficient_evidence_message) never renders
-    # the evidence_missing_detail key.
-    "fallback_state_evidence_missing": False,
+    "fallback_state_evidence_missing": True,
     "fallback_state_dependency_unavailable": True,
-    # Blocked by a real product defect (P3): app.evidence._names_another_market
-    # does not recognise every market name tried (only Kenya passes).
-    "fallback_state_cross_market_policy": False,
+    # en passes for real; the other 6 are individually pinned (P3, see above).
+    "fallback_state_cross_market_policy": True,
     "fallback_state_international_directory": True,
-    # Blocked by a real product gap (P4): reference-narrowing between two
-    # approved directory candidates is not wired; the higher-scored one is
-    # answered instead of asking which one.
-    "fallback_state_ambiguous_followup": False,
-    # Blocked by a real product defect (P2): cx_compose.py only adds
-    # personal_account_limit for an answer-shaped outcome; the realistic
-    # personal-account question (no evidence exists for it) is evidence_missing.
-    "fallback_state_personal_account": False,
+    "fallback_state_ambiguous_followup": True,
+    "fallback_state_personal_account": True,
     "fallback_state_safety_refusal": True,
     "non_route_language_fallback": True,
     "answer_language_parity": True,
     "direct_answer_first": True,
     "partial_answer": True,
-    # Blocked by the same reference-narrowing gap as fallback_state_ambiguous_followup (P4).
+    # Both cases individually pinned (P4, see above); flag stays False since
+    # none pass for real (the pin makes this value moot either way).
     "one_question_clarification": False,
     "contact_escalation": True,
     "supported_only_suggestions": True,
@@ -398,6 +395,16 @@ def _assert_gated_behaviour(case: dict[str, Any], response, outcome: Conversatio
         assert rendered, (case["id"], "render() must never return empty text")
         assert rendered in response.answer, (case["id"], expected["render_key"], rendered, response.answer)
 
+    if "answer_contains" in expected:
+        assert expected["answer_contains"] in response.answer, (
+            case["id"], expected["answer_contains"], response.answer
+        )
+
+    if "clarification_market_join" in expected:
+        assert expected["clarification_market_join"] in response.answer, (
+            case["id"], expected["clarification_market_join"], response.answer
+        )
+
 
 # --- runner -------------------------------------------------------------------
 
@@ -464,12 +471,23 @@ def _run_case(case: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _case_params() -> list:
+    # A case carrying its own `xfail_reason` (mirrors
+    # test_conversation_pack.py's own convention) is a KNOWN, individually
+    # pinned gap -- e.g. one non-English case within a requirement whose
+    # other cases all pass for real (P3), or an admin-gated code path this
+    # offline pack does not enable (P4/one_question_clarification). It is
+    # always xfail, independent of that requirement's FEATURE_FLAGS entry.
     params = []
     for case in CASES:
-        missing = _missing_flags(case)
         marks = []
-        if missing:
-            marks.append(pytest.mark.xfail(reason=f"CX lane not wired: {', '.join(sorted(missing))}", strict=True))
+        if "xfail_reason" in case:
+            marks.append(pytest.mark.xfail(reason=case["xfail_reason"], strict=True))
+        else:
+            missing = _missing_flags(case)
+            if missing:
+                marks.append(
+                    pytest.mark.xfail(reason=f"CX lane not wired: {', '.join(sorted(missing))}", strict=True)
+                )
         params.append(pytest.param(case, marks=marks, id=case["id"]))
     return params
 
