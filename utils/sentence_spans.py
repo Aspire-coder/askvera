@@ -71,20 +71,30 @@ class SentenceSpan(NamedTuple):
 # this list is a known-exception list, not a dictionary, and every entry
 # should be one this module has actually needed for a reproduced defect or a
 # clearly analogous one, not a speculative addition.
+#
+# "hr", "fr", "ing" and "mt" were briefly added here (commit f64f57c) and
+# removed again (Fable re-review, finding F3): they are ordinary words/units
+# ("hour", "Friday", a common word-final fragment, "Mount") far more often
+# than they are an abbreviation whose dot is non-terminal, and merging them
+# unconditionally deleted correct content downstream - see the longer note
+# above ``TITLE_ABBREVIATIONS`` for the reproduced defects. Removing them
+# from this list (not only from ``TITLE_ABBREVIATIONS``) restores the
+# pre-f64f57c behaviour: a bare "hr."/"fr."/"ing."/"mt." is read as an
+# ordinary sentence end again.
 ABBREVIATIONS: frozenset[str] = frozenset(
     {
         # English
         "e.g", "i.e", "etc", "approx", "vs", "no", "nr", "ca",
-        "mr", "mrs", "ms", "dr", "prof", "st", "mt", "jr", "sr", "fr", "vol", "fig", "ref", "pp",
+        "mr", "mrs", "ms", "dr", "prof", "st", "jr", "sr", "vol", "fig", "ref", "pp",
         "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
         # German
-        "z.b", "bzw", "usw", "ggf", "inkl", "exkl", "std", "u.a", "d.h", "hr",
+        "z.b", "bzw", "usw", "ggf", "inkl", "exkl", "std", "u.a", "d.h",
         # French
         "p.ex", "cf", "svp", "etc.al", "mme", "mlle",
         # Spanish / Portuguese
         "sr", "sra", "dr", "dra", "ud", "uds",
         # Italian
-        "sig", "dott", "sigg", "ing",
+        "sig", "dott", "sigg",
         # Dutch
         "dhr", "mevr", "bv", "ev",
         # Scandinavian
@@ -122,18 +132,41 @@ ABBREVIATIONS: frozenset[str] = frozenset(
 # tests/conversation/test_p2fix_title_abbreviations.py), with the "Main St."
 # case documented as a known, accepted limitation rather than silently
 # regressed.
+#
+# "hr", "fr", "ing" and "mt" were added here briefly (commit f64f57c) and
+# removed again (Fable re-review, finding F3): unlike "St.", these are not
+# unambiguous enough to accept the same trade-off - each one is the ordinary
+# spelling of something that ends a sentence far more often than it
+# introduces a name, so treating them as non-terminal deletes correct
+# content instead of merely leaving a rare shape merged. "hr" is "hour"
+# ("Response time is 48 hr. Delivery takes 3 days." must still split, and
+# with "hr" as a title it instead merged into one unit, which then made
+# ``remove_unsupported_numeric_sentences`` delete the supported "48 hr"
+# sentence along with the unrelated "3" it was attached to). "fr" is
+# "Friday"/"franc" (a weekday abbreviation in an opening-hours range such as
+# "Mo.-Fr." must not swallow the sentence that follows - German capitalises
+# every common noun, so the following word is capitalised far more often
+# than not, and the title rule would fire on essentially every "Fr."
+# regardless of context). "ing" is a common word-final fragment (engineering
+# titles) that collides with ordinary sentence-final text. "mt" ("Mount") had
+# no reproduced defect motivating its addition and is dropped along with the
+# others for the same reason: every entry here must be an abbreviation that
+# is essentially never a sentence-final word or a unit/weekday on its own,
+# and none of these four clear that bar. Their language group ("hr"'s German
+# entry, "fr"'s English entry) is removed from ``ABBREVIATIONS`` too, not
+# only from this closed subset - see the matching note there - so a bare
+# "hr."/"fr."/"ing."/"mt." is read as an ordinary sentence end again, not as
+# any kind of abbreviation.
 TITLE_ABBREVIATIONS: frozenset[str] = frozenset(
     {
         # English
-        "dr", "mr", "mrs", "ms", "prof", "st", "mt", "jr", "sr", "fr",
-        # German
-        "hr",
+        "dr", "mr", "mrs", "ms", "prof", "st", "jr", "sr",
         # French
         "mme", "mlle",
         # Spanish / Portuguese
         "sra",
         # Italian
-        "dott", "ing",
+        "dott",
     }
 )
 
@@ -310,7 +343,7 @@ def abbreviation_or_initial_before(text: str, index: int) -> bool:
        word it is terminal: "Is the fee refundable? No. Delivery takes 5
        days." must split after "No.", not merge into "Delivery ...".
     3. The exception to rule 2: a CLOSED set of title/honorific abbreviations
-       (``TITLE_ABBREVIATIONS`` - "Dr", "Mr", "Mrs", "Ms", "Prof", "St", "Mt",
+       (``TITLE_ABBREVIATIONS`` - "Dr", "Mr", "Mrs", "Ms", "Prof", "St",
        "Sr", "Jr" and their configured-language equivalents) is non-terminal
        before an uppercase word too, because that word is the name the title
        attaches to, not a new sentence: "Call Dr. Smith. Delivery takes 3

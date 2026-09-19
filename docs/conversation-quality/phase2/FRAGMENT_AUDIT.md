@@ -550,3 +550,114 @@ No existing test was weakened; the one test whose EXPECTED VALUE changed
 `test_st_louis_no_longer_splits_after_the_independent_review_correction`)
 changed because the behaviour it pinned was the bug this round fixes, per
 this round's own coordinator instruction - not a loosening of coverage.
+
+## Fable re-review (finding F3): hr/fr/ing/mt were wrongly made titles
+
+Commit `f64f57c` (the section above) added six entries to `ABBREVIATIONS`
+- `hr`, `fr`, `ing`, `mt`, `mme`, `mlle` - and put five of them (`hr`, `fr`,
+`ing`, `mt` plus the already-title `mme`/`mlle`) into `TITLE_ABBREVIATIONS`,
+the closed set whose period stays non-terminal even before a capitalised
+word. A Fable re-review (should-fix, finding F3) found that `hr`, `fr`,
+`ing` and `mt` do not belong in either set: unlike the honorifics the
+`TITLE_ABBREVIATIONS` docstring asks for ("essentially never a sentence-final
+word or a unit/weekday"), all four are the ordinary spelling of something
+that regularly *does* end a sentence, so numeric-repair's downstream delete
+step removed the wrong sentence - the supported one - instead of the
+unsupported one whenever they appeared.
+
+### Reproductions
+
+- **`hr` = "hour".** `"Response time is 48 hr. Delivery takes 3 days."` was
+  read as one merged unit (title rule fired because "Delivery" is
+  capitalised). `remove_unsupported_numeric_sentences(answer,
+  [doc("Response time is 48 hr.")])` then found the merged unit only
+  partially supported (the "48 hr" half is grounded, the "3" half is not)
+  and deleted the whole unit, returning `("", ["3"])` - the correctly
+  supported "48 hr" sentence vanished along with the unsupported one. Before
+  `f64f57c`, this case correctly split into two sentences and only the
+  unsupported one was removed.
+- **`fr` = "Friday"/"franc"/"Frau".** `"Geoeffnet Mo.-Fr. Lieferung dauert 3
+  Tage."` (an opening-hours range followed by a delivery-time sentence)
+  merged into one unit, because German capitalises every common noun, so the
+  word after "Fr." is capitalised in the overwhelming majority of real
+  sentences - the title rule effectively fired on every "Fr." in German
+  text, not just the rare "Frau" case it might have been intended for.
+- **`ing`.** `"Ask Ing. Delivery takes 3 days."` merged for the same
+  reason - "ing" is a common word-final fragment (and an Italian engineering
+  title, "Ingegnere"), not an abbreviation that is unambiguous before a
+  capitalised word.
+- **`mt` = "Mount".** No reproduced defect motivated its addition in
+  `f64f57c`; removed for the same reason as the other three - it is a unit
+  ("mt" for metric tons in some markets) and a place-name abbreviation
+  ("Mt." for "Mount") with no local signal to tell them apart, and unlike
+  "St." there was no directory-data repro to justify accepting that
+  trade-off.
+
+### Decision
+
+Removed `hr`, `fr`, `ing`, `mt` from both `ABBREVIATIONS` and
+`TITLE_ABBREVIATIONS`, restoring `ABBREVIATIONS` to its pre-`f64f57c`
+membership for these four entries exactly (confirmed against `git show
+f64f57c^:utils/sentence_spans.py`). `mme` and `mlle` are kept in both sets:
+they are unambiguous French honorifics ("Madame", "Mademoiselle") with no
+competing everyday-word reading, the same shape as `dott` (Italian "Dottore"),
+which is also kept. The final `TITLE_ABBREVIATIONS` set is: `dr`, `mr`,
+`mrs`, `ms`, `prof`, `st` (English, "St." trade-off documented above), `jr`,
+`sr` (English), `mme`, `mlle` (French), `sra` (Spanish/Portuguese), `dott`
+(Italian).
+
+**Should the title rule apply at all in a noun-capitalising language like
+German?** Considered and rejected as a blanket per-language carve-out: the
+simpler, equally correct fix is that `TITLE_ABBREVIATIONS` no longer
+contains any German-specific entry at all (its one German entry, `hr`, is
+removed along with `fr`). A title that is genuinely unambiguous in German
+(none currently proposed) could still be added later, but it would need its
+own reproduced defect and its own scrutiny of how often German capitalisation
+makes the word after it look like a name - not a blanket exemption for the
+language.
+
+### Tests
+
+`tests/unit/test_sentence_spans.py`:
+`test_hr_fr_ing_mt_are_no_longer_titles_and_still_split` (new: the four direct
+repros); `test_title_abbreviation_language_equivalents_are_non_terminal_too`
+trimmed to the entries that are still titles (`mme`, `mlle`, `sra`, `dott`) -
+its `hr`/`fr`/`ing` assertions (added by `f64f57c`, asserting they merged)
+are removed, not loosened, because merging was the defect this finding
+fixes; every other assertion in that file is unchanged.
+
+`tests/conversation/test_p2fix_title_abbreviations.py`:
+`test_removing_an_unsupported_figure_after_hr_does_not_delete_the_supported_sentence`
+(the real `remove_unsupported_numeric_sentences` repro for "48 hr"),
+`test_mo_fr_opening_hours_range_still_splits_before_the_next_sentence`,
+`test_ing_title_before_a_name_still_splits` (new); the `"Ask Hr. Müller."`
+case is removed from
+`test_title_before_uppercase_name_stays_joined_to_its_own_sentence` for the
+same reason.
+
+### Verification
+
+Ran together: `tests/conversation`, `tests/unit/test_sentence_spans.py`,
+`test_numeric_grounding_validator`, `test_numeric_grounding_repair_corrections`,
+`test_numeric_grounding_repair_defects`, `test_response_builder`,
+`test_evidence_contract` (665 passed, 2 xfailed, exit 0). Then the whole
+`tests/unit` directory once (see handoff for the exact count/exit code).
+`flake8` on `utils/sentence_spans.py`, `tests/unit/test_sentence_spans.py`
+and `tests/conversation/test_p2fix_title_abbreviations.py`: clean, exit 0.
+`git diff --check`: clean, exit 0.
+
+### Files changed in this round
+
+- `utils/sentence_spans.py` (`ABBREVIATIONS`, `TITLE_ABBREVIATIONS`, and the
+  docstrings that named the removed entries)
+- `tests/unit/test_sentence_spans.py` (trimmed the `hr`/`fr`/`ing` title
+  assertions added by `f64f57c`; added the four-entry repro test)
+- `tests/conversation/test_p2fix_title_abbreviations.py` (removed the `Hr`
+  case from the title-joining test; added the real numeric-repair repro and
+  two split-still-works cases)
+- `docs/conversation-quality/phase2/FRAGMENT_AUDIT.md` (this section)
+
+No existing test's EXPECTED VALUE was loosened toward merging; every change
+in this round moves `hr`/`fr`/`ing`/`mt` from "non-terminal" back to
+"terminal" (ordinary sentence end), which is a strictly more conservative
+default than the one `f64f57c` shipped.
