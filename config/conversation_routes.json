@@ -449,7 +449,8 @@
         "field_label_payment_methods": "Metodi di pagamento",
         "field_label_delivery_cost": "Costi di spedizione",
         "field_label_delivery_time": "Tempi di consegna",
-        "field_label_fax": "Fax"
+        "field_label_fax": "Fax",
+        "insufficient_evidence": "I documenti di policy approvati attualmente disponibili non contengono informazioni sufficienti per rispondere chiaramente a questa domanda. Riformula la domanda o contatta il supporto Forever Living per una risposta ufficiale.\n\nPuoi anche contattare l'Assistenza Clienti Forever Living al [PHONE]."
       }
     },
     "da": {
@@ -493,7 +494,8 @@
         "field_label_payment_methods": "Betalingsmetoder",
         "field_label_delivery_cost": "Leveringsomkostninger",
         "field_label_delivery_time": "Leveringstid",
-        "field_label_fax": "Fax"
+        "field_label_fax": "Fax",
+        "insufficient_evidence": "De godkendte politikdokumenter, der aktuelt er tilgængelige, indeholder ikke tilstrækkelig information til at besvare dette spørgsmål klart. Omformuler spørgsmålet, eller kontakt Forever Living support for et officielt svar.\n\nDu kan også kontakte Forever Livings kundeservice på [PHONE]."
       }
     },
     "fi": {
@@ -538,7 +540,8 @@
         "field_label_payment_methods": "Maksutavat",
         "field_label_delivery_cost": "Toimitusmaksu",
         "field_label_delivery_time": "Toimitusaika",
-        "field_label_fax": "Faksi"
+        "field_label_fax": "Faksi",
+        "insufficient_evidence": "Tällä hetkellä käytettävissä olevat hyväksytyt käytäntöasiakirjat eivät sisällä tarpeeksi tietoa vastatakseni tähän kysymykseen selkeästi. Muotoile kysymys uudelleen tai ota yhteyttä Forever Livingin tukeen saadaksesi virallisen vastauksen.\n\nVoit myös ottaa yhteyttä Forever Livingin asiakaspalveluun numerossa [PHONE]."
       }
     },
     "no": {
@@ -583,7 +586,8 @@
         "field_label_payment_methods": "Betalingsmetoder",
         "field_label_delivery_cost": "Leveringskostnad",
         "field_label_delivery_time": "Leveringstid",
-        "field_label_fax": "Faks"
+        "field_label_fax": "Faks",
+        "insufficient_evidence": "De godkjente retningslinjedokumentene som er tilgjengelige nå, inneholder ikke nok informasjon til å svare tydelig på dette spørsmålet. Omformuler spørsmålet, eller kontakt Forever Living support for et offisielt svar.\n\nDu kan også kontakte Forever Livings kundeservice på [PHONE]."
       }
     },
     "sr": {
@@ -627,7 +631,8 @@
         "field_label_payment_methods": "Način plaćanja",
         "field_label_delivery_cost": "Troškovi dostave",
         "field_label_delivery_time": "Vreme dostave",
-        "field_label_fax": "Faks"
+        "field_label_fax": "Faks",
+        "insufficient_evidence": "Trenutno dostupni odobreni dokumenti politike ne sadrže dovoljno informacija da bih jasno odgovorila na ovo pitanje. Preformulišite pitanje ili kontaktirajte Forever Living podršku za zvaničan odgovor.\n\nTakođe možete kontaktirati Forever Living službu za korisnike na broju [PHONE]."
       }
     },
     "sv": {
@@ -672,7 +677,8 @@
         "field_label_payment_methods": "Betalningsmetoder",
         "field_label_delivery_cost": "Fraktkostnad",
         "field_label_delivery_time": "Leveranstid",
-        "field_label_fax": "Fax"
+        "field_label_fax": "Fax",
+        "insufficient_evidence": "De godkända policydokument som för närvarande är tillgängliga innehåller inte tillräckligt med information för att tydligt svara på den här frågan. Formulera om frågan eller kontakta Forever Livings support för ett officiellt svar.\n\nDu kan också kontakta Forever Livings kundtjänst på [PHONE]."
       }
     },
     "ru": {
@@ -716,7 +722,8 @@
         "field_label_payment_methods": "Способы оплаты",
         "field_label_delivery_cost": "Стоимость доставки",
         "field_label_delivery_time": "Срок доставки",
-        "field_label_fax": "Факс"
+        "field_label_fax": "Факс",
+        "insufficient_evidence": "Утверждённые документы политики, доступные в настоящее время, не содержат достаточно информации, чтобы чётко ответить на этот вопрос. Пожалуйста, переформулируйте вопрос или обратитесь в службу поддержки Forever Living за официальным ответом.\n\nВы также можете обратиться в службу поддержки клиентов Forever Living по номеру [PHONE]."
       }
     }
   }

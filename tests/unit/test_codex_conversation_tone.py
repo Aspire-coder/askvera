@@ -58,7 +58,21 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # key's value changed anywhere. This is purely additive; the new non-English
 # copy is Lane 4's own translation and needs native review (see
 # docs/conversation-quality/phase3/CX_LANE4_LOCALIZATION.md).
-ROUTES_REST_SHA256 = "5250314eeac8af7b18294cd860f7542d120ce0e890a526656e47bfb0cf6dc60c"
+# Updated 2026-09-19 (Fable CX review finding S5): "insufficient_evidence"
+# was reviewed copy for only 5 of the 12 route locales (en fr es de nl); the
+# other 7 (it da fi no sr sv ru) had none at all, so app/response/cx_render.py's
+# render() floored to English for them while the base orchestrator path
+# (app.evidence.localized_conversation_response) translated at runtime via
+# Bedrock - a mismatch that could deliver a bilingual answer (translated base
+# text with an appended English CX sentence) and that always defeated
+# app/response/cx_compose.py's generic-copy recognition (evidence_missing_detail
+# and the personal-account note never applied) for those 7 locales. Added
+# "insufficient_evidence" for it/da/fi/no/sr/sv/ru, matching the exact
+# two-paragraph shape (generic sentence; then a "[PHONE]"-placeholder contact
+# line) the existing en/fr/es/de/nl entries already use. No existing key's
+# value changed anywhere. This new copy is Lane 4's own translation and needs
+# native review (see docs/conversation-quality/phase3/CX_LANE4_LOCALIZATION.md).
+ROUTES_REST_SHA256 = "3ec04c67e6959926bfca3f738d6517c629854593bc4719225bc5d8110d952213"
 # Updated 2026-09-18 (conversation-quality project): four rules edited in
 # place, all additive in meaning, with the rendered prompt held under the
 # existing 4392-character budget (4247 -> 4381), so no budget assertion moved.

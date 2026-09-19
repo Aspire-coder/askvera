@@ -77,18 +77,71 @@ script.
 ## Review status
 
 All 11 non-English locales' new copy (the CX_LANES.md keys, the
-`field_label_*` keys, and the seven added `bedrock_error` entries for
-`it da fi no sr sv ru`) is Lane 4's own translation and has **not** been
-reviewed by a native speaker of any of those languages. It follows the
-existing tone of each locale's reviewed copy (short, warm, plain, no
-promises, no invented facts, no market-specific facts) and reuses vocabulary
-already reviewed elsewhere in this repository where it existed
-(`utils/directory_fields.py`'s `_SUPPORT_CONTACT_LABEL_TRANSLATIONS` for
-`nl fr de es it sv`'s field labels; `config/directory_field_vocabulary.py`'s
-per-language field-request stems for the rest), but every non-English string
-added by this task needs native review before it should be treated as
-reviewed, reviewed-locale copy the way the pre-existing English/French/
-Spanish/German/Dutch copy is.
+`field_label_*` keys, the seven added `bedrock_error` entries for
+`it da fi no sr sv ru`, and the seven added `insufficient_evidence` entries
+for the same seven locales -- see "Fable review finding S5" below) is Lane 4's
+own translation and has **not** been reviewed by a native speaker of any of
+those languages. It follows the existing tone of each locale's reviewed copy
+(short, warm, plain, no promises, no invented facts, no market-specific
+facts) and reuses vocabulary already reviewed elsewhere in this repository
+where it existed (`utils/directory_fields.py`'s
+`_SUPPORT_CONTACT_LABEL_TRANSLATIONS` for `nl fr de es it sv`'s field labels;
+`config/directory_field_vocabulary.py`'s per-language field-request stems for
+the rest), but every non-English string added by this task needs native
+review before it should be treated as reviewed, reviewed-locale copy the way
+the pre-existing English/French/Spanish/German/Dutch copy is.
+
+## Fable review finding S5 (2026-09-19)
+
+`config/conversation_routes.json` carried reviewed `insufficient_evidence`
+copy for only 5 of the 12 route locales (`en fr es de nl`). For the other 7
+(`it da fi no sr sv ru`), `cx_render.render` floored to English for that key
+-- per this module's own documented behaviour, a *missing* key for a route
+locale is not the same as an *unconfigured* language, but the floor-to-
+English rule applied all the same -- while the base orchestrator path
+(`app.evidence.localized_conversation_response`) translated it at runtime via
+Bedrock. Two consequences:
+
+(a) whenever the runtime translation failed, the answer became bilingual: the
+    (possibly-translated, possibly-English-fallback) base copy with a
+    definitely-English `cx_compose.py` sentence appended on top;
+(b) `app/response/cx_compose.py`'s `_starts_with_generic_missing` compares
+    the delivered answer's opening against `cx_render.render`'s (English,
+    for these 7 locales) first paragraph, so it never matched the base
+    path's localized copy -- `evidence_missing_detail` (and, transitively,
+    the personal-account note on the evidence-missing path, which is gated
+    on the same match) never applied for these 7 locales.
+
+Fixed by adding a reviewed `insufficient_evidence` entry for
+`it da fi no sr sv ru`, matching the exact two-paragraph shape of the
+existing `en/fr/es/de/nl` entries (first paragraph: the generic sentence;
+second paragraph: a contact line using the same `[PHONE]` placeholder token
+the orchestrator's `remove_or_replace_contact_placeholders` already resolves
+or removes). `ROUTES_REST_SHA256`
+(`tests/unit/test_codex_conversation_tone.py`) re-pinned, dated 2026-09-19.
+
+**Audit of every other key the base orchestrator path localizes at runtime**
+(every `localized_conversation_response("<key>", ...)` call site in
+`app/orchestrator/chat_orchestrator.py`): `insufficient_evidence` is the
+*only* one any CX-composed path recognises by matching rendered copy against
+it -- grepped `app/response/cx_compose.py` and every Lane 2/3/4/5 module it
+calls (`contact_completion.py`, `suggestions.py`, `personal_account.py`,
+`partial_answer.py`) for a second `render(...)`-then-`startswith`/generic-
+match pattern; there is none. `bedrock_error` (aliased by
+`dependency_unavailable`, which the `DEPENDENCY_UNAVAILABLE` fallback kind
+composes contact/suggestions on top of but never string-matches) was already
+complete for all 12 locales from the earlier CX_LANES.md pass. Every other
+key (`catalogue_scope`, `off_topic`, `income_claim`, `medical_claim`,
+`office_contact_lead_in`, `reference_clarification`,
+`country_typo_confirmation`, `support_request`, `period_not_covered`) is
+produced entirely by the base path with no CX-side recognition of its
+text -- `off_topic`/`income_claim`/`medical_claim` map to
+`OutcomeKind.SAFETY_REFUSAL`, which `cx_compose.py` returns unchanged with no
+addition at all, and the rest map to `OutcomeKind.EVIDENCE_MISSING` (or, for
+`reference_clarification`/`country_typo_confirmation`, `CLARIFICATION`) but
+are never compared against a rendered template the way
+`insufficient_evidence` is -- so none of them can reproduce this bug, and
+none needed a locale added here.
 
 ## Re-pinned tests (routes changed)
 
