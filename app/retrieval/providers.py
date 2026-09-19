@@ -159,7 +159,27 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
     r"\bpayment\s+methods?\b",
     re.IGNORECASE,
 )
-DIRECTORY_POLICY_WORDING_RE = re.compile(r"\bpolic(?:y|ies)\b|\brules?\b", re.IGNORECASE)
+# R05/N6 fourth follow-up (2026-09-18, coordinator review of 88da3cc/0b1f0e3,
+# finding S1): "policy"/"rules" alone missed common English policy-document
+# synonyms - "regulations", "guidelines", "conditions", and the
+# "terms and conditions"/"terms of" phrase (as in "terms of service") - so a
+# question like "What are the regulations of Forever Norway on the delivery
+# address?" fell through to the multilingual directory disjunct and was
+# wrongly promoted to "directory". A bare "\bterms\b" is deliberately NOT
+# added: "terms" alone is dominated by the unrelated "in terms of X" idiom
+# ("in terms of delivery cost") and would suppress genuine directory
+# questions on that idiom alone. "terms of" (without requiring "in") is
+# still added, per instruction, as a symmetric, accepted trade-off with the
+# Scandinavian "som regel"/"as a rule" idiom already accepted for "regel"/
+# "regler" in POLICY_WORDING_TERMS below (config/directory_field_vocabulary.py) -
+# both fire on an idiom that is not actually a policy-document reference,
+# and neither is fixed, because narrowing either one risks missing the
+# genuine policy-document sense that dominates real usage.
+DIRECTORY_POLICY_WORDING_RE = re.compile(
+    r"\bpolic(?:y|ies)\b|\brules?\b|\bregulations?\b|\bguidelines?\b|\bconditions?\b|"
+    r"\bterms\s+(?:and\s+conditions|of)\b",
+    re.IGNORECASE,
+)
 
 # These values are emitted only from the runtime query-planning boundary.  They
 # deliberately describe routing, not an answer or an expected benchmark label.

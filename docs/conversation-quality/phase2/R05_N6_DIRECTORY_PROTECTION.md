@@ -564,3 +564,136 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   `utils/directory_fields.py`. If a third caller needs the same fold in the
   future, it should move to a shared, dependency-free location rather than
   being duplicated a third time.
+
+## Fourth follow-up (2026-09-18): coordinator review finding S1
+
+A Fable review of candidate `11d9657` (containing `88da3cc` and `0b1f0e3`)
+approved the fix "with limitations" - F1 and F2 were closed - but flagged
+one should-fix (S1) against `POLICY_WORDING_TERMS`: its own docstring
+claimed "policy/rules/regulations/terms" coverage, but only "policy"/
+"rules" (nominative/plural forms) actually existed in the table, and
+English's `DIRECTORY_POLICY_WORDING_RE` was still `policy|rules` only.
+Every repro below (stubbed planner, `document_scopes=[]`, a Norway
+directory row) resolved to `directory`/8.0 before this fix and must resolve
+to `policy`/0.0.
+
+**Fix, in two parts:**
+
+1. `POLICY_WORDING_TERMS` (`config/directory_field_vocabulary.py`) gains a
+   regulation/guideline/condition family of synonyms for every language it
+   already covers: es reglamento(s)/condicion(es)/directriz(ces); fr
+   condition(s)/directive(s) (règlement(s) already present); de
+   Vorschrift(en)/Bestimmung(en)/Bedingung(en); nl voorwaarde(n)/
+   richtlijn(en)/reglement; it regolamento/condizione(i)/"linea guida"/
+   "linee guida"; pt regulamento/condicao(oes)/diretriz(es); fi
+   ehto/ehdot/maarays(maaraykset)/ohje(ohjeet) (medium confidence); no/da/sv
+   definite plural forms (reglene/retningslinjene, reglerne/
+   retningslinjerne, reglerna/riktlinjerna) plus the invariant vilkar/
+   villkor; ru oblique cases of politika/pravila (politike/politiku/
+   politikoj, pravilam/pravilami/pravilah) and uslovie/uslovija/uslovijah;
+   sr the equivalent oblique forms, Latin and Cyrillic. The docstring above
+   the table was rewritten to state exactly what is covered (broken out by
+   sense: policy/regulation/guideline/condition, plus the oblique/definite
+   grammatical forms), the confidence split (unchanged from the earlier
+   follow-up: fr/de/nl/es/it/sv high, pt/fi/no/da/ru/sr medium, with
+   Finnish's ehto/ehdot pair flagged medium-to-low for its own consonant
+   gradation), and the accepted idiom trade-off (see point 3 below).
+2. English's `DIRECTORY_POLICY_WORDING_RE` (`app/retrieval/providers.py`)
+   widens from `policy|rules` to also match `regulation(s)`,
+   `guideline(s)`, `condition(s)`, and the phrase `terms and conditions` /
+   `terms of`. A bare `\bterms\b` was deliberately NOT added, because it is
+   dominated by the unrelated "in terms of X" idiom and would suppress
+   genuine directory questions on that idiom alone.
+3. **Accepted idiom trade-off (reviewer note N1):** "regel"/"regler" (no/da)
+   and the riktlinje/regel family also fire inside the idiom "som regel"
+   ("as a rule", not a policy-document reference), so a genuinely
+   directory-intentioned Scandinavian question using that idiom would be
+   wrongly suppressed. This is accepted, not fixed, symmetric with
+   English's own `terms of` firing inside "in terms of X" - narrowing
+   either pattern to dodge its own idiom risks missing the genuine
+   policy-document sense that dominates real usage, and the cost of
+   over-suppression is only the country-match *bonus*, never retrieval
+   inclusion.
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| "¿Cuál es el reglamento de Forever Norway sobre la dirección de entrega?" (es) | `directory` (8.0) | `policy` (0.0) |
+| "¿Cuáles son las condiciones de Forever Norway sobre la dirección de entrega?" (es) | `directory` (8.0) | `policy` (0.0) |
+| "Quelles sont les conditions de Forever Norge sur l'adresse de livraison ?" (fr) | `directory` (8.0) | `policy` (0.0) |
+| "Quali sono le condizioni di Forever Norway sull'indirizzo di consegna?" (it) | `directory` (8.0) | `policy` (0.0) |
+| "Согласно политике Forever Norway, какой адрес доставки?" (ru, dative) | `directory` (8.0) | `policy` (0.0) |
+| "What are the regulations of Forever Norway on the delivery address?" (en) | `directory` (8.0) | `policy` (0.0) |
+| "What are the terms and conditions of Forever Norway on the delivery address?" (en) | `directory` (8.0) | `policy` (0.0) |
+| "What are the guidelines of Forever Norway on the delivery address?" (en) | `directory` (8.0) | `policy` (0.0) |
+| "How do I reach/contact Forever Ghana?" (en, control) | `directory` (8.0) | `directory` (8.0), unchanged |
+| es/fr/de phone and address repros (control) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "What payment methods does Forever Norway accept?" (en, control) | `directory` (8.0) | `directory` (8.0), unchanged |
+
+### Fixture/conversation-pack grep for false-suppression risk
+
+Per the coordinator's instruction, `tests/fixtures` and `tests/conversation_pack`
+were grepped for every S1 word (English `regulation`/`guideline`/`condition`
+and every non-English addition: `reglamento`, `regolamento`, `condicion`,
+`condizion`, `voorwaarde`, `vorschrift`, `bestimmung`, `bedingung`,
+`richtlijn`, `directive`, `directriz`, `"linea guida"`, `ehto`/`ehdot`,
+`maarays`, `ohje`, `vilkar`/`villkor`, `reglene`/`reglerne`/`reglerna`,
+`retningslinjene`/`retningslinjerne`/`riktlinjerna`, `uslov`). Every hit was
+inspected by hand:
+
+- `ho-slp-02-ghana-prospect-fbo-first-order-conditions-en`'s "conditions" is
+  only in the case-ID slug; the actual `"question"` field ("How much would
+  my first order have to be?") contains none of these words.
+- Every other `held_out_source_linked_pack.json` hit is inside an audit/
+  annotation field (`quote`, `source_evidence`, `not_copied_from`,
+  `forbidden_claims`), never the `"question"` text sent to the classifier.
+- The one genuine hit in a `"message"`/`"text"` field is
+  `tests/conversation_pack/cases.json`'s `"What are the return conditions?"`
+  - a genuine return-*policy* question (not a directory/country-bonus
+    question), whose test only asserts `expected_outcome: "answer"` and a
+    guardrail-misfire control; it carries no directory-routing assertion,
+    so this fix does not disturb it, and routing it to "policy" is the
+    behaviourally correct outcome regardless.
+
+**Conclusion: no false-suppression risk found in either fixture set.**
+
+### Fourth follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 8 new reviewer-repro tests (5 non-English + 3 English), on
+   `config/directory_field_vocabulary.py` and `app/retrieval/providers.py`
+   reverted via `git stash` (tests kept): **8 failed, `EXIT=1`**, confirming
+   genuine fail-before reproductions. `git stash pop` restored the fix
+   afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **674 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **8998 passed, 13
+   xfailed, `EXIT=0`**, 416.43s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): **no output,
+   `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Fourth follow-up limitations
+
+- **Coverage is still a closed, hand-picked synonym list, not exhaustive
+  grammatical coverage.** Every other inflected case a language's grammar
+  can produce beyond the forms explicitly listed (e.g. Finnish's remaining
+  oblique cases of `kaytanto`/`saanto`/`ehto`/`maarays`/`ohje`) is not
+  covered; an unlisted spelling falls back to "ambiguous", the same
+  behaviour as before this task existed - it can only cost directory
+  protection for that spelling, never wrongly grant it.
+- **The "som regel"/"in terms of X" idiom trade-off (point 3 above) is
+  accepted, not fixed**, symmetric between English and Scandinavian, and
+  documented in both `DIRECTORY_POLICY_WORDING_RE`'s own comment
+  (`app/retrieval/providers.py`) and `POLICY_WORDING_TERMS`'s docstring
+  (`config/directory_field_vocabulary.py`).
+- **The Finnish "ehto"/"ehdot" pair is flagged medium-to-low confidence**
+  specifically: Finnish consonant gradation (t/d) is handled for this one
+  pair by listing both forms explicitly, but no further oblique case of it
+  is covered.

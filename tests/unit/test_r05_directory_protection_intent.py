@@ -916,3 +916,173 @@ def test_f1_localized_policy_wording_present_unit_accent_variants() -> None:
     assert localized_policy_wording_present("Какова политика?", language="ru") is True
     assert localized_policy_wording_present("Kakva je politika?", language="sr") is True
     assert localized_policy_wording_present("What is the delivery cost?", language="es") is False
+
+
+# --- R05/N6 fourth follow-up (2026-09-18): coordinator review finding S1 ---
+#
+# Fable review of 88da3cc/0b1f0e3 found POLICY_WORDING_TERMS's docstring
+# claimed "policy/rules/regulations/terms" coverage that did not actually
+# exist - only "policy"/"rules" nominative/plural forms were present, and
+# DIRECTORY_POLICY_WORDING_RE (English) was still "policy|rules" only. Every
+# repro below is taken verbatim from the reviewer's stubbed-planner
+# (scopes=[]) Norway directory-row repro set and must resolve to "policy",
+# not "directory".
+
+GHANA_PHONE_METHODS_QUESTION_EN = "What payment methods does Forever Norway accept?"
+
+
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        ("¿Cuál es el reglamento de Forever Norway sobre la dirección de entrega?", "es"),
+        ("¿Cuáles son las condiciones de Forever Norway sobre la dirección de entrega?", "es"),
+        ("Quelles sont les conditions de Forever Norge sur l'adresse de livraison ?", "fr"),
+        ("Quali sono le condizioni di Forever Norway sull'indirizzo di consegna?", "it"),
+        ("Согласно политике Forever Norway, какой адрес доставки?", "ru"),
+    ],
+    ids=["spanish-reglamento", "spanish-condiciones", "french-conditions", "italian-condizioni", "russian-dative-politike"],
+)
+def test_s1_reviewer_repro_regulation_condition_guideline_wording_stays_policy(
+    monkeypatch, question, language
+) -> None:
+    """Fail-before (S1): each question uses a regulation/condition-family
+    policy synonym POLICY_WORDING_TERMS did not cover before this follow-up
+    (reglamento, condiciones/conditions/condizioni, the Russian dative
+    "политике") AND names a directory field (dirección/adresse/indirizzo/
+    адрес) in the same language - before this fix these resolved to
+    "directory"/8.0; the English equivalent already correctly stays
+    "policy"."""
+    plan = _plan(monkeypatch, question, country="NO", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What are the regulations of Forever Norway on the delivery address?",
+        "What are the terms and conditions of Forever Norway on the delivery address?",
+        "What are the guidelines of Forever Norway on the delivery address?",
+    ],
+    ids=["english-regulations", "english-terms-and-conditions", "english-guidelines"],
+)
+def test_s1_reviewer_repro_english_regulation_condition_guideline_wording_stays_policy(
+    monkeypatch, question
+) -> None:
+    """Fail-before (S1): the same hole existed in English -
+    DIRECTORY_POLICY_WORDING_RE only matched "policy"/"rules", so
+    "regulations"/"terms and conditions"/"guidelines" fell through to
+    deterministic_directory_route (via "address" matching
+    _DIRECTORY_DETAIL_RE) and were wrongly promoted to "directory"."""
+    plan = _plan(monkeypatch, question, country="NO")
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [GHANA_REACH_QUESTION_EN, "How do I contact Forever Ghana?"],
+    ids=["reach", "contact"],
+)
+def test_s1_directory_controls_unaffected_reach_and_contact(monkeypatch, question) -> None:
+    """False-suppression guard: neither "condition(s)" nor any other S1
+    addition appears in these questions, so they must keep resolving to
+    "directory" exactly as before this follow-up."""
+    assert "condition" not in question.lower()
+    plan = _plan(monkeypatch, question, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        (GHANA_PHONE_QUESTION_ES, "es"),
+        (GHANA_PHONE_QUESTION_FR, "fr"),
+        (GHANA_ADDRESS_QUESTION_DE, "de"),
+    ],
+    ids=["spanish-phone", "french-phone", "german-address"],
+)
+def test_s1_directory_controls_unaffected_non_english_phone_and_address(monkeypatch, question, language) -> None:
+    """False-suppression guard: the es/fr/de phone and address repros carry
+    none of the new regulation/condition/guideline vocabulary and must keep
+    resolving to "directory"."""
+    plan = _plan(monkeypatch, question, country="US", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s1_directory_control_payment_methods_unaffected(monkeypatch) -> None:
+    """False-suppression guard: a plain payment-methods directory question
+    naming no policy-family word at all must keep resolving to "directory"."""
+    plan = _plan(monkeypatch, GHANA_PHONE_METHODS_QUESTION_EN, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s1_condition_word_absent_from_directory_control_questions() -> None:
+    """Explicit proof (per the coordinator's instruction) that "condition"/
+    "conditions" does not appear in any of the standing directory control
+    questions this suite relies on - so the S1 additions cannot be silently
+    suppressing them."""
+    controls = [
+        GHANA_REACH_QUESTION_EN,
+        GHANA_LOCATED_QUESTION_EN,
+        GHANA_CREDIT_CARDS_QUESTION_EN,
+        GHANA_ADDRESS_QUESTION_EN,
+        GHANA_PHONE_QUESTION_ES,
+        GHANA_PHONE_QUESTION_FR,
+        GHANA_ADDRESS_QUESTION_DE,
+        GHANA_PHONE_METHODS_QUESTION_EN,
+        "How do I contact Forever Ghana?",
+    ]
+    for question in controls:
+        assert "condition" not in question.lower()
+
+
+def test_s1_localized_policy_wording_present_unit_new_terms() -> None:
+    """Unit-level control directly on ``localized_policy_wording_present``
+    for every S1 addition, isolated from the full retrieval-plan pipeline."""
+    from utils.directory_fields import localized_policy_wording_present as p
+
+    assert p("Cual es el reglamento?", language="es") is True
+    assert p("Cuales son las condiciones?", language="es") is True
+    assert p("Cual es la directriz?", language="es") is True
+    assert p("Quel est le reglement?", language="fr") is True
+    assert p("Quelles sont les conditions?", language="fr") is True
+    assert p("Quelle est la directive?", language="fr") is True
+    assert p("Was ist die Vorschrift?", language="de") is True
+    assert p("Was ist die Bestimmung?", language="de") is True
+    assert p("Was ist die Bedingung?", language="de") is True
+    assert p("Wat zijn de voorwaarden?", language="nl") is True
+    assert p("Wat is de richtlijn?", language="nl") is True
+    assert p("Qual e il regolamento?", language="it") is True
+    assert p("Quali sono le condizioni?", language="it") is True
+    assert p("Qual e la linea guida?", language="it") is True
+    assert p("Qual e o regulamento?", language="pt") is True
+    assert p("Quais sao as condicoes?", language="pt") is True
+    assert p("Qual e a diretriz?", language="pt") is True
+    assert p("Mitkä ovat ehdot?", language="fi") is True
+    assert p("Mikä on määräys?", language="fi") is True
+    assert p("Mikä on ohje?", language="fi") is True
+    assert p("Hva er vilkår for retur?", language="no") is True
+    assert p("Hva er reglene?", language="no") is True
+    assert p("Hvad er vilkår for retur?", language="da") is True
+    assert p("Hvad er reglerne?", language="da") is True
+    assert p("Vad är villkor för retur?", language="sv") is True
+    assert p("Vad är reglerna?", language="sv") is True
+    assert p("Согласно политике", language="ru") is True
+    assert p("по политику", language="ru") is True
+    assert p("политикой", language="ru") is True
+    assert p("правилам", language="ru") is True
+    assert p("правилами", language="ru") is True
+    assert p("в правилах", language="ru") is True
+    assert p("условия", language="ru") is True
+    assert p("условиях", language="ru") is True
+    assert p("politici", language="sr") is True
+    assert p("politikom", language="sr") is True
+    assert p("pravilima", language="sr") is True
+    assert p("uslovi", language="sr") is True
+    assert p("условима", language="sr") is True
+    # Not a false positive: an unrelated question in a covered language.
+    assert p("Cual es el telefono?", language="es") is False
