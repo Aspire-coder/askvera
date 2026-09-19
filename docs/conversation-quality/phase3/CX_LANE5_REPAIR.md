@@ -4,6 +4,20 @@ Status: implemented (2026-09-18), branch `cx/lane5-20260918`. Design:
 `docs/conversation-quality/phase3/CX_DESIGN.md`; shared contract:
 `docs/conversation-quality/phase3/CX_LANES.md`.
 
+**Fixed post-review (coordinator review of 32443d0):** `typo_clarification`
+used to also fire on an exact, correctly spelled collision member
+("What is the shipping cost?" wrongly asked to disambiguate). An exact
+member is never ambiguous - the reader typed a real word, and this module
+must not second-guess a correct spelling any more than `typo_safety` itself
+silently rewrites one. `_is_collision_ambiguous_token` (the only place in
+this lane that reasons about the collision pair) now returns `False` for an
+exact member and only fires for a token that is NOT an exact member but is
+typo-shaped and within bounded edit distance of one (`_typo_distance`/
+`_typo_shape_matches`, both imported read-only from `typo_safety`). New
+negative tests pin exact spellings (bare word, full phrase, case variants,
+trailing punctuation) in en/es/fr/de returning `None`, alongside the
+existing misspelling-triggers-one-question positives.
+
 ## What this lane owns
 
 - `app/orchestrator/conversation_repair.py` (new)

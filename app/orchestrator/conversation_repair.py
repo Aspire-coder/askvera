@@ -158,19 +158,23 @@ def _tokens(value: str) -> set[str]:
 
 
 def _is_collision_ambiguous_token(token: str) -> bool:
-    """True when ``token`` plausibly means either collision-pair member.
+    """True when ``token`` is a genuinely uncertain spelling near the
+    collision pair - NOT an exact, correctly spelled member of it.
 
-    An exact match to either member is itself ambiguous with the other:
-    "shipping" and "shopping" are one QWERTY-adjacent substitution apart
-    (see ``typo_safety._QWERTY_ADJACENCY``), so a reader who typed one
-    correctly may still have meant the other. A near-miss (bounded distance
-    and typing-slip shape, exactly as ``typo_safety`` itself requires before
-    trusting a repair) of either member is ambiguous the same way.
+    A reader who typed "shipping" or "shopping" correctly typed a real word,
+    and typo_safety's own job is to never silently turn a correctly spelled
+    word into the other one - this module must not second-guess a correct
+    spelling either (coordinator review of 32443d0: an exact member was
+    wrongly triggering a clarification on every ordinary "What is the
+    shipping cost?" question). Only a token that is NOT an exact member, but
+    is typo-shaped and within bounded edit distance of at least one member
+    (the same shape/distance typo_safety itself requires before trusting a
+    repair), is ambiguous: the intended word is genuinely uncertain.
     """
     if token in _COLLISION_MEMBERS:
-        return True
+        return False
     for member in _COLLISION_MEMBERS:
-        if token != member and _typo_distance(token, member, 1) <= 1 and _typo_shape_matches(token, member):
+        if _typo_distance(token, member, 1) <= 1 and _typo_shape_matches(token, member):
             return True
     return False
 

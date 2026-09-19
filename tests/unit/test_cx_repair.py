@@ -35,10 +35,14 @@ def test_typo_clarification_english_shippng_asks():
     assert set(result.options) == {"shipping cost", "shopping cost"}
 
 
-def test_typo_clarification_english_exact_shopping_cost_still_ambiguous():
-    # A correctly spelled "shopping cost" is still ambiguous with "shipping
-    # cost" (one QWERTY-adjacent letter apart), per the task's own example.
-    result = typo_clarification("what is the shopping cost", "en")
+def test_typo_clarification_english_misspelling_shiping_asks():
+    result = typo_clarification("what is the shiping fee", "en")
+    assert result is not None
+    assert result.key == "clarify_field"
+
+
+def test_typo_clarification_english_misspelling_shpping_asks():
+    result = typo_clarification("shpping cost?", "en")
     assert result is not None
     assert result.key == "clarify_field"
 
@@ -77,6 +81,38 @@ def test_typo_clarification_swedish_positive():
 # --- typo_clarification: negatives ------------------------------------------
 
 
+def test_typo_clarification_none_for_exact_shipping_english():
+    # An exact, correctly spelled collision member must never trigger a
+    # clarification - the reader typed a real word (coordinator review of
+    # 32443d0: this used to wrongly fire on every ordinary shipping
+    # question).
+    assert typo_clarification("What is the shipping cost?", "en") is None
+
+
+def test_typo_clarification_none_for_exact_shopping_english():
+    assert typo_clarification("What is the shopping cost?", "en") is None
+
+
+def test_typo_clarification_none_for_exact_shipping_bare_word_english():
+    assert typo_clarification("How much is the shipping?", "en") is None
+
+
+def test_typo_clarification_none_for_exact_shipping_case_variant_english():
+    assert typo_clarification("Shipping?", "en") is None
+
+
+def test_typo_clarification_none_for_exact_shipping_uppercase_phrase_english():
+    assert typo_clarification("SHIPPING COST", "en") is None
+
+
+def test_typo_clarification_none_for_exact_shopping_uppercase_phrase_english():
+    assert typo_clarification("SHOPPING COST", "en") is None
+
+
+def test_typo_clarification_none_for_exact_shipping_trailing_punctuation_english():
+    assert typo_clarification("shipping, please?", "en") is None
+
+
 def test_typo_clarification_none_when_no_collision_token():
     assert typo_clarification("what is the business hours", "en") is None
 
@@ -113,6 +149,18 @@ def test_typo_clarification_none_when_delivery_context_present_finnish():
 
 def test_typo_clarification_none_when_delivery_context_present_swedish():
     assert typo_clarification("shoping kostnad leverans", "sv") is None
+
+
+def test_typo_clarification_none_for_exact_shipping_spanish():
+    assert typo_clarification("cual es el costo de shipping", "es") is None
+
+
+def test_typo_clarification_none_for_exact_shopping_french():
+    assert typo_clarification("quel est le prix du shopping", "fr") is None
+
+
+def test_typo_clarification_none_for_exact_shipping_german():
+    assert typo_clarification("was kostet das shipping", "de") is None
 
 
 def test_typo_clarification_none_for_ordinary_unrelated_typo():
