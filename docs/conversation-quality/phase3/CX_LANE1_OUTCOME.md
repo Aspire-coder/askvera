@@ -72,6 +72,29 @@ when the turn would otherwise have been `answer`; it never overrides a real
 failure kind (a directory record with no approved evidence still reports its
 own failure kind, with `directory_target` still populated for diagnostics).
 
+**Coordinator fix (2026-09-18):** the first cut flagged *any* approved
+international-sponsoring record as `international_directory`, including one
+naming the session's own market (a Ghana session asking for Ghana's own
+sponsoring row). Fixed by resolving both sides canonically before comparing,
+reusing the existing market catalog rather than adding a new alias list:
+`services.market_config.market_display_name(country)` for the session's own
+name, widened through the directory's own
+`find_sponsoring_directory_alias_countries` (the section-name aliases in
+`config/sponsoring_directory_country_aliases.json` -- e.g. session `GB` ->
+display name "United Kingdom" -> directory section name "England"), then
+matched against `record_country` with the same whole-segment comparison
+`chat_orchestrator.py`'s `_directory_record_matches_a_target` /
+`_support_contact_segments` already use (reimplemented locally as
+`_segments` / `_record_names_any_target`, since those two helpers are
+module-private to the orchestrator, which this module still does not
+import). A record naming the session's own market now stays `answer`; an
+unresolvable session country (no configured display name) also stays
+`answer` rather than guessing "international". This is the one place
+`derive_outcome` is no longer literally I/O-free: `market_display_name` and
+`find_sponsoring_directory_alias_countries` read (`lru_cache`d) config
+files, the same mechanism `app/evidence.py` and `chat_orchestrator.py`
+already rely on for this -- see the module docstring.
+
 **Limitation found and worth flagging:** there is no existing metadata field
 that records "the market this directory answer targets" independent of the
 record itself. `scripts/capture_application_path.py:534-537` says so
@@ -82,11 +105,8 @@ itself (`app/retrieval/providers.py:219-221`) is a routing label (`policy` /
 `directory` / `international_sponsoring` / `ambiguous` / `unknown`), not a
 market, and it is never copied into `ChatResponse.metadata`, so
 `derive_outcome` cannot read it. The `directory_kind` / `record_country`
-approach above is the closest true signal that reaches this function's
-inputs; a market comparison against the session's own `country` was
-considered and dropped because doing it correctly requires
-`services.market_config.get_document_country_codes`, which reads
-`config/policy_locales.json` -- I/O this function must not perform.
+approach above, now compared canonically against the session `country` (see
+the coordinator fix above), is the signal actually used.
 
 ## `personal_account`
 
@@ -124,7 +144,7 @@ helper returns `None` in that case) rather than guessing.
 ## Test run
 
 ```
-pytest tests/unit/test_conversation_outcome.py -q       -> 22 passed
+pytest tests/unit/test_conversation_outcome.py -q       -> 26 passed
 pytest tests/unit/test_chat_orchestrator.py tests/conversation -q
                                                           -> 462 passed
 flake8 app/response/outcome.py tests/unit/test_conversation_outcome.py

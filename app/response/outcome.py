@@ -14,18 +14,25 @@ Vocabulary discipline: the only new vocabulary this module introduces is the
 ``record_country`` directory fields are copied through unchanged -- never
 renamed, never re-derived, never duplicated with a second alias vocabulary.
 
-Pure by design: no I/O, no model calls, and no import of
-``app.orchestrator.chat_orchestrator`` (to avoid an import cycle and to keep
-this module testable with plain values).
+No model calls, and no import of ``app.orchestrator.chat_orchestrator`` (to
+avoid an import cycle and to keep this module testable with plain values).
+Otherwise pure and deterministic: the one exception is resolving a directory
+record's market canonically through ``services.market_config`` (cached
+config reads, the same mechanism ``app/evidence.py`` and
+``chat_orchestrator.py`` already use for this), needed to tell an
+international-sponsoring record for the session's own market apart from one
+naming a different market.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from services.market_config import find_sponsoring_directory_alias_countries, market_display_name
 from utils.directory_fields import _requested_directory_field_set
 
 
@@ -157,16 +164,73 @@ def _is_directory_shaped(document_metadata: Mapping[str, Any]) -> bool:
     )
 
 
-def _international_directory_target(evidence_decision: object | None) -> str | None:
-    """Return the target market of an approved international-sponsoring record.
+def _segments(value: str) -> list[str]:
+    """Split a `record_country` (or a market name) into lower-cased word
+    segments on both "/" and whitespace - "Kenya/East Africa" ->
+    ["kenya", "east", "africa"].
+
+    Identical in shape to app/orchestrator/chat_orchestrator.py's
+    `_support_contact_segments` (that helper is module-private there, so it
+    is kept, not imported, to avoid importing the orchestrator).
+    """
+    return [part.casefold() for part in re.split(r"[/\s]+", value.strip()) if part]
+
+
+def _record_names_any_target(record_country: str, target_names: Sequence[str]) -> bool:
+    """True only for a whole-segment/word match - never a region word or a
+    market named only inside a longer record.
+
+    Same whole-segment matching rule as chat_orchestrator.py's
+    `_directory_record_matches_a_target`, reimplemented here (rather than
+    imported from the orchestrator) for the same reason as `_segments`.
+    """
+    tokens = _segments(record_country)
+    for name in target_names:
+        name_words = _segments(name)
+        width = len(name_words)
+        if not width or width > len(tokens):
+            continue
+        if any(tokens[start:start + width] == name_words for start in range(len(tokens) - width + 1)):
+            return True
+    return False
+
+
+def _session_market_target_names(country: str) -> list[str]:
+    """Return the session market's own canonical name(s), for comparison
+    against a directory record's `record_country`.
+
+    Reuses the existing, config-driven market catalog
+    (`services.market_config.market_display_name`) and the directory's own
+    section-name aliases (`find_sponsoring_directory_alias_countries`,
+    config/sponsoring_directory_country_aliases.json) rather than adding a
+    second alias list - the same two functions
+    `_resolve_directory_field_target_names` in chat_orchestrator.py already
+    combines to resolve a market to the directory's own naming.
+    """
+    session_name = market_display_name(country)
+    if not session_name:
+        return []
+    aliases = sorted(find_sponsoring_directory_alias_countries(session_name))
+    return aliases or [session_name]
+
+
+def _international_directory_target(evidence_decision: object | None, country: str) -> str | None:
+    """Return the target market of an approved international-sponsoring
+    record naming a market OTHER than the session's own.
 
     Reads only existing evidence: the approved documents an EvidenceDecision
     already carries, and each document's existing `directory_kind` /
-    `record_country` metadata. Returns None when no approved document is an
-    international-sponsoring directory record (the ordinary case), so this
-    never fires for a same-market directory answer or a plain policy answer.
+    `record_country` metadata, resolved canonically against the session
+    `country` through the existing market catalog. Returns None when no
+    approved document is an international-sponsoring directory record (the
+    ordinary case), when the record names the session's own market, or when
+    the session market cannot be resolved at all (fails closed to "not
+    international" rather than guessing).
     """
     evidence: Sequence[Any] = getattr(evidence_decision, "evidence", None) or ()
+    session_target_names = _session_market_target_names(country)
+    if not session_target_names:
+        return None
     for document in evidence:
         document_metadata: Mapping[str, Any] = getattr(document, "metadata", None) or {}
         if not _is_directory_shaped(document_metadata):
@@ -174,7 +238,11 @@ def _international_directory_target(evidence_decision: object | None) -> str | N
         if document_metadata.get("directory_kind") != _INTERNATIONAL_SPONSORING_DIRECTORY_KIND:
             continue
         record_country = str(document_metadata.get("record_country") or "").strip()
-        return record_country or None
+        if not record_country:
+            continue
+        if _record_names_any_target(record_country, session_target_names):
+            continue
+        return record_country
     return None
 
 
@@ -205,8 +273,10 @@ def derive_outcome(
 ) -> ConversationOutcome:
     """Derive the one ConversationOutcome for this turn from existing decisions.
 
-    Pure and deterministic: same inputs always produce the same outcome, and
-    nothing here calls a model, touches the network, or reads a file.
+    Deterministic: same inputs always produce the same outcome, and nothing
+    here calls a model or touches the network. Resolving an
+    international-sponsoring record's market does read the (cached) market
+    config through services.market_config - see the module docstring.
 
     ``evidence_decision`` is accepted as a plain object (duck-typed on
     ``.reason`` and ``.evidence``) rather than imported as a hard dependency,
@@ -228,7 +298,7 @@ def derive_outcome(
         # Fail safe: an unrecognised failure_layer never becomes "answer".
         kind = _FAILURE_LAYER_KINDS.get(failure_layer, OutcomeKind.EVIDENCE_MISSING)
 
-    directory_target = _international_directory_target(evidence_decision)
+    directory_target = _international_directory_target(evidence_decision, country)
     if kind == OutcomeKind.ANSWER and directory_target is not None:
         kind = OutcomeKind.INTERNATIONAL_DIRECTORY
 

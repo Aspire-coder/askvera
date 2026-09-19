@@ -233,6 +233,97 @@ def test_international_directory_does_not_override_an_explicit_failure_kind() ->
     assert outcome.directory_target == "France"
 
 
+def test_international_sponsoring_record_for_the_session_own_market_stays_answer() -> None:
+    # A Ghana session asking for Ghana's own international-sponsoring row
+    # must not be classified international_directory just because the
+    # record lives in the global directory.
+    document = _FakeDocument(
+        {
+            "directory_kind": "international_sponsoring",
+            "record_country": "Ghana",
+        }
+    )
+    decision = _FakeEvidenceDecision(reason="approved", evidence=[document])
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="GH",
+        question="What is the sponsoring contact for Ghana?",
+        answer_text="The Ghana sponsoring contact is ...",
+        evidence_decision=decision,
+    )
+    assert outcome.kind is OutcomeKind.ANSWER
+    assert outcome.directory_target is None
+
+
+def test_international_sponsoring_record_for_another_market_reports_canonical_target() -> None:
+    document = _FakeDocument(
+        {
+            "directory_kind": "international_sponsoring",
+            "record_country": "England",
+        }
+    )
+    decision = _FakeEvidenceDecision(reason="approved", evidence=[document])
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="GH",
+        question="What is the sponsoring contact for the UK?",
+        answer_text="The England sponsoring contact is ...",
+        evidence_decision=decision,
+    )
+    assert outcome.kind is OutcomeKind.INTERNATIONAL_DIRECTORY
+    assert outcome.directory_target == "England"
+
+
+def test_session_country_code_matches_record_by_display_name_and_directory_alias() -> None:
+    # GB's configured display name is "United Kingdom", and the sponsoring
+    # directory's own alias table (config/sponsoring_directory_country_aliases.json)
+    # resolves "United Kingdom" to its section name "England" - so a GB
+    # session and a record_country of "England" are the SAME market, purely
+    # through the existing market config, with no alias list added here.
+    document = _FakeDocument(
+        {
+            "directory_kind": "international_sponsoring",
+            "record_country": "England",
+        }
+    )
+    decision = _FakeEvidenceDecision(reason="approved", evidence=[document])
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="GB",
+        question="What is the sponsoring contact?",
+        answer_text="The England sponsoring contact is ...",
+        evidence_decision=decision,
+    )
+    assert outcome.kind is OutcomeKind.ANSWER
+    assert outcome.directory_target is None
+
+
+def test_unresolvable_session_country_stays_answer_not_international_directory() -> None:
+    # A country code the market catalog has no display name for cannot be
+    # compared to the record canonically, so this must fail closed to "not
+    # international" rather than guess.
+    document = _FakeDocument(
+        {
+            "directory_kind": "international_sponsoring",
+            "record_country": "France",
+        }
+    )
+    decision = _FakeEvidenceDecision(reason="approved", evidence=[document])
+    outcome = derive_outcome(
+        metadata={},
+        language="en",
+        country="ZZ",
+        question="What is the sponsoring contact for France?",
+        answer_text="The France sponsoring contact is ...",
+        evidence_decision=decision,
+    )
+    assert outcome.kind is OutcomeKind.ANSWER
+    assert outcome.directory_target is None
+
+
 def test_fields_requested_reuses_directory_fields_helper() -> None:
     outcome = derive_outcome(
         metadata={},
