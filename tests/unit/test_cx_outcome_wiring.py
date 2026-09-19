@@ -423,3 +423,52 @@ def test_reference_clarification_offers_a_localized_choice(monkeypatch):
     )
     assert response.metadata["outcome"]["kind"] == "clarification"
     assert "Kenya or Ghana" in response.answer
+
+
+def test_an_exact_cache_hit_is_composed_like_the_miss_that_produced_it(monkeypatch):
+    _repair_harness(monkeypatch, "")
+    store = {}
+    monkeypatch.setattr(chat_orchestrator, "set_cache_value", lambda key, value, *_: store.__setitem__(key, value))
+    monkeypatch.setattr(chat_orchestrator, "get_cache_value", lambda key, *_: store.get(key))
+    monkeypatch.setattr(
+        chat_orchestrator, "restore_evidence",
+        lambda value, *_: RetrievalResult(documents=[_kenya_directory_row()], citations=[], confidence=1.0),
+    )
+
+    def _ask():
+        orchestrator = AIOrchestrator(retriever=_Retriever([_kenya_directory_row()]),
+                                      router=_Router("The office phone is +254 20 2026869."),
+                                      validator=_Validator(), governance=_Governance())
+        return orchestrator.handle_chat(
+            ChatRequest(message="What is the phone number?", sessionId="s", country="US", language="en"), "cid"
+        )
+
+    miss, hit = _ask(), _ask()
+    assert hit.metadata.get("cache") == "exact"
+    assert hit.metadata["outcome"]["kind"] == miss.metadata["outcome"]["kind"] == "international_directory"
+    assert hit.metadata["cx_applied"] == miss.metadata["cx_applied"]
+    assert hit.answer == miss.answer
+    assert hit.suggestions == miss.suggestions
+
+
+def test_suggestions_can_come_from_bulleted_record_fields(run):
+    response = run("What is the phone number?", [_kenya_directory_row()], answer="The office phone is +254 20 2026869.")
+    keys = [item["key"] for item in response.suggestions]
+    assert "suggest_topic_payment_methods" in keys or "suggest_topic_delivery_cost" in keys
+
+
+@pytest.mark.parametrize("target", ["resolve_answer_language", "detect_repair"])
+def test_a_failing_pre_retrieval_hook_never_breaks_the_turn(monkeypatch, target):
+    _repair_harness(monkeypatch, "user: What are the payment methods in Kenya?\nvera: An earlier answer.")
+
+    def _boom(*_, **__):
+        raise RuntimeError("hook bug")
+
+    monkeypatch.setattr(chat_orchestrator, target, _boom)
+    orchestrator = AIOrchestrator(retriever=_Retriever([_kenya_directory_row()]), router=_Router("Approved text."),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(
+        ChatRequest(message="No, I meant Ghana", sessionId="s", country="US", language="en"), "cid"
+    )
+    assert response.answer
+    assert "outcome" in response.metadata

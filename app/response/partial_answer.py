@@ -67,6 +67,7 @@ __all__ = [
     "FieldCoverage",
     "RenderCopy",
     "assess_field_coverage",
+    "evidenced_fields",
     "partial_answer_note",
 ]
 
@@ -225,6 +226,23 @@ def _label_line_field_values(content: str) -> dict[str, list[str]]:
         if value:
             values.setdefault(matched_field, []).append(value)
     return values
+
+
+def evidenced_fields(evidence_documents) -> frozenset[str]:
+    """Canonical directory fields that carry a value in ANY of the documents,
+    from both the structured/contact parser and the bulleted fact lines.
+
+    Public so the orchestrator can decide which follow-up topics this turn's
+    evidence supports with the same reader as field coverage.
+    """
+    fields: set[str] = set()
+    for document in evidence_documents or ():
+        for raw_label, raw_value in _document_field_values(document).items():
+            canonical = _label_canonical_field(str(raw_label))
+            if canonical and str(raw_value).strip():
+                fields.add(canonical)
+        fields.update(_label_line_field_values(getattr(document, "content", "") or ""))
+    return frozenset(fields)
 
 
 def _field_mentioned_anywhere(evidence_documents: list[RetrievedDocument], fields: set[str]) -> set[str]:

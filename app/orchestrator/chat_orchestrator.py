@@ -32,12 +32,13 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
-from app.orchestrator.answer_language import resolve_answer_language
+from app.orchestrator.answer_language import AnswerLanguage, resolve_answer_language
 from app.orchestrator.conversation_repair import detect_repair, might_be_repair, one_question, typo_clarification
 from app.orchestrator.reference_resolution import _user_turns
 from app.response.cx_compose import compose_cx_response
 from app.response.cx_render import join_alternatives as cx_join_alternatives, render as cx_render
 from app.response.outcome import derive_outcome
+from app.response.partial_answer import evidenced_fields
 from app.response.suggestions import topic_fields
 from app.response.quality import (
     contact_for_country,
@@ -106,7 +107,6 @@ from app.response.contact_completion import (
 from utils.directory_fields import (
     canonical_requested_order_size,
     directory_field_conflicts,
-    _label_canonical_field,
     parse_directory_fields,
     preserve_directory_role_labels,
     correct_directory_source_contradictions,
@@ -1006,13 +1006,7 @@ def _topic_evidenced(topic: str, evidence_documents: tuple) -> bool:
     """A follow-up topic is suggested only when this turn's approved evidence
     carries a value for one of its directory fields; never from nothing."""
     fields = topic_fields(topic)
-    if not fields:
-        return False
-    for document in evidence_documents:
-        parsed = parse_directory_fields(getattr(document, "content", "") or "")
-        if any(_label_canonical_field(label) in fields and str(value).strip() for label, value in parsed.items()):
-            return True
-    return False
+    return bool(fields) and bool(fields & evidenced_fields(evidence_documents))
 
 
 def _cache_language(body: ChatRequest) -> str:
@@ -1287,7 +1281,11 @@ class AIOrchestrator:
             preserve_person_names=True,
         )
         evidence_token = _TURN_EVIDENCE.set(None)
-        answer_language = resolve_answer_language(scrubbed_input, body.language)
+        try:
+            answer_language = resolve_answer_language(scrubbed_input, body.language)
+        except Exception:  # noqa: BLE001 - CX must never break a turn
+            LOGGER.exception("cx_answer_language_failed", correlation_id=correlation_id)
+            answer_language = AnswerLanguage(body.language, False, "detector_error")
         language_token = _ANSWER_LANGUAGE.set(answer_language.answer_language)
         try:
             resolved_input, reference_clarification = self._resolve_unresolved_reference(
@@ -1295,9 +1293,13 @@ class AIOrchestrator:
             )
             repair_metadata: dict[str, object] = {}
             if reference_clarification is None:
-                resolved_input, reference_clarification, repair_metadata = self._repair_or_clarify(
-                    resolved_input, body, correlation_id
-                )
+                try:
+                    resolved_input, reference_clarification, repair_metadata = self._repair_or_clarify(
+                        resolved_input, body, correlation_id
+                    )
+                except Exception:  # noqa: BLE001 - CX must never break a turn
+                    LOGGER.exception("cx_repair_failed", correlation_id=correlation_id)
+                    reference_clarification, repair_metadata = None, {}
             if reference_clarification is not None:
                 response = reference_clarification
             else:
@@ -1397,7 +1399,7 @@ class AIOrchestrator:
         safe_body = body.model_copy(update={"message": question})
         response = self._handle_scrubbed_chat(safe_body, question, correlation_id, candidate_flags)
         decline = self._governance_user_message(
-            command_decision, body.language, body.country, command, correlation_id,
+            command_decision, _answer_language(body), body.country, command, correlation_id,
         )
         return self._replace_answer(response, f"{response.answer}\n\n{decline}", {
             "mixed_intent": True, "refused_part_count": 1,
@@ -1525,7 +1527,7 @@ class AIOrchestrator:
         )
         if not governance_decision.allowed:
             return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
+                governance_decision, correlation_id, _answer_language(body), body.country, body.message, candidate_flags
             )
 
         cache_key = build_cache_key(request_query, body.country, _cache_language(body), body.role)
@@ -1692,7 +1694,7 @@ class AIOrchestrator:
         )
         if not governance_decision.allowed:
             return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
+                governance_decision, correlation_id, _answer_language(body), body.country, body.message, candidate_flags
             )
         self._record_semantic_shadow_result(
             semantic_candidate,
@@ -2168,6 +2170,13 @@ class AIOrchestrator:
         evidence = restore_evidence(cached.get("evidence"), body.country, body.language)
         if evidence is None:
             return None
+        # CX: a cache hit skips _route_or_approve_evidence, so record the
+        # restored (previously approved) evidence as this turn's decision; the
+        # composer then treats a hit exactly like the miss that produced it.
+        _TURN_EVIDENCE.set(EvidenceDecision(
+            approved=True, reason="cache_restored", evidence=list(evidence.documents),
+            query_intent="cached", exact_topic_match=False, top_score=1.0, score_margin=0.0,
+        ))
         chat_response = self._secure_and_complete_response(
             self.response_builder.from_cached(cached, correlation_id),
             evidence,
@@ -2198,7 +2207,7 @@ class AIOrchestrator:
                 cache_type=cache_type,
             )
             return self._governance_fallback(
-                governance_decision, correlation_id, body.language, body.country, body.message
+                governance_decision, correlation_id, _answer_language(body), body.country, body.message
             )
         return chat_response
 
@@ -4227,7 +4236,7 @@ class AIOrchestrator:
         if not response_key:
             return None
 
-        answer = localized_conversation_response(response_key, body.language)
+        answer = localized_conversation_response(response_key, _answer_language(body))
         if not answer:
             return None
         return self.response_builder.fallback(

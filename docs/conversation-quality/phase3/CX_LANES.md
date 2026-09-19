@@ -73,3 +73,21 @@ Each lane also writes one doc: `docs/conversation-quality/phase3/CX_LANE<n>_*.md
 - [x] (done) Extract the orchestrator-private `_support_contact_segments` / `_directory_record_matches_a_target` into a shared utility and make both `chat_orchestrator.py` and `app/response/outcome.py` import it (Lane 1's `f51d974` re-implemented the same shape locally to avoid importing the orchestrator).
 - [x] (done) Attach `derive_outcome(...).to_metadata()` to `ChatResponse.metadata["outcome"]` once per turn, on every return path (answers and every fallback builder).
 - [x] Fold in the R05 LOW fixes (merged e75a3c1) (a single policy-wording helper at all four sites; comment corrections).
+
+## Coordinator decisions recorded after the Fable CX review (2026-09-19)
+
+- **`repair_ack` is not rendered.** A resolved repair is recorded as
+  `metadata["conversation_repair"]`; the answer itself (now about the corrected
+  market) is the acknowledgement. The key stays in the copy for a later UI use.
+- **Understanding stays on the selected language.** On a switched turn, intent
+  and route detection, typo detection and reference resolution on the message
+  still use `body.language`; only customer-visible copy follows the answer
+  language (governance and semantic-route refusal copy were switched after the
+  review). Revisit with live data.
+- **Market names in localized copy are English.** `config/market_name_aliases.json`
+  holds ICU names untagged by language, so a localized name cannot be chosen
+  reliably without regenerating that data (a dependency install, not permitted
+  here). Recorded as a limitation.
+- **Exact cache hits compose like the miss.** The restored, previously approved
+  evidence is recorded as the turn's decision (reason `cache_restored`).
+- **Pre-retrieval CX hooks fail open** (answer language, repair), like the composer.

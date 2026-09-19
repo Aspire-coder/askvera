@@ -43,8 +43,10 @@ overlap let Spanish get misclassified as French. The detector was rebuilt:
    a duplicate of an existing vocabulary: nothing in the repository already
    covers this closed class at language-ID density and per language for all
    12 - see the module docstring's provenance note. The earlier da/ru/sr
-   copy from `chat_orchestrator.py` was removed; the coordinator is moving
-   those lists into `config/reference_vocabulary.py` during wiring.
+   copy from `chat_orchestrator.py` was removed and replaced by this table.
+   (Coordinator correction, 2026-09-19: an earlier version of this note said
+   the coordinator would move those lists into `config/reference_vocabulary.py`.
+   That move was not needed and was not made; nothing here duplicates them.)
 2. **Overlap-weighted scoring**, not raw counting. Every marker word's
    contribution is discounted automatically by how many of the 12
    languages' lists contain the same normalized word (unique: full weight;
