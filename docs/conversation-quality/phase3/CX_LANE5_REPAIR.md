@@ -10,13 +10,61 @@ used to also fire on an exact, correctly spelled collision member
 member is never ambiguous - the reader typed a real word, and this module
 must not second-guess a correct spelling any more than `typo_safety` itself
 silently rewrites one. `_is_collision_ambiguous_token` (the only place in
-this lane that reasons about the collision pair) now returns `False` for an
-exact member and only fires for a token that is NOT an exact member but is
-typo-shaped and within bounded edit distance of one (`_typo_distance`/
-`_typo_shape_matches`, both imported read-only from `typo_safety`). New
-negative tests pin exact spellings (bare word, full phrase, case variants,
-trailing punctuation) in en/es/fr/de returning `None`, alongside the
-existing misspelling-triggers-one-question positives.
+this lane that reasons about the collision pair) now returned `False` for an
+exact member and only fired for a token that is NOT an exact member but is
+typo-shaped and within bounded edit distance of at least one member. New
+negative tests pinned exact spellings (bare word, full phrase, case
+variants, trailing punctuation) in en/es/fr/de returning `None`, alongside
+the existing misspelling-triggers-one-question positives.
+
+**Fixed post-review, second round (Fable CX review finding S2, 2026-09-19,
+branch `cx/lane5-fable-20260919`, integrated head `9e384bc`):** the fix
+above was still wrong in the OTHER direction. It fired whenever a token was
+close to AT LEAST ONE collision member - but "shiping"/"shippng" are
+distance 1 from "shipping" and distance 2 from "shopping", and "shoping" is
+distance 1 from "shopping" and distance 2 from "shipping". Verified directly
+against `app.retrieval.typo_safety.safe_typo_ranking_queries`: it silently
+repairs each of these to its one nearby word today, unchanged. So wiring
+this lane in turned "What is the shiping cost for Forever Kenya?" (and
+"shiping address") into a clarify-only turn with **no retrieval at all** -
+a regression against the base, which answered it correctly by silently
+repairing the typo.
+
+The fix: `_is_collision_ambiguous_token` no longer asks "is this token near
+member A, or near member B" as two independent checks (an OR, which only
+needs one side to be close). It now asks a different question - "is this
+token equally close to BOTH members, so `typo_safety` has no way to prefer
+one repair over the other" - using bounded edit distance alone (`token !=
+either exact member`, and `_typo_distance(token, "shipping", 1) <= 1` AND
+`_typo_distance(token, "shopping", 1) <= 1`, both must hold). Brute-force
+enumeration of every single-edit neighbour of both words (substitution,
+deletion, insertion, adjacent transposition - see the function's own
+docstring for the full derivation) confirms the tied set is exactly the
+substitution/deletion variants at the ONE position "shipping" and "shopping"
+differ in - a third vowel ("shepping", "shapping", "shupping") or that
+position deleted outright ("shpping") - never a token nearer one word than
+the other. `_looks_like_typo_shape`'s keyboard-adjacency requirement is
+deliberately NOT used any more for this check: it exists in `typo_safety` to
+avoid mistaking one coincidentally-nearby unrelated real word for a typo
+(quite/quiet), which is not a risk here (the two collision words already
+differ by exactly one edit from each other, so the triangle inequality
+bounds the tied set tightly on its own) - and keeping it would have wrongly
+excluded "shepping"/"shapping" (neither e nor a is QWERTY-adjacent to i or
+o), reopening the same under-broad bug this exact function is being fixed
+for.
+
+Test fixtures updated to match (all in this lane's write scope for this fix,
+plus the two files the coordinator explicitly named as in-scope for this fix
+only): `tests/unit/test_cx_repair.py` (positives moved to "shepping" /
+"shapping" / "shupping" / "shpping"; new S2 regression negatives pin
+"shiping cost for Forever Kenya", "shiping address", "shippng cost" and
+"shoping cost" all returning `None`); `tests/unit/test_cx_outcome_wiring.py`
+(its `test_an_ambiguous_typo_asks_one_question_and_never_retrieves`
+parametrization moved from "shoping" to "shepping" in en/es, with an inline
+comment); `tests/conversation_pack/cx/cases.json` cases
+`cx-typo-tolerance-en-00`/`-01` (message text moved to "shepping", notes
+updated in place, `expected`/`render_placeholders` unchanged since the
+rendered options are the same either way).
 
 ## What this lane owns
 
@@ -174,3 +222,15 @@ test under `tests/conversation/`.
 - `git diff --check` - exit 0.
 - No `tests/unit/test_reference_resolution*.py` file exists in this worktree
   to run.
+
+## Verification (2026-09-19, Fable CX review finding S2 fix)
+
+- `pytest tests/unit/test_cx_repair.py tests/unit/test_typo_retrieval.py tests/unit/test_cx_outcome_wiring.py tests/conversation tests/conversation_pack/cx` -
+  558 passed, 9 xfailed (pre-existing, individually pinned - see CX Lane 6's
+  own doc), exit 0.
+- `flake8 app/orchestrator/conversation_repair.py tests/unit/test_cx_repair.py tests/unit/test_cx_outcome_wiring.py` -
+  exit 0.
+- `git diff --check` - exit 0.
+- Directly verified against `app.retrieval.typo_safety.safe_typo_ranking_queries`
+  that "shiping"/"shippng" repair to "shipping" and "shoping" repairs to
+  "shopping" - the base behaviour this fix restores for those three tokens.

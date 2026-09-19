@@ -46,10 +46,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from app.retrieval.typo_safety import (
-    _damerau_levenshtein as _typo_distance,
-    _looks_like_typo_shape as _typo_shape_matches,
-)
+from app.retrieval.typo_safety import _damerau_levenshtein as _typo_distance
 from config.directory_field_vocabulary import normalize_language_code
 from config.repair_vocabulary import (
     CONTEXT_DISAMBIGUATION_WORDS,
@@ -158,25 +155,60 @@ def _tokens(value: str) -> set[str]:
 
 
 def _is_collision_ambiguous_token(token: str) -> bool:
-    """True when ``token`` is a genuinely uncertain spelling near the
-    collision pair - NOT an exact, correctly spelled member of it.
+    """True when ``token`` is a genuinely ambiguous spelling - equally close
+    to BOTH collision-pair members - so ``typo_safety`` cannot silently pick
+    one, and asking is the only safe option.
 
-    A reader who typed "shipping" or "shopping" correctly typed a real word,
-    and typo_safety's own job is to never silently turn a correctly spelled
-    word into the other one - this module must not second-guess a correct
-    spelling either (coordinator review of 32443d0: an exact member was
-    wrongly triggering a clarification on every ordinary "What is the
-    shipping cost?" question). Only a token that is NOT an exact member, but
-    is typo-shaped and within bounded edit distance of at least one member
-    (the same shape/distance typo_safety itself requires before trusting a
-    repair), is ambiguous: the intended word is genuinely uncertain.
+    Two things this function must NOT do (coordinator review of 32443d0,
+    then Fable CX review finding S2):
+
+    1. Second-guess an exact, correctly spelled member. A reader who typed
+       "shipping" or "shopping" typed a real word; this returns ``False``
+       for either immediately.
+    2. Fire on a token that is close to only ONE member. "shiping" and
+       "shippng" are one edit from "shipping" but two from "shopping";
+       "shoping" is one edit from "shopping" but two from "shipping".
+       ``app.retrieval.typo_safety.safe_typo_ranking_queries`` already
+       silently repairs each of those to its one nearby word (verified
+       directly against that function) - asking here would discard a
+       question that base retrieval already answered correctly (S2: "What
+       is the shiping cost for Forever Kenya?" got a clarification and no
+       retrieval instead of the base's silent-repair answer). This
+       function must return ``False`` for exactly those tokens too, so the
+       caller lets the silent repair work.
+
+    What IS ambiguous: a token equally close (same bounded edit distance,
+    here always 1 - both words are 8 letters, well above
+    ``typo_safety._MIN_LENGTH_FOR_SYMMETRIC_REPAIR``, so the bound is 1) to
+    BOTH members - e.g. a third-vowel substitution ("shepping", "shapping",
+    "shupping") or the shared vowel position deleted outright ("shpping").
+    For those, ``typo_safety`` itself has no way to prefer one repair over
+    the other (confirmed by brute-force enumeration of every single-edit
+    neighbour of both words: the tied set is exactly the substitution and
+    deletion variants at the one position "shipping"/"shopping" differ in,
+    plus one double-insertion variant - never a token nearer one word than
+    the other), so asking is the only safe behaviour.
+
+    Deliberately uses raw bounded edit distance only, not
+    ``typo_safety._looks_like_typo_shape``'s extra keyboard-adjacency
+    requirement: that requirement exists in ``typo_safety`` to avoid
+    treating one coincidentally-nearby REAL word as a typo of an unrelated
+    one (quite/quiet). It is not needed here to bound false positives -
+    "shipping" and "shopping" differ by exactly one edit from each other,
+    so a token within one edit of both is, by the triangle inequality,
+    necessarily a variant at that same differing position, a small and
+    already-enumerated set - and dropping it is what actually makes
+    "shepping"/"shapping"/"shupping"/"shpping" resolve as ambiguous instead
+    of falling through unrecognised (none of them pass
+    ``_looks_like_typo_shape`` against either word, since e/a are not
+    QWERTY-adjacent to i or o), matching the tied set this docstring
+    describes rather than a narrower one shape-adjacency would produce.
     """
     if token in _COLLISION_MEMBERS:
         return False
-    for member in _COLLISION_MEMBERS:
-        if _typo_distance(token, member, 1) <= 1 and _typo_shape_matches(token, member):
-            return True
-    return False
+    distance_to_shipping = _typo_distance(token, _SHIPPING, 1)
+    distance_to_shopping = _typo_distance(token, _SHOPPING, 1)
+    return distance_to_shipping <= 1 and distance_to_shopping <= 1
 
 
 def typo_clarification(question: str, language: str) -> Clarification | None:
