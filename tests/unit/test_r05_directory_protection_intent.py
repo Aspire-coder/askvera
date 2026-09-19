@@ -935,26 +935,65 @@ GHANA_PHONE_METHODS_QUESTION_EN = "What payment methods does Forever Norway acce
     "question,language",
     [
         ("¿Cuál es el reglamento de Forever Norway sobre la dirección de entrega?", "es"),
-        ("¿Cuáles son las condiciones de Forever Norway sobre la dirección de entrega?", "es"),
-        ("Quelles sont les conditions de Forever Norge sur l'adresse de livraison ?", "fr"),
-        ("Quali sono le condizioni di Forever Norway sull'indirizzo di consegna?", "it"),
         ("Согласно политике Forever Norway, какой адрес доставки?", "ru"),
     ],
-    ids=["spanish-reglamento", "spanish-condiciones", "french-conditions", "italian-condizioni", "russian-dative-politike"],
+    ids=["spanish-reglamento", "russian-dative-politike"],
 )
 def test_s1_reviewer_repro_regulation_condition_guideline_wording_stays_policy(
     monkeypatch, question, language
 ) -> None:
-    """Fail-before (S1): each question uses a regulation/condition-family
-    policy synonym POLICY_WORDING_TERMS did not cover before this follow-up
-    (reglamento, condiciones/conditions/condizioni, the Russian dative
-    "политике") AND names a directory field (dirección/adresse/indirizzo/
-    адрес) in the same language - before this fix these resolved to
-    "directory"/8.0; the English equivalent already correctly stays
-    "policy"."""
+    """Fail-before (S1): each question uses a regulation-family policy
+    synonym POLICY_WORDING_TERMS did not cover before this follow-up
+    (reglamento, the Russian dative "политике") AND names a directory field
+    (dirección/адрес) in the same language - before this fix these resolved
+    to "directory"/8.0; the English equivalent already correctly stays
+    "policy". Both "reglamento" and the ru oblique cases remain part of the
+    sixth follow-up's kept vocabulary (see
+    ``config/directory_field_vocabulary.py``'s ``POLICY_WORDING_TERMS``),
+    so this assertion is unchanged by that later follow-up."""
     plan = _plan(monkeypatch, question, country="NO", language=language)
 
     assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+# R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438): the
+# three repros below (spanish-condiciones, french-conditions,
+# italian-condizioni) used to be parametrized alongside the two above,
+# asserting "policy". A later, independent Fable review found that bare
+# "condiciones"/"conditions"/"condizioni" (plural, no country/field
+# specificity) are themselves dominated in ordinary usage by an idiomatic,
+# non-policy sense ("la oficina esta en buenas condiciones" = "the office
+# is in good condition") - see the 27-probe false-suppression finding
+# documented in ``config/directory_field_vocabulary.py``'s
+# ``POLICY_WORDING_TERMS`` comment. The coordinator's explicit decision was
+# to drop every bare condition-family form, keeping only the compound
+# "terms and conditions" phrase - so these three repros now correctly
+# resolve to "directory" again (the country-bonus PROTECTION reopens for
+# this shape, exactly as it was before the fourth follow-up). This
+# assertion is CHANGED, not deleted, per the coordinator's explicit
+# instruction to document every such change rather than silently drop the
+# test.
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        ("¿Cuáles son las condiciones de Forever Norway sobre la dirección de entrega?", "es"),
+        ("Quelles sont les conditions de Forever Norge sur l'adresse de livraison ?", "fr"),
+        ("Quali sono le condizioni di Forever Norway sull'indirizzo di consegna?", "it"),
+    ],
+    ids=["spanish-condiciones", "french-conditions", "italian-condizioni"],
+)
+def test_s1_bare_condition_repros_now_resolve_directory_after_sixth_follow_up(
+    monkeypatch, question, language
+) -> None:
+    """CHANGED assertion (sixth follow-up, coordinator review of 99ec438):
+    was "policy" under the fourth follow-up; bare plural "condiciones"/
+    "conditions"/"condizioni" is now dropped from POLICY_WORDING_TERMS
+    (its dominant sense is idiomatic/circumstantial, not a policy document
+    - see the module's own comment), so these now correctly resolve to
+    "directory"/8.0 again."""
+    plan = _plan(monkeypatch, question, country="NO", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
 
 
 @pytest.mark.parametrize(
@@ -962,21 +1001,45 @@ def test_s1_reviewer_repro_regulation_condition_guideline_wording_stays_policy(
     [
         "What are the regulations of Forever Norway on the delivery address?",
         "What are the terms and conditions of Forever Norway on the delivery address?",
-        "What are the guidelines of Forever Norway on the delivery address?",
     ],
-    ids=["english-regulations", "english-terms-and-conditions", "english-guidelines"],
+    ids=["english-regulations", "english-terms-and-conditions"],
 )
 def test_s1_reviewer_repro_english_regulation_condition_guideline_wording_stays_policy(
     monkeypatch, question
 ) -> None:
     """Fail-before (S1): the same hole existed in English -
     DIRECTORY_POLICY_WORDING_RE only matched "policy"/"rules", so
-    "regulations"/"terms and conditions"/"guidelines" fell through to
+    "regulations"/"terms and conditions" fell through to
     deterministic_directory_route (via "address" matching
-    _DIRECTORY_DETAIL_RE) and were wrongly promoted to "directory"."""
+    _DIRECTORY_DETAIL_RE) and were wrongly promoted to "directory". Both
+    "regulations" and "terms and conditions" remain kept after the sixth
+    follow-up, so this assertion is unchanged by that later follow-up
+    (unlike the "english-guidelines" case, moved below)."""
     plan = _plan(monkeypatch, question, country="NO")
 
     assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+# R05/N6 sixth follow-up (2026-09-18): "english-guidelines" used to be
+# parametrized alongside the two cases above, asserting "policy". Bare
+# "guidelines" is dropped from DIRECTORY_POLICY_WORDING_RE by this
+# follow-up (its dominant sense is someone's personal/professional
+# guidance - "guidelines from my doctor" - not a Forever policy document),
+# so this now correctly resolves to "directory" again. CHANGED, not
+# deleted, per the coordinator's explicit instruction.
+def test_s1_bare_guidelines_repro_now_resolves_directory_after_sixth_follow_up(monkeypatch) -> None:
+    """CHANGED assertion (sixth follow-up, coordinator review of 99ec438):
+    was "policy" under the fourth follow-up; bare "guidelines" is now
+    dropped from ``DIRECTORY_POLICY_WORDING_RE``
+    (``app/retrieval/providers.py``), so this now correctly resolves to
+    "directory"/8.0 again."""
+    plan = _plan(
+        monkeypatch,
+        "What are the guidelines of Forever Norway on the delivery address?",
+        country="NO",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
 
 
 @pytest.mark.parametrize(
@@ -1042,50 +1105,104 @@ def test_s1_condition_word_absent_from_directory_control_questions() -> None:
 
 def test_s1_localized_policy_wording_present_unit_new_terms() -> None:
     """Unit-level control directly on ``localized_policy_wording_present``
-    for every S1 addition, isolated from the full retrieval-plan pipeline."""
+    for every S1 addition, isolated from the full retrieval-plan pipeline.
+
+    R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438):
+    most of this test's assertions are CHANGED (True -> False), not
+    deleted, per the coordinator's explicit instruction to document every
+    such change. Only the words whose dominant sense is a policy document
+    survive: the original F1 policy/rules set, the regulation(s)
+    equivalents, and the ru oblique cases of политика/правила - see
+    ``config/directory_field_vocabulary.py``'s ``POLICY_WORDING_TERMS``
+    comment for the full rationale and the 27-probe false-suppression
+    finding that drove this change. Every bare condition-family and
+    guideline-family form below is now False; each line says which."""
     from utils.directory_fields import localized_policy_wording_present as p
 
-    assert p("Cual es el reglamento?", language="es") is True
-    assert p("Cuales son las condiciones?", language="es") is True
-    assert p("Cual es la directriz?", language="es") is True
-    assert p("Quel est le reglement?", language="fr") is True
-    assert p("Quelles sont les conditions?", language="fr") is True
-    assert p("Quelle est la directive?", language="fr") is True
-    assert p("Was ist die Vorschrift?", language="de") is True
-    assert p("Was ist die Bestimmung?", language="de") is True
-    assert p("Was ist die Bedingung?", language="de") is True
-    assert p("Wat zijn de voorwaarden?", language="nl") is True
-    assert p("Wat is de richtlijn?", language="nl") is True
-    assert p("Qual e il regolamento?", language="it") is True
-    assert p("Quali sono le condizioni?", language="it") is True
-    assert p("Qual e la linea guida?", language="it") is True
-    assert p("Qual e o regulamento?", language="pt") is True
-    assert p("Quais sao as condicoes?", language="pt") is True
-    assert p("Qual e a diretriz?", language="pt") is True
-    assert p("Mitkä ovat ehdot?", language="fi") is True
-    assert p("Mikä on määräys?", language="fi") is True
-    assert p("Mikä on ohje?", language="fi") is True
-    assert p("Hva er vilkår for retur?", language="no") is True
-    assert p("Hva er reglene?", language="no") is True
-    assert p("Hvad er vilkår for retur?", language="da") is True
-    assert p("Hvad er reglerne?", language="da") is True
-    assert p("Vad är villkor för retur?", language="sv") is True
-    assert p("Vad är reglerna?", language="sv") is True
-    assert p("Согласно политике", language="ru") is True
-    assert p("по политику", language="ru") is True
-    assert p("политикой", language="ru") is True
-    assert p("правилам", language="ru") is True
-    assert p("правилами", language="ru") is True
-    assert p("в правилах", language="ru") is True
-    assert p("условия", language="ru") is True
-    assert p("условиях", language="ru") is True
-    assert p("politici", language="sr") is True
-    assert p("politikom", language="sr") is True
-    assert p("pravilima", language="sr") is True
-    assert p("uslovi", language="sr") is True
-    assert p("условима", language="sr") is True
+    assert p("Cual es el reglamento?", language="es") is True  # regulation(s) equivalent: kept
+    assert p("Cuales son las condiciones?", language="es") is False  # CHANGED: bare condition-family, dropped
+    assert p("Cual es la directriz?", language="es") is False  # CHANGED: bare guideline-family, dropped
+    assert p("Quel est le reglement?", language="fr") is True  # regulation(s) equivalent (original F1): kept
+    assert p("Quelles sont les conditions?", language="fr") is False  # CHANGED: bare condition-family, dropped
+    assert p("Quelle est la directive?", language="fr") is False  # CHANGED: bare guideline-family, dropped
+    assert p("Was ist die Vorschrift?", language="de") is True  # regulation(s) equivalent: kept
+    assert p("Was ist die Bestimmung?", language="de") is False  # CHANGED: dominant sense is "destination", dropped
+    assert p("Was ist die Bedingung?", language="de") is False  # CHANGED: bare condition-family, dropped
+    assert p("Wat zijn de voorwaarden?", language="nl") is False  # CHANGED: bare condition-family, dropped
+    assert p("Wat is de richtlijn?", language="nl") is False  # CHANGED: bare guideline-family, dropped (was never actually in the original F1 set despite the fourth follow-up's docstring claim)
+    assert p("Qual e il regolamento?", language="it") is True  # regulation(s) equivalent: kept
+    assert p("Quali sono le condizioni?", language="it") is False  # CHANGED: bare condition-family, dropped
+    assert p("Qual e la linea guida?", language="it") is False  # CHANGED: bare guideline-family, dropped
+    assert p("Qual e o regulamento?", language="pt") is True  # regulation(s) equivalent: kept
+    assert p("Quais sao as condicoes?", language="pt") is False  # CHANGED: bare condition-family, dropped
+    assert p("Qual e a diretriz?", language="pt") is False  # CHANGED: bare guideline-family, dropped
+    assert p("Mitkä ovat ehdot?", language="fi") is False  # CHANGED: bare condition-family, dropped
+    assert p("Mikä on määräys?", language="fi") is False  # CHANGED: singular dropped - only plural "maaraykset" is kept, per the coordinator's exact wording
+    assert p("Mikä on ohje?", language="fi") is False  # CHANGED: bare guideline-family, dropped
+    assert p("Hva er vilkår for retur?", language="no") is False  # CHANGED: bare condition-family, dropped
+    assert p("Hva er reglene?", language="no") is False  # CHANGED: not part of the original F1 set (added by the fourth follow-up) and not explicitly named in the coordinator's KEEP list, so reverted along with the other unlisted additions
+    assert p("Hvad er vilkår for retur?", language="da") is False  # CHANGED: bare condition-family, dropped
+    assert p("Hvad er reglerne?", language="da") is False  # CHANGED: same reasoning as no "reglene" above
+    assert p("Vad är villkor för retur?", language="sv") is False  # CHANGED: bare condition-family, dropped
+    assert p("Vad är reglerna?", language="sv") is False  # CHANGED: same reasoning as no "reglene" above
+    assert p("Согласно политике", language="ru") is True  # oblique case of политика: explicitly kept by the coordinator
+    assert p("по политику", language="ru") is True  # oblique case of политика: explicitly kept
+    assert p("политикой", language="ru") is True  # oblique case of политика: explicitly kept
+    assert p("правилам", language="ru") is True  # oblique case of правила: explicitly kept
+    assert p("правилами", language="ru") is True  # oblique case of правила: explicitly kept
+    assert p("в правилах", language="ru") is True  # oblique case of правила: explicitly kept
+    assert p("условия", language="ru") is False  # CHANGED: bare condition-family, dropped
+    assert p("условиях", language="ru") is False  # CHANGED: bare condition-family, dropped
+    assert p("politici", language="sr") is False  # CHANGED: sr oblique forms were not explicitly named in the coordinator's KEEP list (only ru's were), so sr reverts to its original F1 set
+    assert p("politikom", language="sr") is False  # CHANGED: same reasoning as "politici" above
+    assert p("pravilima", language="sr") is False  # CHANGED: same reasoning as "politici" above
+    assert p("uslovi", language="sr") is False  # CHANGED: bare condition-family, dropped
+    assert p("условима", language="sr") is False  # CHANGED: bare condition-family, dropped
     # Not a false positive: an unrelated question in a covered language.
     assert p("Cual es el telefono?", language="es") is False
+
+
+def test_s6_compound_terms_and_conditions_phrases_present_across_languages() -> None:
+    """New (sixth follow-up, coordinator review of 99ec438): the compound
+    "terms and conditions" phrase, added per language as the sole surviving
+    way to recognize the condition/guideline-adjacent sense, since it
+    cannot fire on a bare word appearing alone elsewhere in a question."""
+    from utils.directory_fields import localized_policy_wording_present as p
+
+    assert p("Cuales son los terminos y condiciones?", language="es") is True
+    assert p("Quelles sont les conditions generales ?", language="fr") is True
+    assert p("Was sind die Geschaftsbedingungen?", language="de") is True
+    assert p("Wo finde ich die AGB?", language="de") is True
+    assert p("Was sind die Nutzungsbedingungen?", language="de") is True
+    assert p("Wat zijn de algemene voorwaarden?", language="nl") is True
+    assert p("Quali sono i termini e condizioni?", language="it") is True
+    assert p("Quais sao os termos e condicoes?", language="pt") is True
+    assert p("Hva er vilkar og betingelser?", language="no") is True
+    assert p("Hvad er salgsbetingelser?", language="da") is True
+    assert p("Las vara allmanna villkor innan du bestaller.", language="sv") is True
+    assert p("Mitka ovat kayttoehdot?", language="fi") is True
+    assert p("Mitka ovat toimitusehdot?", language="fi") is True
+    assert p("Kakovy usloviya ispolzovaniya", language="ru") is False  # transliterated (not Cyrillic) - proves the phrase match is script-specific, not a false positive from partial matching
+    assert p("Каковы условия использования?", language="ru") is True
+    assert p("Каковы условия продажи?", language="ru") is True
+
+
+def test_s6_richtlinie_kept_with_justification(monkeypatch) -> None:
+    """German "Richtlinie"/"Richtlinien" is the sole guideline-family word
+    kept, because it was part of the original, second-follow-up F1 set
+    (already reviewed then), not a new addition - see the justification
+    comment directly above ``POLICY_WORDING_TERMS`` in
+    ``config/directory_field_vocabulary.py``. Full pipeline control: a
+    German question combining "Richtlinie" with a directory field name
+    must resolve to "policy", not "directory"."""
+    plan = _plan(
+        monkeypatch,
+        "Was ist die Richtlinie von Forever Norge zur Lieferadresse?",
+        country="NO",
+        language="de",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
 
 
 # --- R05/N6 fifth follow-up (2026-09-18): coordinator review of d77c13f ----
@@ -1149,36 +1266,61 @@ def test_s2_directory_policy_wording_regex_unit_controls() -> None:
     assert policy_re.search("What is the return policy?") is not None
 
 
+# R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438): the
+# "-plural-policy" cases below (es/fr/it/pt) used to assert True. The
+# fifth follow-up's own reasoning - "the plural is not idiomatic that way
+# in any of the four [Romance languages]" - was factually wrong: a later,
+# independent Fable review found "buenas condiciones"/"conditions de
+# vente" (unqualified)/"buone condizioni"/"boas condicoes" ARE the standard
+# plural idiom for a physical/circumstantial sense too ("La oficina esta
+# en buenas condiciones?" = "Is the office in good condition?", exactly as
+# ambiguous as the singular). The coordinator's decision drops the bare
+# plural for these four languages as well, keeping only the compound
+# "terminos y condiciones"/"conditions generales"/"termini e condizioni"/
+# "termos e condicoes" phrase (see
+# ``test_s6_compound_terms_and_conditions_phrases_present_across_languages``
+# above). Every "-plural-policy" id below is CHANGED (True -> False), not
+# deleted, per the coordinator's explicit instruction; the singular cases
+# were already False and are unaffected.
 @pytest.mark.parametrize(
     "text,language,expected",
     [
         ("¿Está el teléfono en buena condición?", "es", False),
-        ("¿Cuáles son las condiciones de venta?", "es", True),
+        ("¿Cuáles son las condiciones de venta?", "es", False),  # CHANGED: was True; bare plural is itself the idiom, dropped
         ("Le téléphone est en bonne condition ?", "fr", False),
-        ("Quelles sont les conditions de vente ?", "fr", True),
+        ("Quelles sont les conditions de vente ?", "fr", False),  # CHANGED: was True; bare plural is itself the idiom, dropped
         ("Il telefono è in buona condizione?", "it", False),
-        ("Quali sono le condizioni di vendita?", "it", True),
+        ("Quali sono le condizioni di vendita?", "it", False),  # CHANGED: was True; bare plural is itself the idiom, dropped
         ("O telefone está em boa condição?", "pt", False),
-        ("Quais são as condições de venda?", "pt", True),
+        ("Quais são as condições de venda?", "pt", False),  # CHANGED: was True; bare plural is itself the idiom, dropped
     ],
     ids=[
-        "es-singular-physical-not-policy", "es-plural-policy",
-        "fr-singular-physical-not-policy", "fr-plural-policy",
-        "it-singular-physical-not-policy", "it-plural-policy",
-        "pt-singular-physical-not-policy", "pt-plural-policy",
+        "es-singular-physical-not-policy", "es-plural-also-not-policy",
+        "fr-singular-physical-not-policy", "fr-plural-also-not-policy",
+        "it-singular-physical-not-policy", "it-plural-also-not-policy",
+        "pt-singular-physical-not-policy", "pt-plural-also-not-policy",
     ],
 )
-def test_s2_romance_language_singular_condition_dropped_plural_kept(text, language, expected) -> None:
-    """The same singular/plural distinction as English, applied to the four
-    Romance languages the coordinator flagged: the ambiguous physical-
-    condition singular ("condicion"/"condition"/"condizione"/"condicao")
-    must NOT trigger policy wording, while the (unambiguous, policy-only in
-    ordinary usage) plural still does."""
+def test_s2_romance_language_bare_condition_forms_dropped_entirely(text, language, expected) -> None:
+    """Neither the singular NOR the bare plural condition-family form
+    triggers policy wording in these four Romance languages any more - see
+    the sixth follow-up note above this test. Only the compound "terms and
+    conditions" phrase (tested separately) still does."""
     from utils.directory_fields import localized_policy_wording_present as p
 
     assert p(text, language=language) is expected
 
 
+# R05/N6 sixth follow-up (2026-09-18): every id below used to assert True
+# ("...kept"). A later, independent Fable review found that German "unter
+# der Bedingung" ("under the condition that"), Dutch "onder voorwaarde
+# dat", Finnish, Russian "в условиях пандемии" ("under pandemic
+# conditions"), and Serbian all have the same circumstance/conjunction
+# sense the Romance languages do, dominant enough in ordinary usage that
+# the coordinator's decision drops every bare condition-family form
+# regardless of language, keeping only each language's compound "terms and
+# conditions" phrase. CHANGED (True -> False), not deleted, per the
+# coordinator's explicit instruction.
 @pytest.mark.parametrize(
     "text,language",
     [
@@ -1188,13 +1330,144 @@ def test_s2_romance_language_singular_condition_dropped_plural_kept(text, langua
         ("Какое условие?", "ru"),
         ("Koji je uslov?", "sr"),
     ],
-    ids=["german-singular-kept", "dutch-singular-kept", "finnish-singular-kept", "russian-singular-kept", "serbian-singular-kept"],
+    ids=["german-singular-dropped", "dutch-singular-dropped", "finnish-singular-dropped", "russian-singular-dropped", "serbian-singular-dropped"],
 )
-def test_s2_non_romance_singular_condition_forms_unchanged(text, language) -> None:
-    """Control: German/Dutch/Finnish/Russian/Serbian keep their singular
-    condition-family form, since none of those languages uses that noun for
-    a physical/product condition (they use a separate word for that sense),
-    so there is no equivalent false-suppression risk to fix there."""
+def test_s2_non_romance_bare_condition_forms_also_dropped_after_sixth_follow_up(text, language) -> None:
+    """CHANGED (sixth follow-up, coordinator review of 99ec438): these
+    bare condition-family forms are no longer recognized in any language -
+    only each language's compound "terms and conditions" phrase is."""
     from utils.directory_fields import localized_policy_wording_present as p
 
-    assert p(text, language=language) is True
+    assert p(text, language=language) is False
+
+
+# --- R05/N6 sixth follow-up (2026-09-18): every reviewer idiom repro, ------
+# --- as a full-pipeline "directory" control -------------------------------
+#
+# Per the coordinator's explicit instruction: every one of the 35 probes
+# the review found (27 of which were false suppressions) is exercised here
+# as a full ``_planned_retrieval_plan`` control, each embedded in a
+# question that also names a genuine directory field (address/phone) so
+# the assertion proves not merely "not policy" but the full, correct
+# "directory"/8.0 protection outcome.
+@pytest.mark.parametrize(
+    "question,country,language",
+    [
+        (
+            "¿Cuál es la dirección de Forever Ghana? ¿La oficina está en buenas condiciones?",
+            "US", "es",
+        ),
+        (
+            "Qual è l'indirizzo di Forever Ghana? L'ufficio è in buone condizioni?",
+            "US", "it",
+        ),
+        (
+            "Qual é o endereço de Forever Ghana? O escritório está em boas condições?",
+            "US", "pt",
+        ),
+        (
+            "What are the road conditions near Forever Ghana's office address?",
+            "US", "en",
+        ),
+        (
+            "What is Forever Ghana's phone number? What are the weather conditions?",
+            "US", "en",
+        ),
+        (
+            "Какой адрес Forever Norway? В условиях пандемии офис работает как обычно?",
+            "NO", "ru",
+        ),
+        (
+            "Hva er telefonnummeret til Forever Norge? Uansett vilkår, er kontoret åpent?",
+            "NO", "no",
+        ),
+        (
+            "Hvad er telefonnummeret på Forever Norge? Under alle vilkår er kontoret åbent.",
+            "NO", "da",
+        ),
+        (
+            "Vad är telefonnumret till Forever Norge? Under alla villkor är kontoret öppet?",
+            "NO", "sv",
+        ),
+        (
+            "Wat is het telefoonnummer van Forever Ghana? Onder voorwaarde dat, is het kantoor open?",
+            "US", "nl",
+        ),
+        (
+            "Wie lautet die Telefonnummer von Forever Norge? Nur unter der Bedingung, dass das Büro geöffnet ist?",
+            "NO", "de",
+        ),
+        (
+            "Wie lautet die Telefonnummer von Forever Norge? Was ist die Bestimmung meiner Sendung?",
+            "NO", "de",
+        ),
+        (
+            "Quelle est l'adresse de Forever Ghana ? Dans ces conditions, le bureau est-il ouvert ?",
+            "US", "fr",
+        ),
+        (
+            "Quel est le numéro de téléphone de Forever Ghana ? Je suis les directives de mon médecin.",
+            "US", "fr",
+        ),
+        (
+            "Qual è l'indirizzo di Forever Ghana? Seguo le linee guida del mio medico.",
+            "US", "it",
+        ),
+        (
+            "¿Cuál es el número de teléfono de Forever Ghana? Sigo las directrices de mi médico.",
+            "US", "es",
+        ),
+    ],
+    ids=[
+        "es-buenas-condiciones", "it-buone-condizioni", "pt-boas-condicoes",
+        "en-road-conditions", "en-weather-conditions", "ru-usloviyakh-pandemii",
+        "no-uansett-vilkar", "da-under-alle-vilkar", "sv-under-alla-villkor",
+        "nl-onder-voorwaarde-dat", "de-unter-der-bedingung", "de-bestimmung-destination",
+        "fr-dans-ces-conditions", "fr-directives-du-medecin",
+        "it-linee-guida-del-medico", "es-directrices",
+    ],
+)
+def test_s6_reviewer_idiom_repros_stay_directory(monkeypatch, question, country, language) -> None:
+    """Fail-before (sixth follow-up, coordinator review of 99ec438): every
+    one of these idiom/subordinate-clause shapes was wrongly suppressed to
+    "policy"/0.0 by the fourth/fifth follow-ups' bare condition/guideline
+    vocabulary. Each also names a genuine directory field (address or
+    phone) in the same sentence, so a correct outcome is "directory"/8.0,
+    not merely "not policy"."""
+    plan = _plan(monkeypatch, question, country=country, language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s6_whitespace_collapse_prevents_in_terms_of_leak(monkeypatch) -> None:
+    """New (sixth follow-up): irregular/doubled whitespace inside "in terms
+    of" must not defeat the fixed-width negative lookbehind in
+    DIRECTORY_POLICY_WORDING_RE. Before the whitespace-collapse fix in
+    _runtime_scope_intent, "in  terms  of" (double-spaced) would not match
+    the lookbehind (exactly one space) and would leak through as if it were the
+    accepted "terms of X" phrasing, wrongly suppressing this genuine
+    office-hours directory question to "policy"."""
+    plan = _plan(
+        monkeypatch,
+        "What are the  office  hours of Forever Norway in  terms  of weekends?",
+        country="NO",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s6_whitespace_collapse_unit_control() -> None:
+    """Unit-level control directly on the whitespace-collapse behaviour,
+    isolated from the full retrieval-plan pipeline."""
+    from app.retrieval.providers import _runtime_scope_intent
+
+    result = _runtime_scope_intent(
+        "What are the office hours of Forever Norway in  terms  of weekends?",
+        include_global_documents=True,
+        named_markets={"Norway"},
+        shared_office_markets=set(),
+        deterministic_directory_route=True,
+        language="en",
+    )
+
+    assert result["intent"] == "directory"

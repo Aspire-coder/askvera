@@ -160,15 +160,14 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
     re.IGNORECASE,
 )
 # R05/N6 fourth follow-up (2026-09-18, coordinator review of 88da3cc/0b1f0e3,
-# finding S1): "policy"/"rules" alone missed common English policy-document
-# synonyms - "regulations", "guidelines", "conditions", and the
-# "terms and conditions"/"terms of" phrase (as in "terms of service") - so a
-# question like "What are the regulations of Forever Norway on the delivery
-# address?" fell through to the multilingual directory disjunct and was
-# wrongly promoted to "directory". A bare "\bterms\b" is deliberately NOT
-# added: "terms" alone is dominated by the unrelated "in terms of X" idiom
-# ("in terms of delivery cost") and would suppress genuine directory
-# questions on that idiom alone.
+# finding S1): "policy"/"rules" alone missed the common English
+# regulation(s)/"terms and conditions" synonyms, so a question like "What
+# are the regulations of Forever Norway on the delivery address?" fell
+# through to the multilingual directory disjunct and was wrongly promoted
+# to "directory". A bare "\bterms\b" is deliberately NOT added: "terms"
+# alone is dominated by the unrelated "in terms of X" idiom ("in terms of
+# delivery cost") and would suppress genuine directory questions on that
+# idiom alone.
 #
 # R05/N6 fifth follow-up (2026-09-18, coordinator review of d77c13f): the
 # fourth follow-up's own "terms of" addition still matched *inside* that
@@ -191,14 +190,26 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
 # single-line regex for an open-ended list that would need its own upkeep
 # as new "terms of ..." policy-document phrasings appear.
 #
-# Also fixed here: plural-only "conditions" (singular "condition" removed).
-# "Is the office in good condition?" is a genuine physical-condition
-# question with no policy-document sense at all, and English's normal
-# "terms and conditions" usage is itself always plural, so the singular
-# added no real recall and only false-suppressed physical-condition
-# questions.
+# R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438, MEDIUM
+# finding): a Fable review ran 35 idiom/subordinate-clause probes and found
+# 27 newly, wrongly suppressed to "policy". The fifth follow-up's own
+# plural-only "conditions" was itself still wrong: "road conditions near
+# Forever Ghana's office address" and "weather conditions" are genuine
+# directory-adjacent English sentences where "conditions" means
+# circumstances, not a policy document - the plural is exactly as
+# idiomatic for that sense as the singular was for "Is the office in good
+# condition?" (removed in the fifth follow-up). Likewise bare
+# "\bguidelines?\b" was dominated in practice by someone's personal/
+# professional guidance ("guidelines from my doctor"), not a Forever policy
+# document. Both are now removed entirely; only the COMPOUND "terms and
+# conditions" phrase (never a bare "conditions") and "regulation(s)"
+# survive, mirroring the same "keep only the words whose dominant sense is
+# a policy document" decision applied to ``POLICY_WORDING_TERMS``
+# (``config/directory_field_vocabulary.py`` - see that module's own,
+# larger comment for the full non-English rationale and the reopened
+# "bare conditions" limitation this accepts, honestly, in both languages).
 DIRECTORY_POLICY_WORDING_RE = re.compile(
-    r"\bpolic(?:y|ies)\b|\brules?\b|\bregulations?\b|\bguidelines?\b|\bconditions\b|"
+    r"\bpolic(?:y|ies)\b|\brules?\b|\bregulations?\b|"
     r"\bterms\s+and\s+conditions\b|(?<!\bin\s)\bterms\s+of\b",
     re.IGNORECASE,
 )
@@ -262,25 +273,42 @@ def _runtime_scope_intent(
 
     R05/N6 second follow-up (2026-09-18): an independent re-review found
     this function's policy-wording suppression - ``is_policy_safety_question``
-    and ``DIRECTORY_POLICY_WORDING_RE`` (``policy|rules``) - is itself
-    English-only, while the ``directory_field_intent_present`` disjunct just
-    added is 13-language. That asymmetry let a non-English POLICY question
-    that also names a directory field (e.g. Spanish "Cual es la politica de
+    and ``DIRECTORY_POLICY_WORDING_RE`` (at the time, ``policy|rules`` only;
+    see that regex's own comment above for what it has grown to cover since,
+    through the fourth/fifth/sixth follow-ups) - is itself English-only,
+    while the ``directory_field_intent_present`` disjunct just added is
+    13-language. That asymmetry let a non-English POLICY question that also
+    names a directory field (e.g. Spanish "Cual es la politica de
     Forever Norway sobre los metodos de pago?") skip this English-only
     branch and fall straight into the multilingual directory disjunct below,
     reopening the N6 class of bug for non-English policy questions - the
     English equivalent already correctly stayed "policy"/0.0.
     ``localized_policy_wording_present`` (``utils/directory_fields.py``, backed
-    by ``config/directory_field_vocabulary.py``'s new, small, closed,
-    per-language ``POLICY_WORDING_TERMS``) closes that gap the same way
-    ``directory_field_intent_present`` closed the recognition gap: checked
-    here, first, so a genuine policy-wording match keeps the question
-    "policy" regardless of what ``deterministic_directory_route`` or the
-    field disjunct below would otherwise compute. A ``language`` neither
-    vocabulary covers falls back to exactly the English-only behaviour this
-    function already had - no worse than before.
+    by ``config/directory_field_vocabulary.py``'s small, closed, per-language
+    ``POLICY_WORDING_TERMS`` - see that module's own comment for exactly
+    what it covers, which has changed since this paragraph was written)
+    closes that gap the same way ``directory_field_intent_present`` closed
+    the recognition gap: checked here, first, so a genuine policy-wording
+    match keeps the question "policy" regardless of what
+    ``deterministic_directory_route`` or the field disjunct below would
+    otherwise compute. A ``language`` neither vocabulary covers falls back
+    to exactly the English-only behaviour this function already had - no
+    worse than before.
+
+    R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438): the
+    text this function matches against is now whitespace-collapsed first
+    (``" ".join(text.split())``) so a run of repeated/irregular whitespace
+    (e.g. "in  terms  of", double-spaced) cannot slip past the fixed-width
+    negative lookbehind in ``DIRECTORY_POLICY_WORDING_RE`` - that
+    lookbehind only recognizes exactly one space between "in" and "terms",
+    so un-collapsed double whitespace would have let "in terms of" leak
+    through as if it were the accepted "terms of X" phrasing. Every regex
+    in this function (and every downstream call this collapsed ``text`` is
+    threaded to - ``directory_field_intent_present``,
+    ``localized_policy_wording_present``) benefits identically, since none
+    of their own patterns depend on preserving original whitespace runs.
     """
-    text = message or ""
+    text = " ".join((message or "").split())
     if (
         is_policy_safety_question(text)
         or DIRECTORY_POLICY_WORDING_RE.search(text)
