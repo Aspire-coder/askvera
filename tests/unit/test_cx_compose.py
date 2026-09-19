@@ -13,9 +13,11 @@ configured market is US).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -590,3 +592,230 @@ def test_citations_are_never_changed() -> None:
 
     assert result.citations == citations
     assert result.citations is response.citations
+
+
+# --- Coordinator review (36a2187): never raise over ordinary content -------
+#
+# compose_cx_response used to run one final regex check over the WHOLE
+# composed answer -- including whatever the model itself wrote -- and raise
+# ValueError if it looked like an unfilled placeholder. A model answer that
+# happens to contain a literal brace-shaped substring (quoting "{country}"
+# as an example, echoing JSON, etc.) would crash the chat turn in
+# production. Fixed: only text THIS module renders and appends is ever
+# checked, and a defect there drops that one addition instead of raising.
+
+
+def test_a_literal_brace_substring_already_in_the_models_answer_never_raises() -> None:
+    answer = 'The field is templated as "{country}" in our internal docs.'
+    response = _response(answer)
+    outcome = _outcome(OutcomeKind.ANSWER, country="US")
+
+    result, applied = _compose(response, outcome, country="US")
+
+    assert result.answer.startswith(answer)
+    assert not any(item.startswith("dropped:") for item in applied["cx_applied"])
+
+
+def test_a_literal_brace_substring_in_a_fallback_answer_never_raises() -> None:
+    answer = "We could not confirm this. Reference token: {ORDER_ID}."
+    response = _response(answer)
+    outcome = _outcome(OutcomeKind.EVIDENCE_MISSING, country="US")
+
+    result, applied = _compose(response, outcome, country="US")
+
+    assert result.answer.startswith(answer)
+    assert "contact_offer" in applied["cx_applied"]
+
+
+def test_a_broken_own_addition_is_dropped_not_raised_or_delivered() -> None:
+    """A defective ``render`` (a stand-in for a future translation bug)
+    leaves ``contact_offer`` with an unfilled placeholder. The whole turn
+    must not crash, and the broken sentence must never reach the reader --
+    it is dropped, and ``cx_applied`` records exactly that.
+    """
+
+    def _broken_render(key: str, language: str, **placeholders: object) -> str:
+        text = cx_render.render(key, language, **placeholders)
+        if key == "contact_offer":
+            return text + " Ref: {case_id}"
+        return text
+
+    response = _response("No policy found.")
+    outcome = _outcome(OutcomeKind.EVIDENCE_MISSING, country="US")
+
+    result, applied = compose_cx_response(
+        response,
+        outcome,
+        question="What is the minimum order policy?",
+        language="en",
+        country="US",
+        evidence_documents=[],
+        topic_supported=_no_topics,
+        render=_broken_render,
+    )
+
+    assert "dropped:contact_offer" in applied["cx_applied"]
+    assert "contact_offer" not in applied["cx_applied"]
+    assert "{case_id}" not in result.answer
+    assert "1-800-555-0100" not in result.answer
+    assert result.answer == "No policy found."
+
+
+def test_a_broken_partial_note_is_dropped_and_never_promotes_the_outcome() -> None:
+    def _broken_render(key: str, language: str, **placeholders: object) -> str:
+        text = cx_render.render(key, language, **placeholders)
+        if key == "partial_answer_gap":
+            return text + " {oops}"
+        return text
+
+    document = _kenya_document({"Telephone Office": "+254 20 2026869"})
+    answer = "You can reach the Kenya office at +254 20 2026869."
+    response = _response(answer)
+    outcome = _outcome(OutcomeKind.ANSWER, country="KE")
+
+    result, applied = compose_cx_response(
+        response,
+        outcome,
+        question="What is the phone number and email?",
+        language="en",
+        country="KE",
+        evidence_documents=[document],
+        topic_supported=_no_topics,
+        render=_broken_render,
+    )
+
+    assert "dropped:partial_note" in applied["cx_applied"]
+    assert "{oops}" not in result.answer
+    assert result.metadata["outcome"]["kind"] == "answer"  # never promoted
+
+
+def test_a_broken_suggestion_is_dropped_from_the_list() -> None:
+    def _broken_render(key: str, language: str, **placeholders: object) -> str:
+        text = cx_render.render(key, language, **placeholders)
+        if key == "suggest_topic_returns":
+            return text + " {broken}"
+        return text
+
+    response = _response("No policy found.")
+    outcome = _outcome(OutcomeKind.EVIDENCE_MISSING, country="US")
+
+    def _only_returns(topic: str, _country: str) -> bool:
+        return topic == "returns"
+
+    result, applied = compose_cx_response(
+        response,
+        outcome,
+        question="What is the minimum order policy?",
+        language="en",
+        country="US",
+        evidence_documents=[],
+        topic_supported=_only_returns,
+        render=_broken_render,
+    )
+
+    assert result.suggestions == []
+    assert "dropped:suggestions" in applied["cx_applied"]
+    assert "suggestions" not in applied["cx_applied"]
+
+
+# --- Robustness: no code path raises on ordinary content -------------------
+
+
+def test_empty_answer_on_a_fallback_kind_never_raises() -> None:
+    response = _response("")
+    outcome = _outcome(OutcomeKind.DEPENDENCY_UNAVAILABLE, country="US")
+
+    result, _applied = _compose(response, outcome, country="US")
+
+    assert isinstance(result.answer, str)
+
+
+def test_empty_answer_on_an_answer_shaped_kind_never_raises() -> None:
+    response = _response("")
+    outcome = _outcome(OutcomeKind.ANSWER, country="US")
+
+    result, _applied = _compose(response, outcome, country="US", topic_supported=_all_topics)
+
+    assert isinstance(result.answer, str)
+
+
+def test_none_metadata_values_never_raise() -> None:
+    response = _response(
+        "Some answer.",
+        metadata={"failure_layer": None, "response_source": None, "validation": None, "client_action": None},
+    )
+    outcome = _outcome(OutcomeKind.ANSWER, country="US")
+
+    result, _applied = _compose(response, outcome, country="US")
+
+    assert result.metadata["failure_layer"] is None
+    assert result.metadata["response_source"] is None
+
+
+def test_metadata_none_itself_never_raises() -> None:
+    response = ChatResponse(
+        answer="Some answer.",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.5,
+        metadata=None,  # type: ignore[arg-type]
+        correlation_id="corr-none-metadata",
+    )
+    outcome = _outcome(OutcomeKind.EVIDENCE_MISSING, country="US")
+
+    result, _applied = _compose(response, outcome, country="US")
+
+    assert isinstance(result.metadata, dict)
+
+
+def test_unrecognised_outcome_kind_never_raises_and_gets_no_addition() -> None:
+    # A future OutcomeKind this module has not been taught yet -- fabricated
+    # via dataclasses.replace (bypassing the enum) to prove the fail-closed
+    # path holds even when `kind` is not one of the nine known members.
+    response = _response("Please contact customer care about your order.")
+    outcome = dataclasses.replace(_outcome(OutcomeKind.ANSWER, country="US"), kind="some_future_kind")
+
+    result, applied = _compose(response, outcome, country="US", topic_supported=_all_topics)
+
+    assert result is response
+    assert applied == {"cx_applied": []}
+
+
+def test_evidence_documents_missing_content_and_metadata_attributes_never_raise() -> None:
+    # Plain objects with neither .content nor .metadata -- not real
+    # RetrievedDocument instances -- must not crash field-coverage
+    # assessment (app/response/partial_answer.py's own getattr-based
+    # reader already tolerates this; this proves cx_compose does not add a
+    # second, less careful read of its own).
+    response = _response("You can reach the Kenya office at +254 20 2026869.")
+    outcome = _outcome(OutcomeKind.ANSWER, country="KE")
+    bare_documents = [SimpleNamespace(), object(), {"unrelated": "dict"}]
+
+    result, _applied = _compose(
+        response,
+        outcome,
+        question="What is the phone number and email?",
+        country="KE",
+        evidence_documents=bare_documents,  # type: ignore[arg-type]
+    )
+
+    assert isinstance(result.answer, str)
+
+
+def test_none_evidence_documents_never_raises() -> None:
+    response = _response("You can reach the Kenya office at +254 20 2026869.")
+    outcome = _outcome(OutcomeKind.ANSWER, country="KE")
+
+    result, _applied = compose_cx_response(
+        response,
+        outcome,
+        question="What is the phone number and email?",
+        language="en",
+        country="KE",
+        evidence_documents=None,  # type: ignore[arg-type]
+        topic_supported=_no_topics,
+        render=cx_render.render,
+    )
+
+    assert isinstance(result.answer, str)
