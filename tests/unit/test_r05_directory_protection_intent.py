@@ -1140,11 +1140,11 @@ def test_s1_localized_policy_wording_present_unit_new_terms() -> None:
     assert p("Mikä on määräys?", language="fi") is False  # CHANGED: singular dropped - only plural "maaraykset" is kept, per the coordinator's exact wording
     assert p("Mikä on ohje?", language="fi") is False  # CHANGED: bare guideline-family, dropped
     assert p("Hva er vilkår for retur?", language="no") is False  # CHANGED: bare condition-family, dropped
-    assert p("Hva er reglene?", language="no") is False  # CHANGED: not part of the original F1 set (added by the fourth follow-up) and not explicitly named in the coordinator's KEEP list, so reverted along with the other unlisted additions
+    assert p("Hva er reglene?", language="no") is True  # CHANGED AGAIN (seventh follow-up): rules-family definite plural, restored - see test_s7_* below
     assert p("Hvad er vilkår for retur?", language="da") is False  # CHANGED: bare condition-family, dropped
-    assert p("Hvad er reglerne?", language="da") is False  # CHANGED: same reasoning as no "reglene" above
+    assert p("Hvad er reglerne?", language="da") is True  # CHANGED AGAIN (seventh follow-up): rules-family definite plural, restored - see test_s7_* below
     assert p("Vad är villkor för retur?", language="sv") is False  # CHANGED: bare condition-family, dropped
-    assert p("Vad är reglerna?", language="sv") is False  # CHANGED: same reasoning as no "reglene" above
+    assert p("Vad är reglerna?", language="sv") is True  # CHANGED AGAIN (seventh follow-up): rules-family definite plural, restored - see test_s7_* below
     assert p("Согласно политике", language="ru") is True  # oblique case of политика: explicitly kept by the coordinator
     assert p("по политику", language="ru") is True  # oblique case of политика: explicitly kept
     assert p("политикой", language="ru") is True  # oblique case of политика: explicitly kept
@@ -1155,7 +1155,7 @@ def test_s1_localized_policy_wording_present_unit_new_terms() -> None:
     assert p("условиях", language="ru") is False  # CHANGED: bare condition-family, dropped
     assert p("politici", language="sr") is False  # CHANGED: sr oblique forms were not explicitly named in the coordinator's KEEP list (only ru's were), so sr reverts to its original F1 set
     assert p("politikom", language="sr") is False  # CHANGED: same reasoning as "politici" above
-    assert p("pravilima", language="sr") is False  # CHANGED: same reasoning as "politici" above
+    assert p("pravilima", language="sr") is True  # CHANGED AGAIN (seventh follow-up): rules-family oblique plural, restored - see test_s7_* below
     assert p("uslovi", language="sr") is False  # CHANGED: bare condition-family, dropped
     assert p("условима", language="sr") is False  # CHANGED: bare condition-family, dropped
     # Not a false positive: an unrelated question in a covered language.
@@ -1471,3 +1471,131 @@ def test_s6_whitespace_collapse_unit_control() -> None:
     )
 
     assert result["intent"] == "directory"
+
+
+# --- R05/N6 seventh follow-up (2026-09-18): coordinator review of 52cee7b -
+#
+# The sixth follow-up over-corrected: "reglene"/"reglerne"/"reglerna" (the
+# definite PLURAL of no/da/sv "regel" = "rule") are rules-family, squarely
+# inside the KEEP list's "policy/RULES family" - not guideline-family, and
+# not condition-family - but were swept up and dropped alongside the
+# (correctly dropped) retningslinjene/riktlinjerna guideline-family
+# definite forms because neither was "explicitly named" in the sixth
+# follow-up's KEEP list. Restored, narrowly: only the definite plural of
+# "regel" itself for no/da/sv, and "pravilima"/"правилима" (the
+# dative/instrumental plural of Serbian "pravila" = rules) for sr.
+
+
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        ("Hva er reglene til Forever Norge for leveringsadressen?", "no"),
+        ("Hvad er reglerne for Forever Norge for leveringsadressen?", "da"),
+        ("Vad är reglerna för Forever Norge för leveransadressen?", "sv"),
+    ],
+    ids=["norwegian-reglene", "danish-reglerne", "swedish-reglerna"],
+)
+def test_s7_reviewer_repro_scandinavian_rules_definite_plural_stays_policy(monkeypatch, question, language) -> None:
+    """Fail-before (S7, sixth follow-up over-correction): "the rules of
+    Forever Norge for the delivery address" is the ordinary way to phrase
+    a rules-family policy question in Norwegian/Danish/Swedish using the
+    definite plural of "regel". Must resolve to "policy"/0.0, exactly like
+    its English equivalent ("What are the rules of Forever Norge for the
+    delivery address?")."""
+    plan = _plan(monkeypatch, question, country="NO", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_s7_reviewer_repro_serbian_pravilima_stays_policy(monkeypatch) -> None:
+    """Fail-before (S7): "pravilima" (dative/instrumental plural of
+    "pravila" = rules) is rules-family, restored alongside the
+    Scandinavian definite plurals above. Must resolve to "policy"/0.0."""
+    plan = _plan(
+        monkeypatch,
+        "Koja su pravilima Forever Norge za adresu isporuke?",
+        country="NO",
+        language="sr",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_s7_retningslinjene_and_riktlinjerna_stay_dropped(monkeypatch) -> None:
+    """Regression guard: the guideline-family definite plurals
+    (retningslinjene, riktlinjerna) must stay dropped - only the
+    rules-family "reglene"/"reglerna" were restored, not the entire
+    "definite plural" shape regardless of which word it inflects."""
+    no_plan = _plan(
+        monkeypatch,
+        "Hva er retningslinjene til Forever Norge for telefonnummeret?",
+        country="NO",
+        language="no",
+    )
+    sv_plan = _plan(
+        monkeypatch,
+        "Vad är riktlinjerna för Forever Norge för telefonnumret?",
+        country="NO",
+        language="sv",
+    )
+
+    assert no_plan.runtime_scope_intent["intent"] == "directory"
+    assert sv_plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s7_serbian_politika_oblique_and_uslov_family_stay_dropped(monkeypatch) -> None:
+    """Regression guard: only "pravilima"/"правилима" (rules-family) was
+    restored for Serbian - politika's own oblique forms (politici,
+    politiku, politikom) and the entire uslov/услов condition-family stay
+    dropped, exactly as the sixth follow-up left them."""
+    politici_plan = _plan(
+        monkeypatch,
+        "Koja je politici Forever Norge za adresu isporuke?",
+        country="NO",
+        language="sr",
+    )
+    uslovi_plan = _plan(
+        monkeypatch,
+        "Koji su uslovi Forever Norge za adresu isporuke?",
+        country="NO",
+        language="sr",
+    )
+
+    assert politici_plan.runtime_scope_intent["intent"] == "directory"
+    assert uslovi_plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_s7_som_regel_idiom_control_unchanged(monkeypatch) -> None:
+    """"som regel" ("as a rule") control, documented in N1: restoring
+    "reglene" does not change the pre-existing, already-accepted "som
+    regel" idiom trade-off (that idiom is matched by bare "regel", which
+    was never dropped) - a genuinely directory-intentioned Norwegian
+    question using the idiom is still suppressed to "policy", exactly as
+    before this follow-up. Not fixed here; this control proves the
+    restoration did not touch that pre-existing, documented trade-off
+    either way."""
+    plan = _plan(
+        monkeypatch,
+        "Vi gjør dette som regel hver dag. Hva er telefonnummeret til Forever Norge?",
+        country="NO",
+        language="no",
+    )
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_s7_localized_policy_wording_present_unit_control() -> None:
+    """Unit-level control directly on ``localized_policy_wording_present``
+    for every S7 restoration and its regression guards, isolated from the
+    full retrieval-plan pipeline."""
+    from utils.directory_fields import localized_policy_wording_present as p
+
+    assert p("Hva er reglene?", language="no") is True
+    assert p("Hvad er reglerne?", language="da") is True
+    assert p("Vad är reglerna?", language="sv") is True
+    assert p("pravilima", language="sr") is True
+    assert p("правилима", language="sr") is True
+    assert p("Hva er retningslinjene?", language="no") is False
+    assert p("Vad är riktlinjerna?", language="sv") is False
+    assert p("politici", language="sr") is False
+    assert p("uslovi", language="sr") is False

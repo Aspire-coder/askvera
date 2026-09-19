@@ -1039,3 +1039,59 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   "Geschäftsbedingungen"/"AGB"/"Nutzungsbedingungen") is not recognized,
   by design (recognizing partial or reordered phrases risks reopening the
   same bare-word ambiguity this follow-up just closed).
+
+## Seventh follow-up (2026-09-18): coordinator review of 52cee7b (small fix)
+
+A coordinator review of the sixth follow-up found one over-correction:
+"reglene"/"reglerne"/"reglerna" (the definite PLURAL of no/da/sv "regel" =
+"rule") were dropped alongside the (correctly dropped)
+retningslinjene/riktlinjerna guideline-family definite forms, because
+neither was "explicitly named" in the sixth follow-up's KEEP list. But
+"reglene" etc. are rules-family, not guideline/condition-family - squarely
+inside the KEEP list's own "policy/RULES family", and the ordinary way to
+write "the rules of Forever Norge for..." in these three languages.
+
+**Fix:** restored, narrowly, in `POLICY_WORDING_TERMS`
+(`config/directory_field_vocabulary.py`): `no` "reglene", `da` "reglerne",
+`sv` "reglerna" (the definite plural of "regel" only -
+`retningslinjene`/`riktlinjerna` stay dropped), and `sr`
+`pravilima`/`правилима` (the dative/instrumental plural of "pravila" =
+rules; Serbian's other, unrestored oblique forms - `politici`, `politiku`,
+`politikom`, and the entire `uslov`/`услов` condition-family - stay
+dropped exactly as the sixth follow-up left them).
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| no "Hva er reglene til Forever Norge for leveringsadressen?" | `ambiguous` (0.0) | `policy` (0.0) |
+| da "Hvad er reglerne for Forever Norge for leveringsadressen?" | `ambiguous` (0.0) | `policy` (0.0) |
+| sv "Vad är reglerna för Forever Norge för leveransadressen?" | `ambiguous` (0.0) | `policy` (0.0) |
+| sr "Koja su pravilima Forever Norge za adresu isporuke?" | `directory` (8.0) | `policy` (0.0) |
+| no/sv "retningslinjene"/"riktlinjerna" + directory field (control) | `directory` (8.0), unchanged | `directory` (8.0), unchanged |
+| sr "politici"/"uslovi" (control, still dropped) | `directory` (8.0), unchanged | `directory` (8.0), unchanged |
+| no "som regel" idiom + directory field (N1 control, unchanged) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+
+Test assertions updated in `test_s1_localized_policy_wording_present_unit_new_terms`
+(four lines, `False` -> `True`, marked "CHANGED AGAIN (seventh follow-up)"
+in an inline comment): no "Hva er reglene?", da "Hvad er reglerne?", sv
+"Vad är reglerna?", sr "pravilima".
+
+### Seventh follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 8 new `test_s7_*` tests, on `config/directory_field_vocabulary.py`
+   reverted via `git stash` (tests kept): **5 failed, 3 passed,
+   `EXIT=1`** - the 3 pre-existing passes are the regression-guard
+   controls (retningslinjene/riktlinjerna, politici/uslovi, and the "som
+   regel" idiom control), unaffected by this restoration either way.
+   `git stash pop` restored the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **719 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **9043 passed, 13
+   xfailed, `EXIT=0`**, 415.11s wall time.
+4. `flake8` on the four changed files: **no output, `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**

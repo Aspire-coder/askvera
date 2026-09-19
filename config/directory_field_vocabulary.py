@@ -597,16 +597,30 @@ POLICY_WORDING_TERMS: dict[str, tuple[str, ...]] = {
         "määräykset",  # regulation(s) equivalent, medium confidence, plural only (coordinator's exact wording)
         "käyttöehdot", "toimitusehdot",  # compound "terms and conditions" phrases (single Finnish compound words)
     ),
+    # R05/N6 seventh follow-up (2026-09-18, coordinator review of 52cee7b):
+    # the sixth follow-up over-corrected by dropping "reglene"/"reglerne"/
+    # "reglerna" - the definite PLURAL of "regel"/"regel"/"regel" ("rule"),
+    # not a guideline-family word at all. They are the ordinary way to
+    # write "the rules" in Norwegian/Danish/Swedish ("Hva er reglene til
+    # Forever Norge for leveringsadressen?" = "What are the RULES of
+    # Forever Norge for the delivery address?"), squarely inside the KEEP
+    # list's "policy/RULES family" - the sixth follow-up's blanket "not
+    # explicitly named, so drop it" reasoning wrongly swept up a rules-
+    # family inflection alongside the (correctly dropped)
+    # retningslinjene/riktlinjerna guideline-family definite forms.
+    # Restored here, narrowly: only the definite plural of "regel" itself,
+    # not the guideline-family "retningslinje"/"riktlinje" family, which
+    # stays dropped.
     "no": (
-        "regel", "regler",  # original F1 set (retningslinje/retningslinjer/retningslinjene dropped - guideline family)
+        "regel", "regler", "reglene",  # original F1 set + restored rules-family definite plural (retningslinje/retningslinjer/retningslinjene stay dropped - guideline family)
         "vilkår og betingelser", "salgsbetingelser",  # compound "terms and conditions" phrases
     ),
     "da": (
-        "regel", "regler",  # original F1 set (retningslinje/retningslinjer/retningslinjerne dropped - guideline family)
+        "regel", "regler", "reglerne",  # original F1 set + restored rules-family definite plural (retningslinje/retningslinjer/retningslinjerne stay dropped - guideline family)
         "vilkår og betingelser", "salgsbetingelser",  # compound "terms and conditions" phrases
     ),
     "sv": (
-        "regel", "regler",  # original F1 set (riktlinje/riktlinjer/riktlinjerna dropped - guideline family)
+        "regel", "regler", "reglerna",  # original F1 set + restored rules-family definite plural (riktlinje/riktlinjer/riktlinjerna stay dropped - guideline family)
         "allmänna villkor",  # compound "terms and conditions" phrase
     ),
     "ru": (
@@ -615,7 +629,14 @@ POLICY_WORDING_TERMS: dict[str, tuple[str, ...]] = {
         "правилам", "правилами", "правилах",  # kept: oblique cases of правила (coordinator's explicit exception)
         "условия использования", "условия продажи",  # compound "terms and conditions" phrases
     ),
+    # Seventh follow-up: "pravilima"/"правилима" (dative/instrumental
+    # plural of "pravila" = rules) restored, narrowly, for the same
+    # rules-family reason as no/da/sv "reglene" above - the coordinator's
+    # instruction was to restore only the pravila/правила oblique forms if
+    # they were rules-family, leaving everything else (politika/политика's
+    # own oblique forms, the uslov/услова condition-family forms) dropped.
     "sr": (
-        "politika", "politike", "pravilo", "pravila", "политика", "правило", "правила",  # original F1 set only
+        "politika", "politike", "pravilo", "pravila", "политика", "правило", "правила",  # original F1 set
+        "pravilima", "правилима",  # restored: rules-family oblique plural (Latin and Cyrillic)
     ),
 }
