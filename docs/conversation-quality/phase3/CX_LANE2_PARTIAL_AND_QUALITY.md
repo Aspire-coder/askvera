@@ -244,7 +244,7 @@ composes with the rest exactly like every existing step there.
 pytest tests/unit/test_cx_partial_answer.py tests/unit/test_cx_answer_quality.py
        tests/unit/test_response_quality.py tests/unit/test_response_builder.py
        tests/conversation -q
-                                                          -> 433 passed
+                                                          -> 442 passed
 flake8 app/response/partial_answer.py app/response/quality.py
        tests/unit/test_cx_partial_answer.py tests/unit/test_cx_answer_quality.py
                                                           -> exit 0 (clean)
@@ -266,3 +266,42 @@ standalone `"¡Claro!"`). New tests cover `"¡Buena pregunta!"`,
 `"¡Claro!"`, `"¡Por supuesto!"`, and a control where the
 punctuation-wrapped opener sentence itself states a number (still never
 preamble).
+
+## Fix 2 (coordinator review of cadd4f1): negation/yes-no answers were being deleted
+
+`strip_leading_preamble` matched an opener as a PREFIX of the first
+sentence, so "Of course not. Returns are not accepted." matched the "of
+course" opener and deleted "Of course not." -- the actual "no" to the
+reader's question, not a pleasantry. Same defect for "Certainly not.",
+"Claro que no.", "Claro que si.", "Naturlich nicht.", "Bien sur que non.".
+
+Two changes:
+
+1. **Whole-sentence match only.** `leading_preamble_span` now requires the
+   folded, wrapper-punctuation-stripped first sentence to EQUAL an opener
+   entry -- or equal an opener plus a short entry from the new closed
+   `_PREAMBLE_FILLER_TAILS` table (e.g. English "of course, i'd be happy to
+   help with that") -- never a prefix match. A prefix match is what let
+   "of course" silently swallow "of course not" in the first place.
+
+2. **Negation/yes-no token guard.** A new closed, per-language
+   `_NEGATION_OR_YES_NO_TOKENS` table (en not/no/yes; es no/si; fr
+   non/oui/pas; de nicht/nein/ja/kein(e)(n); it no/si/non; pt nao/sim; nl
+   niet/nee/ja; sv inte/ja/nej; no ikke/ja/nei; da ikke/ja/nej; fi ei/kylla;
+   ru не/нет/да; sr ne/da), matched whole-word on the accent-folded
+   sentence via `_sentence_has_negation_or_yes_no_token`, wired into
+   `_sentence_is_never_preamble`. Any sentence carrying one of these tokens
+   is never preamble, regardless of whether it also opens with a table
+   phrase -- this is what actually blocks "Claro que si." (contains the
+   Spanish "si"/yes token) even though "claro que si" itself is still a
+   listed Spanish opener for the plain "¡Claro!" case.
+
+   Documented, deliberate over-blocking trade-off: Spanish "si" is also the
+   word for "if", so this table leaves some genuinely-preamble Spanish
+   sentences containing "si" unstripped. Always the safe direction -- it can
+   only ever keep a sentence whole, never delete real content.
+
+New tests cover every example in the coordinator's report (English,
+Spanish, German, French) keeping its first sentence, plus two positive
+controls ("Of course! Returns are accepted..." and "¡Claro! Puedes...")
+confirming genuine pleasantries still strip after the fix.

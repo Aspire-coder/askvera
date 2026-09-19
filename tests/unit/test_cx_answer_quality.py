@@ -70,6 +70,70 @@ def test_spanish_inverted_exclamation_preamble_with_a_number_is_never_preamble()
     assert strip_leading_preamble(answer, "es") == answer
 
 
+# --- negation / yes-no answer tokens: coordinator review of cadd4f1 --------
+#
+# "Of course not.", "Certainly not.", "Claro que no.", "Claro que si.",
+# "Naturlich nicht.", "Bien sur que non." all open with a table entry from
+# _PREAMBLE_OPENERS, but each one IS the direct yes/no answer -- stripping
+# it deleted the actual answer, not a pleasantry.
+
+
+def test_of_course_not_keeps_its_negation() -> None:
+    answer = "Of course not. Returns are not accepted."
+    assert leading_preamble_span(answer, "en") is None
+    assert strip_leading_preamble(answer, "en") == answer
+
+
+def test_certainly_not_keeps_its_negation() -> None:
+    answer = "Certainly not. Returns are not accepted."
+    assert leading_preamble_span(answer, "en") is None
+    assert strip_leading_preamble(answer, "en") == answer
+
+
+def test_of_course_not_with_a_different_second_sentence_keeps_its_negation() -> None:
+    answer = "Of course not. You can ask your sponsor."
+    assert leading_preamble_span(answer, "en") is None
+    assert strip_leading_preamble(answer, "en") == answer
+
+
+def test_spanish_claro_que_no_keeps_its_negation() -> None:
+    answer = "Claro que no. No se aceptan devoluciones."
+    assert leading_preamble_span(answer, "es") is None
+    assert strip_leading_preamble(answer, "es") == answer
+
+
+def test_spanish_claro_que_si_keeps_its_affirmation() -> None:
+    answer = "Claro que sí. Puedes cambiar de patrocinador."
+    assert leading_preamble_span(answer, "es") is None
+    assert strip_leading_preamble(answer, "es") == answer
+
+
+def test_german_naturlich_nicht_keeps_its_negation() -> None:
+    answer = "Natürlich nicht. Rückgaben werden nicht akzeptiert."
+    assert leading_preamble_span(answer, "de") is None
+    assert strip_leading_preamble(answer, "de") == answer
+
+
+def test_french_bien_sur_que_non_keeps_its_negation() -> None:
+    answer = "Bien sûr que non. Les retours ne sont pas acceptés."
+    assert leading_preamble_span(answer, "fr") is None
+    assert strip_leading_preamble(answer, "fr") == answer
+
+
+def test_of_course_returns_are_accepted_still_strips() -> None:
+    # Positive control: a genuine pleasantry opener with no negation/yes-no
+    # token in it must still strip after the fix.
+    answer = "Of course! Returns are accepted within 30 days."
+    assert leading_preamble_span(answer, "en") is not None
+    assert strip_leading_preamble(answer, "en") == "Returns are accepted within 30 days."
+
+
+def test_spanish_claro_still_strips() -> None:
+    answer = "¡Claro! Puedes cambiar de patrocinador."
+    assert leading_preamble_span(answer, "es") is not None
+    assert strip_leading_preamble(answer, "es") == "Puedes cambiar de patrocinador."
+
+
 def test_french_preamble_is_detected_and_stripped() -> None:
     answer = "Merci de poser la question. Le cout de livraison est de 5 USD."
     assert leading_preamble_span(answer, "fr") is not None

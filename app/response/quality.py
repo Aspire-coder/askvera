@@ -205,11 +205,13 @@ def format_period_not_covered(template: str, years: list[int]) -> str:
 # question!", "Certainly!", "I'd be happy to help.") and exists only to
 # precede the real answer. Deliberately small and closed, the same discipline
 # every other per-language table in this codebase uses (see e.g.
-# config/reference_vocabulary.py's own docstring): every entry below is a
-# complete opener phrase, matched only at the very START of the answer's
-# first sentence, never a bare word matched anywhere in it -- so an answer
-# that happens to mention "of course you can return the item within 30 days"
-# is never touched (that phrase does not open the sentence).
+# config/reference_vocabulary.py's own docstring): every entry below is
+# matched against the answer's WHOLE first sentence (after folding and
+# stripping wrapper punctuation), not a prefix -- see the "Certainly not."
+# defect note below _PREAMBLE_FILLER_TAILS for why a prefix match is unsafe.
+# An answer sentence that happens to mention "of course you can return the
+# item within 30 days" is never touched (that phrase is not the whole
+# sentence).
 #
 # Confidence per language (documents which of these are held to the same bar
 # as the rest of this codebase's reviewed copy, and which are a best-effort
@@ -305,6 +307,76 @@ _TRAILING_WRAPPER_PUNCTUATION_RE = re.compile(
     r"[\s\"'*«»‘’“”¡¿.,:;!?-]+$"
 )
 
+# CLOSED, small, short filler continuation a preamble opener may be followed
+# by and still be pure preamble -- "Of course, I'd be happy to help with
+# that." says as little as "Of course." alone. Deliberately narrow: only
+# entries actually reviewed go here (Fable/coordinator review, 2026-09-18,
+# finding on cadd4f1 -- see the negation/yes-no fix below for the defect
+# this table's own narrowness was found alongside). A language with no table
+# here simply never gets the "opener + filler" shape, only the bare opener.
+_PREAMBLE_FILLER_TAILS: dict[str, tuple[str, ...]] = {
+    "en": ("i'd be happy to help with that", "i would be happy to help with that"),
+}
+
+# CLOSED, per-language table of negation and yes/no answer tokens (Fable/
+# coordinator review of cadd4f1, 2026-09-18): "Of course not.", "Certainly
+# not.", "Claro que no.", "Claro que si.", "Naturlich nicht.", "Bien sur que
+# non." all open with a table entry from _PREAMBLE_OPENERS above, but each
+# one IS the direct answer to a yes/no question -- "Of course not. Returns
+# are not accepted." must never lose its "not". A sentence carrying one of
+# these tokens (matched as a whole word, after the same accent-fold
+# _PREAMBLE_OPENERS itself is matched through) is never treated as preamble,
+# regardless of whether it also happens to start with an opener phrase. Kept
+# deliberately literal and narrow, the same discipline as every other
+# per-language table in this module: a plain negation/affirmation particle
+# in each language, not an open-ended list of every way to say "no".
+#
+# Documented over-blocking trade-off, accepted deliberately: Spanish "si"
+# (unaccented "si") is also the ordinary word for "if" ("si tienes dudas,
+# contacta..."), so this table causes some genuinely-preamble Spanish
+# sentences containing "si" to be left unstripped too. That is always the
+# SAFE direction for this check -- it can only ever cause a sentence to be
+# kept whole, never cause real content to be deleted -- so the trade-off is
+# accepted rather than trying to disambiguate "if" from "yes" here.
+_NEGATION_OR_YES_NO_TOKENS: dict[str, frozenset[str]] = {
+    "en": frozenset({"not", "no", "yes"}),
+    "es": frozenset({"no", "si"}),
+    "fr": frozenset({"non", "oui", "pas"}),
+    "de": frozenset({"nicht", "nein", "ja", "kein", "keine", "keinen"}),
+    "it": frozenset({"no", "si", "non"}),
+    "pt": frozenset({"nao", "sim"}),
+    "nl": frozenset({"niet", "nee", "ja"}),
+    "sv": frozenset({"inte", "ja", "nej"}),
+    "no": frozenset({"ikke", "ja", "nei"}),
+    "da": frozenset({"ikke", "ja", "nej"}),
+    "fi": frozenset({"ei", "kylla"}),
+    "ru": frozenset({"не", "нет", "да"}),
+    "sr": frozenset({"ne", "da"}),
+}
+_NEGATION_OR_YES_NO_PATTERNS: dict[str, re.Pattern[str]] = {
+    language: re.compile(
+        r"(?<!\w)(?:" + "|".join(re.escape(token) for token in tokens) + r")(?!\w)",
+        re.IGNORECASE | re.UNICODE,
+    )
+    for language, tokens in _NEGATION_OR_YES_NO_TOKENS.items()
+}
+
+
+def _sentence_has_negation_or_yes_no_token(sentence: str, language: str) -> bool:
+    """True when ``sentence`` carries a whole-word negation/yes/no token.
+
+    Matched on the accent-folded sentence (:func:`_fold_diacritics`) so an
+    accented spelling ("Sí", "Ja" with a following umlaut word, etc.) is
+    caught the same way :data:`_PREAMBLE_OPENERS` itself is. An unrecognised
+    ``language`` (no entry in :data:`_NEGATION_OR_YES_NO_TOKENS`) matches
+    nothing here -- the same "not recognized, do nothing extra" default this
+    module's other per-language lookups use.
+    """
+    pattern = _NEGATION_OR_YES_NO_PATTERNS.get(normalize_language_code(language))
+    if pattern is None:
+        return False
+    return bool(pattern.search(_fold_diacritics(sentence)))
+
 
 def _sentence_is_never_preamble(sentence: str, language: str) -> bool:
     """True when ``sentence`` must never be treated as pure preamble.
@@ -329,6 +401,8 @@ def _sentence_is_never_preamble(sentence: str, language: str) -> bool:
     if DIRECTORY_POLICY_WORDING_RE.search(sentence):
         return True
     if localized_policy_wording_present(sentence, language=language):
+        return True
+    if _sentence_has_negation_or_yes_no_token(sentence, language):
         return True
     return False
 
@@ -358,8 +432,19 @@ def leading_preamble_span(answer: str, language: str) -> tuple[int, int] | None:
     folded = _fold_diacritics(text)
     folded = _LEADING_WRAPPER_PUNCTUATION_RE.sub("", folded)
     folded = _TRAILING_WRAPPER_PUNCTUATION_RE.sub("", folded)
-    if any(folded == opener or folded.startswith(opener + " ") or folded.startswith(opener + ",")
-           for opener in openers):
+    fillers = _PREAMBLE_FILLER_TAILS.get(normalize_language_code(language), ())
+    if any(
+        folded == opener
+        or any(
+            # The filler tail can be separated from the opener by a comma or
+            # just whitespace -- both were already stripped of their own
+            # trailing/leading punctuation above, so only a plain space or
+            # ", " join needs checking here.
+            folded == f"{opener} {filler}" or folded == f"{opener}, {filler}"
+            for filler in fillers
+        )
+        for opener in openers
+    ):
         return (first.start, first.end)
     return None
 
