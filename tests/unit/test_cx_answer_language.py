@@ -210,6 +210,35 @@ class TestRetrievalLanguageInvariant:
 
 _NO_DA_AMBIGUOUS_PAIR = frozenset({"no", "da"})
 
+# Known, documented miss within ACCEPTANCE_POSITIVE_CASES (Fable CX review
+# finding F4, 2026-09-19): an earlier revision silently SWAPPED this
+# sentence out for one that switches, when removing the (incorrect) Latin
+# Serbian diacritic bonus made it stop switching - without saying so in
+# CX_LANE7's "unchanged" recall claim. It is restored here, kept in the
+# table (not deleted again) so a future change that makes it start
+# switching - right OR wrong - is visible, and so the recall bar stays
+# honest about exactly what it covers. It genuinely IS ambiguous with
+# Croatian/Bosnian (see the hr/bs sink in answer_language.py), so staying
+# unswitched is the correct, safe outcome, not a defect - see
+# TestAcceptanceSet.test_known_miss_sr_sentence_stays_unswitched.
+_KNOWN_MISS_CASES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("sr", "Koje načine plaćanja prihvatate za porudžbine na internetu?"),
+        # The two below are new costs of the Fable re-review word-evidence
+        # gate (2026-09-19): both are genuinely correct switches whose
+        # evidence happens to have the SAME thin-word/letter-heavy shape as
+        # the wrong-language switches that gate exists to block (one
+        # matching marker word plus a shared moderate-accent letter bonus -
+        # see answer_language.py's MIN_WORD_EVIDENCE/MIN_LATIN_SWITCH_SHARE
+        # docstring). There is no way to tell these apart from the pt/hu
+        # false positives using the evidence shape alone, so blocking them
+        # too is the safe, documented trade the coordinator accepted
+        # ("a small drop is acceptable; state it").
+        ("fi", "Mitä maksutapoja hyväksytte verkkotilauksissa?"),
+        ("sv", "Vilka betalningsmetoder accepterar ni för beställningar online?"),
+    }
+)
+
 # 4 questions per language x 12 languages = 48, covering shipping cost,
 # returns, payment methods and contact/sponsorship.
 ACCEPTANCE_POSITIVE_CASES: dict[str, tuple[str, ...]] = {
@@ -270,6 +299,9 @@ ACCEPTANCE_POSITIVE_CASES: dict[str, tuple[str, ...]] = {
     "sr": (
         "Koliko košta dostava porudžbine u Srbiju i koliko to traje?",
         "Kako mogu da vratim proizvod koji sam naručio prošle nedelje?",
+        # Known miss - see _KNOWN_MISS_CASES above (Fable F4): restored,
+        # not deleted, and excluded from the "must switch" assertion below.
+        "Koje načine plaćanja prihvatate za porudžbine na internetu?",
         "Da li prihvatate sve načine plaćanja za porudžbine na internetu?",
         "Ko je moj sponzor i kako mogu da ga kontaktiram?",
     ),
@@ -322,17 +354,35 @@ class TestAcceptanceSet:
 
     def test_every_non_near_pair_language_switches_correctly(self):
         """Every language outside the no/da ambiguous pair must switch to
-        exactly the expected language for every one of its 4 questions
-        (recall == 1.0, and never a WRONG language - precision == 1.0)."""
+        exactly the expected language for every one of its questions except
+        the documented _KNOWN_MISS_CASES (recall == 1.0 on the rest, and
+        never a WRONG language anywhere - precision == 1.0)."""
         failures = []
         for language, questions in ACCEPTANCE_POSITIVE_CASES.items():
             if language in _NO_DA_AMBIGUOUS_PAIR:
                 continue
             for question in questions:
+                if (language, question) in _KNOWN_MISS_CASES:
+                    continue
                 result = resolve_answer_language(question, "en")
                 if not (result.switched and result.answer_language == language):
                     failures.append((language, question, result))
         assert not failures, f"{len(failures)} acceptance-set failures: {failures}"
+
+    def test_known_miss_cases_stay_unswitched(self):
+        """Every documented _KNOWN_MISS_CASES entry stays unswitched, for
+        its own documented reason (see the frozenset's own comments): the
+        `sr` sentence restored per Fable F4 (2026-09-19, genuinely ambiguous
+        with Croatian/Bosnian), and the `fi`/`sv` sentences that are a new,
+        disclosed cost of the Fable re-review word-evidence gate (their
+        evidence has the same thin-word/letter-heavy shape as a true
+        wrong-language switch, so the gate cannot tell them apart). None of
+        these is a wrong-language switch - all stay on the selected
+        language."""
+        for language, question in _KNOWN_MISS_CASES:
+            result = resolve_answer_language(question, "en")
+            assert result.switched is False, (language, question, result)
+            assert result.answer_language == "en", (language, question, result)
 
     def test_no_da_pair_never_crosses_to_the_wrong_member(self):
         """no/da may legitimately stay unswitched on a genuinely ambiguous
@@ -414,7 +464,15 @@ class TestAcceptanceSet:
 
         assert wrong_language_switches == 0, "a switch happened to the wrong language"
         assert precision == 1.0
-        assert recall >= 0.85, f"recall {recall:.2%} below the documented 0.85 bar (correct={correct}/{total})"
+        # Bar lowered 0.85 -> 0.80 (Fable CX re-review, 2026-09-19): the new
+        # word-evidence gate (MIN_WORD_EVIDENCE/MIN_LATIN_SWITCH_SHARE - see
+        # answer_language.py) closed two real wrong-language switches
+        # (Portuguese/Hungarian read as Spanish) but, being unable to tell
+        # a true positive with the same thin-evidence shape apart from a
+        # false one, also cost two genuine base-set switches (fi, sv - see
+        # _KNOWN_MISS_CASES). Precision (0 wrong switches) stays 100%; this
+        # bar states the recall cost honestly rather than hiding it.
+        assert recall >= 0.80, f"recall {recall:.2%} below the documented 0.80 bar (correct={correct}/{total})"
 
 
 # ---------------------------------------------------------------------------
@@ -565,14 +623,16 @@ class TestBrandMarketAcceptanceSet:
 
         recall = correct / total
         assert wrong == 0, "a switch happened to the wrong language in the brand/market set"
-        # Bar lowered 0.70 -> 0.65 (Fable CX review finding S4, 2026-09-19):
-        # the precision fixes (winner-share gate, the stricter words-only
-        # Cyrillic tier, the corrected Serbian distinctive-character set)
-        # cost some recall here in exchange for zero wrong-language
-        # switches, which the coordinator explicitly prioritized ("keep
-        # 100% precision ... report recall before and after"). See
-        # CX_LANE7_ANSWER_LANGUAGE.md for the exact before/after numbers.
-        assert recall >= 0.65, f"brand/market recall {recall:.2%} below the documented 0.65 bar ({correct}/{total})"
+        # Bar lowered 0.70 -> 0.65 (Fable S4, 2026-09-19), now 0.65 -> 0.55
+        # (Fable re-review, 2026-09-19): the new word-evidence gate
+        # (MIN_WORD_EVIDENCE/MIN_LATIN_SWITCH_SHARE) hits this set harder
+        # than the base set, because masking the brand/market proper nouns
+        # already thins out winner_share before the new >=0.3 floor is even
+        # applied - several genuine switches (e.g. a Spanish sentence with
+        # a real "¿" exempt-letter hit) now fall just short of that share
+        # floor. Precision (0 wrong-language switches) stays 100% - see
+        # CX_LANE7_ANSWER_LANGUAGE.md for the full before/after table.
+        assert recall >= 0.55, f"brand/market recall {recall:.2%} below the documented 0.55 bar ({correct}/{total})"
 
 
 class TestMarketNameExclusion:
@@ -776,3 +836,143 @@ class TestPortugueseCroatianUkrainianTurkishOnEnglishWidget:
         ):
             result = resolve_answer_language(message, "en")
             assert result.answer_language not in ("fr", "de"), (message, result)
+
+
+# ---------------------------------------------------------------------------
+# "None of the above" SINK languages (Fable CX review finding F1,
+# 2026-09-19): reachable TODAY, because every non-route market's widget
+# still sends "en" (the other configured languages aren't in ChatRequest's
+# enum), so a message actually written in one of them lands on an "en"
+# widget. The winner-share gate (S4) alone cannot separate a genuinely
+# Portuguese/Hungarian/Croatian/... sentence from its closest route-copy
+# relative, because the vocabulary genuinely overlaps - fixed with a small,
+# closed marker table per likely non-route language (function words +
+# distinctive letters), scored alongside the 12 real candidates but never
+# eligible to become answer_language itself; if a sink rivals the route
+# winner, or a sink's distinctive letter appears anywhere, the turn stays
+# unswitched (reason "non_route_language_likely").
+# ---------------------------------------------------------------------------
+
+# The exact three sentences the coordinator reported as failing.
+FABLE_F1_EXACT_SENTENCES: tuple[str, ...] = (
+    "Qual é o custo de entrega para a Forever Portugal?",
+    "Quais são os métodos de pagamento aceites?",
+    "Milyen fizetési módokat fogadnak el?",
+)
+
+# >=5 realistic customer questions (shipping cost, returns, payment methods,
+# sponsorship/contact) in each of the 10 sink languages named in the
+# coordinator's fix, widget="en" - must not switch.
+SINK_LANGUAGE_NEGATIVE_CASES: dict[str, tuple[str, ...]] = {
+    "pt": (
+        "Qual é o custo de entrega para a Forever Portugal?",
+        "Quais são os métodos de pagamento aceites?",
+        "Como posso devolver um produto que encomendei há uma semana?",
+        "Quem é o meu patrocinador e como posso contactá-lo?",
+        "Quanto tempo demora a entrega de uma encomenda normal?",
+    ),
+    "hu": (
+        "Milyen fizetési módokat fogadnak el?",
+        "Mennyibe kerül egy rendelés kiszállítása?",
+        "Hogyan tudom visszaküldeni a terméket, amit rendeltem?",
+        "Ki a szponzorom és hogyan léphetek vele kapcsolatba?",
+        "Mennyi ideig tart a szállítás általában?",
+    ),
+    "ro": (
+        "Cât costă livrarea unei comenzi?",
+        "Cum pot returna un produs pe care l-am comandat?",
+        "Ce metode de plată acceptați pentru comenzile online?",
+        "Cine este sponsorul meu și cum pot să îl contactez?",
+        "Cât timp durează livrarea de obicei?",
+    ),
+    "pl": (
+        "Ile kosztuje dostawa zamówienia?",
+        "Jak mogę zwrócić produkt, który zamówiłem?",
+        "Jakie metody płatności akceptujecie przy zamówieniach online?",
+        "Kto jest moim sponsorem i jak mogę się z nim skontaktować?",
+        "Jak długo trwa zwykle dostawa?",
+    ),
+    "tr": (
+        "Bir siparişin teslimat ücreti ne kadar?",
+        "Sipariş ettiğim bir ürünü nasıl iade edebilirim?",
+        "Çevrimiçi siparişler için hangi ödeme yöntemlerini kabul ediyorsunuz?",
+        "Sponsorum kim ve onunla nasıl iletişime geçebilirim?",
+        "Teslimat genellikle ne kadar sürer?",
+    ),
+    "hr": (
+        "Koliko košta dostava narudžbe?",
+        "Kako mogu vratiti proizvod koji sam naručio?",
+        "Koje načine plaćanja prihvaćate za narudžbe putem interneta?",
+        "Tko je moj sponzor i kako ga mogu kontaktirati?",
+        "Koliko obično traje dostava?",
+    ),
+    "sq": (
+        "Cilat metoda pagese pranoni për porositë në internet?",
+        "Sa kushton dërgesa e një porosie?",
+        "Si mund ta kthej një produkt që porosita?",
+        "Kush është sponsori im dhe si mund ta kontaktoj?",
+        "Sa kohë zgjat zakonisht dërgesa?",
+    ),
+    "mk": (
+        "Кои начини на плаќање ги прифаќате за нарачки преку интернет?",
+        "Колку чини достава на нарачка?",
+        "Како можам да го вратам производот што го нарачав?",
+        "Кој е мојот спонзор и како можам да го контактирам?",
+        "Колку време обично трае доставата?",
+    ),
+    "bg": (
+        "Какви методи на плащане приемате за поръчки онлайн?",
+        "Колко струва доставката на поръчка?",
+        "Как мога да върна продукт, който съм поръчал?",
+        "Кой е моят спонсор и как мога да се свържа с него?",
+        "Колко време обикновено отнема доставката?",
+    ),
+    "uk": (
+        "Які способи оплати ви приймаєте для замовлень онлайн?",
+        "Скільки коштує доставка замовлення?",
+        "Як я можу повернути товар, який я замовив?",
+        "Хто мій спонсор і як я можу з ним зв'язатися?",
+        "Скільки зазвичай триває доставка?",
+    ),
+}
+
+
+class TestSinkLanguages:
+    """Fable CX review finding F1 (2026-09-19), closed out by the Fable
+    re-review word-evidence gate (also 2026-09-19): the two sentences that
+    were disclosed as remaining wrong-language switches (`pt`/`hu`, both
+    switching to "es") are FIXED by that gate - coordinator review found a
+    wrong-language switch is never an acceptable "known miss", so there is
+    no longer any exemption here. Every case below is now a regular,
+    unconditional assertion."""
+
+    def test_fable_exact_sentences_no_longer_switch_to_spanish(self):
+        for message in FABLE_F1_EXACT_SENTENCES:
+            result = resolve_answer_language(message, "en")
+            assert result.switched is False, (message, result)
+            assert result.answer_language == "en", (message, result)
+
+    def test_sink_language_negatives_never_switch(self):
+        failures = []
+        for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
+            for question in questions:
+                result = resolve_answer_language(question, "en")
+                if result.switched:
+                    failures.append((language, question, result))
+        assert not failures, f"{len(failures)} sink-language false switches: {failures}"
+
+    def test_recall_of_the_sink_negative_set(self):
+        """Aggregate count for the coordinator report: how many of the 50
+        realistic non-route-language questions correctly stay unswitched -
+        now 50/50 (100%), up from 48/50 once the word-evidence gate closed
+        the two remaining wrong-language switches."""
+        total = 0
+        correct = 0
+        for language, questions in SINK_LANGUAGE_NEGATIVE_CASES.items():
+            for question in questions:
+                total += 1
+                result = resolve_answer_language(question, "en")
+                if not result.switched:
+                    correct += 1
+        assert total == 50
+        assert correct == 50, f"only {correct}/{total} sink negatives stayed unswitched"
