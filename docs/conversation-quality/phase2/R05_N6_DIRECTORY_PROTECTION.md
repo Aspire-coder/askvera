@@ -816,3 +816,282 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   attempt to disambiguate sense from a bare word. This trades a small
   amount of recall for eliminating the physical-condition false positive,
   the same trade-off English's fix makes.
+
+## Sixth follow-up (2026-09-18): coordinator review of 99ec438 (MEDIUM finding)
+
+A Fable review of candidate `99ec438` (the fourth and fifth follow-ups)
+approved the fix "with limitations", with one MEDIUM finding: the
+widening amplifies false suppression. The review ran 35 idiom/
+subordinate-clause probes against the vocabulary and found **27 newly,
+wrongly suppressed from `directory`/8.0 to `policy`/0.0**. The fifth
+follow-up's own reasoning - that the Romance-language plural
+("condiciones"/"conditions"/"condizioni"/"condições") was not idiomatic
+the way the singular was - was itself factually wrong: the plural IS the
+standard idiom for the same physical/circumstantial sense ("La oficina
+esta en buenas condiciones?" = "Is the office in good condition?").
+
+### Confirmed false positives (reviewer's probe set)
+
+- es "¿Cuál es la dirección de Forever Ghana? ¿La oficina está en buenas
+  condiciones?", it "in buone condizioni", pt "em boas condições" - the
+  plural physical-condition idiom in all three Romance languages.
+- en "road conditions near Forever Ghana's office address", "weather
+  conditions" - the same idiom in English (the fifth follow-up's
+  plural-only fix did not go far enough).
+- ru "в условиях пандемии" ("under pandemic conditions" - a
+  circumstance/setting, not a policy document).
+- no/da/sv "uansett vilkår"/"under alla villkor" ("regardless of
+  terms"/"under all conditions" as a general expression).
+- nl "onder voorwaarde dat" ("on condition that", a conjunction).
+- de "unter der Bedingung" (the same conjunction sense), "die Bestimmung
+  meiner Sendung" ("Bestimmung" here means "destination", a genuine
+  directory/logistics question, not "provision/regulation").
+- fr "dans ces conditions" ("under these circumstances"), "directives de
+  mon médecin" (a doctor's instructions, not a Forever policy document).
+- it "linee guida del mio medico" (a doctor's guidelines).
+- es "directrices" (bare, same guideline-instruction ambiguity).
+
+### Coordinator decision (implemented exactly): keep only words whose dominant sense is a policy document
+
+**KEEP**, per language, exactly three categories:
+
+1. The original, second-follow-up F1 set (already reviewed then),
+   including German "Richtlinie"/"Richtlinien" - kept specifically because
+   it was part of that original reviewed set, not a new addition (see the
+   justification comment directly above `POLICY_WORDING_TERMS` in
+   `config/directory_field_vocabulary.py`).
+2. A distinct "regulation(s)" synonym where the language has one:
+   `regulation(s)` (en), `reglamento(s)` (es), `règlement(s)` (fr, already
+   in the F1 set), `Vorschrift(en)` (de), `reglement` (nl), `regolamento`/
+   `regolamenti` (it), `regulamento`/`regulamentos` (pt), `määräykset`
+   (fi, medium confidence, **plural only** - the coordinator's exact
+   wording; the singular `määräys` is dropped along with everything else
+   not explicitly named).
+3. The COMPOUND "terms and conditions" phrase, matched as a whole
+   multi-word phrase (so it cannot fire on a bare word inside it appearing
+   alone elsewhere): en "terms and conditions"/"terms of" (already
+   present, with the fifth follow-up's lookbehind); es "términos y
+   condiciones"; fr "conditions générales"; de "Geschäftsbedingungen"/
+   "AGB"/"Nutzungsbedingungen"; nl "algemene voorwaarden"; it "termini e
+   condizioni"; pt "termos e condições"; no/da "vilkår og betingelser"/
+   "salgsbetingelser"; sv "allmänna villkor"; fi "käyttöehdot"/
+   "toimitusehdot"; ru "условия использования"/"условия продажи". The ru
+   oblique cases of политика/правила (политике/политику/политикой,
+   правилам/правилами/правилах) are also explicitly kept (named by the
+   coordinator as an exception).
+
+**DROP** everything else the fourth/fifth follow-ups added:
+
+- Every BARE condition-family form, in every language: es condiciones, fr
+  conditions, de Bedingung(en), nl voorwaarde(n), it condizioni, pt
+  condições, fi ehto/ehdot, no/da/sv vilkår/villkor, ru
+  условие/условия/условиях, sr uslov/uslovi/uslova/uslovima (Latin and
+  Cyrillic).
+- Every BARE guideline-family form: es directriz/directrices, fr
+  directive(s), it "linea guida"/"linee guida", pt diretriz/diretrizes,
+  fi ohje/ohjeet, nl richtlijn(en), no/da retningslinje/retningslinjer/
+  retningslinjene, sv riktlinje/riktlinjer/riktlinjerna. (German
+  "Richtlinie" is the sole survivor of this family - see KEEP #1 above.)
+- de Bestimmung(en) specifically (the "destination" sense dominates).
+- Serbian's oblique-case additions (politici/politiku/politikom,
+  pravilima, and Cyrillic equivalents), and the Scandinavian definite
+  plural rule forms (reglene/reglerne/reglerna): neither was explicitly
+  named in the coordinator's KEEP list (only "the ru oblique cases" were),
+  so both revert to their pre-fourth-follow-up state as the conservative,
+  literal implementation of the decision - not a claim that they are
+  themselves unsafe, but a deliberate choice to keep only what was
+  explicitly authorized.
+- English: `conditions?` and `guidelines?` removed from
+  `DIRECTORY_POLICY_WORDING_RE`; `regulation(s)`, `terms and conditions`,
+  and `terms of` (with the fifth follow-up's lookbehind) are kept.
+
+### Also fixed: whitespace collapse and stale comments
+
+- **(a) Whitespace collapse:** `_runtime_scope_intent` now computes
+  `text = " ".join((message or "").split())` before any matching (it
+  previously read `text = message or ""`). Without this, "in  terms  of"
+  (double-spaced) would not match the fifth follow-up's
+  `(?<!\bin\s)` lookbehind (which recognizes exactly one space), letting
+  the "in terms of X" idiom leak through as if it were the accepted
+  "terms of X" phrasing.
+- **(b) Stale comments fixed:** the fourth follow-up's claim that nl
+  "richtlijn"/no/da "retningslinje(r)"/sv "riktlinje(r)" were "already
+  present" (imprecise, and now moot since those forms are dropped); the
+  fifth follow-up's N1 paragraph, which still described "terms of" as
+  firing inside "in terms of" as an accepted trade-off (that trade-off was
+  actually fixed by the fifth follow-up's own lookbehind - the paragraph
+  was updated to say so); `_runtime_scope_intent`'s docstring lines
+  describing `DIRECTORY_POLICY_WORDING_RE` as "policy|rules" (stale since
+  the fourth follow-up; now points to that regex's own comment for current
+  coverage); the fifth follow-up's now-incorrect claim that the Romance
+  plural "isn't idiomatic" for the physical-condition sense (removed,
+  replaced with the corrected finding above).
+
+### Before/after table
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| es "¿Cuál es la dirección de Forever Ghana? ¿La oficina está en buenas condiciones?" | `policy` (0.0) | `directory` (8.0) |
+| it "...L'ufficio è in buone condizioni?" | `policy` (0.0) | `directory` (8.0) |
+| pt "...O escritório está em boas condições?" | `policy` (0.0) | `directory` (8.0) |
+| en "What are the road conditions near Forever Ghana's office address?" | `policy` (0.0) | `directory` (8.0) |
+| en "...What are the weather conditions?" | `policy` (0.0) | `directory` (8.0) |
+| ru "...В условиях пандемии офис работает как обычно?" | `policy` (0.0) | `directory` (8.0) |
+| no/da/sv "...Uansett vilkår/Under alle vilkår/Under alla villkor..." | `policy` (0.0) | `directory` (8.0) |
+| nl "...Onder voorwaarde dat, is het kantoor open?" | `policy` (0.0) | `directory` (8.0) |
+| de "...Nur unter der Bedingung, dass das Büro geöffnet ist?" | `policy` (0.0) | `directory` (8.0) |
+| de "...Was ist die Bestimmung meiner Sendung?" | `policy` (0.0) | `directory` (8.0) |
+| fr "...Dans ces conditions, le bureau est-il ouvert ?" | `policy` (0.0) | `directory` (8.0) |
+| fr "...Je suis les directives de mon médecin." | `policy` (0.0) | `directory` (8.0) |
+| it "...Seguo le linee guida del mio medico." | `policy` (0.0) | `directory` (8.0) |
+| es "...Sigo las directrices de mi médico." | `policy` (0.0) | `directory` (8.0) |
+| "What are the office hours...in  terms  of weekends?" (double-space) | `policy` (0.0) | `directory` (8.0) |
+| es "reglamento"/ru dative "политике" (control, regulation/oblique kept) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| en "regulations"/"terms and conditions" (control) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| de "Richtlinie" + directory field (control) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| es "términos y condiciones"/de "AGB" (new compound, control) | n/a (new) | `policy` (0.0) |
+
+### Test assertions CHANGED (not deleted), per the coordinator's instruction
+
+- `test_s1_reviewer_repro_regulation_condition_guideline_wording_stays_policy`:
+  split into two tests. The `spanish-condiciones`/`french-conditions`/
+  `italian-condizioni` cases moved to a new
+  `test_s1_bare_condition_repros_now_resolve_directory_after_sixth_follow_up`,
+  asserting `directory` instead of `policy`. `spanish-reglamento`/
+  `russian-dative-politike` are unchanged (kept vocabulary).
+- `test_s1_reviewer_repro_english_regulation_condition_guideline_wording_stays_policy`:
+  the `english-guidelines` case moved to a new
+  `test_s1_bare_guidelines_repro_now_resolves_directory_after_sixth_follow_up`,
+  asserting `directory` instead of `policy`. `english-regulations`/
+  `english-terms-and-conditions` are unchanged.
+- `test_s1_localized_policy_wording_present_unit_new_terms`: 28 of its 40
+  assertions changed from `True` to `False` (every bare condition/
+  guideline-family form and the Serbian/Scandinavian unlisted additions);
+  11 remain `True` unchanged (the regulation(s) equivalents and the ru
+  oblique cases), and 1 remains `False` unchanged (the pre-existing
+  "Cual es el telefono?" not-a-false-positive control). Each changed line
+  carries an inline `# CHANGED: ...` comment naming the reason.
+- `test_s2_romance_language_singular_condition_dropped_plural_kept`
+  renamed to `test_s2_romance_language_bare_condition_forms_dropped_entirely`;
+  all four `-plural-policy` cases changed from `True` to `False` (the
+  bare plural is itself the idiom now recognized as a false positive);
+  all four singular cases are unchanged (already `False`).
+- `test_s2_non_romance_singular_condition_forms_unchanged` renamed to
+  `test_s2_non_romance_bare_condition_forms_also_dropped_after_sixth_follow_up`;
+  all five cases (de/nl/fi/ru/sr) changed from `True` to `False`.
+
+### Sixth follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 20 new sixth-follow-up tests
+   (`test_s6_compound_terms_and_conditions_phrases_present_across_languages`,
+   `test_s6_richtlinie_kept_with_justification`,
+   `test_s6_reviewer_idiom_repros_stay_directory` x16,
+   `test_s6_whitespace_collapse_prevents_in_terms_of_leak`,
+   `test_s6_whitespace_collapse_unit_control`), on
+   `config/directory_field_vocabulary.py` and `app/retrieval/providers.py`
+   reverted via `git stash` (tests kept): **19 failed, 1 passed,
+   `EXIT=1`** - the 1 pre-existing pass is
+   `test_s6_richtlinie_kept_with_justification` (Richtlinie was already
+   present before this follow-up). `git stash pop` restored the fix
+   afterward.
+2. Full `test_r05_directory_protection_intent.py` plus targeted list
+   (`test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **711 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **9035 passed, 13
+   xfailed, `EXIT=0`**, 338.92s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): one `W605`
+   invalid-escape-sequence finding (a docstring, not a regex) was caught
+   and fixed; final run: **no output, `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Sixth follow-up limitations (reopened, stated honestly)
+
+- **A genuine policy question using bare "conditions" once again resolves
+  to `directory`/8.0 instead of `policy`/0.0** - exactly the shape this
+  whole task exists to prevent, reopened deliberately: "What are the
+  conditions of Forever Norway on the delivery address?" (English) or the
+  identical shape in any covered language no longer suppresses the
+  country bonus. Only the specific compound "terms and conditions" phrase
+  is recognized now. This is the coordinator's explicit, accepted
+  trade-off: false suppression (blocking a genuine directory question) was
+  judged worse than this reopened gap (a genuine policy question
+  occasionally keeping its directory bonus), given the review's 27/35
+  false-positive rate on the wider vocabulary.
+- **The same reopened gap applies to the guideline family**: "What are
+  the guidelines of Forever Norway on the delivery address?" also
+  resolves to `directory`/8.0 again, in every language except German
+  ("Richtlinie", the sole kept guideline-family word).
+- **Serbian's oblique political/pravila forms and the Scandinavian
+  definite-plural rule forms (reglene/reglerne/reglerna) were reverted
+  conservatively**, not because they were shown to be unsafe, but because
+  the coordinator's KEEP list did not name them explicitly. A future
+  review could reinstate them with an explicit decision either way.
+- **The compound "terms and conditions" phrases are closed, literal,
+  multi-word strings** - a paraphrase or reordering of the standard phrase
+  in any language (e.g. a non-standard German phrasing that isn't
+  "Geschäftsbedingungen"/"AGB"/"Nutzungsbedingungen") is not recognized,
+  by design (recognizing partial or reordered phrases risks reopening the
+  same bare-word ambiguity this follow-up just closed).
+
+## Seventh follow-up (2026-09-18): coordinator review of 52cee7b (small fix)
+
+A coordinator review of the sixth follow-up found one over-correction:
+"reglene"/"reglerne"/"reglerna" (the definite PLURAL of no/da/sv "regel" =
+"rule") were dropped alongside the (correctly dropped)
+retningslinjene/riktlinjerna guideline-family definite forms, because
+neither was "explicitly named" in the sixth follow-up's KEEP list. But
+"reglene" etc. are rules-family, not guideline/condition-family - squarely
+inside the KEEP list's own "policy/RULES family", and the ordinary way to
+write "the rules of Forever Norge for..." in these three languages.
+
+**Fix:** restored, narrowly, in `POLICY_WORDING_TERMS`
+(`config/directory_field_vocabulary.py`): `no` "reglene", `da` "reglerne",
+`sv` "reglerna" (the definite plural of "regel" only -
+`retningslinjene`/`riktlinjerna` stay dropped), and `sr`
+`pravilima`/`правилима` (the dative/instrumental plural of "pravila" =
+rules; Serbian's other, unrestored oblique forms - `politici`, `politiku`,
+`politikom`, and the entire `uslov`/`услов` condition-family - stay
+dropped exactly as the sixth follow-up left them).
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| no "Hva er reglene til Forever Norge for leveringsadressen?" | `ambiguous` (0.0) | `policy` (0.0) |
+| da "Hvad er reglerne for Forever Norge for leveringsadressen?" | `ambiguous` (0.0) | `policy` (0.0) |
+| sv "Vad är reglerna för Forever Norge för leveransadressen?" | `ambiguous` (0.0) | `policy` (0.0) |
+| sr "Koja su pravilima Forever Norge za adresu isporuke?" | `directory` (8.0) | `policy` (0.0) |
+| no/sv "retningslinjene"/"riktlinjerna" + directory field (control) | `directory` (8.0), unchanged | `directory` (8.0), unchanged |
+| sr "politici"/"uslovi" (control, still dropped) | `directory` (8.0), unchanged | `directory` (8.0), unchanged |
+| no "som regel" idiom + directory field (N1 control, unchanged) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+
+Test assertions updated in `test_s1_localized_policy_wording_present_unit_new_terms`
+(four lines, `False` -> `True`, marked "CHANGED AGAIN (seventh follow-up)"
+in an inline comment): no "Hva er reglene?", da "Hvad er reglerne?", sv
+"Vad är reglerna?", sr "pravilima".
+
+### Seventh follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 8 new `test_s7_*` tests, on `config/directory_field_vocabulary.py`
+   reverted via `git stash` (tests kept): **5 failed, 3 passed,
+   `EXIT=1`** - the 3 pre-existing passes are the regression-guard
+   controls (retningslinjene/riktlinjerna, politici/uslovi, and the "som
+   regel" idiom control), unaffected by this restoration either way.
+   `git stash pop` restored the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **719 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **9043 passed, 13
+   xfailed, `EXIT=0`**, 415.11s wall time.
+4. `flake8` on the four changed files: **no output, `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
