@@ -206,9 +206,67 @@ def _partial_answer_gap_note(
     """
     if not coverage.unsupported:
         return None
-    labels = [render(f"field_label_{field}", language) for field in sorted(coverage.unsupported)]
+    labels = [
+        _label_in_sentence(render(f"field_label_{field}", language), language)
+        for field in sorted(coverage.unsupported)
+    ]
     joined = cx_render.join_list(labels, language)
     return render("partial_answer_gap", language, fields=joined)
+
+
+# Languages that capitalise common nouns; everywhere else a field label used
+# inside a sentence starts lower-case ("about payment methods").
+_NOUN_CAPITALISING_LANGUAGES = frozenset({"de"})
+
+
+def _label_in_sentence(label: str, language: str) -> str:
+    base = (language or "en").split("-", 1)[0].lower()
+    if not label or base in _NOUN_CAPITALISING_LANGUAGES:
+        return label
+    return label[0].lower() + label[1:]
+
+
+def _generic_missing_first_paragraph(language: str, render: Callable[..., str]) -> str:
+    """The first paragraph of the reviewed generic ``insufficient_evidence``
+    copy (the rest is a contact line whose [PHONE] the orchestrator fills)."""
+    try:
+        return render("insufficient_evidence", language).split("\n\n", 1)[0].strip()
+    except KeyError:
+        return ""
+
+
+def _starts_with_generic_missing(answer: str, language: str, render: Callable[..., str]) -> bool:
+    generic = _generic_missing_first_paragraph(language, render)
+    return bool(generic) and answer.startswith(generic)
+
+
+def _name_missing_fields(
+    answer: str,
+    outcome: ConversationOutcome,
+    language: str,
+    render: Callable[..., str],
+    applied: list[str],
+) -> str:
+    """Swap the generic reviewed ``insufficient_evidence`` sentence for its
+    ``evidence_missing_detail`` version naming the requested fields.
+
+    Only an answer that STARTS with the exact generic copy for ``language`` is
+    changed, and only that copy is replaced; anything appended after it (an
+    office-contact addendum) is kept. Otherwise the answer is returned as is.
+    """
+    generic = _generic_missing_first_paragraph(language, render)
+    if not generic or not answer.startswith(generic):
+        return answer
+    labels = [
+        _label_in_sentence(render(f"field_label_{field}", language), language)
+        for field in sorted(outcome.fields_requested)
+    ]
+    detail = render("evidence_missing_detail", language, topic=cx_render.join_list(labels, language))
+    if not detail or _UNFILLED_PLACEHOLDER_RE.search(detail):
+        applied.append("dropped:evidence_missing_detail")
+        return answer
+    applied.append("evidence_missing_detail")
+    return detail + answer[len(generic):]
 
 
 def _render_suggestions(
@@ -309,16 +367,35 @@ def compose_cx_response(
             # copy or crashing the turn.
             applied.append("dropped:partial_note")
 
-        if detect_personal_account_request(question, language):
-            answer = _apply_addition(
-                answer, "personal_account_limit", render("personal_account_limit", language), applied,
-            )
-
     elif outcome.kind not in _FALLBACK_KINDS:
         # Fail closed: an outcome kind this module does not recognise (a
         # future addition to OutcomeKind not yet wired here) gets no
         # addition at all rather than a guessed-at treatment.
         return _unchanged(response)
+
+    if outcome.kind == OutcomeKind.EVIDENCE_MISSING and outcome.fields_requested:
+        # Name what could not be found, replacing only the generic reviewed
+        # sentence it is the drop-in detail version of (coordinator,
+        # 2026-09-19). Any other evidence-missing copy is left untouched.
+        answer = _name_missing_fields(answer, outcome, language, render, applied)
+
+    # A personal-account lookup ("Where is my order?") usually has no evidence
+    # at all, so the note applies to evidence_missing too, not only to answers
+    # (coordinator, 2026-09-19, CX pack triage P2). It is never a refusal.
+    # On an evidence-missing response the note is added only on top of the
+    # generic copy: a specialised scope copy (e.g. "I don't have ... order
+    # status") has already said it, and repeating it reads as a loop.
+    personal_eligible = outcome.kind in _ANSWER_LIKE_KINDS or (
+        outcome.kind == OutcomeKind.EVIDENCE_MISSING
+        and ("evidence_missing_detail" in applied or _starts_with_generic_missing(answer, language, render))
+    )
+    if personal_eligible and detect_personal_account_request(question, language):
+        before = len(applied)
+        answer = _apply_addition(
+            answer, "personal_account_limit", render("personal_account_limit", language), applied,
+        )
+        if outcome.kind == OutcomeKind.EVIDENCE_MISSING and applied[before:] == ["personal_account_limit"]:
+            current_outcome = replace(current_outcome, kind=OutcomeKind.PERSONAL_ACCOUNT)
 
     contact_note = contact_escalation(
         current_outcome, country=country, language=language, answer_text=answer, render=render,

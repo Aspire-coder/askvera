@@ -4011,7 +4011,7 @@ class AIOrchestrator:
         if outcome.clarification_candidates:
             answer = localized_conversation_response("reference_clarification", _answer_language(body))
             if answer:
-                candidates = " / ".join(outcome.clarification_candidates)
+                candidates = cx_join_alternatives(outcome.clarification_candidates, _answer_language(body))
                 return scrubbed_input, self.response_builder.fallback(
                     answer.replace("{candidates}", candidates),
                     correlation_id,

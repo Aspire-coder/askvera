@@ -143,7 +143,12 @@ def test_cx_only_appends_whole_paragraphs_and_never_alters_citations_or_existing
     finally:
         chat_orchestrator.AIOrchestrator._attach_conversation_outcome = original
     with_cx = run("What payment methods does Forever Kenya accept?", docs, **kwargs)
-    assert with_cx.answer == without.answer or with_cx.answer.startswith(without.answer + "\n\n")
+    if "evidence_missing_detail" in with_cx.metadata["cx_applied"]:
+        # The one recorded rewrite: the generic first sentence becomes its
+        # detail version; everything after it is kept.
+        assert with_cx.answer.split("\n", 1)[-1] == without.answer.split("\n", 1)[-1]
+    else:
+        assert with_cx.answer == without.answer or with_cx.answer.startswith(without.answer + "\n\n")
     assert with_cx.citations == without.citations
     added = {"outcome", "cx_applied"}
     assert {k: v for k, v in with_cx.metadata.items() if k not in added} == without.metadata
@@ -363,3 +368,58 @@ def test_international_directory_note_only_when_the_question_asked_for_directory
     assert field.metadata["outcome"]["kind"] == "international_directory"
     assert "international_directory_note" in field.metadata["cx_applied"]
     assert "Kenya" in field.answer
+
+
+def test_a_personal_lookup_without_evidence_gets_the_personal_account_note(monkeypatch):
+    _repair_harness(monkeypatch, "")
+    orchestrator = AIOrchestrator(retriever=_Retriever([]), router=_Router("x"),
+                                  validator=_Validator(), governance=_Governance())
+    for message, language in (("Has my payment been received?", "en"), ("¿Cuál es mi saldo?", "es")):
+        response = orchestrator.handle_chat(
+            ChatRequest(message=message, sessionId="s", country="US", language=language), "cid"
+        )
+        assert response.metadata["outcome"]["kind"] == "personal_account", message
+        assert "personal_account_limit" in response.metadata["cx_applied"]
+        assert response.answer.count("\n\n") >= 1
+
+
+def test_a_specialised_scope_copy_is_not_repeated_by_the_personal_note(monkeypatch):
+    # "Where is my order?" already gets the reviewed order-status scope copy;
+    # adding the personal-account note on top would say the same thing twice.
+    _repair_harness(monkeypatch, "")
+    orchestrator = AIOrchestrator(retriever=_Retriever([]), router=_Router("x"),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(
+        ChatRequest(message="Where is my order?", sessionId="s", country="US", language="en"), "cid"
+    )
+    assert "personal_account_limit" not in response.metadata["cx_applied"]
+    assert response.metadata["outcome"]["kind"] == "evidence_missing"
+
+
+def test_missing_evidence_names_the_requested_fields(monkeypatch):
+    _repair_harness(monkeypatch, "")
+    orchestrator = AIOrchestrator(retriever=_Retriever([]), router=_Router("x"),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(
+        ChatRequest(message="What payment methods do you accept?", sessionId="s", country="US", language="en"), "cid"
+    )
+    assert response.metadata["outcome"]["kind"] == "evidence_missing"
+    assert "evidence_missing_detail" in response.metadata["cx_applied"]
+    assert "about payment methods" in response.answer
+    assert "{" not in response.answer
+    plain = orchestrator.handle_chat(
+        ChatRequest(message="What is the refund window for damaged products?", sessionId="s", country="US",
+                    language="en"), "cid"
+    )
+    assert "evidence_missing_detail" not in plain.metadata["cx_applied"]
+
+
+def test_reference_clarification_offers_a_localized_choice(monkeypatch):
+    _repair_harness(monkeypatch, "user: Who is the sponsoring contact for Kenya?\nvera: A.\nuser: And for Ghana?\nvera: B.")
+    orchestrator = AIOrchestrator(retriever=_Retriever([]), router=_Router("x"),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(
+        ChatRequest(message="What about the other one?", sessionId="s", country="US", language="en"), "cid"
+    )
+    assert response.metadata["outcome"]["kind"] == "clarification"
+    assert "Kenya or Ghana" in response.answer
