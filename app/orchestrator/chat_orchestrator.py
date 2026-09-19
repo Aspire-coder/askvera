@@ -108,6 +108,7 @@ from utils.directory_fields import (
     restore_missing_requested_directory_fields,
     restore_missing_requested_order_size,
 )
+from utils.directory_records import record_matches_any_target, record_segments
 from utils.logging import get_logger
 from utils.validators import ChatRequest
 from app.orchestrator.reference_resolution import might_reference_market, resolve_reference
@@ -764,11 +765,9 @@ def _support_contact_response_is_ineligible(chat_response: ChatResponse) -> bool
     )
 
 
-def _support_contact_segments(value: str) -> list[str]:
-    """Split a directory ``record_country`` (or a market name) into lower-cased
-    word segments on both "/" and whitespace - "Kenya/East Africa" ->
-    ["kenya", "east", "africa"]."""
-    return [part.casefold() for part in re.split(r"[/\s]+", value.strip()) if part]
+# Shared with app/response/outcome.py through utils/directory_records.py.
+_support_contact_segments = record_segments
+_directory_record_matches_a_target = record_matches_any_target
 
 
 def _resolve_support_contact_target_names(lookup_text: str, country: str) -> list[str]:
@@ -793,20 +792,6 @@ def _resolve_directory_field_target_names(lookup_text: str, country: str) -> lis
     session_name = market_display_name(country)
     session_aliases = sorted(find_sponsoring_directory_alias_countries(session_name or ""))
     return session_aliases or ([session_name] if session_name else [])
-
-
-def _directory_record_matches_a_target(record_country: str, target_names: list[str]) -> bool:
-    """True only for a whole-segment/word match - never a region word (``East
-    Africa``, ``Benelux``) or a country named only inside a record's body."""
-    tokens = _support_contact_segments(record_country)
-    for name in target_names:
-        name_words = _support_contact_segments(name)
-        width = len(name_words)
-        if not width or width > len(tokens):
-            continue
-        if any(tokens[start:start + width] == name_words for start in range(len(tokens) - width + 1)):
-            return True
-    return False
 
 
 def _find_matching_support_contact_record(documents: list, target_names: list[str]):

@@ -26,7 +26,6 @@ naming a different market.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -34,6 +33,7 @@ from typing import Any
 
 from services.market_config import find_sponsoring_directory_alias_countries, market_display_name
 from utils.directory_fields import _requested_directory_field_set
+from utils.directory_records import record_matches_any_target
 
 
 class OutcomeKind(str, Enum):
@@ -164,35 +164,9 @@ def _is_directory_shaped(document_metadata: Mapping[str, Any]) -> bool:
     )
 
 
-def _segments(value: str) -> list[str]:
-    """Split a `record_country` (or a market name) into lower-cased word
-    segments on both "/" and whitespace - "Kenya/East Africa" ->
-    ["kenya", "east", "africa"].
-
-    Identical in shape to app/orchestrator/chat_orchestrator.py's
-    `_support_contact_segments` (that helper is module-private there, so it
-    is kept, not imported, to avoid importing the orchestrator).
-    """
-    return [part.casefold() for part in re.split(r"[/\s]+", value.strip()) if part]
-
-
-def _record_names_any_target(record_country: str, target_names: Sequence[str]) -> bool:
-    """True only for a whole-segment/word match - never a region word or a
-    market named only inside a longer record.
-
-    Same whole-segment matching rule as chat_orchestrator.py's
-    `_directory_record_matches_a_target`, reimplemented here (rather than
-    imported from the orchestrator) for the same reason as `_segments`.
-    """
-    tokens = _segments(record_country)
-    for name in target_names:
-        name_words = _segments(name)
-        width = len(name_words)
-        if not width or width > len(tokens):
-            continue
-        if any(tokens[start:start + width] == name_words for start in range(len(tokens) - width + 1)):
-            return True
-    return False
+# Whole-segment matching is shared with chat_orchestrator.py through
+# utils/directory_records.py (one implementation, no drift).
+_record_names_any_target = record_matches_any_target
 
 
 def _session_market_target_names(country: str) -> list[str]:
