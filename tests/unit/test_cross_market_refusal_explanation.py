@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.evidence import approve_evidence
-from app.orchestrator.chat_orchestrator import AIOrchestrator
+from app.orchestrator.chat_orchestrator import AIOrchestrator, CROSS_MARKET_POLICY_SCOPE_RESPONSE
 from app.retrieval.models import RetrievalResult
 
 
@@ -62,16 +62,32 @@ def test_foreign_policy_is_refused_with_scope_explanation_in_english() -> None:
 
     assert decision.approved is False
     assert decision.reason == "cross_market_policy_request"
+    # No single other market named: the generic English copy, unchanged.
     assert AIOrchestrator._cross_market_scope_message(_orchestrator_stub(), "en") == (
-        EN_CROSS_MARKET_POLICY_SCOPE
+        CROSS_MARKET_POLICY_SCOPE_RESPONSE
     )
+    # One other market named: the reviewed copy, naming it, never a placeholder.
+    named = AIOrchestrator._cross_market_scope_message(
+        _orchestrator_stub(), "en", "What is the company policy on returns in Belgium?", "US"
+    )
+    assert named == EN_CROSS_MARKET_POLICY_SCOPE.replace("{country}", "Belgium")
+    assert "{" not in named
 
 
 def test_non_english_scope_refusal_now_uses_reviewed_locale_copy() -> None:
     message = AIOrchestrator._cross_market_scope_message(_orchestrator_stub(), "fr", "Belgium")
 
     assert "only available to readers" not in message
-    assert message == FR_CROSS_MARKET_POLICY_SCOPE
-    # No longer falls back to the generic insufficient-evidence copy now that
-    # a reviewed "cross_market_policy_scope" key exists for "fr".
+    assert message == FR_CROSS_MARKET_POLICY_SCOPE.replace("{country}", "Belgium")
+    assert "{" not in message
     assert message != AIOrchestrator._insufficient_evidence_message(None, "fr", "Belgium")
+
+
+def test_session_market_and_multiple_markets_never_fill_the_name() -> None:
+    # The session market itself is not "another market"; two named markets are
+    # ambiguous. Both keep the pre-CX behaviour and never deliver a placeholder.
+    own = AIOrchestrator._cross_market_scope_message(_orchestrator_stub(), "en", "Belgium returns?", "BE")
+    two = AIOrchestrator._cross_market_scope_message(
+        _orchestrator_stub(), "en", "Belgium or Sweden returns?", "US"
+    )
+    assert own == two == CROSS_MARKET_POLICY_SCOPE_RESPONSE

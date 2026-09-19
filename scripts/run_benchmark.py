@@ -1060,17 +1060,24 @@ _ABSENCE_STATEMENT = re.compile(
 )
 
 
-def _cross_market_scope_copy(language: str) -> str:
+def _cross_market_scope_copies(language: str) -> list[str]:
+    """Every cross-market scope copy the orchestrator can deliver for ``language``.
+
+    The reviewed copy (which names the other market; only the text before its
+    {country} placeholder is a stable marker) and the generic English constant,
+    which is still delivered when the question names no single other market.
+    """
     from app.evidence import configured_conversation_response
 
+    copies = []
     copy, reviewed = configured_conversation_response("cross_market_policy_scope", language)
     if copy and reviewed:
-        return copy
+        copies.append(copy.split("{", 1)[0])
     try:
         from app.orchestrator.chat_orchestrator import CROSS_MARKET_POLICY_SCOPE_RESPONSE
     except ImportError:
-        return ""
-    return CROSS_MARKET_POLICY_SCOPE_RESPONSE
+        return copies
+    return [*copies, CROSS_MARKET_POLICY_SCOPE_RESPONSE]
 
 
 def _configured_copy(key: str, language: str) -> str:
@@ -1094,7 +1101,7 @@ def declining_copy_kind(answer: str, language: str) -> str | None:
         return None
     typo = _configured_copy("country_typo_confirmation", language)
     candidates = [
-        ("cross_market_policy_scope", _cross_market_scope_copy(language)),
+        *(("cross_market_policy_scope", copy) for copy in _cross_market_scope_copies(language)),
         ("country_typo_confirmation", typo.split("{country}", 1)[0]),
         *((key, _configured_copy(key, language)) for key in _REFUSAL_KEYS),
     ]

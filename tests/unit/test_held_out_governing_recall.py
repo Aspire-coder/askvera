@@ -172,7 +172,11 @@ def test_outcomes_are_labelled_offline_for_artifacts_that_predate_the_label():
     # uses the same reviewed copy classify_outcome resolves.
     from app.evidence import configured_conversation_response
 
-    cross_market_scope_copy = configured_conversation_response("cross_market_policy_scope", "en")[0]
+    # Coordinator, 2026-09-18: the delivered copy has the market filled in.
+    cross_market_scope_copy = configured_conversation_response("cross_market_policy_scope", "en")[0].replace(
+        "{country}", "Sweden"
+    )
+    assert "{" not in cross_market_scope_copy
 
     pack_cases = {ABSTAIN_CASE["id"]: ABSTAIN_CASE, ANSWER_CASE["id"]: ANSWER_CASE}
     recorded = {"outcome": "answered", "basis": "recorded", "declining_copy": None}

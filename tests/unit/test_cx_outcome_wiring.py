@@ -187,3 +187,23 @@ def test_non_english_request_keeps_its_language_on_the_outcome(run):
     outcome = response.metadata["outcome"]
     assert outcome["language"] == "es"
     assert "payment_methods" in outcome["fields_requested"]
+
+
+def test_cross_market_refusal_names_the_market_and_never_ships_a_placeholder(run, monkeypatch):
+    errors = []
+    monkeypatch.setattr(chat_orchestrator.LOGGER, "error", lambda event, **_: errors.append(event))
+    response = run("What is the company policy in Sweden on returns?", [])
+    outcome = response.metadata["outcome"]
+    assert outcome["kind"] == "cross_market_policy"
+    assert "Sweden" in response.answer
+    assert "{" not in response.answer
+    assert "cx_unfilled_placeholder_delivered" not in errors
+
+
+def test_an_unfilled_placeholder_is_logged_not_rewritten(run, monkeypatch):
+    errors = []
+    monkeypatch.setattr(chat_orchestrator.LOGGER, "error", lambda event, **_: errors.append(event))
+    response = run("What payment methods does Forever Kenya accept?", [_kenya_directory_row()],
+                   answer="For {country}, Forever Kenya accepts bank deposit.")
+    assert "cx_unfilled_placeholder_delivered" in errors
+    assert "{country}" in response.answer  # logged, never silently rewritten

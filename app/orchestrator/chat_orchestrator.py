@@ -32,6 +32,7 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
+from app.response.cx_render import render as cx_render
 from app.response.outcome import derive_outcome
 from app.response.quality import (
     contact_for_country,
@@ -977,6 +978,7 @@ CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
 DIAGNOSTIC_CAPTURE_ENABLED = False
 DIAGNOSTIC_CAPTURE_VERSION = 1
 _DIAGNOSTIC_CAPTURE: ContextVar[dict[str, Any] | None] = ContextVar("askvera_diagnostic_capture", default=None)
+_UNFILLED_CX_PLACEHOLDER_RE = re.compile(r"\{(?:country|topic|fields|options|contact)\}")
 # CX: the turn's final evidence decision, read once at the delivery choke point
 # to derive the conversation outcome. Set in _route_or_approve_evidence; scoped
 # to one turn by _handle_chat (set to None on entry, reset in finally).
@@ -1288,6 +1290,10 @@ class AIOrchestrator:
             answer_text=response.answer,
             evidence_decision=_TURN_EVIDENCE.get(),
         )
+        if _UNFILLED_CX_PLACEHOLDER_RE.search(response.answer or ""):
+            # Never expected: every CX copy is filled before delivery. Logged
+            # (not rewritten) so monitoring catches the bug class.
+            LOGGER.error("cx_unfilled_placeholder_delivered", failure_layer=outcome.failure_layer, kind=outcome.kind.value)
         return self._replace_answer(response, response.answer, {"outcome": outcome.to_metadata()})
 
     def _mixed_request_response(
@@ -3690,12 +3696,22 @@ class AIOrchestrator:
     def _cross_market_scope_message(
         self, language: str = "en", user_message: str = "", country: str = ""
     ) -> str:
-        """Explain a cross-market local-policy refusal without disclosing policy."""
+        """Explain a cross-market local-policy refusal without disclosing policy.
+
+        The reviewed copy names the other market ({country}). It is used only
+        when the question names exactly one market other than the session's;
+        otherwise the generic copy below is used, so a placeholder is never
+        delivered and a market is never guessed.
+        """
         copy, reviewed_for_locale = configured_conversation_response(
             "cross_market_policy_scope", language
         )
-        if copy and reviewed_for_locale:
-            return copy
+        other_markets = sorted(
+            code for code in find_market_mentions(user_message or "") if code != (country or "").upper()
+        )
+        other_name = market_display_name(other_markets[0]) if len(other_markets) == 1 else ""
+        if copy and reviewed_for_locale and other_name:
+            return cx_render("cross_market_policy_scope", language, country=other_name)
         if (language or "en").split("-", 1)[0].lower() == "en":
             return CROSS_MARKET_POLICY_SCOPE_RESPONSE
         return self._insufficient_evidence_message(language, user_message, country)

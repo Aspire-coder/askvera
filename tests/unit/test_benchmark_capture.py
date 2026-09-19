@@ -445,7 +445,16 @@ def test_refusal_copy_is_labelled_by_the_kind_of_refusal():
     # orchestrator's own hardcoded English-only ultimate fallback, used only
     # when no reviewed copy exists for a locale -- no longer true for "en" -
     # so this test now checks the actual reviewed copy classify_outcome sees.
-    assert _label(_copy("cross_market_policy_scope"), abstained=True)["outcome"] == "foreign_policy_refusal"
+    # Coordinator, 2026-09-18: label what customers actually receive - the
+    # reviewed copy with the market filled in - and the generic constant that
+    # is still delivered when the question names no single other market.
+    from app.orchestrator.chat_orchestrator import CROSS_MARKET_POLICY_SCOPE_RESPONSE
+    from app.response.cx_render import render
+
+    delivered = render("cross_market_policy_scope", "en", country="Sweden")
+    assert "{" not in delivered and "Sweden" in delivered
+    assert _label(delivered, abstained=True)["outcome"] == "foreign_policy_refusal"
+    assert _label(CROSS_MARKET_POLICY_SCOPE_RESPONSE, abstained=True)["outcome"] == "foreign_policy_refusal"
     assert _label(_copy("off_topic"), abstained=True)["outcome"] == "out_of_scope_refusal"
     assert _label(_copy("off_topic", "fr"), language="fr", abstained=True)["outcome"] == "out_of_scope_refusal"
     assert _label(_copy("catalogue_scope"), abstained=True)["basis"] == "catalogue_scope"
@@ -676,7 +685,9 @@ def test_labelling_never_asks_for_a_translation_and_labels_stay_correct(translat
         # _configured (configured_conversation_response), which never
         # translates -- rather than the orchestrator's English-only
         # CROSS_MARKET_POLICY_SCOPE_RESPONSE fallback constant.
-        (_configured("cross_market_policy_scope", language), {"abstained": True}, "foreign_policy_refusal"),
+        # Coordinator, 2026-09-18: the delivered copy, with the market filled in.
+        (_configured("cross_market_policy_scope", language).replace("{country}", "Sverige"),
+         {"abstained": True}, "foreign_policy_refusal"),
         ("Minimitilaus on 2 Case Credits.", {}, "answered"),
     ]
 

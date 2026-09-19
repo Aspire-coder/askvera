@@ -18,7 +18,7 @@ import pytest
 from app.evidence import approve_evidence
 from app.governance.models import GovernanceAction, GovernanceDecision
 from app.orchestrator import chat_orchestrator
-from app.orchestrator.chat_orchestrator import AIOrchestrator
+from app.orchestrator.chat_orchestrator import AIOrchestrator, CROSS_MARKET_POLICY_SCOPE_RESPONSE
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.validation.models import ValidationResult
 from services import market_config
@@ -213,17 +213,7 @@ def test_orchestrator_gives_scope_copy_and_no_model_context_for_the_reported_que
 
     assert decision is not None and decision.reason == "cross_market_policy_request"
     assert approved.documents == []
-    # Updated 2026-09-18 (Phase 3, Lane 4): config/conversation_routes.json
-    # now carries a reviewed "cross_market_policy_scope" key for "en" (the
-    # CX_LANES.md message-key table), which _cross_market_scope_message
-    # already looked up before this key existed anywhere -- once it exists,
-    # that reviewed copy is what's returned, not the orchestrator's
-    # English-only fallback constant (CROSS_MARKET_POLICY_SCOPE_RESPONSE),
-    # which is used only when no reviewed copy exists for a locale.
-    from app.evidence import configured_conversation_response
-
-    expected, reviewed = configured_conversation_response("cross_market_policy_scope", "en")
-    assert reviewed and response is not None and response.answer.startswith(expected)
+    assert response is not None and response.answer.startswith(CROSS_MARKET_POLICY_SCOPE_RESPONSE)
 
 
 def test_orchestrator_still_answers_the_own_market_adjective_question(monkeypatch) -> None:

@@ -170,18 +170,12 @@ def test_d_policy_country_restriction_is_distinct_from_missing_evidence_and_depe
     response = _handle(
         _RetrieverForeignPolicy(), _RouterOk(), "What is the company policy in Sweden on returns?", country="US"
     )
-    # Updated 2026-09-18 (Phase 3, Lane 4): config/conversation_routes.json
-    # now carries a reviewed "cross_market_policy_scope" key for "en" (the
-    # CX_LANES.md message-key table), which _cross_market_scope_message
-    # already looked up before this key existed anywhere -- once it exists,
-    # that reviewed copy is returned instead of the orchestrator's
-    # English-only fallback constant (whose wording included "another
-    # market"). The assertion below checks the actual reviewed copy rather
-    # than a substring of the old fallback text.
-    from app.evidence import configured_conversation_response
-
-    expected, reviewed = configured_conversation_response("cross_market_policy_scope", "en")
-    assert reviewed and response.answer.startswith(expected)
+    # Coordinator, 2026-09-18 (CX): a question naming one other market now
+    # gets the reviewed scope copy that names it (it used to say "another
+    # market"). Stronger than before: the market is named and no placeholder
+    # can be delivered.
+    assert "Sweden" in response.answer
+    assert "{" not in response.answer
     assert "technical hiccup" not in response.answer.lower()
     assert "do not contain enough information" not in response.answer
 
