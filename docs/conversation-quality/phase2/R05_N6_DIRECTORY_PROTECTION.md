@@ -1030,9 +1030,14 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   ("Richtlinie", the sole kept guideline-family word).
 - **Serbian's oblique political/pravila forms and the Scandinavian
   definite-plural rule forms (reglene/reglerne/reglerna) were reverted
-  conservatively**, not because they were shown to be unsafe, but because
-  the coordinator's KEEP list did not name them explicitly. A future
-  review could reinstate them with an explicit decision either way.
+  conservatively** here in the sixth follow-up, not because they were
+  shown to be unsafe, but because the coordinator's KEEP list did not name
+  them explicitly. **Restored in the seventh follow-up** (below): the
+  Scandinavian definite plurals of "regel" (no "reglene", da "reglerne",
+  sv "reglerna") and Serbian "pravilima"/"правилима" are rules-family, not
+  guideline/condition-family, and are back in `POLICY_WORDING_TERMS`.
+  Serbian's *politika*-family oblique forms (politici/politiku/politikom)
+  remain reverted - only *pravila*'s were restored.
 - **The compound "terms and conditions" phrases are closed, literal,
   multi-word strings** - a paraphrase or reordering of the standard phrase
   in any language (e.g. a non-standard German phrasing that isn't
