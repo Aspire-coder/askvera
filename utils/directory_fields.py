@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import re
+import unicodedata
 from collections.abc import Iterable
 
 from utils.sentence_spans import sentence_boundaries
@@ -11,6 +12,7 @@ from config.directory_field_vocabulary import (
     DIRECTORY_INTENT_SYNONYM_TERMS,
     LANGUAGE_FIELD_TERMS,
     ORDER_WORD_TERMS,
+    POLICY_WORDING_TERMS,
     normalize_language_code,
 )
 
@@ -182,13 +184,122 @@ def _requested_directory_field_set(question: str, *, language: str = "en") -> se
 # compiled here, the same way LANGUAGE_FIELD_TERMS is compiled above, but
 # kept in its own dict so nothing in this file's removal/restoration/
 # conflict-detection logic can accidentally start reading it.
+#
+# R05/N6 second follow-up (2026-09-18): unlike LANGUAGE_FIELD_TERMS's
+# compound stems (deliberately open-ended so one spelling catches a family
+# of inflected forms - see that module's "Whole-word / inflection handling"
+# section), every term here is a short, complete word or phrase with no
+# useful inflection to catch that way, so both a leading AND a trailing
+# boundary are used: without the trailing boundary, the bare verb "reach"
+# also matched "reach**es**" ("...when it reaches Manager level?"),
+# wrongly granting the directory bonus to a question that never named a
+# contact field or used the "reach" synonym as intended.
 _DIRECTORY_INTENT_SYNONYM_PATTERNS: dict[str, dict[str, re.Pattern[str]]] = {
     language: {
-        field: re.compile(r"(?<!\w)(?:" + "|".join(terms) + ")", re.IGNORECASE | re.UNICODE)
+        field: re.compile(r"(?<!\w)(?:" + "|".join(terms) + r")(?!\w)", re.IGNORECASE | re.UNICODE)
         for field, terms in fields.items()
     }
     for language, fields in DIRECTORY_INTENT_SYNONYM_TERMS.items()
 }
+
+# --- R05/N6 second follow-up: multilingual POLICY-wording, symmetric with --
+# --- directory_field_intent_present's multilingual field RECOGNITION -------
+#
+# config/directory_field_vocabulary.py's POLICY_WORDING_TERMS is a small,
+# closed, per-language set of policy/rules/regulations/terms equivalents
+# (its docstring explains scope and confidence). Every term is a complete
+# inflected word, so - like _DIRECTORY_INTENT_SYNONYM_PATTERNS above, and
+# unlike the compound-stem LANGUAGE_FIELD_TERMS - both a leading and a
+# trailing boundary are used.
+#
+# R05/N6 third follow-up (2026-09-18, coordinator review of 88da3cc): a
+# Spanish/French/Portuguese/etc. question that omits its accents entirely
+# ("Cual es la politica de Forever Norway sobre los metodos de pago?" -
+# no accent on "politica") did not match POLICY_WORDING_TERMS at all (it
+# only spelled "política" accented), while LANGUAGE_FIELD_TERMS's own
+# "metodos de pago" pattern (``m[eé]todos?\s+de\s+pago``) tolerates the
+# missing accent via an explicit character class - so the question still
+# fell through to the (accent-tolerant) field disjunct and was wrongly
+# promoted to "directory". There is no single shared runtime normalizer to
+# import here for this: the field vocabulary's own accent tolerance is
+# built pattern-by-pattern (explicit accented/unaccented literal pairs, or
+# an ``[eé]``-style character class per term), not a text-normalization
+# pass, and the closest thing to a reusable fold function
+# (``app/retrieval/providers.py``'s ``_fold_search_text``, NFKD-decompose +
+# strip combining marks + casefold) cannot be imported here without a
+# circular import (``providers.py`` already imports this module). Fixed
+# instead by folding both sides - the POLICY_WORDING_TERMS literals (at
+# compile time) and the question text (at match time) - through the
+# identical NFKD/strip-combining/casefold recipe ``_fold_search_text`` uses,
+# so a single accented spelling in the vocabulary matches its accentless,
+# NFC, and NFD-decomposed variants alike, without hand-maintaining a second
+# accentless literal or character class per term. NFKD only decomposes
+# characters that have a compatibility decomposition; Cyrillic letters (ru,
+# sr) have none, so this folding is a no-op for them and does not disturb
+# those entries.
+
+
+def _fold_diacritics(text: str) -> str:
+    """NFKD-decompose, drop combining marks, casefold - the same recipe
+    ``app/retrieval/providers.py._fold_search_text`` uses for its own local
+    query-expansion heuristics, duplicated here (not imported, to avoid a
+    circular import: ``providers.py`` imports this module) so an accented,
+    accentless, or NFD-decomposed spelling of the same word all fold to one
+    comparable form."""
+    decomposed = unicodedata.normalize("NFKD", text or "").casefold()
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
+_POLICY_WORDING_PATTERNS: dict[str, re.Pattern[str]] = {
+    language: re.compile(
+        r"(?<!\w)(?:" + "|".join(re.escape(_fold_diacritics(term)) for term in terms) + r")(?!\w)",
+        re.IGNORECASE | re.UNICODE,
+    )
+    for language, terms in POLICY_WORDING_TERMS.items()
+}
+
+
+def localized_policy_wording_present(question: str, *, language: str = "en") -> bool:
+    """True when a non-English question uses localized policy/rules wording.
+
+    Symmetric counterpart to :func:`directory_field_intent_present`'s
+    multilingual field recognition. English's own ``DIRECTORY_POLICY_WORDING_RE``
+    (``app/retrieval/providers.py``) already matches "policy"/"policies"/
+    "rule(s)" and is checked first, ahead of any directory-field promotion,
+    in ``_runtime_scope_intent``. Before this function existed, an
+    equivalent policy question phrased in Spanish, French, German, or any
+    other language :mod:`config.directory_field_vocabulary` covers fell
+    through that English-only check, then matched
+    :func:`directory_field_intent_present`'s 13-language field disjunct
+    instead (because it also names a directory field, e.g. "metodos de
+    pago") and was wrongly promoted to "directory" with the full country
+    bonus - reopening the N6 class of bug for non-English policy questions.
+    ``_runtime_scope_intent`` calls this function before its directory
+    disjunct, so a match here keeps the question "policy", regardless of
+    what any deterministic directory route separately computed.
+
+    English is intentionally absent from ``POLICY_WORDING_TERMS`` - English's
+    own ``DIRECTORY_POLICY_WORDING_RE`` stays the sole English source,
+    unchanged. A ``language`` this dict has no table for (including "en"
+    itself) returns ``False`` here - the same "not recognized" default
+    :func:`directory_field_intent_present` uses for its own English-only
+    synonym disjunct - never worse than before this addition.
+
+    The question is matched in its accent-folded form (:func:`_fold_diacritics`,
+    the same NFKD/strip-combining/casefold recipe the compiled patterns'
+    terms were folded with), so an accented spelling ("politica" vs.
+    "política"), an accentless spelling users routinely type, and an
+    NFD-decomposed spelling of either all match identically. This mirrors -
+    without duplicating each term by hand - the accent tolerance
+    ``LANGUAGE_FIELD_TERMS`` already gets pattern-by-pattern (explicit
+    accented/unaccented literal pairs, or an ``[eé]``-style character
+    class); see the third R05/N6 follow-up note above
+    ``_POLICY_WORDING_PATTERNS`` for why folding, not import, was used.
+    """
+    pattern = _POLICY_WORDING_PATTERNS.get(normalize_language_code(language))
+    if pattern is None:
+        return False
+    return bool(pattern.search(_fold_diacritics(question or "")))
 
 
 def directory_field_intent_present(question: str, *, language: str = "en") -> bool:

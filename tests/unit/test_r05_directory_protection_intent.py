@@ -687,3 +687,232 @@ def test_ghana_spanish_phone_retrieve_keeps_the_global_record_at_rank_one(monkey
     result = provider.retrieve(GHANA_PHONE_QUESTION_ES, "GB", "es", "fbo", "cid")
 
     assert result.documents[0].id == "sponsoring-010-ghana"
+
+
+# --- R05/N6 second follow-up (2026-09-18): Fable re-review findings F1/F2 --
+#
+# F1: the multilingual field-intent disjunct added above is 13-language, but
+# the policy-wording suppression it is checked alongside
+# (DIRECTORY_POLICY_WORDING_RE = policy|rules, is_policy_safety_question) was
+# still English-only, so a NON-English POLICY question naming a field was
+# wrongly promoted to "directory" instead of staying "policy" - reopening
+# the N6 class of bug. Every repro below is taken verbatim from the
+# reviewer's stubbed-planner (scopes=[]) Norway/Ghana repro set.
+
+NORWAY_POLICY_PAYMENT_QUESTION_ES = (
+    "¿Cuál es la política de Forever Norway sobre los métodos de pago?"
+)
+NORWAY_POLICY_ADDRESS_QUESTION_FR = (
+    "Quelles sont les règles de Forever Norge sur l'adresse de livraison ?"
+)
+NORWAY_POLICY_EMAIL_QUESTION_DE = (
+    "Welche Regeln gelten bei Forever Norge für die Rückgabe per E-Mail?"
+)
+GHANA_POLICY_DELIVERY_QUESTION_FR = (
+    "Quelle est la politique de Forever Ghana sur les frais de livraison ?"
+)
+
+
+@pytest.mark.parametrize(
+    "question,country,language",
+    [
+        (NORWAY_POLICY_PAYMENT_QUESTION_ES, "NO", "es"),
+        (NORWAY_POLICY_ADDRESS_QUESTION_FR, "NO", "fr"),
+        (NORWAY_POLICY_EMAIL_QUESTION_DE, "NO", "de"),
+        (GHANA_POLICY_DELIVERY_QUESTION_FR, "GB", "fr"),
+    ],
+    ids=["spanish-payment", "french-address", "german-email", "french-ghana-delivery"],
+)
+def test_f1_reviewer_repro_non_english_policy_question_naming_a_field_stays_policy(
+    monkeypatch, question, country, language
+) -> None:
+    """Fail-before (F1): each question uses localized policy/rules wording
+    (politica/politique/Regeln) AND names a directory field in the same
+    language (metodos de pago/adresse de livraison/E-Mail/frais de
+    livraison) - before this fix, the field disjunct fired and there was no
+    non-English policy-wording check to stop it, so these resolved to
+    "directory" with the full 8.0 bonus. The English equivalent
+    ("What is the policy of Forever Norway on payment methods?") already
+    correctly resolves to "policy"/0.0."""
+    plan = _plan(monkeypatch, question, country=country, language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+@pytest.mark.parametrize(
+    "question,language",
+    [
+        (GHANA_PHONE_QUESTION_ES, "es"),
+        (GHANA_PHONE_QUESTION_FR, "fr"),
+        (GHANA_ADDRESS_QUESTION_DE, "de"),
+    ],
+    ids=["spanish-phone", "french-phone", "german-address"],
+)
+def test_f1_earlier_non_english_directory_repros_stay_directory(monkeypatch, question, language) -> None:
+    """Regression guard: the F1 policy-wording fix must not suppress the
+    earlier (non-policy) non-English directory repros - none of these use
+    any localized policy/rules wording, so they must keep resolving to
+    "directory"/8.0."""
+    plan = _plan(monkeypatch, question, country="US", language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [GHANA_REACH_QUESTION_EN, GHANA_LOCATED_QUESTION_EN, GHANA_CREDIT_CARDS_QUESTION_EN],
+    ids=["reach", "located", "credit-cards"],
+)
+def test_f1_earlier_english_synonym_repros_stay_directory(monkeypatch, question) -> None:
+    """Regression guard: the F1/F2 changes must not disturb the earlier
+    English contact/payment-synonym repros."""
+    plan = _plan(monkeypatch, question, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+# F2: the "reach" synonym in DIRECTORY_INTENT_SYNONYM_TERMS["en"] compiled
+# with a leading word-start boundary only, so it also matched inflected
+# forms like "reaches" - a bare contact verb false-positive unrelated to
+# the intended "How do I reach Forever Ghana?" shape.
+
+GHANA_DOWNLINE_REACHES_MANAGER_QUESTION = (
+    "What happens to my downline in Ghana when it reaches Manager level?"
+)
+
+
+def test_f2_reviewer_repro_reaches_inflection_does_not_trigger_directory_synonym(monkeypatch) -> None:
+    """Fail-before (F2): "reaches" (an inflected verb form describing a
+    downline reaching a rank, not a contact request) must not match the
+    "reach" synonym and must not be promoted to "directory" by it. This
+    question names no directory field and no other directory/operational
+    wording, so it must land on "ambiguous"."""
+    plan = _plan(monkeypatch, GHANA_DOWNLINE_REACHES_MANAGER_QUESTION, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "ambiguous"
+
+
+def test_f2_bare_reach_synonym_still_matches_as_a_whole_word(monkeypatch) -> None:
+    """Control: the literal word "reach" itself must still match after the
+    trailing boundary was added - only its inflected forms are excluded."""
+    plan = _plan(monkeypatch, GHANA_REACH_QUESTION_EN, country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+def test_f2_contact_question_still_routes_to_directory_without_the_synonym(monkeypatch) -> None:
+    """"contact" was removed from DIRECTORY_INTENT_SYNONYM_TERMS as
+    redundant with opensearch_sections._DIRECTORY_DETAIL_RE (already
+    matches "contact" and feeds deterministic_directory_route independently
+    of this synonym set) - this question must still resolve to "directory"
+    through that route."""
+    plan = _plan(monkeypatch, "How do I contact Forever Ghana?", country="US")
+
+    assert plan.runtime_scope_intent["intent"] == "directory"
+
+
+# --- R05/N6 third follow-up (2026-09-18): coordinator review of 88da3cc ----
+#
+# The F1 policy-wording set only spelled its accented forms ("política"),
+# so a question that omits accents entirely - which users routinely do -
+# did not match it, while LANGUAGE_FIELD_TERMS's own field patterns
+# (e.g. Spanish "m[eé]todos?\s+de\s+pago") already tolerate the missing
+# accent. That asymmetry let an accentless non-English policy question
+# fall through to the (accent-tolerant) field disjunct and be wrongly
+# promoted to "directory" - the exact F1 bug, reopened for accentless
+# input. Fixed by accent-folding (NFKD, strip combining marks, casefold)
+# both POLICY_WORDING_TERMS and the question before matching.
+
+NORWAY_POLICY_PAYMENT_QUESTION_ES_NO_ACCENT = (
+    "Cual es la politica de Forever Norway sobre los metodos de pago?"
+)
+NORWAY_POLICY_ADDRESS_QUESTION_FR_NO_ACCENT = (
+    "Quelles sont les regles de Forever Norge sur l'adresse de livraison ?"
+)
+GHANA_POLICY_PAYMENT_QUESTION_PT_ACCENTED = (
+    "Qual é a política de Forever Ghana sobre as formas de pagamento?"
+)
+GHANA_POLICY_PAYMENT_QUESTION_PT_NO_ACCENT = (
+    "Qual e a politica de Forever Ghana sobre as formas de pagamento?"
+)
+NORWAY_POLICY_EMAIL_QUESTION_DE_CONTROL = NORWAY_POLICY_EMAIL_QUESTION_DE  # "Regeln" already has no accent
+
+
+@pytest.mark.parametrize(
+    "question,country,language",
+    [
+        (NORWAY_POLICY_PAYMENT_QUESTION_ES_NO_ACCENT, "NO", "es"),
+        (NORWAY_POLICY_ADDRESS_QUESTION_FR_NO_ACCENT, "NO", "fr"),
+        (GHANA_POLICY_PAYMENT_QUESTION_PT_NO_ACCENT, "GB", "pt"),
+        (NORWAY_POLICY_EMAIL_QUESTION_DE_CONTROL, "NO", "de"),
+    ],
+    ids=["spanish-accentless", "french-accentless", "portuguese-accentless", "german-control-no-accent-to-begin-with"],
+)
+def test_f1_accentless_non_english_policy_question_stays_policy(monkeypatch, question, country, language) -> None:
+    """Fail-before (coordinator review of 88da3cc): the accentless Spanish/
+    French/Portuguese spellings of the F1 repros must resolve to "policy"
+    exactly like their accented originals - users routinely omit accents.
+    German is included as a same-shape control: "Regeln" already carries no
+    accent, so this proves the fix is additive and does not regress the
+    case that already worked."""
+    plan = _plan(monkeypatch, question, country=country, language=language)
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_f1_accented_and_accentless_spanish_policy_question_agree(monkeypatch) -> None:
+    """Direct before/after pairing: the accented and accentless spellings of
+    the same Spanish question must resolve identically."""
+    accented = _plan(monkeypatch, NORWAY_POLICY_PAYMENT_QUESTION_ES, country="NO", language="es")
+    accentless = _plan(monkeypatch, NORWAY_POLICY_PAYMENT_QUESTION_ES_NO_ACCENT, country="NO", language="es")
+
+    assert accented.runtime_scope_intent["intent"] == "policy"
+    assert accentless.runtime_scope_intent["intent"] == "policy"
+
+
+def test_f1_portuguese_accented_policy_question_stays_policy(monkeypatch) -> None:
+    """Control: the accented Portuguese original must also resolve to
+    "policy" (Portuguese was not in the original F1 repro set)."""
+    plan = _plan(monkeypatch, GHANA_POLICY_PAYMENT_QUESTION_PT_ACCENTED, country="GB", language="pt")
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_f1_nfd_decomposed_accented_policy_question_stays_policy(monkeypatch) -> None:
+    """A question can arrive with its accents already NFD-decomposed (a
+    base letter followed by a separate combining-mark codepoint, rather
+    than one precomposed character) - a different Unicode encoding of the
+    identical accented text, not different content. This must resolve to
+    "policy" exactly like the NFC (precomposed) spelling."""
+    import unicodedata
+
+    nfd_question = unicodedata.normalize("NFD", NORWAY_POLICY_PAYMENT_QUESTION_ES)
+    assert nfd_question != NORWAY_POLICY_PAYMENT_QUESTION_ES  # sanity: actually decomposed
+    assert unicodedata.normalize("NFC", nfd_question) == NORWAY_POLICY_PAYMENT_QUESTION_ES
+
+    plan = _plan(monkeypatch, nfd_question, country="NO", language="es")
+
+    assert plan.runtime_scope_intent["intent"] == "policy"
+
+
+def test_f1_localized_policy_wording_present_unit_accent_variants() -> None:
+    """Unit-level control directly on ``localized_policy_wording_present``,
+    isolating the accent-folding fix from the full retrieval-plan pipeline:
+    accented, accentless, and NFD-decomposed Spanish/French/Portuguese
+    policy wording must all be recognized, and Cyrillic (ru/sr) entries -
+    unaffected by NFKD folding, since they have no decomposable diacritic -
+    must be unchanged."""
+    import unicodedata
+
+    from utils.directory_fields import localized_policy_wording_present
+
+    assert localized_policy_wording_present("Cual es la politica?", language="es") is True
+    assert localized_policy_wording_present("¿Cuál es la política?", language="es") is True
+    assert localized_policy_wording_present(
+        unicodedata.normalize("NFD", "¿Cuál es la política?"), language="es"
+    ) is True
+    assert localized_policy_wording_present("Quelles sont les regles?", language="fr") is True
+    assert localized_policy_wording_present("Qual e a politica?", language="pt") is True
+    assert localized_policy_wording_present("Какова политика?", language="ru") is True
+    assert localized_policy_wording_present("Kakva je politika?", language="sr") is True
+    assert localized_policy_wording_present("What is the delivery cost?", language="es") is False

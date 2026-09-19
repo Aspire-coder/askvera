@@ -378,7 +378,81 @@ def supported_languages() -> frozenset[str]:
 # module before being trusted for another language.
 DIRECTORY_INTENT_SYNONYM_TERMS: dict[str, dict[str, tuple[str, ...]]] = {
     "en": {
-        PHONE: ("reach", "contact"),
+        PHONE: ("reach",),
         PAYMENT_METHODS: (r"credit\s+cards?", r"debit\s+cards?"),
     },
+}
+# R05/N6 second follow-up (2026-09-18): "contact" was removed from the
+# ``PHONE`` synonym above. It is redundant with
+# ``app/retrieval/opensearch_sections.py``'s ``_DIRECTORY_DETAIL_RE``
+# (``\b(?:address|business\s+hours?|email|office|phone|telephone|website|
+# contact)\b``), which already feeds ``_directory_guard_topic_match`` ->
+# ``directory_topic_route`` -> ``deterministic_directory_route`` in
+# ``app/retrieval/providers.py._planned_retrieval_plan`` independently of
+# this module - "How do I contact Forever Ghana?" still resolves to
+# "directory" through that route (see
+# ``tests/unit/test_r05_directory_protection_intent.py::
+# test_contact_question_still_routes_to_directory_without_the_synonym``).
+# Also fixed here: ``utils.directory_fields._DIRECTORY_INTENT_SYNONYM_PATTERNS``
+# used to compile every term in this dict with a leading word-start
+# (``(?<!\w)``) only, no trailing boundary - correct for the compound-stem
+# terms in ``LANGUAGE_FIELD_TERMS`` above (deliberately, see this module's
+# "Whole-word / inflection handling" section), but wrong for "reach", a bare
+# verb with no useful inflection to catch this way: it let "reach**es**"
+# ("...when it reaches Manager level?") match too. A trailing boundary
+# (``(?!\w)``) was added to that compilation so only the literal word
+# "reach" itself matches now; "credit/debit card(s)" already carried their
+# own explicit, bounded ``s?`` and are unaffected.
+
+# --- R05/N6 second follow-up (2026-09-18): multilingual POLICY-wording -----
+#
+# Symmetric counterpart to ``DIRECTORY_INTENT_SYNONYM_TERMS`` above and to
+# ``LANGUAGE_FIELD_TERMS``: an independent review found that
+# ``app/retrieval/providers.py``'s policy-wording suppression check
+# (``DIRECTORY_POLICY_WORDING_RE`` = ``policy|rules``, plus
+# ``services.guardrails.is_policy_safety_question``) is English-only, while
+# the field-intent RECOGNITION check added by the first R05/N6 follow-up
+# (``directory_field_intent_present``, via ``LANGUAGE_FIELD_TERMS``) is
+# 13-language. That asymmetry meant a non-English POLICY question that also
+# names a directory field (e.g. Spanish "¿Cual es la politica de Forever
+# Norway sobre los metodos de pago?" - "politica" = policy, "metodos de
+# pago" = payment methods) fell through the English-only policy check,
+# matched the field-intent disjunct instead, and was wrongly promoted to
+# "directory" with the full country bonus - reopening the N6 class of bug
+# for non-English policy questions. The English equivalent ("What is the
+# policy of Forever Norway on payment methods?") already correctly resolves
+# to "policy"/0.0 via ``DIRECTORY_POLICY_WORDING_RE``.
+#
+# Deliberately narrow and closed, exactly like ``DIRECTORY_INTENT_SYNONYM_TERMS``:
+# only "policy"/"rules"/"regulations"/"terms" and their per-language
+# equivalents, spelled out as explicit inflected forms (not open stems) so
+# every entry is auditable and matched as a whole word
+# (``utils.directory_fields._POLICY_WORDING_PATTERNS`` wraps each with both
+# a leading and a trailing boundary) rather than approximated the way the
+# field-request stems above are. Covers every language
+# ``LANGUAGE_FIELD_TERMS`` already covers except English itself (English's
+# own ``DIRECTORY_POLICY_WORDING_RE`` stays the sole English source,
+# unchanged, exactly as ``LANGUAGE_FIELD_TERMS`` leaves English to
+# ``utils.directory_fields._FIELD_REQUEST_PATTERNS``).
+#
+# Confidence: reuses the same high/medium split as ``LANGUAGE_FIELD_TERMS``'s
+# own docstring - French/German/Dutch/Spanish/Italian/Swedish forms are
+# ordinary, unambiguous dictionary words; Portuguese/Finnish/Norwegian/
+# Danish/Russian/Serbian forms are this module's own first pass (medium
+# confidence, same caveat as the payment/delivery-cost-vs-time split above -
+# a native reviewer should check these before they gate anything
+# destructive in production).
+POLICY_WORDING_TERMS: dict[str, tuple[str, ...]] = {
+    "es": ("política", "políticas", "norma", "normas", "regla", "reglas"),
+    "fr": ("politique", "politiques", "règle", "règles", "règlement", "règlements"),
+    "de": ("richtlinie", "richtlinien", "regel", "regeln", "regelung", "regelungen"),
+    "nl": ("beleid", "regel", "regels"),
+    "it": ("politica", "politiche", "regola", "regole"),
+    "pt": ("política", "políticas", "regra", "regras"),
+    "fi": ("käytäntö", "käytännön", "käytäntöä", "sääntö", "säännöt", "säännön"),
+    "no": ("retningslinje", "retningslinjer", "regel", "regler"),
+    "da": ("retningslinje", "retningslinjer", "regel", "regler"),
+    "sv": ("riktlinje", "riktlinjer", "regel", "regler"),
+    "ru": ("политика", "политики", "правило", "правила"),
+    "sr": ("politika", "politike", "pravilo", "pravila", "политика", "правило", "правила"),
 }

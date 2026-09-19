@@ -361,3 +361,206 @@ scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
   task's file scope (an experimental audit-module content-hash check over a
   fixed 26-path manifest) and reproduce identically on the unmodified base
   commit.
+
+## Second follow-up (2026-09-18): Fable re-review findings F1/F2
+
+An independent Fable re-review approved the multilingual-RECOGNITION follow-up
+above "with limitations" and flagged two should-fix findings against the
+stubbed-planner (`document_scopes=[]`) Norway/Ghana repro set.
+
+### F1: the policy-wording suppression stayed English-only
+
+`_runtime_scope_intent`'s policy branch
+(`is_policy_safety_question`/`DIRECTORY_POLICY_WORDING_RE` = `policy|rules`)
+was still English-only, while the `directory_field_intent_present` disjunct
+added by the first follow-up is 13-language. A non-English POLICY question
+that also names a directory field in the same language therefore skipped the
+(English-only) policy branch and matched the (multilingual) field branch
+instead - reopening the N6 class of bug for exactly the languages the first
+follow-up had just added recognition for.
+
+**Fix:** `config/directory_field_vocabulary.py` gains a new, small, closed,
+documented `POLICY_WORDING_TERMS` table (policy/rules/regulations/terms and
+their equivalents) for every language `LANGUAGE_FIELD_TERMS` already covers
+except English (es, fr, de, nl, it, pt, fi, no, da, sv, ru, sr).
+`utils/directory_fields.py` compiles it into
+`localized_policy_wording_present(question, language=...)`, checked in
+`_runtime_scope_intent` alongside the existing English-only checks, before
+the directory disjunct - so a genuine non-English policy-wording match keeps
+the question `policy`, exactly like its English equivalent, regardless of
+what any deterministic directory route separately computed.
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| "¿Cual es la politica de Forever Norway sobre los metodos de pago?" (es) | `directory` (8.0) | `policy` (0.0) |
+| "Quelles sont les regles de Forever Norge sur l'adresse de livraison ?" (fr) | `directory` (8.0) | `policy` (0.0) |
+| "Welche Regeln gelten bei Forever Norge fur die Ruckgabe per E-Mail?" (de) | `directory` (8.0) | `policy` (0.0) |
+| "Quelle est la politique de Forever Ghana sur les frais de livraison ?" (fr, GB session) | `directory` (8.0) | `policy` (0.0) |
+| "What is the policy of Forever Norway on payment methods?" (en, control) | `policy` (0.0) | `policy` (0.0), unchanged |
+| "¿Cual es el numero de telefono de Forever Ghana?" (es, earlier directory repro) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "Quel est le numero de telephone de Forever Ghana ?" (fr, earlier directory repro) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "Wie lautet die Adresse von Forever Ghana?" (de, earlier directory repro) | `directory` (8.0) | `directory` (8.0), unchanged |
+
+### F2: the "reach" synonym matched its own inflections
+
+`DIRECTORY_INTENT_SYNONYM_TERMS["en"][PHONE]` (`("reach", "contact")`) was
+compiled with a leading word-start boundary (`(?<!\w)`) only, the same style
+used for `LANGUAGE_FIELD_TERMS`'s compound stems - correct there (deliberately
+open-ended, so one spelling catches inflected forms of a compound), but wrong
+for a bare, complete verb like "reach": it also matched "reach**es**", so
+"What happens to my downline in Ghana when it **reaches** Manager level?"
+(a downline-rank question, not a contact request) was wrongly promoted to
+`directory`.
+
+**Fix:**
+`utils/directory_fields._DIRECTORY_INTENT_SYNONYM_PATTERNS` now compiles every
+synonym term with both a leading and a trailing boundary
+(`(?<!\w)(?:...)(?!\w)`), so only the complete word matches. Separately,
+"contact" was removed from the synonym set as redundant: it is already
+present, with the same full-word matching, in
+`app/retrieval/opensearch_sections.py`'s `_DIRECTORY_DETAIL_RE`, which feeds
+`_directory_guard_topic_match` -> `directory_topic_route` ->
+`deterministic_directory_route` independently of this synonym set - proven by
+a dedicated control test rather than assumed.
+
+| Question | Before this fix | After this fix |
+| --- | --- | --- |
+| "What happens to my downline in Ghana when it reaches Manager level?" | `directory` (8.0) | `ambiguous` (0.0) |
+| "How do I reach Forever Ghana?" (control, bare word) | `directory` (8.0) | `directory` (8.0), unchanged |
+| "How do I contact Forever Ghana?" (control, synonym removed) | `directory` (8.0) | `directory` (8.0), unchanged (via `_DIRECTORY_DETAIL_RE`, not the removed synonym) |
+
+### Second follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. Both new F1/F2 repro tests, on the unmodified worktree (`git stash` the
+   three source changes, keep the new tests): **5 failed, `EXIT=1`**,
+   confirming genuine fail-before reproductions
+   (`test_f1_reviewer_repro_non_english_policy_question_naming_a_field_stays_policy`
+   x4 and
+   `test_f2_reviewer_repro_reaches_inflection_does_not_trigger_directory_synonym`).
+   `git stash pop` restored the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **650 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **8974 passed, 13
+   xfailed, `EXIT=0`**, 341.42s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): **no output,
+   `FLAKE8_EXIT=0`.**
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Second follow-up limitations
+
+- **F1's policy-wording set is closed and per-language**, same discipline as
+  the field vocabulary it sits beside: es/fr/de/nl/it/sv are ordinary,
+  unambiguous dictionary words (high confidence, reused stems' sibling
+  quality); pt/fi/no/da/ru/sr are this module's own first pass (medium
+  confidence - a native reviewer should check these before they gate
+  anything destructive in production), exactly mirroring the confidence
+  split `LANGUAGE_FIELD_TERMS` already documents for the same language set.
+- **F1 does not touch `_directory_guard_topic_match`'s own (English-only)
+  `DIRECTORY_POLICY_WORDING_RE` check** in
+  `app/retrieval/opensearch_sections.py` - it does not need to: the new
+  `localized_policy_wording_present` check runs first in
+  `_runtime_scope_intent`'s if/elif chain, ahead of `deterministic_directory_route`,
+  so it overrides that route's result regardless of how it was computed.
+- **F2's trailing-boundary fix is scoped to `DIRECTORY_INTENT_SYNONYM_TERMS`
+  only**, not `LANGUAGE_FIELD_TERMS`'s compound stems, which still
+  intentionally omit a trailing boundary for the documented inflection
+  reasons in `config/directory_field_vocabulary.py`'s own docstring.
+
+## Third follow-up (2026-09-18): coordinator review of 88da3cc - accent folding
+
+A coordinator review of the F1 fix (commit `88da3cc`) found a symmetric gap:
+`POLICY_WORDING_TERMS` only spelled its accented forms ("política"), so a
+question that omits accents entirely - which users routinely do - did not
+match it, while `LANGUAGE_FIELD_TERMS`'s own field patterns already tolerate
+missing accents (e.g. Spanish `m[eé]todos?\s+de\s+pago` matches "metodos de
+pago" via an explicit character class). Probe:
+`localized_policy_wording_present("Cual es la politica de Forever Norway
+sobre los metodos de pago?", language="es")` returned `False` while
+`directory_field_intent_present` returned `True` for the same text, so the
+question still resolved to `directory`/8.0 - reopening F1's own bug for
+accentless input.
+
+**Fix:** rather than hand-maintaining a second accentless literal or
+character class per `POLICY_WORDING_TERMS` term (which the field vocabulary
+does, pattern-by-pattern, and which does not generalize), both the
+vocabulary's terms (at compile time) and the question text (at match time)
+are folded through the same NFKD-decompose/strip-combining-marks/casefold
+recipe `app/retrieval/providers.py`'s own `_fold_search_text` already uses
+for its local query-expansion heuristics. That exact function could not be
+imported into `utils/directory_fields.py` (`providers.py` already imports
+*from* that module, so importing back would be circular), so a private
+`_fold_diacritics` duplicate was added there instead, documented as
+intentionally mirroring `_fold_search_text` rather than reinventing it. This
+folding also transparently handles NFD-decomposed input (a base letter plus
+a separate combining-mark codepoint, one of two valid Unicode encodings of
+the same accented text) without any special-casing, since NFKD decomposition
+subsumes NFD. Cyrillic letters (ru, sr) have no compatibility decomposition,
+so folding is a no-op for those entries and they are unaffected.
+
+| Question (language) | Before this fix | After this fix |
+| --- | --- | --- |
+| "Cual es la politica de Forever Norway sobre los metodos de pago?" (es, accentless) | `directory` (8.0) | `policy` (0.0) |
+| "Quelles sont les regles de Forever Norge sur l'adresse de livraison ?" (fr, accentless) | `directory` (8.0) | `policy` (0.0) |
+| "Qual e a politica de Forever Ghana sobre as formas de pagamento?" (pt, accentless) | `directory` (8.0) | `policy` (0.0) |
+| NFD-decomposed form of the accented Spanish F1 repro | `ambiguous` (0.0)* | `policy` (0.0) |
+| "¿Cuál es la política ...?" (es, accented, precomposed - F1 control) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+| "Welche Regeln ...?" (de, control - already accentless) | `policy` (0.0), unchanged | `policy` (0.0), unchanged |
+
+\* Before this fix, NFD-decomposed accented Spanish text also broke the
+(unfolded) field-intent match - `directory_field_intent_present`'s own
+character-class patterns expect a single precomposed accented character, not
+a base letter plus a separate combining mark - so that specific probe landed
+on `ambiguous`, not `directory`. This is a separate, narrower, pre-existing
+gap in the field disjunct for NFD input specifically; it is not addressed
+here (out of scope for this coordinator review), but the policy-wording fix
+resolves the question correctly regardless, because it is checked first.
+
+### Third follow-up test run counts and exit codes
+
+All commands run in the foreground with `--basetemp` under the assigned
+scratchpad and `-o addopts=""`, `-p no:cacheprovider`.
+
+1. The 8 new accent-folding tests, on `utils/directory_fields.py` reverted
+   via `git stash` (tests kept): **6 failed, 2 passed, `EXIT=1`** - the 2
+   pre-existing passes are the German control (no accent to begin with) and
+   the accented-Portuguese control (already matched via the literal,
+   unfolded term added in the second follow-up); the 6 failures are the
+   genuine accentless/NFD-decomposed reproductions. `git stash pop` restored
+   the fix afterward.
+2. Targeted list (`test_r05_directory_protection_intent.py`,
+   `test_opensearch_sections.py`, `test_retrieval_service.py`,
+   `test_retrieval_rank_list_capture.py`, `test_demo_kenya_directory_gate.py`,
+   `test_demo_directory_routing.py`, `test_directory_fields.py`,
+   `tests/conversation`): **658 passed, `EXIT=0`.**
+3. Full `tests/unit` (foreground, 600000ms timeout): **8982 passed, 13
+   xfailed, `EXIT=0`**, 387.63s wall time.
+4. `flake8` on the four changed files (`app/retrieval/providers.py`,
+   `config/directory_field_vocabulary.py`, `utils/directory_fields.py`,
+   `tests/unit/test_r05_directory_protection_intent.py`): **no output,
+   `FLAKE8_EXIT=0`** (one `E302` blank-line finding was caught and fixed
+   during this follow-up before the final run).
+5. `git diff --check`: **no output, `DIFFCHECK_EXIT=0`.**
+
+### Third follow-up limitations
+
+- **The NFD-input gap in `directory_field_intent_present` itself (see the
+  table footnote above) is not fixed here** - it is masked for policy
+  questions because the policy check runs first, but a genuinely
+  directory-intentioned question typed with NFD-decomposed accents (an
+  uncommon but valid input encoding) would still not be recognized by the
+  field disjunct. Flagged as a candidate for a future, narrower follow-up if
+  NFD input is confirmed to occur in practice; not in this review's scope.
+- **`_fold_diacritics` is a small, private duplicate of
+  `app/retrieval/providers.py._fold_search_text`**, not a shared import,
+  specifically to avoid a circular import between that module and
+  `utils/directory_fields.py`. If a third caller needs the same fold in the
+  future, it should move to a shared, dependency-free location rather than
+  being duplicated a third time.
