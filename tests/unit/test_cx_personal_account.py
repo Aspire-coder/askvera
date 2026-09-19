@@ -14,6 +14,18 @@ for the fix (commission/bonus removed from the bare current-value shape;
 every identifier shape anchored to an explicit lookup verb) and
 ``test_fable_s1_rate_and_need_probes_are_not_personal_account`` below for
 every reproduction, in all 12 languages.
+
+Fable's re-review of that fix (2026-09-19, findings F2/F3) added two more
+blocks: F2 (should-fix) -- "What is my volume requirement to stay active?"
+still matched the current-value shape because that shape didn't care what
+came after the noun; see ``test_fable_f2_requirement_purpose_probes_are_not_personal_account``
+for every reproduction. F3 (low) -- the S1 narrowing dropped real lookups
+that pair commission/bonus/earnings with an explicit time marker ("What is
+my commission this month?", "Did my bonus get paid this month?"); see
+``test_fable_f3_commission_bonus_with_time_marker_is_personal_account``.
+Both are covered in all 12 languages, and every S1 negative above is
+re-asserted in ``test_fable_s1_rate_and_need_probes_are_not_personal_account``
+to confirm F2/F3 did not reopen S1.
 """
 
 from __future__ import annotations
@@ -84,7 +96,7 @@ def test_detects_personal_account_lookup_in_english(question: str) -> None:
         ("fi", "Missä tilaukseni on?"),
         ("fi", "Onko bonukseni maksettu?"),
         ("sv", "Var är min order?"),
-        ("sv", "Vad är min saldo?"),
+        ("sv", "Vad är mitt saldo?"),  # grammatical Swedish (Fable re-review)
         ("da", "Hvor er min ordre?"),
         ("no", "Hvor er min bestilling?"),
         ("ru", "Где мой заказ?"),
@@ -180,6 +192,74 @@ def test_general_policy_question_with_possessive_is_not_personal_account(languag
 )
 def test_fable_s1_rate_and_need_probes_are_not_personal_account(language: str, question: str) -> None:
     assert detect_personal_account_request(question, language) is False
+
+
+# --- Fable CX review finding F2 (2026-09-19, should-fix): a requirement/
+# rule/purpose clause after the current-value shape must still not match,
+# in all 12 languages. ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("en", "What is my volume requirement to stay active?"),
+        ("en", "What is my balance requirement for the 2CC rule?"),
+        ("de", "Wie hoch ist mein Guthaben, um aktiv zu bleiben?"),
+        ("de", "Wie hoch ist mein Kontostand Anforderung für die 2CC-Regel?"),
+        ("es", "¿Cuál es mi requisito de puntos para permanecer activo?"),
+        ("es", "¿Cuál es mi saldo requisito para la regla del 2CC?"),
+        ("fr", "Quel est mon solde exigence pour rester actif?"),
+        ("fr", "Quel est mon nombre de points exigence pour la règle du 2CC?"),
+        ("it", "Qual è il mio saldo requisito per rimanere attivo?"),
+        ("it", "Qual è il mio numero di punti requisito per la regola del 2CC?"),
+        ("nl", "Wat is mijn saldo vereiste om actief te blijven?"),
+        ("nl", "Wat is mijn aantal punten vereiste voor de 2CC-regel?"),
+        ("sv", "Vad är mitt saldo krav för att förbli aktiv?"),
+        ("sv", "Vad är min poäng krav för regeln 2CC?"),
+        ("da", "Hvad er min saldo krav for at forblive aktiv?"),
+        ("da", "Hvad er min pointsum krav for reglen 2CC?"),
+        ("no", "Hva er min saldo krav for å forbli aktiv?"),
+        ("no", "Hva er min poengsum krav for regelen 2CC?"),
+        ("fi", "Mikä on saldoni vaatimus pysyäkseni aktiivisena?"),
+        ("fi", "Mikä on pisteideni määrä vaatimus säännön mukaan?"),
+        ("ru", "Какой мой баланс требование, чтобы остаться активным?"),
+        ("ru", "Какой мой остаток баллов требование для правила 2CC?"),
+        ("sr", "Колико је моје стање услов да останем активан?"),
+        ("sr", "Колико је мој број поена услов за правило 2CC?"),
+    ],
+)
+def test_fable_f2_requirement_purpose_probes_are_not_personal_account(language: str, question: str) -> None:
+    assert detect_personal_account_request(question, language) is False
+
+
+# --- Fable CX review finding F3 (2026-09-19, low): commission/bonus/
+# earnings paired with an explicit time marker IS a real lookup, in all 12
+# languages -- the S1 narrowing must not have dropped this shape. ----------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("en", "What is my commission this month?"),
+        ("en", "What is my bonus last month?"),
+        ("en", "How much is my earnings so far?"),
+        ("en", "Did my bonus get paid this month?"),
+        ("de", "Wie hoch ist meine Provision diesen Monat?"),
+        ("de", "Wurde mein Bonus ausgezahlt?"),
+        ("es", "¿Cuál es mi comisión este mes?"),
+        ("fr", "Quel est mon bonus ce mois-ci ?"),
+        ("it", "Qual è la mia commissione questo mese?"),
+        ("nl", "Wat is mijn commissie deze maand?"),
+        ("sv", "Vad är min provision denna månad?"),
+        ("da", "Hvad er min provision denne måned?"),
+        ("no", "Hva er min provisjon denne måneden?"),
+        ("fi", "Mikä on palkkioni tässä kuussa?"),
+        ("ru", "Какая моя комиссия в этом месяце?"),
+        ("sr", "Колика је моја провизија овог месеца?"),
+    ],
+)
+def test_fable_f3_commission_bonus_with_time_marker_is_personal_account(language: str, question: str) -> None:
+    assert detect_personal_account_request(question, language) is True
 
 
 def test_unrecognised_language_never_matches() -> None:
