@@ -81,9 +81,16 @@ Each lane also writes one doc: `docs/conversation-quality/phase3/CX_LANE<n>_*.md
   market) is the acknowledgement. The key stays in the copy for a later UI use.
 - **Understanding stays on the selected language.** On a switched turn, intent
   and route detection, typo detection and reference resolution on the message
-  still use `body.language`; only customer-visible copy follows the answer
+  still use `body.language`; customer-visible copy follows the answer
   language (governance and semantic-route refusal copy were switched after the
-  review). Revisit with live data.
+  review). One classification input follows it too, deliberately: the
+  claim-safety scope of a refusal (`localized_claim_response` →
+  `services/claim_safety.classify_claim_scope`, which picks the product and
+  disease term list by language) now reads the answer language, which on a
+  switched turn is the language the message is actually written in. It runs
+  only after governance has already classified the message as a medical claim
+  and only chooses between two refusal wordings; it never changes whether a
+  claim is refused (Fable re-review F5, 2026-09-19). Revisit with live data.
 - **Market names in localized copy are English.** `config/market_name_aliases.json`
   holds ICU names untagged by language, so a localized name cannot be chosen
   reliably without regenerating that data (a dependency install, not permitted
