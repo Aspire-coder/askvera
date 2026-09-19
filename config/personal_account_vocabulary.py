@@ -23,9 +23,12 @@ reader's own account state and asks to look it up:
    whether something already happened, not a question about *when* it will
    happen in the future).
 3. **Current-value lookup** -- "what is my balance", "how many points do I
-   have", "what is my commission this month".
+   have" (balance/points/volume only -- see the Fable S1 note below for why
+   commission/bonus are NOT in this shape).
 4. **Earned-amount lookup** -- "how much did I earn (this month)".
-5. **Identifier reference** -- "my tracking number", "my order number".
+5. **Identifier reference, as an explicit lookup** -- "what is my tracking
+   number", "track my order" (anchored to a lookup verb -- see the Fable S1
+   note below for why a bare "my order number" is NOT enough).
 
 None of these shapes match:
 
@@ -37,6 +40,49 @@ None of these shapes match:
 - a capability question ("CAN I return my order?");
 - a general fact question that happens to use "my" ("What are the payment
   methods for my order?").
+
+## Fable CX review finding S1 (2026-09-19, should-fix, all 12 languages)
+
+The first shipped version of this vocabulary matched TWO policy shapes it
+should not have, both reproduced by Fable at 23/23 probes:
+
+1. **Rate/percentage questions.** "What is my bonus percentage as an
+   Assistant Supervisor?" and "What is my commission rate?" (and the
+   equivalents Fable listed in every other language) matched the
+   current-value lookup shape because that shape originally accepted
+   "commission"/"bonus" as a bare object noun ("what is my commission",
+   "what is my bonus") with nothing after it required. A rate/percentage
+   question uses the exact same opening words. **Fix:** "commission" and
+   "bonus" (and their per-language translations) are removed from the
+   plain current-value shape entirely; the current-value shape now only
+   ever matches ``balance``/``points``/``volume``/``account balance`` (the
+   fields that genuinely have no rate/policy reading). A commission/bonus
+   VALUE lookup only matches through the completed-event shape below,
+   which requires a state or time marker a rate question never has ("has
+   my commission been paid" matches; "what is my commission rate" does
+   not, because it carries no ``has``/``did``/``was`` and no
+   received/arrived/paid/processed/shipped word).
+2. **"Do I need my order number..." capability questions.** "Do I need my
+   order number to return a product?" and "Brauche ich meine Bestellnummer
+   für eine Rücksendung?" matched the identifier shape because it
+   originally accepted a bare "my order/tracking/account number" anywhere
+   in the sentence. **Fix:** every identifier shape is now anchored to an
+   actual lookup verb immediately before it ("what is my tracking
+   number", "track my order", German "wie lautet meine Bestellnummer" /
+   "wo finde ich meine Bestellnummer", etc. -- see each language's pattern)
+   rather than matching the bare noun phrase anywhere in the question. "Do
+   I need..." / "Brauche ich..." has no lookup verb immediately before the
+   noun phrase, so it no longer matches.
+
+Both fixes are structural (narrowing WHAT the shapes accept), not a bolted-
+on exclusion list of "bad words" layered on top of the original shapes --
+consistent with this module's "closed phrase shapes, not a keyword blocklist"
+discipline. New completed-event/time-marker positives were added per
+language for the commission/bonus VALUE-with-state-marker case ("has my
+commission been paid", "was my payment received", "where is my bonus
+payment", "how much did I earn last month") so shape 2 above (Fable's
+"(b) commission/bonus/payment only with a state or time marker") stays
+fully covered even though the bare rate-shaped match is gone.
 
 ## Confidence per language
 
@@ -79,126 +125,137 @@ from config.directory_field_vocabulary import normalize_language_code
 _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
     "en": re.compile(
         r"""
-        \bwhere\s+is\s+my\s+(?:order|shipment|package|payment|refund)\b
+        \bwhere\s+is\s+my\s+(?:bonus\s+)?(?:order|shipment|package|payment|refund)\b
         | \b(?:what\s*'?s|what\s+is)\s+the\s+status\s+of\s+my\s+
             (?:order|shipment|package|payment)\b
         | \bmy\s+order\s+status\b
-        | \b(?:has|did)\s+my\s+(?:payment|commission|bonus|order|refund)\s+
+        | \btrack\s+my\s+(?:order|shipment|package)\b
+        | \b(?:has|did|was)\s+my\s+(?:payment|commission|bonus|order|refund)\s+
             (?:been\s+)?(?:receive[d]?|arrive[d]?|paid|processed|ship(?:ped)?)\b
         | \b(?:what\s*'?s|what\s+is)\s+my\s+
-            (?:balance|commission|bonus|points|volume|account\s+balance)\b
+            (?:balance|points|volume|account\s+balance)\b
         | \bhow\s+(?:much|many)\s+(?:did\s+i\s+earn|points\s+do\s+i\s+have)\b
-        | \bmy\s+(?:tracking|order|account)\s+number\b
+        | \b(?:what\s*'?s|what\s+is|track)\s+my\s+(?:tracking|order|account)\s+number\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "de": re.compile(
         r"""
-        \bwo\s+ist\s+(?:meine\s+bestellung|meine\s+sendung|mein\s+paket|
-            meine\s+zahlung)\b
+        \bwo\s+ist\s+(?:meine\s+(?:bonus)?zahlung|meine\s+bestellung|
+            meine\s+sendung|mein\s+paket)\b
         | \bstatus\s+meiner\s+bestellung\b
-        | \bist\s+meine\s+(?:zahlung|provision|bonuszahlung|bestellung)\s+
-            (?:eingegangen|angekommen|bezahlt|versendet)\b
+        | \b(?:ist|wurde)\s+meine?\s+(?:zahlung|provision|bonus(?:zahlung)?|
+            bestellung)\s+
+            (?:eingegangen|angekommen|bezahlt|versendet|ausgezahlt)\b
         | \bwie\s+hoch\s+ist\s+mein\s+
-            (?:kontostand|guthaben|provision|bonus|punktestand)\b
+            (?:kontostand|guthaben|punktestand)\b
         | \bwie\s+viel(?:e)?\s+(?:habe\s+ich\s+verdient|punkte\s+habe\s+ich)\b
-        | \bmeine\s+(?:sendungsverfolgung|bestellnummer|kontonummer)\b
+        | \b(?:wie\s+lautet|was\s+ist|wo\s+finde\s+ich)\s+meine\s+
+            (?:sendungsverfolgungsnummer|bestellnummer|kontonummer)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "es": re.compile(
         r"""
-        \bd[oó]nde\s+est[aá]\s+mi\s+(?:pedido|env[ií]o|paquete|pago)\b
+        \bd[oó]nde\s+est[aá]\s+mi\s+(?:bono\s+)?(?:pedido|env[ií]o|paquete|pago)\b
         | \bestado\s+de\s+mi\s+pedido\b
         | \b(?:se\s+ha\s+recibido|ha\s+llegado|se\s+ha\s+pagado)\s+mi\s+
             (?:pago|comisi[oó]n|bono|pedido)\b
         | \bcu[aá]l\s+es\s+mi\s+
-            (?:saldo|comisi[oó]n|bono|puntos)\b
+            (?:saldo|puntos)\b
         | \bcu[aá]nto\s+(?:he\s+ganado|puntos\s+tengo)\b
-        | \bmi\s+n[uú]mero\s+de\s+(?:seguimiento|pedido|cuenta)\b
+        | \b(?:cu[aá]l\s+es|d[oó]nde\s+encuentro)\s+mi\s+
+            n[uú]mero\s+de\s+(?:seguimiento|pedido|cuenta)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "fr": re.compile(
         r"""
-        \bo[uù]\s+est\s+ma\s+(?:commande|livraison|colis|paiement)\b
+        \bo[uù]\s+est\s+ma\s+(?:commande|livraison|colis|paiement|prime)\b
         | \bstatut\s+de\s+ma\s+commande\b
         | \b(?:mon\s+paiement|ma\s+commission|ma\s+prime|ma\s+commande)\s+
             (?:a[- ]t[- ]il|a[- ]t[- ]elle)\s+(?:[ée]t[ée]\s+re[cç]u(?:e)?|
             [ée]t[ée]\s+pay[ée]e?|arriv[ée]e?)\b
         | \bquel\s+est\s+mon\s+
-            (?:solde|montant\s+de\s+commission|bonus|nombre\s+de\s+points)\b
+            (?:solde|nombre\s+de\s+points)\b
         | \bcombien\s+(?:ai[- ]je\s+gagn[ée]|de\s+points\s+ai[- ]je)\b
-        | \bmon\s+num[ée]ro\s+de\s+(?:suivi|commande|compte)\b
+        | \b(?:quel\s+est|o[uù]\s+trouve[- ]je)\s+mon\s+
+            num[ée]ro\s+de\s+(?:suivi|commande|compte)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "it": re.compile(
         r"""
-        \bdov['’]?\s*[eè]\s+il\s+mio\s+(?:ordine|spedizione|pacco|pagamento)\b
+        \bdov['’]?\s*[eè]\s+il\s+mio\s+(?:bonus\s+)?
+            (?:ordine|spedizione|pacco|pagamento)\b
         | \bstato\s+del\s+mio\s+ordine\b
         | \b(?:il\s+mio\s+pagamento|la\s+mia\s+commissione|il\s+mio\s+bonus|
             il\s+mio\s+ordine)\s+[eè]\s+stat[oa]\s+
             (?:ricevut[oa]|arrivat[oa]|pagat[oa])\b
         | \bqual\s+[eè]\s+il\s+mio\s+
-            (?:saldo|importo\s+commissione|bonus|numero\s+di\s+punti)\b
+            (?:saldo|numero\s+di\s+punti)\b
         | \bquanto\s+ho\s+guadagnato\b
-        | \bil\s+mio\s+numero\s+di\s+(?:tracciamento|ordine|conto)\b
+        | \b(?:qual\s+[eè]|dove\s+trovo)\s+il\s+mio\s+
+            numero\s+di\s+(?:tracciamento|ordine|conto)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "nl": re.compile(
         r"""
-        \bwaar\s+is\s+mijn\s+(?:bestelling|zending|pakket|betaling)\b
+        \bwaar\s+is\s+mijn\s+(?:bonus\s*)?(?:betaling|bestelling|zending|pakket)\b
         | \bstatus\s+van\s+mijn\s+bestelling\b
         | \bis\s+mijn\s+(?:betaling|commissie|bonus|bestelling)\s+
             (?:ontvangen|aangekomen|betaald|verzonden)\b
         | \bwat\s+is\s+mijn\s+
-            (?:saldo|commissiebedrag|bonus|aantal\s+punten)\b
+            (?:saldo|aantal\s+punten)\b
         | \bhoeveel\s+(?:heb\s+ik\s+verdiend|punten\s+heb\s+ik)\b
-        | \bmijn\s+(?:trackingnummer|bestelnummer|rekeningnummer)\b
+        | \b(?:wat\s+is|waar\s+vind\s+ik)\s+mijn\s+
+            (?:trackingnummer|bestelnummer|rekeningnummer)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "sv": re.compile(
         r"""
-        \bvar\s+[aä]r\s+min\s+(?:order|leverans|paket|betalning)\b
+        \bvar\s+[aä]r\s+min\s+(?:bonus\s*)?(?:order|leverans|paket|betalning)\b
         | \bstatus\s+f[oö]r\s+min\s+order\b
         | \b(?:har\s+min\s+betalning|har\s+min\s+provision|har\s+min\s+bonus|
             har\s+min\s+order)\s+
             (?:mottagits|kommit|betalats|skickats)\b
         | \bvad\s+[aä]r\s+min\s+
-            (?:saldo|provision|bonus|po[aä]ng)\b
+            (?:saldo|po[aä]ng)\b
         | \bhur\s+mycket\s+(?:har\s+jag\s+tj[aä]nat|po[aä]ng\s+har\s+jag)\b
-        | \bmitt\s+(?:sp[aå]rningsnummer|ordernummer|kontonummer)\b
+        | \b(?:vad\s+[aä]r|var\s+hittar\s+jag)\s+mitt\s+
+            (?:sp[aå]rningsnummer|ordernummer|kontonummer)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "da": re.compile(
         r"""
-        \bhvor\s+er\s+min\s+(?:ordre|forsendelse|pakke|betaling)\b
+        \bhvor\s+er\s+min\s+(?:bonus\s*)?(?:ordre|forsendelse|pakke|betaling)\b
         | \bstatus\s+p[aå]\s+min\s+ordre\b
         | \b(?:er\s+min\s+betaling|er\s+min\s+provision|er\s+min\s+bonus|
             er\s+min\s+ordre)\s+
             (?:modtaget|ankommet|betalt|afsendt)\b
         | \bhvad\s+er\s+min\s+
-            (?:saldo|provision|bonus|po[iî]nt(?:sum)?)\b
+            (?:saldo|po[iî]nt(?:sum)?)\b
         | \bhvor\s+meget\s+(?:har\s+jeg\s+tjent|point\s+har\s+jeg)\b
-        | \bmit\s+(?:sporingsnummer|ordrenummer|kontonummer)\b
+        | \b(?:hvad\s+er|hvor\s+finder\s+jeg)\s+mit\s+
+            (?:sporingsnummer|ordrenummer|kontonummer)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
     "no": re.compile(
         r"""
-        \bhvor\s+er\s+min\s+(?:bestilling|forsendelse|pakke|betaling)\b
+        \bhvor\s+er\s+min\s+(?:bonus\s*)?(?:bestilling|forsendelse|pakke|betaling)\b
         | \bstatus\s+p[aå]\s+min\s+bestilling\b
         | \b(?:er\s+min\s+betaling|er\s+min\s+provisjon|er\s+min\s+bonus|
             er\s+min\s+bestilling)\s+
             (?:mottatt|ankommet|betalt|sendt)\b
         | \bhva\s+er\s+min\s+
-            (?:saldo|provisjon|bonus|po[eé]ngsum)\b
+            (?:saldo|po[eé]ngsum)\b
         | \bhvor\s+mye\s+(?:har\s+jeg\s+tjent|po[eé]ng\s+har\s+jeg)\b
-        | \bmitt\s+(?:sporingsnummer|bestillingsnummer|kontonummer)\b
+        | \b(?:hva\s+er|hvor\s+finner\s+jeg)\s+mitt\s+
+            (?:sporingsnummer|bestillingsnummer|kontonummer)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
@@ -209,9 +266,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
         | \bonko\s+(?:maksuni|palkkioni|bonukseni|tilaukseni)\s+
             (?:vastaanotettu|saapunut|maksettu|l[aä]hetetty)\b
         | \bmik[aä]\s+on\s+
-            (?:saldoni|palkkioni|bonukseni|pisteideni\s+m[aä][aä]r[aä])\b
+            (?:saldoni|pisteideni\s+m[aä][aä]r[aä])\b
         | \bpaljonko\s+(?:olen\s+ansainnut|pisteit[aä]\s+minulla\s+on)\b
-        | \b(?:seurantanumeroni|tilausnumeroni|tilinumeroni)\b
+        | \b(?:mik[aä]\s+on|mist[aä]\s+l[oö]yd[aä]n)\s+
+            (?:seurantanumeroni|tilausnumeroni|tilinumeroni)\b
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
@@ -221,13 +279,14 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
     # languages.
     "ru": re.compile(
         r"""
-        где\s+мо[йяё]\s+(?:заказ|посылка|отправление|платёж)
+        где\s+мо[йяё]\s+(?:бонус|заказ|посылка|отправление|платёж)
         | статус\s+моего\s+заказа
         | (?:получен\s+ли\s+мой|пришёл\s+ли\s+мой|поступил\s+ли\s+мой)\s+
             (?:платёж|заказ|бонус|комиссион)
-        | как[аоо]й\s+мо[йяё]\s+(?:баланс|комиссион|бонус|остаток\s+баллов)
+        | какой\s+мой\s+(?:баланс|остаток\s+баллов)
         | сколько\s+(?:я\s+заработал|у\s+меня\s+баллов)
-        | мо[йяё]\s+(?:номер\s+отслеживания|номер\s+заказа|номер\s+счёта)
+        | (?:какой\s+мой|где\s+найти\s+мой)\s+
+            (?:номер\s+отслеживания|номер\s+заказа|номер\s+счёта)
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
@@ -235,15 +294,16 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
     # object + lookup-shape discipline as Russian above.
     "sr": re.compile(
         r"""
-        где\s+је\s+мо(?:ј|ја|је)\s+(?:поруџбина|пошиљка|уплата)
+        где\s+је\s+мо(?:ј|ја|је)\s+(?:бонус|поруџбина|пошиљка|уплата)
         | статус\s+моје\s+поруџбине
         | да\s+ли\s+је\s+мо(?:ј|ја|је)\s+
             (?:уплата|поруџбина|бонус|провизија)\s+
             (?:примљена|стигла|исплаћена|послата)
         | колико\s+је\s+мо(?:ј|ја|је)\s+
-            (?:стање|провизија|бонус|број\s+поена)
+            (?:стање|број\s+поена)
         | колико\s+сам\s+(?:зарадио|поена\s+имам)
-        | мо(?:ј|ја|је)\s+(?:број\s+за\s+праћење|број\s+поруџбине|број\s+рачуна)
+        | (?:колико\s+је\s+мо(?:ј|ја|је)|где\s+да\s+нађем\s+мо(?:ј|ја|је))\s+
+            (?:број\s+за\s+праћење|број\s+поруџбине|број\s+рачуна)
         """,
         re.IGNORECASE | re.VERBOSE,
     ),
