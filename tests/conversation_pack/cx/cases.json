@@ -3072,9 +3072,9 @@
         "cx_applied_absent": [
           "evidence_missing_detail"
         ],
-        "answer_contains": "The approved policy documents currently available do not contain enough information to answer this question clearly. Please rephrase the question or contact Forever Living support for an official answer."
+        "answer_contains": "Утверждённые документы политики, доступные в настоящее время, не содержат достаточно информации, чтобы чётко ответить на этот вопрос. Пожалуйста, переформулируйте вопрос или обратитесь в службу поддержки Forever Living за официальным ответом."
       },
-      "notes": "v5 addition (coordinator P1 control): a question naming no known directory field must keep the reviewed GENERIC copy -- free-text topic extraction isn't reliable enough to name 'the company's history' as a topic, so evidence_missing_detail is never substituted (app/response/cx_compose.py: _name_missing_fields only swaps when outcome.fields_requested is non-empty). How this case can fail: if a future change starts guessing a free-text topic and names the wrong thing, or drops the reviewed generic copy's exact wording."
+      "notes": "v5 addition (coordinator P1 control): a question naming no known directory field must keep the reviewed GENERIC copy -- free-text topic extraction isn't reliable enough to name 'the company's history' as a topic, so evidence_missing_detail is never substituted (app/response/cx_compose.py: _name_missing_fields only swaps when outcome.fields_requested is non-empty). How this case can fail: if a future change starts guessing a free-text topic and names the wrong thing, or drops the reviewed generic copy's exact wording. Updated 2026-09-19 (Fable CX review finding S5): config/conversation_routes.json now carries a reviewed Russian 'insufficient_evidence' entry (it previously had none, so app.evidence.localized_conversation_response translated it at runtime and this pinned answer_contains happened to be the English source text left over from a translation failure/fallback); answer_contains now checks the actual reviewed Russian generic sentence instead."
     },
     {
       "id": "cx-fallback-state-personal-account-no-duplicate-en-00",
