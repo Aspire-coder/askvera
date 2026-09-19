@@ -45,7 +45,20 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # "sr" and "ru", but config/conversation_routes.json never gained a
 # "reference_clarification" key for either locale; corrected the comment
 # only - the hash below and the config file are unchanged.)
-ROUTES_REST_SHA256 = "0098ec016292865497a7f551b1eab12748f97ff67d84edbf41c3464fa2822165"
+# Updated 2026-09-18 (Phase 3, Lane 4, CX localization/rendering task): every
+# locale gained the CX_LANES.md message-key set (evidence_missing_detail,
+# dependency_unavailable, cross_market_policy_scope,
+# international_directory_note, personal_account_limit, partial_answer_gap,
+# clarify_field, clarify_country, clarify_role, repair_ack, contact_offer,
+# suggest_intro, the four suggest_topic_* keys) plus ten field_label_<field>
+# keys for the canonical directory fields (utils/directory_fields.py /
+# config/directory_field_vocabulary.py). it/da/fi/no/sr/sv/ru also gained a
+# "bedrock_error" entry (none of these seven locales had one before), since
+# "dependency_unavailable" reuses that same string per locale. No existing
+# key's value changed anywhere. This is purely additive; the new non-English
+# copy is Lane 4's own translation and needs native review (see
+# docs/conversation-quality/phase3/CX_LANE4_LOCALIZATION.md).
+ROUTES_REST_SHA256 = "5250314eeac8af7b18294cd860f7542d120ce0e890a526656e47bfb0cf6dc60c"
 # Updated 2026-09-18 (conversation-quality project): four rules edited in
 # place, all additive in meaning, with the rendered prompt held under the
 # existing 4392-character budget (4247 -> 4381), so no budget assertion moved.
