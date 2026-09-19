@@ -95,7 +95,7 @@ from app.retrieval.models import RetrievalAvailability, RetrievalResult  # noqa:
 
 FEATURE_FLAGS: dict[str, bool] = {
     # Coordinator: chat_orchestrator.py attaches ChatResponse.metadata["outcome"].
-    "outcome_contract_wired": False,
+    "outcome_contract_wired": True,
     "partial_answer": False,  # Lane 2: app/response/partial_answer.py
     "contact_and_suggestions": False,  # Lane 3: contact_completion.py (extend), suggestions.py
     "personal_account": False,  # Lane 3: app/response/personal_account.py
