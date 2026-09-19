@@ -14,7 +14,7 @@ from app.experimental.evidence_first_v2 import ScopeIntent, V2Request, resolve_s
 
 PACKAGE = Path(__file__).parents[2] / "app" / "experimental" / "evidence_first_v2"
 ALLOWED_ABSOLUTE_IMPORTS = {"__future__", "dataclasses", "enum", "hashlib", "re", "typing", "unicodedata"}
-ALLOWED_RELATIVE_IMPORTS = {"context", "contracts", "scope", "standalone"}
+ALLOWED_RELATIVE_IMPORTS = {"context", "contracts", "scope", "standalone", "capture_provenance"}
 
 
 class OfflineIsolationTests(unittest.TestCase):

@@ -1,12 +1,13 @@
 from __future__ import annotations
+import hashlib
 from pathlib import Path
 import unittest
 from app.experimental.evidence_first_v2 import audit
 ROOT=Path(__file__).resolve().parents[2]
 def manifest():return tuple((p,(ROOT/p).read_bytes()) for p,_ in audit.APPROVED_FILES)
 class AuditTests(unittest.TestCase):
- def test_closed_26_path_manifest_and_aggregates(self):
-  x=manifest();self.assertEqual(len(x),26);self.assertTrue(audit.verify_approved(x,audit.ACCEPTED_AGGREGATES))
+ def test_closed_27_path_manifest_and_aggregates(self):
+  x=manifest();self.assertEqual(len(x),27);self.assertTrue(audit.verify_approved(x,audit.ACCEPTED_AGGREGATES))
   for bad in (x[:-1],x+(("extra.py",b"x"),),tuple(reversed(x)),x[:1]+((x[0][0].replace("contracts.py","../contracts.py"),x[0][1]),)+x[1:]):self.assertFalse(audit.verify_approved(bad,audit.ACCEPTED_AGGREGATES))
   self.assertFalse(audit.verify_approved(x,audit.ACCEPTED_AGGREGATES[:-1]))
  def test_manifest_drift_duplicate_and_public_alias_do_not_authorize(self):
@@ -32,11 +33,39 @@ class AuditTests(unittest.TestCase):
   for p in files:self.assertNotIn("evidence_first_v2",p.read_text(encoding="utf-8"),str(p))
  def test_historical_authority_is_recomputed_not_accepted_by_label(self):
   self.assertEqual(audit._historical_aggregates(),audit.ACCEPTED_AGGREGATES)
-  self.assertEqual(len(audit._MILESTONE_MANIFESTS),6)
-  self.assertEqual(len(audit._MILESTONE_SERIALIZATIONS),6)
-  self.assertEqual(len(audit._SUPERSESSION),2)
+  self.assertEqual(len(audit._MILESTONE_MANIFESTS),7)
+  self.assertEqual(len(audit._MILESTONE_SERIALIZATIONS),7)
+  self.assertEqual(len(audit._SUPERSESSION),3)
   bad=list(audit.ACCEPTED_AGGREGATES);bad[0]="0"*64
   self.assertFalse(audit.verify_approved(manifest(),tuple(bad)))
+  bad=list(audit.ACCEPTED_AGGREGATES);bad[-1]="0"*64
+  self.assertFalse(audit.verify_approved(manifest(),tuple(bad)))
+ def test_v2_01_and_v2_02_history_still_recomputes_under_the_v2_11_ledger(self):
+  aggregates=audit._historical_aggregates()
+  self.assertEqual(aggregates[0],audit._ACCEPTED_AGGREGATES[0])
+  self.assertEqual(aggregates[1],audit._ACCEPTED_AGGREGATES[1])
+  self.assertEqual(dict(audit._MILESTONE_MANIFESTS[0])["app/experimental/evidence_first_v2/__init__.py"],audit._SUPERSESSION[0][3])
+  self.assertEqual(dict(audit._MILESTONE_MANIFESTS[1])["app/experimental/evidence_first_v2/__init__.py"],audit._SUPERSESSION[0][4])
+ def test_v2_11_supersession_row_validates_like_the_v2_02_precedent(self):
+  from_milestone,to_milestone,path,old_hash,new_hash=audit._SUPERSESSION[2]
+  self.assertEqual((from_milestone,to_milestone,path),("V2-02","V2-11","tests/evidence_first_v2/test_offline_isolation.py"))
+  self.assertEqual(old_hash,dict(audit._MILESTONE_MANIFESTS[1])[path])
+  self.assertEqual(new_hash,dict(audit._MILESTONE_MANIFESTS[6])[path])
+  self.assertNotEqual(old_hash,new_hash)
+  self.assertEqual(new_hash,hashlib.sha256((ROOT/path).read_bytes()).hexdigest())
+ def test_tampering_with_the_v2_11_manifest_or_aggregate_fails_closed(self):
+  original_manifests=audit._MILESTONE_MANIFESTS
+  tampered=original_manifests[:6]+(((original_manifests[6][0][0],"0"*64),original_manifests[6][1]),)
+  try:
+   audit._MILESTONE_MANIFESTS=tampered
+   self.assertFalse(audit.verify_approved(manifest(),audit.ACCEPTED_AGGREGATES))
+  finally:audit._MILESTONE_MANIFESTS=original_manifests
+  original_aggregates=audit._ACCEPTED_AGGREGATES
+  tampered_aggregates=original_aggregates[:6]+("0"*64,)
+  try:
+   audit._ACCEPTED_AGGREGATES=tampered_aggregates
+   self.assertFalse(audit.verify_approved(manifest(),audit._ACCEPTED_AGGREGATES))
+  finally:audit._ACCEPTED_AGGREGATES=original_aggregates
  def test_exact_record_types_and_terminal_truth_table(self):
   class S(str):pass
   for outcome,counts in audit._COUNTERS.items():
@@ -97,7 +126,7 @@ class AuditTests(unittest.TestCase):
     audit._MILESTONE_MANIFESTS,audit._MILESTONE_SERIALIZATIONS=manifests,rules
     self.assertFalse(audit.verify_approved(manifest(),audit.ACCEPTED_AGGREGATES))
   finally:audit._MILESTONE_MANIFESTS,audit._MILESTONE_SERIALIZATIONS=original
- def test_all_32_serialization_rule_scalar_substitutions_fail_closed(self):
+ def test_all_37_serialization_rule_scalar_substitutions_fail_closed(self):
   class StrSub(str):pass
   original=audit._MILESTONE_SERIALIZATIONS; mutations=[]
   for index,rule in enumerate(original):
@@ -105,7 +134,7 @@ class AuditTests(unittest.TestCase):
     changed=list(original);changed[index]=replacement;mutations.append(tuple(changed))
   for index in (0,1):
    changed=list(original);rule=changed[index];changed[index]=(rule[0],rule[1],True,rule[3]);mutations.append(tuple(changed))
-  self.assertEqual(len(mutations),32)
+  self.assertEqual(len(mutations),37)
   try:
    for rules in mutations:
     audit._MILESTONE_SERIALIZATIONS=rules
