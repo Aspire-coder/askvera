@@ -42,6 +42,34 @@ def test_spanish_preamble_is_detected_and_stripped() -> None:
     assert strip_leading_preamble(answer, "es") == "El costo de envio es 5 USD."
 
 
+def test_spanish_inverted_exclamation_preamble_is_detected_and_stripped() -> None:
+    # Coordinator review of 568a422: leading opening punctuation (¡, ¿,
+    # guillemets, quotes) must not hide an otherwise-exact opener match.
+    answer = "¡Buena pregunta! El pedido minimo es de 100 USD."
+    assert leading_preamble_span(answer, "es") is not None
+    assert strip_leading_preamble(answer, "es") == "El pedido minimo es de 100 USD."
+
+
+def test_spanish_claro_preamble_is_detected_and_stripped() -> None:
+    answer = "¡Claro! El pedido minimo es de 100 USD."
+    assert leading_preamble_span(answer, "es") is not None
+    assert strip_leading_preamble(answer, "es") == "El pedido minimo es de 100 USD."
+
+
+def test_spanish_por_supuesto_preamble_is_detected_and_stripped() -> None:
+    answer = "¡Por supuesto! El pedido minimo es de 100 USD."
+    assert leading_preamble_span(answer, "es") is not None
+    assert strip_leading_preamble(answer, "es") == "El pedido minimo es de 100 USD."
+
+
+def test_spanish_inverted_exclamation_preamble_with_a_number_is_never_preamble() -> None:
+    # Control: the opening punctuation must not defeat the digit guard --
+    # a preamble-shaped sentence that itself states a fact is still kept.
+    answer = "¡Buena pregunta, cuesta 5 USD!"
+    assert leading_preamble_span(answer, "es") is None
+    assert strip_leading_preamble(answer, "es") == answer
+
+
 def test_french_preamble_is_detected_and_stripped() -> None:
     answer = "Merci de poser la question. Le cout de livraison est de 5 USD."
     assert leading_preamble_span(answer, "fr") is not None

@@ -235,7 +235,7 @@ _PREAMBLE_OPENERS: dict[str, tuple[str, ...]] = {
     ),
     "es": (
         "buena pregunta", "gracias por preguntar", "con gusto te ayudo",
-        "con mucho gusto", "claro que si", "por supuesto",
+        "con mucho gusto", "claro que si", "claro", "por supuesto",
     ),
     "fr": (
         "bonne question", "merci de poser la question", "avec plaisir",
@@ -290,6 +290,21 @@ _PREAMBLE_OPENERS: dict[str, tuple[str, ...]] = {
 _CITATION_MARKER_RE = re.compile(r"\[(?:source\s+)?\d+\]", re.IGNORECASE)
 _ANY_DIGIT_RE = re.compile(r"\d")
 
+# Opening/closing wrapper punctuation and quote marks stripped from a
+# sentence's edges before it is compared against _PREAMBLE_OPENERS, so a
+# leading inverted mark (Spanish "¡Buena pregunta!", "¿Listo?"),
+# a guillemet or a straight/curly quote around the opener never hides an
+# otherwise-exact match -- the openers table itself stays plain, unquoted
+# text for every language rather than needing a wrapped variant of every
+# entry. Trailing punctuation is stripped the same way so the final "!"/"."
+# of the opener sentence does not have to be listed either.
+_LEADING_WRAPPER_PUNCTUATION_RE = re.compile(
+    r"^[\s\"'*«»‘’“”¡¿.,:;!?-]+"
+)
+_TRAILING_WRAPPER_PUNCTUATION_RE = re.compile(
+    r"[\s\"'*«»‘’“”¡¿.,:;!?-]+$"
+)
+
 
 def _sentence_is_never_preamble(sentence: str, language: str) -> bool:
     """True when ``sentence`` must never be treated as pure preamble.
@@ -340,7 +355,9 @@ def leading_preamble_span(answer: str, language: str) -> tuple[int, int] | None:
     openers = _PREAMBLE_OPENERS.get(normalize_language_code(language))
     if not openers:
         return None
-    folded = _fold_diacritics(text).strip(" \t\"'*.!?,:;-")
+    folded = _fold_diacritics(text)
+    folded = _LEADING_WRAPPER_PUNCTUATION_RE.sub("", folded)
+    folded = _TRAILING_WRAPPER_PUNCTUATION_RE.sub("", folded)
     if any(folded == opener or folded.startswith(opener + " ") or folded.startswith(opener + ",")
            for opener in openers):
         return (first.start, first.end)

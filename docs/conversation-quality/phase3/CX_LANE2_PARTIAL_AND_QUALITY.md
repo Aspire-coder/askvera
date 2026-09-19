@@ -241,12 +241,28 @@ composes with the rest exactly like every existing step there.
 ## Test run
 
 ```
-pytest tests/unit/test_cx_partial_answer.py tests/unit/test_cx_answer_quality.py -q
-                                                          -> 44 passed
-pytest tests/unit/test_response_quality.py tests/unit/test_response_builder.py tests/conversation -q
-                                                          -> 385 passed
+pytest tests/unit/test_cx_partial_answer.py tests/unit/test_cx_answer_quality.py
+       tests/unit/test_response_quality.py tests/unit/test_response_builder.py
+       tests/conversation -q
+                                                          -> 433 passed
 flake8 app/response/partial_answer.py app/response/quality.py
        tests/unit/test_cx_partial_answer.py tests/unit/test_cx_answer_quality.py
                                                           -> exit 0 (clean)
 git diff --check                                          -> exit 0 (clean)
 ```
+
+## Fix (coordinator review of 568a422)
+
+`leading_preamble_span`/`strip_leading_preamble` did not strip a sentence's
+leading opening punctuation (Spanish inverted marks `¡`/`¿`,
+guillemets, straight/curly quotes) before comparing it against
+`_PREAMBLE_OPENERS`, so `"¡Buena pregunta! ..."` was left unchanged.
+Fixed by stripping a leading/trailing run of wrapper punctuation
+(`_LEADING_WRAPPER_PUNCTUATION_RE` / `_TRAILING_WRAPPER_PUNCTUATION_RE`) from
+the accent-folded sentence before the opener comparison, for every language
+-- the openers table itself stays plain, unquoted text. Also added a bare
+`"claro"` entry to the Spanish table (`"claro que si"` alone did not cover a
+standalone `"¡Claro!"`). New tests cover `"¡Buena pregunta!"`,
+`"¡Claro!"`, `"¡Por supuesto!"`, and a control where the
+punctuation-wrapped opener sentence itself states a number (still never
+preamble).
