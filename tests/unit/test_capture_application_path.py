@@ -427,6 +427,19 @@ def test_resume_rejects_a_changed_prompt_version(tmp_path, monkeypatch):
         tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--resume"])
 
 
+def test_resume_rejects_a_different_approval_id(tmp_path, monkeypatch):
+    """One checkpoint is one authorization (Fable re-review F4)."""
+    _patch_real_singletons(monkeypatch)
+    manifest = _manifest([_case("a")])
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-A"])
+
+    with pytest.raises(tool.ResumeMismatchError, match="approval_id"):
+        tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-B", "--resume"])
+
+
 def test_resume_skips_cases_already_in_the_checkpoint(tmp_path, monkeypatch):
     _patch_real_singletons(monkeypatch)
     manifest = _manifest([_case("a"), _case("b")])

@@ -617,10 +617,15 @@ def validate_resume(
         mismatches.append("code_identity")
     if header.get("prompt_version") != current_prompt_version:
         mismatches.append("prompt_version")
+    # One checkpoint is one authorization. Resuming under a different approval
+    # would write rows whose approval_id disagrees with the header (Fable
+    # re-review, 2026-09-18).
+    if header.get("approval_id") != approval_id:
+        mismatches.append("approval_id")
     if mismatches:
         raise ResumeMismatchError(
             "refusing to resume: " + ", ".join(mismatches) + " differ from the checkpoint's run header; "
-            "a resume must never mix candidate versions in one output"
+            "a resume must never mix candidate versions or approvals in one output"
         )
 
 
