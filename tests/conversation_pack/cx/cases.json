@@ -1,13 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
   "lane": "6",
-  "description": "CX offline evaluation matrix (Lane 6). Case ids live only here; app/test code must never reference them.",
+  "description": "CX offline evaluation matrix (Lane 6), driving the real AIOrchestrator.handle_chat path. Case ids live only here; app/test code must never reference them.",
   "cases": [
     {
-      "id": "cx-fallback_state_evidence_missing-en-00",
+      "id": "cx-fallback-state-evidence-missing-en-00",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -20,11 +19,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -37,13 +33,12 @@
         ],
         "language": "en"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-en-00",
+      "id": "cx-fallback-state-dependency-unavailable-en-00",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -56,8 +51,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "unavailable"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "unavailable"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -67,15 +63,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "en"
+        "language": "en",
+        "retrieval_availability": "unavailable"
       },
-      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-en-00",
+      "id": "cx-fallback-state-cross-market-policy-en-00",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -88,11 +84,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Kenya company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Kenya",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -104,13 +114,12 @@
         ],
         "language": "en"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Kenya/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-en-00",
+      "id": "cx-fallback-state-international-directory-en-00",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -119,19 +128,21 @@
         {
           "role": "user",
           "message": "Who is the sponsoring contact for Kenya?",
-          "language": "en"
+          "language": "en",
+          "scripted_answer": "The sponsoring contact for Kenya is contact@example-0.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-000",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-0.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -144,13 +155,12 @@
         "language": "en",
         "directory_target": "Kenya"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Kenya, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-en-00",
+      "id": "cx-fallback-state-ambiguous-followup-en-00",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -158,15 +168,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Who is the sponsoring contact for Kenya?",
+          "language": "en"
+        },
+        {
+          "role": "assistant",
+          "message": "(Kenya and Ghana both matched.)"
+        },
+        {
+          "role": "user",
           "message": "What about the other one?",
           "language": "en"
         }
       ],
       "stub": {
-        "failure_layer": "candidate_narrowing_fallback",
-        "metadata_extra": {
-          "failure_layer": "candidate_narrowing_fallback"
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-000-a",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-000-b",
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -179,13 +211,12 @@
         "language": "en",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Kenya, Ghana) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-en-00",
+      "id": "cx-fallback-state-personal-account-en-00",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -199,8 +230,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -212,13 +243,12 @@
         ],
         "language": "en"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-en-00",
+      "id": "cx-fallback-state-safety-refusal-en-00",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -231,25 +261,31 @@
         }
       ],
       "stub": {
-        "failure_layer": "aws_guardrail"
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "1.01",
+            "title": "Introduction",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9,
+        "model_finish_reason": "guardrail_intervened"
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "en",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'aws_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-es-01",
+      "id": "cx-fallback-state-evidence-missing-es-01",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "es",
@@ -262,11 +298,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -279,13 +312,12 @@
         ],
         "language": "es"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-es-01",
+      "id": "cx-fallback-state-dependency-unavailable-es-01",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "es",
@@ -298,8 +330,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "degraded"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "degraded"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -309,15 +342,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "es"
+        "language": "es",
+        "retrieval_availability": "degraded"
       },
-      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-es-01",
+      "id": "cx-fallback-state-cross-market-policy-es-01",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "es",
@@ -330,11 +363,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Ghana company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Ghana",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -346,13 +393,12 @@
         ],
         "language": "es"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Ghana/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-es-01",
+      "id": "cx-fallback-state-international-directory-es-01",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "es",
@@ -361,19 +407,21 @@
         {
           "role": "user",
           "message": "¿Quién es el contacto de patrocinio para Ghana?",
-          "language": "es"
+          "language": "es",
+          "scripted_answer": "The sponsoring contact for Ghana is contact@example-1.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Ghana"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-001",
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-1.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -386,13 +434,12 @@
         "language": "es",
         "directory_target": "Ghana"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Ghana, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-es-01",
+      "id": "cx-fallback-state-ambiguous-followup-es-01",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "es",
@@ -400,19 +447,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "¿Quién es el contacto de patrocinio para Ghana?",
+          "language": "es"
+        },
+        {
+          "role": "assistant",
+          "message": "(Ghana and Nigeria both matched.)"
+        },
+        {
+          "role": "user",
           "message": "¿Y el otro?",
           "language": "es"
         }
       ],
       "stub": {
-        "failure_layer": "directory_clarification",
-        "metadata_extra": {
-          "failure_layer": "directory_clarification",
-          "reference_candidates": [
-            "Ghana",
-            "Nigeria"
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-001-a",
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-001-b",
+            "record_country": "Nigeria",
+            "content": "Forever Nigeria\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -425,13 +490,12 @@
         "language": "es",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Ghana, Nigeria) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-es-01",
+      "id": "cx-fallback-state-personal-account-es-01",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -445,8 +509,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -458,13 +522,12 @@
         ],
         "language": "es"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-es-01",
+      "id": "cx-fallback-state-safety-refusal-es-01",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "es",
@@ -477,25 +540,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "local_guardrail"
+        "documents": [],
+        "confidence": 0.0,
+        "governance_block": {
+          "provider": "bedrock_guardrails",
+          "guardrail_action": "BLOCK"
+        }
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "es",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'local_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-fr-02",
+      "id": "cx-fallback-state-evidence-missing-fr-02",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fr",
@@ -508,11 +571,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -525,13 +585,12 @@
         ],
         "language": "fr"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-fr-02",
+      "id": "cx-fallback-state-dependency-unavailable-fr-02",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fr",
@@ -544,8 +603,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "unavailable"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "unavailable"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -555,15 +615,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "fr"
+        "language": "fr",
+        "retrieval_availability": "unavailable"
       },
-      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-fr-02",
+      "id": "cx-fallback-state-cross-market-policy-fr-02",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fr",
@@ -576,11 +636,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Nigeria company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Nigeria",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -592,13 +666,12 @@
         ],
         "language": "fr"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Nigeria/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-fr-02",
+      "id": "cx-fallback-state-international-directory-fr-02",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fr",
@@ -607,19 +680,21 @@
         {
           "role": "user",
           "message": "Qui est le contact de parrainage pour Nigeria ?",
-          "language": "fr"
+          "language": "fr",
+          "scripted_answer": "The sponsoring contact for Nigeria is contact@example-2.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Nigeria"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-002",
+            "record_country": "Nigeria",
+            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-2.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -632,13 +707,12 @@
         "language": "fr",
         "directory_target": "Nigeria"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Nigeria, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-fr-02",
+      "id": "cx-fallback-state-ambiguous-followup-fr-02",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fr",
@@ -646,15 +720,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Qui est le contact de parrainage pour Nigeria ?",
+          "language": "fr"
+        },
+        {
+          "role": "assistant",
+          "message": "(Nigeria and Brazil both matched.)"
+        },
+        {
+          "role": "user",
           "message": "Et l'autre ?",
           "language": "fr"
         }
       ],
       "stub": {
-        "failure_layer": "candidate_narrowing_fallback",
-        "metadata_extra": {
-          "failure_layer": "candidate_narrowing_fallback"
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-002-a",
+            "record_country": "Nigeria",
+            "content": "Forever Nigeria\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-002-b",
+            "record_country": "Brazil",
+            "content": "Forever Brazil\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -667,13 +763,12 @@
         "language": "fr",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Nigeria, Brazil) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-fr-02",
+      "id": "cx-fallback-state-personal-account-fr-02",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -687,8 +782,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -700,13 +795,12 @@
         ],
         "language": "fr"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-fr-02",
+      "id": "cx-fallback-state-safety-refusal-fr-02",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fr",
@@ -719,25 +813,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "risk_policy"
+        "documents": [],
+        "confidence": 0.0,
+        "governance_block": {
+          "provider": "risk_policy_engine",
+          "guardrail_action": "REVIEW"
+        }
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "fr",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'risk_policy' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: risk_policy (fake governance blocks, provider != bedrock_guardrails, action != BLOCK), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-de-03",
+      "id": "cx-fallback-state-evidence-missing-de-03",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -745,16 +839,13 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebuehr?",
+          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebühr?",
           "language": "de"
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -767,13 +858,12 @@
         ],
         "language": "de"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-de-03",
+      "id": "cx-fallback-state-dependency-unavailable-de-03",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -781,13 +871,14 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebuehr?",
+          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebühr?",
           "language": "de"
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "degraded"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "degraded"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -797,15 +888,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "de"
+        "language": "de",
+        "retrieval_availability": "degraded"
       },
-      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-de-03",
+      "id": "cx-fallback-state-cross-market-policy-de-03",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -818,11 +909,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Brazil company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Brazil",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -834,13 +939,12 @@
         ],
         "language": "de"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Brazil/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-de-03",
+      "id": "cx-fallback-state-international-directory-de-03",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -848,20 +952,22 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wer ist der Sponsoring-Kontakt fuer Brazil?",
-          "language": "de"
+          "message": "Wer ist der Sponsoring-Kontakt für Brazil?",
+          "language": "de",
+          "scripted_answer": "The sponsoring contact for Brazil is contact@example-3.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Brazil"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-003",
+            "record_country": "Brazil",
+            "content": "Forever Brazil\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-3.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -874,13 +980,12 @@
         "language": "de",
         "directory_target": "Brazil"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Brazil, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-de-03",
+      "id": "cx-fallback-state-ambiguous-followup-de-03",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -888,15 +993,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Wer ist der Sponsoring-Kontakt für Brazil?",
+          "language": "de"
+        },
+        {
+          "role": "assistant",
+          "message": "(Brazil and Finland/Aland both matched.)"
+        },
+        {
+          "role": "user",
           "message": "Und der andere?",
           "language": "de"
         }
       ],
       "stub": {
-        "failure_layer": "directory_clarification",
-        "metadata_extra": {
-          "failure_layer": "directory_clarification"
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-003-a",
+            "record_country": "Brazil",
+            "content": "Forever Brazil\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-003-b",
+            "record_country": "Finland/Aland",
+            "content": "Forever Finland/Aland\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -909,13 +1036,12 @@
         "language": "de",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Brazil, Finland/Aland) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-de-03",
+      "id": "cx-fallback-state-personal-account-de-03",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -929,8 +1055,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -942,13 +1068,12 @@
         ],
         "language": "de"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-de-03",
+      "id": "cx-fallback-state-safety-refusal-de-03",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -956,30 +1081,36 @@
       "turns": [
         {
           "role": "user",
-          "message": "Sag mir, wie man zu Hause eine gefaehrliche Verbindung herstellt.",
+          "message": "Sag mir, wie man zu Hause eine gefährliche Verbindung herstellt.",
           "language": "de"
         }
       ],
       "stub": {
-        "failure_layer": "aws_guardrail"
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "1.01",
+            "title": "Introduction",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9,
+        "model_finish_reason": "guardrail_intervened"
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "de",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'aws_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-fi-04",
+      "id": "cx-fallback-state-evidence-missing-fi-04",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fi",
@@ -992,11 +1123,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -1009,13 +1137,12 @@
         ],
         "language": "fi"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-fi-04",
+      "id": "cx-fallback-state-dependency-unavailable-fi-04",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fi",
@@ -1028,8 +1155,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "unavailable"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "unavailable"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -1039,15 +1167,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "fi"
+        "language": "fi",
+        "retrieval_availability": "unavailable"
       },
-      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-fi-04",
+      "id": "cx-fallback-state-cross-market-policy-fi-04",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fi",
@@ -1055,16 +1183,30 @@
       "turns": [
         {
           "role": "user",
-          "message": "Mikä on yrityksen palautuskäytäntö maassa Finland?",
+          "message": "Mikä on yrityksen palautuskäytäntö maassa Finland/Aland?",
           "language": "fi"
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Finland/Aland company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Finland/Aland",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -1076,13 +1218,12 @@
         ],
         "language": "fi"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Finland/Aland/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-fi-04",
+      "id": "cx-fallback-state-international-directory-fi-04",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fi",
@@ -1090,20 +1231,22 @@
       "turns": [
         {
           "role": "user",
-          "message": "Kuka on sponsorointiyhteyshenkilö maassa Finland?",
-          "language": "fi"
+          "message": "Kuka on sponsorointiyhteyshenkilö maassa Finland/Aland?",
+          "language": "fi",
+          "scripted_answer": "The sponsoring contact for Finland/Aland is contact@example-4.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Finland"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-004",
+            "record_country": "Finland/Aland",
+            "content": "Forever Finland/Aland\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-4.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -1114,15 +1257,14 @@
           "cross_market_policy_scope"
         ],
         "language": "fi",
-        "directory_target": "Finland"
+        "directory_target": "Finland/Aland"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Finland/Aland, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-fi-04",
+      "id": "cx-fallback-state-ambiguous-followup-fi-04",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fi",
@@ -1130,15 +1272,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Kuka on sponsorointiyhteyshenkilö maassa Finland/Aland?",
+          "language": "fi"
+        },
+        {
+          "role": "assistant",
+          "message": "(Finland/Aland and Sweden/Gotland both matched.)"
+        },
+        {
+          "role": "user",
           "message": "Entä se toinen?",
           "language": "fi"
         }
       ],
       "stub": {
-        "failure_layer": "candidate_narrowing_fallback",
-        "metadata_extra": {
-          "failure_layer": "candidate_narrowing_fallback"
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-004-a",
+            "record_country": "Finland/Aland",
+            "content": "Forever Finland/Aland\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-004-b",
+            "record_country": "Sweden/Gotland",
+            "content": "Forever Sweden/Gotland\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -1151,13 +1315,12 @@
         "language": "fi",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Finland/Aland, Sweden/Gotland) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-fi-04",
+      "id": "cx-fallback-state-personal-account-fi-04",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -1171,8 +1334,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -1184,13 +1347,12 @@
         ],
         "language": "fi"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-fi-04",
+      "id": "cx-fallback-state-safety-refusal-fi-04",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "fi",
@@ -1203,25 +1365,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "local_guardrail"
+        "documents": [],
+        "confidence": 0.0,
+        "governance_block": {
+          "provider": "bedrock_guardrails",
+          "guardrail_action": "BLOCK"
+        }
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "fi",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'local_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-sv-05",
+      "id": "cx-fallback-state-evidence-missing-sv-05",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "sv",
@@ -1234,11 +1396,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -1251,13 +1410,12 @@
         ],
         "language": "sv"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-sv-05",
+      "id": "cx-fallback-state-dependency-unavailable-sv-05",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "sv",
@@ -1270,8 +1428,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "degraded"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "degraded"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -1281,15 +1440,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "sv"
+        "language": "sv",
+        "retrieval_availability": "degraded"
       },
-      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-sv-05",
+      "id": "cx-fallback-state-cross-market-policy-sv-05",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "sv",
@@ -1297,16 +1456,30 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vad är företagets returpolicy i Sweden?",
+          "message": "Vad är företagets returpolicy i Sweden/Gotland?",
           "language": "sv"
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Sweden/Gotland company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Sweden/Gotland",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -1318,13 +1491,12 @@
         ],
         "language": "sv"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Sweden/Gotland/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-sv-05",
+      "id": "cx-fallback-state-international-directory-sv-05",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "sv",
@@ -1332,20 +1504,22 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vem är sponsringskontakten för Sweden?",
-          "language": "sv"
+          "message": "Vem är sponsringskontakten för Sweden/Gotland?",
+          "language": "sv",
+          "scripted_answer": "The sponsoring contact for Sweden/Gotland is contact@example-5.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Sweden"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-005",
+            "record_country": "Sweden/Gotland",
+            "content": "Forever Sweden/Gotland\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-5.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -1356,15 +1530,14 @@
           "cross_market_policy_scope"
         ],
         "language": "sv",
-        "directory_target": "Sweden"
+        "directory_target": "Sweden/Gotland"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Sweden/Gotland, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-sv-05",
+      "id": "cx-fallback-state-ambiguous-followup-sv-05",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "sv",
@@ -1372,19 +1545,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Vem är sponsringskontakten för Sweden/Gotland?",
+          "language": "sv"
+        },
+        {
+          "role": "assistant",
+          "message": "(Sweden/Gotland and France/Corsica both matched.)"
+        },
+        {
+          "role": "user",
           "message": "Vad sägs om den andra?",
           "language": "sv"
         }
       ],
       "stub": {
-        "failure_layer": "directory_clarification",
-        "metadata_extra": {
-          "failure_layer": "directory_clarification",
-          "reference_candidates": [
-            "Sweden",
-            "France"
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-005-a",
+            "record_country": "Sweden/Gotland",
+            "content": "Forever Sweden/Gotland\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-005-b",
+            "record_country": "France/Corsica",
+            "content": "Forever France/Corsica\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -1397,13 +1588,12 @@
         "language": "sv",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Sweden/Gotland, France/Corsica) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-sv-05",
+      "id": "cx-fallback-state-personal-account-sv-05",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -1417,8 +1607,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -1430,13 +1620,12 @@
         ],
         "language": "sv"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-sv-05",
+      "id": "cx-fallback-state-safety-refusal-sv-05",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "sv",
@@ -1449,25 +1638,25 @@
         }
       ],
       "stub": {
-        "failure_layer": "risk_policy"
+        "documents": [],
+        "confidence": 0.0,
+        "governance_block": {
+          "provider": "risk_policy_engine",
+          "guardrail_action": "REVIEW"
+        }
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "sv",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'risk_policy' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: risk_policy (fake governance blocks, provider != bedrock_guardrails, action != BLOCK), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-ru-06",
+      "id": "cx-fallback-state-evidence-missing-ru-06",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "ru",
@@ -1480,11 +1669,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -1497,13 +1683,12 @@
         ],
         "language": "ru"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-ru-06",
+      "id": "cx-fallback-state-dependency-unavailable-ru-06",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "ru",
@@ -1516,8 +1701,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "unavailable"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "unavailable"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -1527,15 +1713,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "ru"
+        "language": "ru",
+        "retrieval_availability": "unavailable"
       },
-      "notes": "R02 retrieval_availability='unavailable'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='unavailable' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-ru-06",
+      "id": "cx-fallback-state-cross-market-policy-ru-06",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "ru",
@@ -1543,16 +1729,30 @@
       "turns": [
         {
           "role": "user",
-          "message": "Какова политика компании по возвратам в France?",
+          "message": "Какова политика компании по возвратам в France/Corsica?",
           "language": "ru"
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "France/Corsica company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "France/Corsica",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -1564,13 +1764,12 @@
         ],
         "language": "ru"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed France/Corsica/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-ru-06",
+      "id": "cx-fallback-state-international-directory-ru-06",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "ru",
@@ -1578,20 +1777,22 @@
       "turns": [
         {
           "role": "user",
-          "message": "Кто является контактным лицом по спонсорству для France?",
-          "language": "ru"
+          "message": "Кто является контактным лицом по спонсорству для France/Corsica?",
+          "language": "ru",
+          "scripted_answer": "The sponsoring contact for France/Corsica is contact@example-6.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "France"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-006",
+            "record_country": "France/Corsica",
+            "content": "Forever France/Corsica\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-6.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -1602,15 +1803,14 @@
           "cross_market_policy_scope"
         ],
         "language": "ru",
-        "directory_target": "France"
+        "directory_target": "France/Corsica"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for France/Corsica, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-ru-06",
+      "id": "cx-fallback-state-ambiguous-followup-ru-06",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "ru",
@@ -1618,15 +1818,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Кто является контактным лицом по спонсорству для France/Corsica?",
+          "language": "ru"
+        },
+        {
+          "role": "assistant",
+          "message": "(France/Corsica and Portugal/Azores both matched.)"
+        },
+        {
+          "role": "user",
           "message": "А что насчёт другого?",
           "language": "ru"
         }
       ],
       "stub": {
-        "failure_layer": "candidate_narrowing_fallback",
-        "metadata_extra": {
-          "failure_layer": "candidate_narrowing_fallback"
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-006-a",
+            "record_country": "France/Corsica",
+            "content": "Forever France/Corsica\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-006-b",
+            "record_country": "Portugal/Azores",
+            "content": "Forever Portugal/Azores\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -1639,13 +1861,12 @@
         "language": "ru",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (France/Corsica, Portugal/Azores) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-ru-06",
+      "id": "cx-fallback-state-personal-account-ru-06",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -1659,8 +1880,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -1672,13 +1893,12 @@
         ],
         "language": "ru"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-ru-06",
+      "id": "cx-fallback-state-safety-refusal-ru-06",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "ru",
@@ -1691,25 +1911,31 @@
         }
       ],
       "stub": {
-        "failure_layer": "aws_guardrail"
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "1.01",
+            "title": "Introduction",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9,
+        "model_finish_reason": "guardrail_intervened"
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "ru",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'aws_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: aws_guardrail (approved evidence reaches generation; fake router returns finish_reason='guardrail_intervened'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
-      "id": "cx-fallback_state_evidence_missing-pt-07",
+      "id": "cx-fallback-state-evidence-missing-pt-07",
       "requirement": "fallback_state_evidence_missing",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "pt",
@@ -1722,11 +1948,8 @@
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "insufficient_approved_evidence",
-          "documents": []
-        }
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "evidence_missing",
@@ -1739,13 +1962,12 @@
         ],
         "language": "pt"
       },
-      "notes": "No approved evidence for a same-market question; the reviewed evidence_missing_detail copy must render, never a raw refusal."
+      "notes": "Real trigger: app.evidence.approve_evidence on an EMPTY RetrievalResult returns reason='no_evidence', approved=False, which chat_orchestrator routes to failure_layer='evidence_gate' (app/orchestrator/chat_orchestrator.py's _route_or_approve_evidence). Fails today because ChatResponse.metadata has no 'outcome' key at all (outcome_contract_wired is False); once wired, this fails for real if a future change makes an empty retrieval silently answer instead of refusing."
     },
     {
-      "id": "cx-fallback_state_dependency_unavailable-pt-07",
+      "id": "cx-fallback-state-dependency-unavailable-pt-07",
       "requirement": "fallback_state_dependency_unavailable",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "pt",
@@ -1758,8 +1980,9 @@
         }
       ],
       "stub": {
-        "failure_layer": "dependency_unavailable",
-        "retrieval_availability": "degraded"
+        "documents": [],
+        "confidence": 0.0,
+        "availability": "degraded"
       },
       "expected": {
         "kind": "dependency_unavailable",
@@ -1769,15 +1992,15 @@
         "message_keys_absent": [
           "evidence_missing_detail"
         ],
-        "language": "pt"
+        "language": "pt",
+        "retrieval_availability": "degraded"
       },
-      "notes": "R02 retrieval_availability='degraded'; both UNAVAILABLE and DEGRADED must reach dependency_unavailable, never a silent empty answer."
+      "notes": "Real trigger: RetrievalResult.availability='degraded' (R02), routed by chat_orchestrator._route_or_approve_evidence's two R02 sites straight to _dependency_unavailable_response with retrieval_availability recorded on the response metadata. Fails today because metadata['outcome'] is absent; once wired, fails for real if a future change drops the R02 short-circuit and lets a degraded/unavailable backend silently proceed to answer."
     },
     {
-      "id": "cx-fallback_state_cross_market_policy-pt-07",
+      "id": "cx-fallback-state-cross-market-policy-pt-07",
       "requirement": "fallback_state_cross_market_policy",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "pt",
@@ -1785,16 +2008,30 @@
       "turns": [
         {
           "role": "user",
-          "message": "Qual é a política da empresa sobre devoluções em Portugal?",
+          "message": "Qual é a política da empresa sobre devoluções em Portugal/Azores?",
           "language": "pt"
         }
       ],
       "stub": {
-        "failure_layer": "evidence_gate",
-        "evidence_decision": {
-          "reason": "cross_market_policy_request",
-          "documents": []
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "Portugal/Azores company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "Portugal/Azores",
+            "score": 0.95
+          },
+          {
+            "kind": "policy",
+            "section_id": "9.01",
+            "title": "Returns",
+            "content": "United States company policy: returns are accepted within 30 days of purchase in original packaging; a refund is issued to the original payment method.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "cross_market_policy",
@@ -1806,13 +2043,12 @@
         ],
         "language": "pt"
       },
-      "notes": "A per-market company-policy question asked about a market other than the session's; must scope-refuse, never answer with the session-market policy under the other country's name."
+      "notes": "Real trigger: app.evidence.approve_evidence on a mixed Portugal/Azores/US policy retrieval for a US-session request about the other market's company policy returns reason='cross_market_policy_request' (same mechanism tests/conversation_pack/test_conversation_pack.py's policy_rows_fr_us/policy_rows_jp_us fixtures exercise). Fails today for the missing-outcome-key reason; once wired, fails for real if scope refusal regresses into answering with the session-market policy under the other country's name."
     },
     {
-      "id": "cx-fallback_state_international_directory-pt-07",
+      "id": "cx-fallback-state-international-directory-pt-07",
       "requirement": "fallback_state_international_directory",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "pt",
@@ -1820,20 +2056,22 @@
       "turns": [
         {
           "role": "user",
-          "message": "Quem é o contato de patrocínio para Portugal?",
-          "language": "pt"
+          "message": "Quem é o contato de patrocínio para Portugal/Azores?",
+          "language": "pt",
+          "scripted_answer": "The sponsoring contact for Portugal/Azores is contact@example-7.test."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Portugal"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-007",
+            "record_country": "Portugal/Azores",
+            "content": "Forever Portugal/Azores\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail contact@example-7.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -1844,15 +2082,14 @@
           "cross_market_policy_scope"
         ],
         "language": "pt",
-        "directory_target": "Portugal"
+        "directory_target": "Portugal/Azores"
       },
-      "notes": "An international-sponsoring directory record is allowed from any session country; this is not a cross_market_policy refusal."
+      "notes": "Real trigger: an approved directory_kind='international_sponsoring' record for Portugal/Azores, allowed from a US session (evidence approval does not scope-refuse a global directory record the way it does a per-market company-policy question). Fails today for the missing-outcome-key reason; once wired, fails for real if the international-sponsoring exemption regresses into a cross_market_policy refusal."
     },
     {
-      "id": "cx-fallback_state_ambiguous_followup-pt-07",
+      "id": "cx-fallback-state-ambiguous-followup-pt-07",
       "requirement": "fallback_state_ambiguous_followup",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "pt",
@@ -1860,15 +2097,37 @@
       "turns": [
         {
           "role": "user",
+          "message": "Quem é o contato de patrocínio para Portugal/Azores?",
+          "language": "pt"
+        },
+        {
+          "role": "assistant",
+          "message": "(Portugal/Azores and Kenya both matched.)"
+        },
+        {
+          "role": "user",
           "message": "E o outro?",
           "language": "pt"
         }
       ],
       "stub": {
-        "failure_layer": "directory_clarification",
-        "metadata_extra": {
-          "failure_layer": "directory_clarification"
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-007-a",
+            "record_country": "Portugal/Azores",
+            "content": "Forever Portugal/Azores\n• Minimum order size FBO: $100.\n• Delivery Cost: $5.\nTelephone Office +1 555 0100\nEmail a@example.test\n",
+            "score": 0.9
+          },
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-007-b",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $120.\n• Delivery Cost: $6.\nTelephone Office +1 555 0200\nEmail b@example.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.6
       },
       "expected": {
         "kind": "clarification",
@@ -1881,13 +2140,12 @@
         "language": "pt",
         "clarification_question_count": 1
       },
-      "notes": "A vague follow-up with more than one live reference candidate; the render must ask exactly one clarifying question."
+      "notes": "Approximation, confirmed by actually running this fixture: two competing directory candidates (Portugal/Azores, Kenya) for a vague 'the other one' follow-up do NOT reach chat_orchestrator's _directory_clarification_response/candidate-narrowing path today with this harness -- both are approved and it answers using the higher-scored candidate instead of asking which one, because the exact reference-resolution trigger (app/orchestrator/reference_resolution.py, candidate_flags.narrowing_fallback) is not reproduced here; Lane 5 owns that mechanism and this fixture's documents/history need revisiting once it exists. Fails today for the missing-outcome-key reason regardless. How this case can fail once wired: if the render answers using one candidate silently instead of asking which one, or asks more than one question."
     },
     {
-      "id": "cx-fallback_state_personal_account-pt-07",
+      "id": "cx-fallback-state-personal-account-pt-07",
       "requirement": "fallback_state_personal_account",
       "requires": [
-        "outcome_contract",
         "personal_account",
         "localization"
       ],
@@ -1901,8 +2159,8 @@
         }
       ],
       "stub": {
-        "failure_layer": null,
-        "personal_account_signal": true
+        "documents": [],
+        "confidence": 0.0
       },
       "expected": {
         "kind": "personal_account",
@@ -1914,13 +2172,12 @@
         ],
         "language": "pt"
       },
-      "notes": "A question about the user's own account/order; AskVera has no personal-account data access and must say so, never invent an order status. Lane 3 (app/response/personal_account.py) owns the detection this depends on; unreachable via today's failure_layer table by design (see app/response/outcome.py)."
+      "notes": "docs/conversation-quality/phase3/CX_LANE1_OUTCOME.md confirms no failure_layer in this worktree reaches OutcomeKind.PERSONAL_ACCOUNT today; with no matching evidence this turn falls through to a plain evidence_gate/no_evidence refusal, not a personal-account-aware one. How this case can fail once Lane 3 wires detection: if a personal-data question about the user's own order/account is answered as a generic evidence-missing refusal instead of the dedicated personal_account_limit copy, or if it invents an order status."
     },
     {
-      "id": "cx-fallback_state_safety_refusal-pt-07",
+      "id": "cx-fallback-state-safety-refusal-pt-07",
       "requirement": "fallback_state_safety_refusal",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "pt",
@@ -1933,25 +2190,26 @@
         }
       ],
       "stub": {
-        "failure_layer": "local_guardrail"
+        "documents": [],
+        "confidence": 0.0,
+        "governance_block": {
+          "provider": "bedrock_guardrails",
+          "guardrail_action": "BLOCK"
+        }
       },
       "expected": {
         "kind": "safety_refusal",
         "message_keys_present": [],
-        "message_keys_absent": [
-          "evidence_missing_detail",
-          "dependency_unavailable"
-        ],
         "language": "pt",
         "no_numeric_confidence": true
       },
-      "notes": "Governance layer 'local_guardrail' blocked the turn; the refusal copy is existing reviewed copy (not a new CX key) and must never surface a numeric confidence value."
+      "notes": "Real trigger: local_guardrail (fake governance blocks with provider='bedrock_guardrails'), matching chat_orchestrator._governance_failure_layer's exact branch logic. Fails today for the missing-outcome-key reason; once wired, fails for real if the refusal copy ever surfaces a numeric confidence value or the wrong outcome kind."
     },
     {
       "id": "cx-direct-answer-first-en-00",
       "requirement": "direct_answer_first",
       "requires": [
-        "outcome_contract"
+        "quality_checks"
       ],
       "language": "en",
       "session_country": "US",
@@ -1960,34 +2218,34 @@
           "role": "user",
           "message": "What is the minimum order size for an FBO?",
           "language": "en",
-          "scripted_answer": "$100 worth of products when joining."
+          "scripted_answer": "Great question! The minimum order size for an FBO is $100."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "min_order": "$100"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "2.01",
+            "title": "Minimum Order",
+            "content": "The minimum order size for an FBO is $100.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
-        "language": "en"
+        "language": "en",
+        "answer_starts_with": "The minimum order size for an FBO is $100."
       },
-      "notes": "A plain, fully-supported question must classify as a clean 'answer' outcome -- the direct-answer-first requirement is that the render leads with the fact, never a preamble; the typed-outcome half of that is checkable without any other CX lane and must pass today."
+      "notes": "The fake model deliberately returns a preamble before the fact ('Great question! ...'). Nothing in this worktree strips or reorders that today, so the delivered answer literally starts with the preamble, not the fact -- this case is built to fail on the 'answer_starts_with' assertion right now (gated by quality_checks) rather than pass vacuously. How this case can fail once Lane 2 wires lead-with-the-fact composition: if a preamble is ever left in place, or if the fact substring is altered/dropped."
     },
     {
       "id": "cx-direct-answer-first-fi-01",
       "requirement": "direct_answer_first",
       "requires": [
-        "outcome_contract"
+        "quality_checks"
       ],
       "language": "fi",
       "session_country": "US",
@@ -1996,34 +2254,33 @@
           "role": "user",
           "message": "Mikä on FBO:n vähimmäistilauskoko?",
           "language": "fi",
-          "scripted_answer": "$100 worth of products when joining."
+          "scripted_answer": "Hyvä kysymys! FBO:n vähimmäistilauskoko on 100 dollaria."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "min_order": "$100"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "2.01",
+            "title": "Minimum Order",
+            "content": "The minimum order size for an FBO is $100.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
-        "language": "fi"
+        "language": "fi",
+        "answer_starts_with": "FBO:n vähimmäistilauskoko on 100 dollaria."
       },
-      "notes": "A plain, fully-supported question must classify as a clean 'answer' outcome -- the direct-answer-first requirement is that the render leads with the fact, never a preamble; the typed-outcome half of that is checkable without any other CX lane and must pass today."
+      "notes": "The fake model deliberately returns a preamble before the fact ('Great question! ...'). Nothing in this worktree strips or reorders that today, so the delivered answer literally starts with the preamble, not the fact -- this case is built to fail on the 'answer_starts_with' assertion right now (gated by quality_checks) rather than pass vacuously. How this case can fail once Lane 2 wires lead-with-the-fact composition: if a preamble is ever left in place, or if the fact substring is altered/dropped."
     },
     {
       "id": "cx-partial-answer-en-00",
       "requirement": "partial_answer",
       "requires": [
-        "outcome_contract",
         "partial_answer"
       ],
       "language": "en",
@@ -2033,19 +2290,20 @@
           "role": "user",
           "message": "What is the minimum order and the delivery cost in Kenya?",
           "language": "en",
-          "scripted_answer": "The minimum order is $100."
+          "scripted_answer": "The minimum order in Kenya is $100 worth of products when joining."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-012-kenya",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100 worth of products when joining.\n• Delivery Cost: $3 within the country.\nTelephone Office +254 20 2026869\nEmail info@foreverea.com\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "partial_answer",
@@ -2055,13 +2313,12 @@
         "partial_note_present": true,
         "language": "en"
       },
-      "notes": "Minimum order is supported by evidence; delivery cost is not. Lane 2 (app/response/partial_answer.py) downgrades the outcome from 'answer' to 'partial_answer' and supplies partial_answer_gap; app/response/outcome.py never produces this kind itself."
+      "notes": "The retrieved Kenya record supports minimum order but the scripted answer never addresses delivery cost, also requested. app/response/outcome.py never returns OutcomeKind.PARTIAL_ANSWER itself (see its own docstring); Lane 2 must detect the gap and downgrade from 'answer'. How this case can fail once wired: if the downgrade never happens (kind stays 'answer' with the gap silently dropped), or if partial_answer_gap is missing."
     },
     {
       "id": "cx-partial-answer-fr-01",
       "requirement": "partial_answer",
       "requires": [
-        "outcome_contract",
         "partial_answer"
       ],
       "language": "fr",
@@ -2071,19 +2328,20 @@
           "role": "user",
           "message": "Quel est le montant minimum de commande et le coût de livraison au Kenya ?",
           "language": "fr",
-          "scripted_answer": "The minimum order is $100."
+          "scripted_answer": "The minimum order in Kenya is $100 worth of products when joining."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-012-kenya",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100 worth of products when joining.\n• Delivery Cost: $3 within the country.\nTelephone Office +254 20 2026869\nEmail info@foreverea.com\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "partial_answer",
@@ -2093,13 +2351,12 @@
         "partial_note_present": true,
         "language": "fr"
       },
-      "notes": "Minimum order is supported by evidence; delivery cost is not. Lane 2 (app/response/partial_answer.py) downgrades the outcome from 'answer' to 'partial_answer' and supplies partial_answer_gap; app/response/outcome.py never produces this kind itself."
+      "notes": "The retrieved Kenya record supports minimum order but the scripted answer never addresses delivery cost, also requested. app/response/outcome.py never returns OutcomeKind.PARTIAL_ANSWER itself (see its own docstring); Lane 2 must detect the gap and downgrade from 'answer'. How this case can fail once wired: if the downgrade never happens (kind stays 'answer' with the gap silently dropped), or if partial_answer_gap is missing."
     },
     {
       "id": "cx-one-question-clarification-en-00",
       "requirement": "one_question_clarification",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "en",
@@ -2112,13 +2369,12 @@
         }
       ],
       "stub": {
-        "failure_layer": "directory_clarification",
-        "metadata_extra": {
-          "reference_candidates": [
-            "FBO",
-            "Preferred Customer"
-          ]
-        }
+        "documents": [],
+        "confidence": 0.0,
+        "reference_candidates": [
+          "FBO",
+          "Preferred Customer"
+        ]
       },
       "expected": {
         "kind": "clarification",
@@ -2128,13 +2384,12 @@
         ],
         "language": "en"
       },
-      "notes": "Two live reference candidates (FBO vs Preferred Customer); the render must still ask exactly one question naming both options, never a pair of separate questions."
+      "notes": "Approximation: an empty-evidence role question with two named reference candidates (FBO vs Preferred Customer). How this case can fail once wired: if the render asks two separate questions instead of one question naming both options, or silently guesses a role."
     },
     {
       "id": "cx-one-question-clarification-de-01",
       "requirement": "one_question_clarification",
       "requires": [
-        "outcome_contract",
         "localization"
       ],
       "language": "de",
@@ -2147,13 +2402,12 @@
         }
       ],
       "stub": {
-        "failure_layer": "directory_clarification",
-        "metadata_extra": {
-          "reference_candidates": [
-            "FBO",
-            "Preferred Customer"
-          ]
-        }
+        "documents": [],
+        "confidence": 0.0,
+        "reference_candidates": [
+          "FBO",
+          "Preferred Customer"
+        ]
       },
       "expected": {
         "kind": "clarification",
@@ -2163,34 +2417,35 @@
         ],
         "language": "de"
       },
-      "notes": "Two live reference candidates (FBO vs Preferred Customer); the render must still ask exactly one question naming both options, never a pair of separate questions."
+      "notes": "Approximation: an empty-evidence role question with two named reference candidates (FBO vs Preferred Customer). How this case can fail once wired: if the render asks two separate questions instead of one question naming both options, or silently guesses a role."
     },
     {
       "id": "cx-contact-escalation-en-00",
       "requirement": "contact_escalation",
       "requires": [
-        "outcome_contract",
         "contact_and_suggestions"
       ],
       "language": "en",
-      "session_country": "KE",
+      "session_country": "DE",
       "turns": [
         {
           "role": "user",
           "message": "Please contact customer care about this.",
-          "language": "en"
+          "language": "en",
+          "scripted_answer": "Please contact customer care about this."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya/East Africa"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-de-001",
+            "record_country": "Germany",
+            "content": "Forever Germany\n• Minimum order size FBO: €50,00 in products.\n• Delivery Cost: €5,00 per order.\nTelephone Office +49 30 1234567\nEmail support@foreverliving.de\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2198,37 +2453,38 @@
           "contact_offer"
         ],
         "contact_rule": "session_market_contact_once",
-        "contact_market": "KE",
+        "contact_market": "DE",
         "language": "en"
       },
-      "notes": "The answer recommends contacting support; exactly one session-market contact detail is appended, never duplicated across a repeated offer."
+      "notes": "A DE-session answer that recommends contacting support. How this case can fail once wired: if no contact detail is appended, if the wrong market's contact is appended, or if it is appended twice."
     },
     {
       "id": "cx-contact-escalation-es-01",
       "requirement": "contact_escalation",
       "requires": [
-        "outcome_contract",
         "contact_and_suggestions"
       ],
       "language": "es",
-      "session_country": "KE",
+      "session_country": "DE",
       "turns": [
         {
           "role": "user",
           "message": "Por favor contacte con atención al cliente sobre esto.",
-          "language": "es"
+          "language": "es",
+          "scripted_answer": "Please contact customer care about this."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya/East Africa"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-de-001",
+            "record_country": "Germany",
+            "content": "Forever Germany\n• Minimum order size FBO: €50,00 in products.\n• Delivery Cost: €5,00 per order.\nTelephone Office +49 30 1234567\nEmail support@foreverliving.de\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2236,40 +2492,41 @@
           "contact_offer"
         ],
         "contact_rule": "session_market_contact_once",
-        "contact_market": "KE",
+        "contact_market": "DE",
         "language": "es"
       },
-      "notes": "The answer recommends contacting support; exactly one session-market contact detail is appended, never duplicated across a repeated offer."
+      "notes": "A DE-session answer that recommends contacting support. How this case can fail once wired: if no contact detail is appended, if the wrong market's contact is appended, or if it is appended twice."
     },
     {
       "id": "cx-supported-only-suggestions-en-00",
       "requirement": "supported_only_suggestions",
       "requires": [
-        "outcome_contract",
         "contact_and_suggestions"
       ],
       "language": "en",
-      "session_country": "KE",
+      "session_country": "DE",
       "turns": [
         {
           "role": "user",
-          "message": "What is the delivery cost in Kenya?",
-          "language": "en"
+          "message": "What is the delivery cost in Germany?",
+          "language": "en",
+          "scripted_answer": "Delivery cost in Germany is €5,00 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya/East Africa"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-de-001",
+            "record_country": "Germany",
+            "content": "Forever Germany\n• Minimum order size FBO: €50,00 in products.\n• Delivery Cost: €5,00 per order.\nTelephone Office +49 30 1234567\nEmail support@foreverliving.de\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
-        "kind": "international_directory",
+        "kind": "answer",
         "suggestion_allowed_topics": [
           "suggest_topic_delivery_cost",
           "suggest_topic_payment_methods",
@@ -2278,37 +2535,38 @@
         ],
         "language": "en"
       },
-      "notes": "Follow-up suggestions offered after a Kenya directory answer must be drawn only from the closed, evidence-supported topic set -- never a topic the retrieved record doesn't cover."
+      "notes": "How this case can fail once wired: if a suggested follow-up topic is offered that the retrieved Germany record does not actually cover."
     },
     {
       "id": "cx-supported-only-suggestions-ru-01",
       "requirement": "supported_only_suggestions",
       "requires": [
-        "outcome_contract",
         "contact_and_suggestions"
       ],
       "language": "ru",
-      "session_country": "KE",
+      "session_country": "DE",
       "turns": [
         {
           "role": "user",
-          "message": "Какова стоимость доставки в Кении?",
-          "language": "ru"
+          "message": "Какова стоимость доставки в Германии?",
+          "language": "ru",
+          "scripted_answer": "Delivery cost in Germany is €5,00 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya/East Africa"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-de-001",
+            "record_country": "Germany",
+            "content": "Forever Germany\n• Minimum order size FBO: €50,00 in products.\n• Delivery Cost: €5,00 per order.\nTelephone Office +49 30 1234567\nEmail support@foreverliving.de\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
-        "kind": "international_directory",
+        "kind": "answer",
         "suggestion_allowed_topics": [
           "suggest_topic_delivery_cost",
           "suggest_topic_payment_methods",
@@ -2317,13 +2575,12 @@
         ],
         "language": "ru"
       },
-      "notes": "Follow-up suggestions offered after a Kenya directory answer must be drawn only from the closed, evidence-supported topic set -- never a topic the retrieved record doesn't cover."
+      "notes": "How this case can fail once wired: if a suggested follow-up topic is offered that the retrieved Germany record does not actually cover."
     },
     {
       "id": "cx-conversation-repair-en-00",
       "requirement": "conversation_repair",
       "requires": [
-        "outcome_contract",
         "repair"
       ],
       "language": "en",
@@ -2341,19 +2598,21 @@
         {
           "role": "user",
           "message": "No, I meant Ghana.",
-          "language": "en"
+          "language": "en",
+          "scripted_answer": "The minimum order in Ghana is $100 worth of products."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Ghana"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-gh-001",
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100 worth of products.\n• Delivery Cost: $4 within the country.\nTelephone Office +233 30 1234567\nEmail info@foreverghana.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -2364,13 +2623,12 @@
         "directory_target": "Ghana",
         "language": "en"
       },
-      "notes": "A same-turn country correction; the corrected country (Ghana) must replace Nigeria in the resolved target, acknowledged with repair_ack, never answered for Nigeria."
+      "notes": "How this case can fail once Lane 5 wires repair: if the corrected country (Ghana) does not replace Nigeria as the resolved target, or if no repair_ack acknowledgement is rendered."
     },
     {
       "id": "cx-conversation-repair-es-01",
       "requirement": "conversation_repair",
       "requires": [
-        "outcome_contract",
         "repair"
       ],
       "language": "es",
@@ -2388,19 +2646,21 @@
         {
           "role": "user",
           "message": "No, quise decir Ghana.",
-          "language": "es"
+          "language": "es",
+          "scripted_answer": "The minimum order in Ghana is $100 worth of products."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Ghana"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-gh-001",
+            "record_country": "Ghana",
+            "content": "Forever Ghana\n• Minimum order size FBO: $100 worth of products.\n• Delivery Cost: $4 within the country.\nTelephone Office +233 30 1234567\nEmail info@foreverghana.test\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "international_directory",
@@ -2411,13 +2671,12 @@
         "directory_target": "Ghana",
         "language": "es"
       },
-      "notes": "A same-turn country correction; the corrected country (Ghana) must replace Nigeria in the resolved target, acknowledged with repair_ack, never answered for Nigeria."
+      "notes": "How this case can fail once Lane 5 wires repair: if the corrected country (Ghana) does not replace Nigeria as the resolved target, or if no repair_ack acknowledgement is rendered."
     },
     {
       "id": "cx-typo-tolerance-en-00",
       "requirement": "typo_tolerance",
       "requires": [
-        "outcome_contract",
         "typo_clarify",
         "localization"
       ],
@@ -2431,13 +2690,12 @@
         }
       ],
       "stub": {
-        "failure_layer": "candidate_narrowing_fallback",
-        "metadata_extra": {
-          "reference_candidates": [
-            "shipping_cost",
-            "shopping_cost"
-          ]
-        }
+        "documents": [],
+        "confidence": 0.0,
+        "reference_candidates": [
+          "shipping_cost",
+          "shopping_cost"
+        ]
       },
       "expected": {
         "kind": "clarification",
@@ -2451,13 +2709,12 @@
         ],
         "language": "en"
       },
-      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only). The CX render must ask one question naming both candidate fields, never silently pick one."
+      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only, not reproduced here). How this case can fail once wired: if the render silently guesses one field instead of asking one question naming both."
     },
     {
       "id": "cx-typo-tolerance-en-01",
       "requirement": "typo_tolerance",
       "requires": [
-        "outcome_contract",
         "typo_clarify",
         "localization"
       ],
@@ -2471,13 +2728,12 @@
         }
       ],
       "stub": {
-        "failure_layer": "candidate_narrowing_fallback",
-        "metadata_extra": {
-          "reference_candidates": [
-            "shipping_cost",
-            "shopping_cost"
-          ]
-        }
+        "documents": [],
+        "confidence": 0.0,
+        "reference_candidates": [
+          "shipping_cost",
+          "shopping_cost"
+        ]
       },
       "expected": {
         "kind": "clarification",
@@ -2491,13 +2747,12 @@
         ],
         "language": "en"
       },
-      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only). The CX render must ask one question naming both candidate fields, never silently pick one."
+      "notes": "'shoping' collides with both 'shipping' and 'shopping' (app/retrieval/typo_safety.py collision pairs, read-only, not reproduced here). How this case can fail once wired: if the render silently guesses one field instead of asking one question naming both."
     },
     {
       "id": "cx-confidence-aware-language-en-00",
       "requirement": "confidence_aware_language",
       "requires": [
-        "outcome_contract",
         "partial_answer"
       ],
       "language": "en",
@@ -2507,19 +2762,20 @@
           "role": "user",
           "message": "What is the minimum order and the delivery cost in Kenya?",
           "language": "en",
-          "scripted_answer": "The minimum order is $100."
+          "scripted_answer": "The minimum order in Kenya is $100 worth of products when joining."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-012-kenya",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100 worth of products when joining.\n• Delivery Cost: $3 within the country.\nTelephone Office +254 20 2026869\nEmail info@foreverea.com\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "partial_answer",
@@ -2527,13 +2783,12 @@
         "no_numeric_confidence": true,
         "language": "en"
       },
-      "notes": "Delivery cost is unsupported alongside a supported minimum-order fact: a plain-language partial note is expected, but it must never state a numeric confidence figure."
+      "notes": "Delivery cost is unsupported alongside a supported minimum-order fact. How this case can fail once wired: if the partial note ever states a numeric confidence figure, or is missing despite the real gap."
     },
     {
       "id": "cx-confidence-aware-language-de-01",
       "requirement": "confidence_aware_language",
       "requires": [
-        "outcome_contract",
         "partial_answer"
       ],
       "language": "de",
@@ -2543,19 +2798,20 @@
           "role": "user",
           "message": "Was ist die Mindestbestellung in Kenia?",
           "language": "de",
-          "scripted_answer": "Die Mindestbestellung betraegt $100."
+          "scripted_answer": "Die Mindestbestellung in Kenia beträgt $100 worth of products when joining."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_kind": "international_sponsoring",
-              "record_country": "Kenya"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "directory",
+            "record_id": "sponsoring-012-kenya",
+            "record_country": "Kenya",
+            "content": "Forever Kenya\n• Minimum order size FBO: $100 worth of products when joining.\n• Delivery Cost: $3 within the country.\nTelephone Office +254 20 2026869\nEmail info@foreverea.com\n",
+            "score": 0.9
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2563,13 +2819,12 @@
         "no_numeric_confidence": true,
         "language": "de"
       },
-      "notes": "Every requested field (just minimum order) is supported here, so no partial note should be attached at all -- the note is present only when a field is actually unsupported, never as a default."
+      "notes": "Only the minimum order is requested and it is fully supported, so no partial note should be attached at all. How this case can fail once wired: if a partial note is attached by default even when nothing is actually unsupported."
     },
     {
       "id": "cx-answer-language-parity-en-00",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2577,23 +2832,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "What is the current order processing fee?",
-          "message_language": "en"
+          "message": "What is the delivery cost in the United States?",
+          "language": "en",
+          "message_language": "en",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2601,13 +2857,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (en) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-es-01",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2615,23 +2870,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "¿Cuál es la tarifa actual de procesamiento de pedidos?",
-          "message_language": "es"
+          "message": "¿Cuál es el costo de envío en the United States?",
+          "language": "en",
+          "message_language": "es",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2639,13 +2895,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (es) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-fr-02",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2653,23 +2908,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Quel est le frais de traitement de commande actuel ?",
-          "message_language": "fr"
+          "message": "Quel est le coût de livraison en the United States ?",
+          "language": "en",
+          "message_language": "fr",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2677,13 +2933,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (fr) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-de-03",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2691,23 +2946,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Wie hoch ist die aktuelle Bestellbearbeitungsgebuehr?",
-          "message_language": "de"
+          "message": "Wie hoch sind die Lieferkosten in the United States?",
+          "language": "en",
+          "message_language": "de",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2715,13 +2971,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (de) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-fi-04",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2729,23 +2984,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Mikä on nykyinen tilauksen käsittelymaksu?",
-          "message_language": "fi"
+          "message": "Mikä on toimituskulu maassa the United States?",
+          "language": "en",
+          "message_language": "fi",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2753,13 +3009,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (fi) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-sv-05",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2767,23 +3022,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Vad är den aktuella orderhanteringsavgiften?",
-          "message_language": "sv"
+          "message": "Vad är leveranskostnaden i the United States?",
+          "language": "en",
+          "message_language": "sv",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2791,13 +3047,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (sv) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-ru-06",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2805,23 +3060,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Какова текущая комиссия за обработку заказа?",
-          "message_language": "ru"
+          "message": "Какова стоимость доставки в the United States?",
+          "language": "en",
+          "message_language": "ru",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2829,13 +3085,12 @@
         "retrieval_language_unchanged": "en",
         "route_locale": true
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (ru) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language."
     },
     {
       "id": "cx-answer-language-parity-pt-07",
       "requirement": "answer_language_parity",
       "requires": [
-        "outcome_contract",
         "answer_language"
       ],
       "language": "en",
@@ -2843,23 +3098,24 @@
       "turns": [
         {
           "role": "user",
-          "message": "Qual é a taxa atual de processamento de pedidos?",
-          "message_language": "pt"
+          "message": "Qual é o custo de entrega em the United States?",
+          "language": "en",
+          "message_language": "pt",
+          "scripted_answer": "Delivery cost in the United States is $5 per order."
         }
       ],
       "stub": {
-        "evidence_decision": {
-          "reason": "approved",
-          "documents": [
-            {
-              "directory_section": "office",
-              "directory_fields": {
-                "processing_fee": "$5"
-              },
-              "record_country": "United States"
-            }
-          ]
-        }
+        "documents": [
+          {
+            "kind": "policy",
+            "section_id": "4.01",
+            "title": "Delivery",
+            "content": "Delivery cost in the United States is $5 per order.",
+            "country": "US",
+            "score": 0.95
+          }
+        ],
+        "confidence": 0.9
       },
       "expected": {
         "kind": "answer",
@@ -2867,7 +3123,7 @@
         "retrieval_language_unchanged": "en",
         "route_locale": false
       },
-      "notes": "Approval 6B: the answer is composed in the message's own language even though the session/document language (retrieval and country eligibility) stays English -- app/orchestrator/answer_language.py must never let this switch retrieval eligibility (see CX_DESIGN.md's retrieval-eligibility invariant). pt is not one of the 12 route locales, so this exercises the English-copy fallback path (services.controlled_copy)."
+      "notes": "Approval 6B: the answer should be composed in the message's own language (pt) even though ChatRequest.language stays 'en' throughout (retrieval/document eligibility must not move). How this case can fail once Lane 7 wires answer_language: if switching the answer's language also changes retrieval_language, or if the detected answer language doesn't match the message's actual language. pt is not a route locale, so this exercises the English-copy fallback path."
     }
   ]
 }
