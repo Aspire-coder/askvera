@@ -375,7 +375,7 @@ def test_a_completed_run_records_the_approval_id_in_every_row(tmp_path, monkeypa
     path.write_text(json.dumps(manifest), encoding="utf-8")
     out = tmp_path / "out.jsonl"
 
-    exit_code = tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1"])
+    exit_code = tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1"])
 
     assert exit_code == 0
     header, rows = tool.read_checkpoint(out)
@@ -390,13 +390,13 @@ def test_resume_rejects_a_changed_manifest(tmp_path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     out = tmp_path / "out.jsonl"
-    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1"])
+    tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1"])
 
     changed = _manifest([_case("a", message="a different question entirely")])
     path.write_text(json.dumps(changed), encoding="utf-8")
 
     with pytest.raises(tool.ResumeMismatchError, match="manifest_sha256"):
-        tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--resume"])
+        tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1", "--resume"])
 
 
 def test_resume_rejects_a_changed_head_or_dirty_flag(tmp_path, monkeypatch):
@@ -405,12 +405,12 @@ def test_resume_rejects_a_changed_head_or_dirty_flag(tmp_path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     out = tmp_path / "out.jsonl"
-    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1"])
+    tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1"])
 
     monkeypatch.setattr(tool, "git_code_identity", lambda *_a, **_kw: {"head": "deadbeef", "dirty": True})
 
     with pytest.raises(tool.ResumeMismatchError, match="code_identity"):
-        tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--resume"])
+        tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1", "--resume"])
 
 
 def test_resume_rejects_a_changed_prompt_version(tmp_path, monkeypatch):
@@ -419,12 +419,12 @@ def test_resume_rejects_a_changed_prompt_version(tmp_path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     out = tmp_path / "out.jsonl"
-    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1"])
+    tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1"])
 
     monkeypatch.setattr(settings, "PROMPT_VERSION", "some-other-version")
 
     with pytest.raises(tool.ResumeMismatchError, match="prompt_version"):
-        tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--resume"])
+        tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1", "--resume"])
 
 
 def test_resume_rejects_a_different_approval_id(tmp_path, monkeypatch):
@@ -434,10 +434,10 @@ def test_resume_rejects_a_different_approval_id(tmp_path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     out = tmp_path / "out.jsonl"
-    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-A"])
+    tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-A"])
 
     with pytest.raises(tool.ResumeMismatchError, match="approval_id"):
-        tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-B", "--resume"])
+        tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-B", "--resume"])
 
 
 def test_resume_skips_cases_already_in_the_checkpoint(tmp_path, monkeypatch):
@@ -446,13 +446,13 @@ def test_resume_skips_cases_already_in_the_checkpoint(tmp_path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     out = tmp_path / "out.jsonl"
-    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--max-calls", "0"])
+    tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1", "--max-calls", "0"])
 
     # The first case ran and hit the cap; resuming should not redo it.
     _, rows_before = tool.read_checkpoint(out)
     assert len(rows_before) == 1
 
-    tool.main(["--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--resume"])
+    tool.main(["--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1", "--resume"])
 
     _, rows_after = tool.read_checkpoint(out)
     assert [row["case_id"] for row in rows_after] == ["a", "b"]
@@ -466,7 +466,7 @@ def test_max_calls_aborts_cleanly_and_writes_a_checkpoint(tmp_path, monkeypatch)
     out = tmp_path / "out.jsonl"
 
     exit_code = tool.main([
-        "--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1", "--max-calls", "1",
+        "--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1", "--max-calls", "1",
     ])
 
     assert exit_code == 2
@@ -482,7 +482,7 @@ def test_max_cost_aborts_cleanly_and_writes_a_checkpoint(tmp_path, monkeypatch):
     out = tmp_path / "out.jsonl"
 
     exit_code = tool.main([
-        "--manifest", str(path), "--out", str(out), "--i-have-approval", "APPROVAL-1",
+        "--manifest", str(path), "--out", str(out), "--allow-empty-corpus", "--i-have-approval", "APPROVAL-1",
         "--max-cost", "0.0001", "--unit-price", "generation=1.0",
     ])
 
@@ -523,7 +523,9 @@ def test_a_capture_does_not_validate_its_own_seeded_sessions(tmp_path, monkeypat
         lambda *args, **kwargs: {"case_id": "c1", "call_counts": {key: 0 for key in capture.CALL_CATEGORIES}},
     )
     capture.main([
-        "--manifest", str(manifest), "--out", str(out),
+        # An offline test has no ingestion corpus, so it opts out of the
+        # live-run corpus guard explicitly.
+        "--manifest", str(manifest), "--out", str(out), "--allow-empty-corpus",
         "--i-have-approval", "TEST-APPROVAL",
     ])
 
@@ -553,3 +555,57 @@ def test_a_case_record_carries_the_conversation_layer_diagnostics():
     assert '"conversation_outcome"' in source
     for key in ("outcome", "cx_applied", "answer_language", "conversation_repair"):
         assert f'"{key}"' in source, key
+
+
+def test_a_capture_refuses_to_run_when_the_corpus_filter_would_match_nothing(tmp_path, monkeypatch):
+    """Observed 2026-09-22: with no database reachable, the active ingestion
+    generations are empty, retrieval filters on a sentinel that matches nothing,
+    and every case ends in the missing-evidence fallback after real calls."""
+    import scripts.capture_application_path as capture
+
+    monkeypatch.setattr(capture, "read_active_generations", lambda: [])
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test", "turns": [],
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x",
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(capture.CaptureError) as error:
+        capture.main([
+            "--manifest", str(manifest), "--out", str(tmp_path / "out.jsonl"),
+            "--i-have-approval", "TEST-APPROVAL",
+        ])
+    assert "zero hits" in str(error.value)
+
+
+def test_a_capture_refuses_to_run_when_the_generations_cannot_be_read(tmp_path, monkeypatch):
+    """The same guard covers an unreachable database, which is how this was
+    first observed (the read itself raised, rather than returning nothing)."""
+    import scripts.capture_application_path as capture
+
+    def _unreachable():
+        raise RuntimeError("no database here")
+
+    monkeypatch.setattr(capture, "read_active_generations", _unreachable)
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test", "turns": [],
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x",
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(capture.CaptureError) as error:
+        capture.main([
+            "--manifest", str(manifest), "--out", str(tmp_path / "out.jsonl"),
+            "--i-have-approval", "TEST-APPROVAL",
+        ])
+    assert "retrieval would match nothing" in str(error.value)

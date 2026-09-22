@@ -140,6 +140,20 @@ class CallBudgetExceeded(RuntimeError):
     """Raised internally to abort a run cleanly once a cap is exceeded."""
 
 
+class CaptureError(RuntimeError):
+    """Raised when the environment cannot produce a meaningful capture."""
+
+
+def read_active_generations() -> list[dict[str, Any]]:
+    """Return the active ingestion generations retrieval will filter on.
+
+    Its own function so the corpus guard below has one seam to exercise.
+    """
+    from services.knowledge_generations import _active_generation_rows
+
+    return _active_generation_rows(fresh=True)
+
+
 # --------------------------------------------------------------------------
 # Manifest loading and strict validation. Pure, offline, no imports of app/.
 # --------------------------------------------------------------------------
@@ -699,6 +713,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-calls", type=int, default=None, help="Abort once total calls exceed this.")
     parser.add_argument("--max-cost", type=float, default=None, help="Abort once estimated cost exceeds this.")
     parser.add_argument(
+        "--allow-empty-corpus", action="store_true",
+        help="Run even when no active ingestion generation is readable (every search would return zero hits).",
+    )
+    parser.add_argument(
         "--unit-price", dest="unit_prices", action="append", default=[],
         help="NAME=PRICE, one of retrieval/embedding/planner_or_translation/selector/reranker/generation. "
         "Repeatable. No default prices are built in.",
@@ -751,6 +769,30 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
     # configured before this run touches anything else in the process.
     previous_memory_backend = settings.CHAT_MEMORY_BACKEND
     settings.CHAT_MEMORY_BACKEND = "memory"
+
+    # A corpus filter that matches nothing makes a capture worthless: retrieval
+    # runs, every search returns zero hits, and every case ends in the
+    # missing-evidence fallback. Observed on 2026-09-22 (approval
+    # R10-2026-09-22-KRISH): 13 journeys, 312 calls, 0 hits, because the active
+    # ingestion generations are read from the database and this host could not
+    # reach it. Fail before spending anything.
+    if not args.allow_empty_corpus:
+        try:
+            generations = read_active_generations()
+        except Exception as exc:  # noqa: BLE001 - any failure here means no corpus filter
+            raise CaptureError(
+                "could not read the active ingestion generations "
+                f"({type(exc).__name__}: {exc}); retrieval would match nothing. "
+                "Run where the database is reachable, or pass --allow-empty-corpus "
+                "to capture the no-evidence path deliberately."
+            ) from exc
+        if not generations:
+            raise CaptureError(
+                "no active ingestion generations are configured; every search would "
+                "return zero hits and every case would end in the missing-evidence "
+                "fallback. Run where the database is reachable, or pass "
+                "--allow-empty-corpus to capture that path deliberately."
+            )
 
     # Capture isolation (see CAPTURE_ISOLATION below). Restored in `finally`.
     from app.orchestrator import chat_orchestrator as _chat_orchestrator
