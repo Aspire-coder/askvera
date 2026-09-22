@@ -444,6 +444,108 @@ def test_bare_conjunction_fix_keeps_existing_policy_negatives(
     assert detect_personal_account_request(question, language) is False
 
 
+# --- Fable re-review of the bare-conjunction fix (2026-09-22): the new
+# rank-word requirement was too NARROW. Three causes, all in
+# config/personal_account_vocabulary.py: (1) the local rank lists lacked
+# the brand's own English rank names (Manager, Supervisor, Soaring
+# Manager, Diamond Manager, ...), which route-language markets use
+# untranslated too, so "... om jag blir Manager?" and "... som Manager?"
+# style conditionals wrongly kept the note; (2) each language covered only
+# ONE verb form for "become/reach" (en missed "qualify as", "get promoted
+# to", "reach the ... level", "were"; de missed the copula "bin"; es
+# missed "soy"/"me convierto en"; fi missed "pääsen ...iksi"; ru missed
+# "буду" and the bare "как <rank>" role marker; sr missed "буде"); (3) no
+# rank word tolerated a feminine/inflected ending ("als Managerin", "come
+# Supervisora", "en tant que Superviseure"). Fixed by adding a shared
+# English brand-rank fragment (a closed prefix-modifier list -- assistant/
+# senior/soaring/sapphire/diamond/double/triple -- combined with a closed
+# core-noun list -- manager/supervisor/director/diamond/crown -- covering
+# every combination the brand uses without spelling out each one) to
+# every language's rank alternation, adding the missing verb/copula forms
+# per language, and appending ``\w*`` to every rank stem so a gender or
+# case ending doesn't fall outside the match. --------------------------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        # Cause 1: brand English rank names, all 12 languages.
+        ("en", "What is my commission this month if I reach Soaring Manager?"),
+        ("en", "How much is my bonus this month as a Diamond Manager in general?"),
+        ("de", "Wie hoch ist meine Provision diesen Monat, wenn ich Soaring Manager werde?"),
+        ("de", "Wie hoch ist mein Bonus diesen Monat als Diamond Manager im Allgemeinen?"),
+        ("es", "¿Cuál es mi comisión este mes si llego a Soaring Manager?"),
+        ("es", "¿Cuánto es mi bono este mes como Diamond Manager en general?"),
+        ("fr", "Quel est mon bonus ce mois-ci si je deviens Soaring Manager?"),
+        ("fr", "Combien est ma commission ce mois-ci en tant que Diamond Manager en général?"),
+        ("it", "Qual è la mia commissione questo mese se divento Soaring Manager?"),
+        ("it", "Quanto è il mio bonus questo mese come Diamond Manager in generale?"),
+        ("nl", "Wat is mijn commissie deze maand als ik Soaring Manager word?"),
+        ("nl", "Hoeveel is mijn bonus deze maand als Diamond Manager in het algemeen?"),
+        ("sv", "Vad är min provision denna månad om jag blir Manager?"),
+        ("sv", "Hur mycket är min bonus denna månad som Diamond Manager i allmänhet?"),
+        ("da", "Hvad er min provision denne måned, hvis jeg bliver Manager?"),
+        ("da", "Hvor meget er min bonus denne måned som Diamond Manager generelt?"),
+        ("no", "Hva er min provisjon denne måneden hvis jeg blir Manager?"),
+        ("no", "Hvor mye er min bonus denne måneden som Diamond Manager generelt?"),
+        ("fi", "Mikä on palkkioni tässä kuussa, jos minusta tulee Soaring Manager?"),
+        ("fi", "Mikä on palkkioni tässä kuussa roolissa Diamond Manager?"),
+        ("ru", "Какая моя комиссия в этом месяце, если я стану Diamond Manager?"),
+        ("ru", "Какая моя комиссия в этом месяце как Diamond Manager?"),
+        ("sr", "Колика је моја провизија овог месеца ако постанем Diamond Manager?"),
+        ("sr", "Колика је моја провизија овог месеца као Diamond Manager?"),
+        # Cause 2: verb/copula forms missing per language.
+        ("en", "What is my commission this month if I qualify as Manager?"),
+        ("en", "What is my commission this month if I get promoted to Manager?"),
+        ("en", "What is my commission this month if I reach the Manager level?"),
+        ("en", "What is my commission this month if I were a Supervisor?"),
+        ("de", "Wie hoch ist meine Provision diesen Monat, wenn ich Manager bin?"),
+        ("es", "¿Cuál es mi comisión este mes si soy Gerente?"),
+        ("es", "¿Cuál es mi comisión este mes si me convierto en Gerente?"),
+        ("fi", "Mikä on palkkioni tässä kuussa, jos pääsen Manageriksi?"),
+        ("ru", "Какая моя комиссия в этом месяце, если я буду менеджером?"),
+        ("ru", "Какая моя комиссия в этом месяце как менеджер?"),
+        ("sr", "Колика је моја провизија овог месеца ако будем менаџер?"),
+        # Cause 3: feminine/inflected rank forms.
+        ("de", "Wie hoch ist mein Bonus diesen Monat als Managerin?"),
+        ("it", "Quanto è il mio bonus questo mese come Supervisora?"),
+        ("fr", "Combien est ma commission ce mois-ci en tant que Superviseure?"),
+    ],
+)
+def test_fable_re_review_role_conditional_probes_are_not_personal_account(
+    language: str, question: str
+) -> None:
+    assert detect_personal_account_request(question, language) is False
+
+
+# The 24 genuine lookups the previous (bare-conjunction) fix restored must
+# still keep the note now that the rank-word list is wider -- confirms the
+# widening didn't reopen the earlier bug.
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("sv", "Vad är mitt saldo som jag har nu?"),
+        ("da", "Hvad er min saldo som jeg har nu?"),
+        ("no", "Hva er min saldo som jeg har nå?"),
+        ("ru", "Какой мой баланс, как я могу его проверить?"),
+        ("es", "¿Cuál es mi saldo y como puedo verlo?"),
+        ("it", "Qual è il mio saldo e come posso vederlo?"),
+        ("nl", "Wat is mijn saldo als ik nu inlog?"),
+        ("en", "What is my commission this month, if I may ask?"),
+        ("de", "Wie hoch ist mein Kontostand, wenn ich mich einlogge?"),
+        ("fr", "Quel est mon solde si je le vérifie maintenant?"),
+        ("fi", "Mikä on saldoni, jos kirjaudun sisään?"),
+        ("sr", "Колико је моје стање, као што сад имам?"),
+    ],
+)
+def test_fable_re_review_keeps_restored_lookups_matching(
+    language: str, question: str
+) -> None:
+    assert detect_personal_account_request(question, language) is True
+
+
 def test_unrecognised_language_never_matches() -> None:
     assert detect_personal_account_request("Where is my order?", "xx") is False
 

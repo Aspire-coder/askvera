@@ -269,10 +269,57 @@ Supervisor?") stays vetoed after the narrowing -- see
 `test_bare_conjunction_fix_keeps_existing_policy_negatives` and the
 pre-existing `test_fable_f2a_extended_veto_probes_are_not_personal_account`.
 
+Fable's re-review of the bare-conjunction fix (2026-09-22) found the new
+rank-word requirement itself too NARROW: 36/48 role/conditional probes
+wrongly kept the note because the rank word or its surrounding verb form
+wasn't covered. Three causes, all fixed and covered by
+`test_fable_re_review_role_conditional_probes_are_not_personal_account`
+(38 probes across all three causes, all 12 languages) and
+`test_fable_re_review_keeps_restored_lookups_matching` (the 12 restored
+lookups, re-asserted):
+
+1. **Missing brand rank names.** The local rank lists never included the
+   brand's own English rank names (Manager, Supervisor, Soaring Manager,
+   Sapphire Manager, Diamond Manager, Diamond Sapphire Manager, Double/
+   Triple Diamond, Diamond Director, Senior Diamond Director, Crown, Crown
+   Ambassador), which route-language markets use untranslated too ("Vad
+   är min provision denna månad om jag blir Manager?", "Hvad er min
+   provision … som Manager?"). No existing rank vocabulary was found
+   elsewhere in the repository to reuse, so one shared closed fragment (a
+   repeatable prefix-modifier group -- assistant/senior/soaring/sapphire/
+   diamond/double/triple -- before a closed core-noun group -- manager/
+   supervisor/director/diamond/crown -- with an optional trailing
+   "ambassador") was added to every language's rank alternation instead of
+   a separate per-language brand-rank list.
+2. **Only one verb/copula form per language.** en covered `reach|qualify|
+   become|hit|am` but missed "qualify AS", "get promoted to", "reach THE
+   ... LEVEL", and "were"; de missed the copula "bin" ("wenn ich Manager
+   bin"); es missed "soy"/"me convierto en"; fi missed "pääsen ...iksi";
+   ru missed "буду" and the bare "как <rank>" role marker; sr missed
+   "буде". Fixed by adding the missing forms per language.
+3. **No feminine/inflected rank forms.** "als Managerin", "come
+   Supervisora", "en tant que Superviseure" fell outside every exact-string
+   rank alternative. Fixed by appending `\w*` to every rank stem (Italian's
+   and Spanish's "supervisor" stems were shortened to their common root so
+   the suffix covers both masculine and feminine forms).
+
+A rank word inside the OBJECT noun phrase ("Has my Manager bonus been
+paid?") is unaffected either way -- that shape requires the object noun
+immediately after the possessive, so a rank word between them already
+fails to match the shape at all, independent of this veto (verified
+unchanged before/after: both `False`, for the pre-existing, unrelated
+reason, not a regression from this fix).
+
+| set | before (fable4) | after (fable5) |
+| --- | --- | --- |
+| Fable-style role/conditional probes (38, must be vetoed) | 11/38 | 38/38 |
+| Restored genuine lookups (12, must keep the note) | 12/12 | 12/12 |
+| Rank-in-object-noun probes (3, unaffected either way) | 0/3 | 0/3 |
+
 ## Run results
 
-- `tests/unit/test_cx_personal_account.py`: 208 passed
-- `tests/unit/test_cx_*.py` + `tests/conversation` + `tests/conversation_pack/cx` (full run): 1011 passed, 9 xfailed
+- `tests/unit/test_cx_personal_account.py`: 246 passed
+- `tests/unit/test_cx_*.py` + `tests/conversation` + `tests/conversation_pack/cx` (full run): 1067 passed, 9 xfailed
 - `flake8` on `config/personal_account_vocabulary.py` and
   `tests/unit/test_cx_personal_account.py`: clean
 - `git diff --check`: clean

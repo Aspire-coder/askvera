@@ -213,6 +213,61 @@ Supervisor?") stays vetoed after this narrowing -- see
 ``test_fable_f2a_extended_veto_probes_are_not_personal_account`` (unchanged)
 and the new ``test_bare_conjunction_fix_keeps_existing_policy_negatives``.
 
+## Fable re-review finding (2026-09-22): the rank-word fix was too narrow
+
+The rank-word requirement above fixed the bare-conjunction bug but was
+itself too narrow: Fable reproduced 36/48 role/conditional probes that
+wrongly matched (kept the note) once the veto required a rank word,
+because the rank word or its surrounding verb form wasn't covered. Three
+causes:
+
+1. **Missing brand rank names.** The local rank lists (chef/leder/
+   supervisor/manager/gerente/etc.) never included the brand's own English
+   rank names -- Manager, Supervisor, Soaring Manager, Sapphire Manager,
+   Diamond Manager, Diamond Sapphire Manager, Double/Triple Diamond,
+   Diamond Director, Senior Diamond Director, Crown, Crown Ambassador --
+   which route-language markets use UNTRANSLATED too ("Vad är min
+   provision denna månad om jag blir Manager?", "Hvad er min provision …
+   som Manager?"). No existing rank vocabulary was found elsewhere in this
+   repository to reuse (same search repeated from the prior finding), so a
+   single shared fragment was added and reused across all 12 languages
+   instead of a separate per-language brand-rank list: a closed prefix-
+   modifier group (``assistant|senior|soaring|sapphire|diamond|double|
+   triple``) repeated zero or more times before a closed core-noun group
+   (``manager|supervisor|director|diamond|crown``), with an optional
+   trailing "ambassador" -- covering every brand rank combination without
+   spelling out each one, e.g. "diamond" + "sapphire" + "manager" ->
+   "Diamond Sapphire Manager", "double" + "diamond" -> "Double Diamond".
+2. **Only one verb/copula form per language.** en covered
+   ``reach|qualify|become|hit|am`` but not "qualify AS", "get promoted
+   to", "reach THE ... LEVEL", or the subjunctive "were"; de covered only
+   "werde" ("wenn ich Manager bin" -- copula -- was missed); es covered
+   only "llego a"/"alcanzo" ("si soy Gerente", "si me convierto en
+   Gerente" were missed); fi covered only "minusta tulee" ("jos pääsen
+   Manageriksi" was missed); ru covered only "стан-" forms and had no
+   bare-rank role marker at all ("если я буду менеджером", "как
+   менеджер" were missed); sr covered only "постан-" forms ("ако будем
+   менаџер" was missed). Fixed by adding the missing verb/copula
+   alternatives per language.
+3. **No feminine/inflected rank forms.** Every rank alternative was an
+   exact string, so "als Managerin", "come Supervisora", "en tant que
+   Superviseure" fell outside the match entirely. Fixed by appending
+   ``\w*`` to every rank stem (English and local) so a gender or case
+   suffix no longer breaks the match; Italian's "supervisore" and
+   Spanish's "supervisor" stems were also shortened to their common root
+   ("supervisor") so the trailing ``\w*`` covers both the masculine and
+   feminine local forms.
+
+See ``test_fable_re_review_role_conditional_probes_are_not_personal_account``
+(38 probes spanning all three causes, all 12 languages) and
+``test_fable_re_review_keeps_restored_lookups_matching`` (the 12 genuine
+lookups the prior fix restored, re-asserted to confirm the widened rank
+list didn't reopen that bug). A rank word inside the OBJECT noun phrase
+("Has my Manager bonus been paid?") is unaffected either way: that shape
+requires the object noun immediately after the possessive, so inserting a
+rank word between them already fails to match the shape at all,
+independent of this veto.
+
 ## Confidence per language
 
 Each language's regex was written from this same five-shape template,
@@ -265,11 +320,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:balance|points|volume|account\s+balance)\b
             (?![^.!?]{0,40}?\b(?:requirements?|rule|needed|minimum|quota|
                 to\s+stay|to\s+qualify|to\s+remain|to\s+keep|
-                if\s+i\s+(?:reach|qualify|become|hit|am)\s+(?:an?\s+)?
-                    (?:manager|supervisor|assistant\s+supervisor|
-                    senior\s+supervisor|director)|
-                as\s+an?\s+(?:manager|supervisor|assistant\s+supervisor|
-                    senior\s+supervisor|director)|
+                if\s+i\s+(?:reach|qualify(?:\s+as)?|become|
+                    get\s+promoted\s+to|hit|am|were)\s+(?:the\s+)?
+                    (?:an?\s+)?(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?(?:\s+level)?|
+                as\s+an?\s+(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|
                 in\s+general|under\s+the\s+policy|calculated)\b)
             (?![^.!?]{0,40}?\bfor\s+the\b(?!\s+(?:month|week)\b))
         | \b(?:what\s*'?s|what\s+is|how\s+much\s+is)\s+my\s+
@@ -277,11 +331,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:this\s+month|last\s+month|this\s+week|so\s+far)\b
             (?![^.!?]{0,40}?\b(?:requirements?|rule|needed|minimum|quota|
                 to\s+stay|to\s+qualify|to\s+remain|to\s+keep|
-                if\s+i\s+(?:reach|qualify|become|hit|am)\s+(?:an?\s+)?
-                    (?:manager|supervisor|assistant\s+supervisor|
-                    senior\s+supervisor|director)|
-                as\s+an?\s+(?:manager|supervisor|assistant\s+supervisor|
-                    senior\s+supervisor|director)|
+                if\s+i\s+(?:reach|qualify(?:\s+as)?|become|
+                    get\s+promoted\s+to|hit|am|were)\s+(?:the\s+)?
+                    (?:an?\s+)?(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?(?:\s+level)?|
+                as\s+an?\s+(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|
                 in\s+general|under\s+the\s+policy|calculated)\b)
         | \bhow\s+(?:much|many)\s+(?:did\s+i\s+earn|points\s+do\s+i\s+have)\b
         | \b(?:what\s*'?s|what\s+is|track)\s+my\s+(?:tracking|order|account)\s+number\b
@@ -301,10 +354,11 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
                 mindest\w*|quote|zu\s+behalten|
                 wenn\s+ich\s+(?:ein\w*\s+)?
-                    (?:manager|supervisor|assistent\s+supervisor|
-                    senior\s+supervisor|direktor)\s+werde|
-                als\s+(?:manager|supervisor|assistent\s+supervisor|
-                    senior\s+supervisor|direktor)|
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    senior\s+supervisor\w*|direktor\w*)\s+
+                    (?:werde|bin)|
+                als\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    senior\s+supervisor\w*|direktor\w*)|
                 im\s+allgemeinen|richtlinie|berechnet|
                 um\s+aktiv\s+zu\s+bleiben|um\s+mich\s+zu\s+
                 qualifizieren)\b)
@@ -315,10 +369,11 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
                 mindest\w*|quote|zu\s+behalten|
                 wenn\s+ich\s+(?:ein\w*\s+)?
-                    (?:manager|supervisor|assistent\s+supervisor|
-                    senior\s+supervisor|direktor)\s+werde|
-                als\s+(?:manager|supervisor|assistent\s+supervisor|
-                    senior\s+supervisor|direktor)|
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    senior\s+supervisor\w*|direktor\w*)\s+
+                    (?:werde|bin)|
+                als\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    senior\s+supervisor\w*|direktor\w*)|
                 im\s+allgemeinen|richtlinie|berechnet)\b)
         | \bwie\s+viel(?:e)?\s+(?:habe\s+ich\s+verdient|punkte\s+habe\s+ich)\b
         | \b(?:wie\s+lautet|was\s+ist|wo\s+finde\s+ich)\s+meine\s+
@@ -337,11 +392,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|cuota|
                 para\s+(?:permanecer|seguir)\s+activo|para\s+calificar|
                 para\s+mantener|
-                si\s+(?:llego\s+a|alcanzo)\s+(?:un\w*\s+)?
-                    (?:gerente|supervisor|supervisor\s+asistente|
-                    director)|
-                como\s+(?:un\w*\s+)?(?:gerente|supervisor|
-                    supervisor\s+asistente|director)|
+                si\s+(?:llego\s+a|alcanzo|soy|me\s+convierto\s+en)\s+
+                    (?:un\w*\s+)?
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|gerente\w*|supervisor\w*\s+asistente\w*|
+                    director\w*)|
+                como\s+(?:un\w*\s+)?(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|gerente\w*|supervisor\w*|
+                    supervisor\w*\s+asistente\w*|director\w*)|
                 en\s+general|pol[ií]tica|
                 calculad[oa])\b)
             (?![^.!?]{0,40}?\bpara\s+la\b(?!\s+semana\b))
@@ -351,11 +407,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|cuota|
                 para\s+(?:permanecer|seguir)\s+activo|para\s+calificar|
                 para\s+mantener|
-                si\s+(?:llego\s+a|alcanzo)\s+(?:un\w*\s+)?
-                    (?:gerente|supervisor|supervisor\s+asistente|
-                    director)|
-                como\s+(?:un\w*\s+)?(?:gerente|supervisor|
-                    supervisor\s+asistente|director)|
+                si\s+(?:llego\s+a|alcanzo|soy|me\s+convierto\s+en)\s+
+                    (?:un\w*\s+)?
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|gerente\w*|supervisor\w*\s+asistente\w*|
+                    director\w*)|
+                como\s+(?:un\w*\s+)?(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|gerente\w*|supervisor\w*|
+                    supervisor\w*\s+asistente\w*|director\w*)|
                 en\s+general|pol[ií]tica|
                 calculad[oa])\b)
         | \bcu[aá]nto\s+(?:he\s+ganado|puntos\s+tengo)\b
@@ -376,11 +433,11 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
                 minimum|quota|pour\s+rester\s+actif|pour\s+me\s+qualifier|
                 pour\s+garder|
-                si\s+je\s+(?:deviens|atteins)\s+(?:un\w*\s+)?
-                    (?:manager|superviseur|superviseur\s+adjoint|
-                    directeur)|
-                en\s+tant\s+que\s+(?:manager|superviseur|
-                    superviseur\s+adjoint|directeur)|
+                si\s+je\s+(?:deviens|atteins|suis)\s+(?:un\w*\s+)?
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|superviseur\w*|superviseur\w*\s+adjoint\w*|
+                    directeur\w*)|
+                en\s+tant\s+que\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|superviseur\w*|
+                    superviseur\w*\s+adjoint\w*|directeur\w*)|
                 en\s+g[ée]n[ée]ral|
                 politique|calcul[ée])\b)
             (?![^.!?]{0,40}?\bpour\s+la\b(?!\s+semaine\b))
@@ -391,11 +448,11 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
                 minimum|quota|pour\s+rester\s+actif|pour\s+me\s+qualifier|
                 pour\s+garder|
-                si\s+je\s+(?:deviens|atteins)\s+(?:un\w*\s+)?
-                    (?:manager|superviseur|superviseur\s+adjoint|
-                    directeur)|
-                en\s+tant\s+que\s+(?:manager|superviseur|
-                    superviseur\s+adjoint|directeur)|
+                si\s+je\s+(?:deviens|atteins|suis)\s+(?:un\w*\s+)?
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|superviseur\w*|superviseur\w*\s+adjoint\w*|
+                    directeur\w*)|
+                en\s+tant\s+que\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|superviseur\w*|
+                    superviseur\w*\s+adjoint\w*|directeur\w*)|
                 en\s+g[ée]n[ée]ral|
                 politique|calcul[ée])\b)
         | \bcombien\s+(?:ai[- ]je\s+gagn[ée]|de\s+points\s+ai[- ]je)\b
@@ -418,10 +475,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 minim[oa]|quota|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
                 per\s+mantenere|
                 se\s+divento\s+(?:un\w*\s+)?
-                    (?:manager|supervisore|supervisore\s+assistente|
-                    direttore)|
-                come\s+(?:un\w*\s+)?(?:manager|supervisore|
-                    supervisore\s+assistente|direttore)|
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|supervisor\w*|supervisor\w*\s+assistent\w*|
+                    direttor\w*)|
+                come\s+(?:un\w*\s+)?(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|supervisor\w*|
+                    supervisor\w*\s+assistent\w*|direttor\w*)|
                 in\s+generale|politica|
                 calcolat[oa])\b)
             (?![^.!?]{0,40}?\bper\s+la\b(?!\s+settimana\b))
@@ -432,10 +489,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 minim[oa]|quota|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
                 per\s+mantenere|
                 se\s+divento\s+(?:un\w*\s+)?
-                    (?:manager|supervisore|supervisore\s+assistente|
-                    direttore)|
-                come\s+(?:un\w*\s+)?(?:manager|supervisore|
-                    supervisore\s+assistente|direttore)|
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|supervisor\w*|supervisor\w*\s+assistent\w*|
+                    direttor\w*)|
+                come\s+(?:un\w*\s+)?(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|supervisor\w*|
+                    supervisor\w*\s+assistent\w*|direttor\w*)|
                 in\s+generale|politica|
                 calcolat[oa])\b)
         | \bquanto\s+ho\s+guadagnato\b
@@ -456,10 +513,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 om\s+actief\s+te\s+blijven|om\s+in\s+aanmerking\s+te\s+komen|
                 om\s+te\s+behouden|
                 als\s+ik\s+(?:een\w*\s+)?
-                    (?:manager|supervisor|assistent\s+supervisor|
-                    directeur)\s+word|
-                als\s+(?:manager|supervisor|assistent\s+supervisor|
-                    directeur)|
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    directeur\w*)\s+(?:word|ben)|
+                als\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    directeur\w*)|
                 in\s+het\s+algemeen|
                 beleid|berekend)\b)
             (?![^.!?]{0,40}?\bvoor\s+de\b(?!\s+(?:maand|week)\b))
@@ -470,10 +527,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 om\s+actief\s+te\s+blijven|om\s+in\s+aanmerking\s+te\s+komen|
                 om\s+te\s+behouden|
                 als\s+ik\s+(?:een\w*\s+)?
-                    (?:manager|supervisor|assistent\s+supervisor|
-                    directeur)\s+word|
-                als\s+(?:manager|supervisor|assistent\s+supervisor|
-                    directeur)|
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    directeur\w*)\s+(?:word|ben)|
+                als\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|assistent\s+supervisor\w*|
+                    directeur\w*)|
                 in\s+het\s+algemeen|
                 beleid|berekend)\b)
         | \bhoeveel\s+(?:heb\s+ik\s+verdiend|punten\s+heb\s+ik)\b
@@ -494,10 +551,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|kvot|
                 f[oö]r\s+att\s+f[oö]rbli\s+aktiv|f[oö]r\s+att\s+kvalificera|
                 f[oö]r\s+att\s+beh[aå]lla|
-                om\s+jag\s+blir\s+(?:chef|supervisor|
-                    assisterande\s+supervisor|direkt[oö]r)|
-                som\s+(?:chef|supervisor|assisterande\s+supervisor|
-                    direkt[oö]r)|
+                om\s+jag\s+blir\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|chef\w*|
+                    assisterande\s+supervisor\w*|direkt[oö]r\w*)|
+                som\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|chef\w*|assisterande\s+supervisor\w*|
+                    direkt[oö]r\w*)|
                 i\s+allm[aä]nhet|
                 policyn|ber[aä]knas|
                 f[oö]r\s+regeln)\b)
@@ -508,10 +565,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|kvot|
                 f[oö]r\s+att\s+f[oö]rbli\s+aktiv|f[oö]r\s+att\s+kvalificera|
                 f[oö]r\s+att\s+beh[aå]lla|
-                om\s+jag\s+blir\s+(?:chef|supervisor|
-                    assisterande\s+supervisor|direkt[oö]r)|
-                som\s+(?:chef|supervisor|assisterande\s+supervisor|
-                    direkt[oö]r)|
+                om\s+jag\s+blir\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|chef\w*|
+                    assisterande\s+supervisor\w*|direkt[oö]r\w*)|
+                som\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|chef\w*|assisterande\s+supervisor\w*|
+                    direkt[oö]r\w*)|
                 i\s+allm[aä]nhet|
                 policyn|ber[aä]knas)\b)
         | \bhur\s+mycket\s+(?:har\s+jag\s+tj[aä]nat|po[aä]ng\s+har\s+jag)\b
@@ -532,10 +589,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+at\s+forblive\s+aktiv|for\s+at\s+kvalificere|
                 for\s+at\s+beholde|
-                hvis\s+jeg\s+bliver\s+(?:leder|supervisor|
-                    assisterende\s+supervisor|direkt[oø]r)|
-                som\s+(?:leder|supervisor|assisterende\s+supervisor|
-                    direkt[oø]r)|
+                hvis\s+jeg\s+bliver\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|
+                    assisterende\s+supervisor\w*|direkt[oø]r\w*)|
+                som\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|assisterende\s+supervisor\w*|
+                    direkt[oø]r\w*)|
                 generelt|politikken|
                 beregnes|
                 for\s+reglen)\b)
@@ -546,10 +603,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+at\s+forblive\s+aktiv|for\s+at\s+kvalificere|
                 for\s+at\s+beholde|
-                hvis\s+jeg\s+bliver\s+(?:leder|supervisor|
-                    assisterende\s+supervisor|direkt[oø]r)|
-                som\s+(?:leder|supervisor|assisterende\s+supervisor|
-                    direkt[oø]r)|
+                hvis\s+jeg\s+bliver\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|
+                    assisterende\s+supervisor\w*|direkt[oø]r\w*)|
+                som\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|assisterende\s+supervisor\w*|
+                    direkt[oø]r\w*)|
                 generelt|politikken|
                 beregnes)\b)
         | \bhvor\s+meget\s+(?:har\s+jeg\s+tjent|point\s+har\s+jeg)\b
@@ -570,10 +627,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+[aå]\s+forbli\s+aktiv|for\s+[aå]\s+kvalifisere|
                 for\s+[aå]\s+beholde|
-                hvis\s+jeg\s+blir\s+(?:leder|supervisor|
-                    assisterende\s+supervisor|direkt[oø]r)|
-                som\s+(?:leder|supervisor|assisterende\s+supervisor|
-                    direkt[oø]r)|
+                hvis\s+jeg\s+blir\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|
+                    assisterende\s+supervisor\w*|direkt[oø]r\w*)|
+                som\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|assisterende\s+supervisor\w*|
+                    direkt[oø]r\w*)|
                 generelt|policyen|
                 beregnes|
                 for\s+regelen)\b)
@@ -584,10 +641,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+[aå]\s+forbli\s+aktiv|for\s+[aå]\s+kvalifisere|
                 for\s+[aå]\s+beholde|
-                hvis\s+jeg\s+blir\s+(?:leder|supervisor|
-                    assisterende\s+supervisor|direkt[oø]r)|
-                som\s+(?:leder|supervisor|assisterende\s+supervisor|
-                    direkt[oø]r)|
+                hvis\s+jeg\s+blir\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|
+                    assisterende\s+supervisor\w*|direkt[oø]r\w*)|
+                som\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|leder\w*|assisterende\s+supervisor\w*|
+                    direkt[oø]r\w*)|
                 generelt|policyen|
                 beregnes)\b)
         | \bhvor\s+mye\s+(?:har\s+jeg\s+tjent|po[eé]ng\s+har\s+jeg)\b
@@ -607,8 +664,9 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
                 tarvitaan|v[aä]himm[aä]is\w*|kiinti[oö]\w*|
                 s[aä]ilytt[aä][aä]kseni|
-                jos\s+minusta\s+tulee\s+(?:esimies|supervisor|
-                    apulaisvalvoja|johtaja)|
+                jos\s+(?:minusta\s+tulee|p[aä][aä]sen|olen)\s+
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|esimies\w*|apulaisvalvoja\w*|
+                    johtaja\w*)|
                 roolissa|yleens[aä]|
                 k[aä]yt[aä]nn[oö]n\s+mukaan|lasketaan|
                 pysy[aä][aä]kseni\s+aktiivisena|
@@ -619,8 +677,9 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?![^.!?]{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
                 tarvitaan|v[aä]himm[aä]is\w*|kiinti[oö]\w*|
                 s[aä]ilytt[aä][aä]kseni|
-                jos\s+minusta\s+tulee\s+(?:esimies|supervisor|
-                    apulaisvalvoja|johtaja)|
+                jos\s+(?:minusta\s+tulee|p[aä][aä]sen|olen)\s+
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|esimies\w*|apulaisvalvoja\w*|
+                    johtaja\w*)|
                 roolissa|yleens[aä]|
                 k[aä]yt[aä]nn[oö]n\s+mukaan|lasketaan)\b)
         | \bpaljonko\s+(?:olen\s+ansainnut|pisteit[aä]\s+minulla\s+on)\b
@@ -642,9 +701,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
         | какой\s+мой\s+(?:баланс|остаток\s+баллов)
             (?![^.!?]{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
                 минимум|квота|чтобы\s+сохранить|
-                если\s+я\s+стан\w+\s+(?:менеджер\w*|супервайзер\w*|
+                если\s+я\s+(?:стан\w+|буду)\s+
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менеджер\w*|супервайзер\w*|
                     ассистент\w*\s+супервайзера|директор\w*)|
-                как\s+(?:это\s+)?рассчитывается|рассчитывается|
+                как\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менеджер\w*|супервайзер\w*|
+                    ассистент\w*\s+супервайзера|директор\w*|
+                    это\s+рассчитывается)|рассчитывается|
                 в\s+общем|согласно\s+политике|
                 чтобы\s+остаться\s+активным|чтобы\s+соответствовать)\b)
         | как(?:ая|ой)\s+мо[яй]\s+(?:комиссия|бонус|заработок)\s+
@@ -652,9 +714,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 на\s+сегодняшний\s+день)
             (?![^.!?]{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
                 минимум|квота|чтобы\s+сохранить|
-                если\s+я\s+стан\w+\s+(?:менеджер\w*|супервайзер\w*|
+                если\s+я\s+(?:стан\w+|буду)\s+
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менеджер\w*|супервайзер\w*|
                     ассистент\w*\s+супервайзера|директор\w*)|
-                как\s+(?:это\s+)?рассчитывается|рассчитывается|
+                как\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менеджер\w*|супервайзер\w*|
+                    ассистент\w*\s+супервайзера|директор\w*|
+                    это\s+рассчитывается)|рассчитывается|
                 в\s+общем|согласно\s+политике)\b)
         | сколько\s+(?:я\s+заработал|у\s+меня\s+баллов)
         | (?:какой\s+мой|где\s+найти\s+мой)\s+
@@ -675,9 +740,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:стање|број\s+поена)
             (?![^.!?]{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|квота|
                 да\s+задржим|
-                ако\s+постан\w+\s+(?:менаџер\w*|супервизор\w*|
+                ако\s+(?:постан\w+|буде\w*)\s+
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менаџер\w*|супервизор\w*|
                     помоћник\w*\s+супервизора|директор\w*)|
-                као\s+(?:менаџер\w*|супервизор\w*|
+                као\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менаџер\w*|супервизор\w*|
                     помоћник\w*\s+супервизора|директор\w*)|
                 уопштено|према\s+политици|
                 израчунава|
@@ -687,9 +753,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:овог\s+месеца|прошлог\s+месеца|ове\s+недеље|до\s+сада)
             (?![^.!?]{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|квота|
                 да\s+задржим|
-                ако\s+постан\w+\s+(?:менаџер\w*|супервизор\w*|
+                ако\s+(?:постан\w+|буде\w*)\s+
+                    (?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менаџер\w*|супервизор\w*|
                     помоћник\w*\s+супервизора|директор\w*)|
-                као\s+(?:менаџер\w*|супервизор\w*|
+                као\s+(?:(?:(?:assistant|senior|soaring|sapphire|diamond|double|triple)\s+)*(?:manager|supervisor|director|diamond|crown)\w*(?:\s+ambassador)?|менаџер\w*|супервизор\w*|
                     помоћник\w*\s+супервизора|директор\w*)|
                 уопштено|према\s+политици|
                 израчунава)\b)
