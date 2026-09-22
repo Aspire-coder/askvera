@@ -976,3 +976,215 @@ class TestSinkLanguages:
                     correct += 1
         assert total == 50
         assert correct == 50, f"only {correct}/{total} sink negatives stayed unswitched"
+
+
+# =============================================================================
+# HELD-OUT SET (Fable CX re-review, third pass, fix D, 2026-09-19). Written
+# ONCE and run ONCE to produce the numbers reported to the coordinator; NOT
+# iterated against afterwards - no sentence below was adjusted, replaced or
+# removed after seeing its result, and no answer_language.py threshold or
+# vocabulary was tuned in response to a failure in this specific set (all
+# tuning happened against the acceptance/brand-market/sink sets above,
+# which remain the "practice" sets). 4 realistic customer questions per
+# ROUTE_COPY_LANGUAGES language (12) plus 4 per named sink language (pt hu
+# ro pl tr hr mk bg uk et = 10) = 88 total, each with a realistic session
+# `country` for that language and widget="en" (or, for the "en" rows, a
+# non-English widget so a real switch INTO English is exercised). This is
+# the set fix D asks for; its own measured numbers (not an aspirational
+# bar) are what CX_LANE7_ANSWER_LANGUAGE.md's held-out table reports.
+# =============================================================================
+
+HELD_OUT_ROUTE_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "da": ("DK", (
+        "Har I mulighed for at levere til en anden adresse end min egen?",
+        "Jeg vil gerne vide, om der er fortrydelsesret på dette produkt.",
+        "Kan I sende mig en kvittering på min seneste betaling?",
+        "Hvor kan jeg se status på min aktuelle bestilling?",
+    )),
+    "de": ("DE", (
+        "Gibt es eine Möglichkeit, die Lieferadresse nachträglich zu ändern?",
+        "Ich möchte wissen, ob ein Umtausch für dieses Produkt möglich ist.",
+        "Können Sie mir eine Quittung für meine letzte Zahlung schicken?",
+        "Wo finde ich den aktuellen Status meiner Bestellung?",
+    )),
+    "en": ("DE", (  # widget="de" below, country=DE (enables en+de)
+        "Is it possible to change the delivery address after placing the order?",
+        "I would like to know if this product can be exchanged for another one.",
+        "Could you send me a receipt for my last payment?",
+        "Where can I see the current status of my order?",
+    )),
+    "es": ("US", (
+        "¿Hay alguna forma de cambiar la dirección de envío después de hacer el pedido?",
+        "Quisiera saber si este producto se puede cambiar por otro.",
+        "¿Podrían enviarme un recibo de mi último pago?",
+        "¿Dónde puedo ver el estado actual de mi pedido?",
+    )),
+    "fi": ("FI", (
+        "Onko mahdollista vaihtaa toimitusosoitetta tilauksen jälkeen?",
+        "Haluaisin tietää, voiko tämän tuotteen vaihtaa toiseen.",
+        "Voisitteko lähettää minulle kuitin viimeisimmästä maksustani?",
+        "Mistä näen tilaukseni tämänhetkisen tilan?",
+    )),
+    "fr": ("CA", (
+        "Est-il possible de modifier l'adresse de livraison après la commande ?",
+        "J'aimerais savoir si ce produit peut être échangé contre un autre.",
+        "Pourriez-vous m'envoyer un reçu de mon dernier paiement ?",
+        "Où puis-je voir l'état actuel de ma commande ?",
+    )),
+    "it": ("IT", (
+        "È possibile modificare l'indirizzo di consegna dopo l'ordine?",
+        "Vorrei sapere se questo prodotto può essere cambiato con un altro.",
+        "Potreste inviarmi una ricevuta del mio ultimo pagamento?",
+        "Dove posso vedere lo stato attuale del mio ordine?",
+    )),
+    "nl": ("NL", (
+        "Is het mogelijk om het afleveradres na de bestelling te wijzigen?",
+        "Ik wil graag weten of dit product geruild kan worden.",
+        "Kunt u mij een bon sturen van mijn laatste betaling?",
+        "Waar kan ik de huidige status van mijn bestelling zien?",
+    )),
+    "no": ("NO", (
+        "Er det mulig å endre leveringsadressen etter at bestillingen er lagt inn?",
+        "Jeg vil gjerne vite om dette produktet kan byttes mot et annet.",
+        "Kan dere sende meg en kvittering for min siste betaling?",
+        "Hvor kan jeg se nåværende status på bestillingen min?",
+    )),
+    "ru": ("RU", (
+        "Можно ли изменить адрес доставки после оформления заказа?",
+        "Я хотел бы узнать, можно ли обменять этот товар на другой.",
+        "Не могли бы вы прислать мне квитанцию о последнем платеже?",
+        "Где я могу посмотреть текущий статус своего заказа?",
+    )),
+    "sr": ("RS", (
+        "Da li je moguće promeniti adresu za dostavu nakon porudžbine?",
+        "Želeo bih da znam da li se ovaj proizvod može zameniti za drugi.",
+        "Da li mi možete poslati priznanicu za moju poslednju uplatu?",
+        "Gde mogu da vidim trenutni status svoje porudžbine?",
+    )),
+    "sv": ("SE", (
+        "Är det möjligt att ändra leveransadressen efter att beställningen är lagd?",
+        "Jag skulle vilja veta om den här produkten kan bytas mot en annan.",
+        "Kan ni skicka mig ett kvitto på min senaste betalning?",
+        "Var kan jag se den aktuella statusen för min beställning?",
+    )),
+}
+
+HELD_OUT_SINK_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "pt": ("PT", (
+        "Posso alterar a morada de entrega depois de fazer o pedido?",
+        "Gostava de saber se este produto pode ser trocado por outro.",
+        "Podem enviar-me um recibo do meu último pagamento?",
+        "Onde posso ver o estado atual da minha encomenda?",
+    )),
+    "hu": ("HU", (
+        "Lehetséges-e megváltoztatni a szállítási címet a rendelés után?",
+        "Szeretném tudni, hogy ez a termék kicserélhető-e egy másikra.",
+        "El tudnák küldeni az utolsó fizetésemről szóló nyugtát?",
+        "Hol nézhetem meg a rendelésem jelenlegi állapotát?",
+    )),
+    "ro": ("RO", (
+        "Este posibil să schimb adresa de livrare după plasarea comenzii?",
+        "Aș vrea să știu dacă acest produs poate fi schimbat cu altul.",
+        "Îmi puteți trimite o chitanță pentru ultima mea plată?",
+        "Unde pot vedea starea actuală a comenzii mele?",
+    )),
+    "pl": ("PL", (
+        "Czy można zmienić adres dostawy po złożeniu zamówienia?",
+        "Chciałbym wiedzieć, czy ten produkt można wymienić na inny.",
+        "Czy mogliby Państwo przesłać mi potwierdzenie ostatniej płatności?",
+        "Gdzie mogę sprawdzić aktualny status mojego zamówienia?",
+    )),
+    "tr": ("TR", (
+        "Siparişi verdikten sonra teslimat adresini değiştirmek mümkün mü?",
+        "Bu ürünün başka bir ürünle değiştirilip değiştirilemeyeceğini öğrenmek istiyorum.",
+        "Son ödememle ilgili bana bir makbuz gönderebilir misiniz?",
+        "Siparişimin güncel durumunu nereden görebilirim?",
+    )),
+    "hr": ("HR", (
+        "Je li moguće promijeniti adresu dostave nakon narudžbe?",
+        "Zanima me može li se ovaj proizvod zamijeniti za drugi.",
+        "Možete li mi poslati potvrdu o mojoj posljednjoj uplati?",
+        "Gdje mogu vidjeti trenutni status svoje narudžbe?",
+    )),
+    "mk": ("MK", (
+        "Дали е можно да се промени адресата за достава по нарачката?",
+        "Би сакал да знам дали овој производ може да се замени за друг.",
+        "Дали можете да ми испратите потврда за последната уплата?",
+        "Каде можам да го видам тековниот статус на мојата нарачка?",
+    )),
+    "bg": ("BG", (
+        "Възможно ли е да се промени адресът за доставка след поръчката?",
+        "Бих искал да знам дали този продукт може да се смени с друг.",
+        "Можете ли да ми изпратите разписка за последното ми плащане?",
+        "Къде мога да видя текущия статус на поръчката си?",
+    )),
+    "uk": ("UA", (
+        "Чи можна змінити адресу доставки після оформлення замовлення?",
+        "Хотів би дізнатися, чи можна обміняти цей товар на інший.",
+        "Чи можете ви надіслати мені квитанцію про останній платіж?",
+        "Де я можу побачити поточний статус свого замовлення?",
+    )),
+    "et": ("BALTICS", (
+        "Kas tellimuse esitamise järel on võimalik tarneaadressi muuta?",
+        "Tahaksin teada, kas seda toodet saab teise vastu vahetada?",
+        "Kas saaksite mulle saata minu viimase makse kviitungi?",
+        "Kust ma näen oma tellimuse praegust olekut?",
+    )),
+}
+
+
+class TestHeldOutMarketScopedSet:
+    """FROZEN held-out set - see the module comment above
+    HELD_OUT_ROUTE_CASES. Precision (zero wrong-language switches) is a
+    hard requirement across all 88 cases; recall is reported, not forced,
+    since this set was deliberately never tuned against."""
+
+    def test_zero_wrong_language_switches_across_the_entire_held_out_set(self):
+        """The one non-negotiable bar (coordinator: "precision ... must be
+        100%, zero wrong switches")."""
+        failures = []
+        for language, (country, questions) in HELD_OUT_ROUTE_CASES.items():
+            widget = "en" if language != "en" else "de"
+            expected = "en" if language == "en" else language
+            for question in questions:
+                result = resolve_answer_language(question, widget, country=country)
+                if result.switched and result.answer_language != expected:
+                    failures.append(("route", language, country, question, result))
+        for language, (country, questions) in HELD_OUT_SINK_CASES.items():
+            for question in questions:
+                result = resolve_answer_language(question, "en", country=country)
+                if result.switched:
+                    failures.append(("sink", language, country, question, result))
+        assert not failures, f"{len(failures)} wrong-language switches in the held-out set: {failures}"
+
+    def test_sink_held_out_recall(self):
+        """Measured: 40/40 (100%). Asserted at >= 0.90 so this stays a
+        regression guard, not a re-tuning target - see the module comment."""
+        total = 0
+        correct = 0
+        for language, (country, questions) in HELD_OUT_SINK_CASES.items():
+            for question in questions:
+                total += 1
+                result = resolve_answer_language(question, "en", country=country)
+                if not result.switched:
+                    correct += 1
+        assert total == 40
+        assert correct / total >= 0.90, f"sink held-out recall {correct}/{total} regressed below measured"
+
+    def test_route_held_out_recall(self):
+        """Measured: 28/48 (58.3%) - lower than the tuned acceptance sets,
+        as expected for a genuinely fresh, never-tuned-against sample.
+        Asserted at >= 0.50 so this stays a regression guard for the
+        measured value, not a target this test file's own tuning chases."""
+        total = 0
+        correct = 0
+        for language, (country, questions) in HELD_OUT_ROUTE_CASES.items():
+            widget = "en" if language != "en" else "de"
+            expected = "en" if language == "en" else language
+            for question in questions:
+                total += 1
+                result = resolve_answer_language(question, widget, country=country)
+                if result.switched and result.answer_language == expected:
+                    correct += 1
+        assert total == 48
+        assert correct / total >= 0.50, f"route held-out recall {correct}/{total} regressed below measured"

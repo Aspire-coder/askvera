@@ -229,7 +229,9 @@ ALL_MARKER_WORDS: frozenset[str] = frozenset(
 # and the selected-language gate (S4) - a sink is an extra safety net for
 # the specific collisions found, not a claim of covering every non-route
 # language there is.
-_SINK_LANGUAGES: tuple[str, ...] = ("pt", "hu", "ro", "pl", "cs", "sk", "tr", "hr", "bs", "sq", "mk", "bg", "uk")
+_SINK_LANGUAGES: tuple[str, ...] = (
+    "pt", "hu", "ro", "pl", "cs", "sk", "tr", "hr", "bs", "sq", "mk", "bg", "uk", "et",
+)
 
 # Cyrillic-script sinks (checked only against a Cyrillic-script message);
 # every other sink above is Latin-script.
@@ -237,7 +239,11 @@ _CYRILLIC_SINK_LANGUAGES: frozenset[str] = frozenset({"mk", "bg", "uk"})
 
 _SINK_RAW_MARKER_WORDS: dict[str, str] = {
     # Portuguese: coordinator-supplied word list verbatim.
-    "pt": "nao sao voce os das dos uma um o com qual para que",
+    "pt": (
+        "nao sao voce os das dos uma um o com qual para que "
+        "quero pedido ontem posso fazer isso meu minha meus minhas "
+        "eu ele ela nos eles elas esta este isto"
+    ),
     "hu": "a az es hogy nem milyen mi hogyan",
     "ro": "si un o sunt este cu pentru ce cum unde cand nu",
     "pl": "i nie jest sa na do z co jak ale",
@@ -256,6 +262,12 @@ _SINK_RAW_MARKER_WORDS: dict[str, str] = {
     "mk": "и или но а што е се на за како кој која кое колку не со од да го",
     "bg": "и или но а какво е на за с кой коя кое колко не със този",
     "uk": "і або але а що це як на для з цей ця це не зі",
+    # Estonian (Fable CX re-review, 2026-09-19: added because Finnish's
+    # doubled-vowel bonus - Estonian orthography ALSO doubles vowels for
+    # length - could otherwise make a genuinely Estonian sentence
+    # ("Milliseid makseviise te veebitellimuste puhul aktsepteerite?")
+    # score as Finnish with no Estonian competitor to veto it).
+    "et": "ja voi aga on ei mina sina tema meie teie nemad see need mis kes kus millal miks kuidas",
 }
 
 _SINK_DISTINCTIVE_STRONG: dict[str, frozenset[str]] = {
@@ -283,13 +295,30 @@ _SINK_DISTINCTIVE_STRONG: dict[str, frozenset[str]] = {
     # candidates; see _BULGARIAN_MEDIAL_YER below for its own, positional
     # signal instead (coordinator: "'ъ' in word-medial position is
     # bg-typical").
+    # Estonian: only "õ" is genuinely exclusive among these candidates -
+    # ä/ö/ü are shared with German/Finnish/Swedish (route languages), so
+    # they are NOT listed here (this set feeds the unconditional blanket
+    # veto below; putting a route-shared letter here would veto ordinary
+    # German/Finnish/Swedish switches). They are still credited to
+    # Estonian's own sink SCORE via _SINK_DISTINCTIVE_MODERATE instead.
+    "et": frozenset("õÕ"),
 }
 
-# Every sink language's distinctive letters, flattened into one set, for the
-# blanket veto in resolve_answer_language ("distinctive letters of a sink
-# present -> no switch") - deliberately unconditional and independent of
-# which sink they belong to, since the point is only "this doesn't look
-# like any of the 12".
+# A second, MODERATE tier for sinks only (mirrors the route table's own
+# strong/moderate split) - letters that help a sink's own score but are
+# deliberately excluded from the blanket veto below because they are also
+# used by route languages (Estonian ä/ö/ü overlap with German/Finnish/
+# Swedish); see _SINK_DISTINCTIVE_STRONG's "et" note.
+_SINK_DISTINCTIVE_MODERATE: dict[str, frozenset[str]] = {
+    "et": frozenset("äöüÄÖÜ"),
+}
+
+# Every sink language's STRONG distinctive letters only, flattened into one
+# set, for the blanket veto in resolve_answer_language ("distinctive
+# letters of a sink present -> no switch") - deliberately unconditional and
+# independent of which sink they belong to, since the point is only "this
+# doesn't look like any of the 12". MODERATE sink letters are deliberately
+# excluded from this union (see _SINK_DISTINCTIVE_MODERATE above).
 _ALL_SINK_DISTINCTIVE_LETTERS: frozenset[str] = frozenset(
     character for letters in _SINK_DISTINCTIVE_STRONG.values() for character in letters
 )
@@ -432,18 +461,26 @@ _DISTINCTIVE_STRONG: dict[str, frozenset[str]] = {
     "es": frozenset("ñÑ¿¡"),
     "de": frozenset("ß"),
     "fr": frozenset("çÇœŒâêîôûÂÊÎÔÛ"),
-    "ru": frozenset("ыэъёЫЭЪЁ"),  # Cyrillic letters Serbian's alphabet does not have
-    # Cyrillic only: ђ ј љ њ ћ џ are genuinely Serbian-exclusive here (a
-    # Cyrillic message using them cannot be any other route-copy language).
-    # The Latin diacritics đ š ž č ć were REMOVED (Fable CX review finding
-    # S4, 2026-09-19): they are NOT Serbian-specific at all - Croatian,
-    # Bosnian and Montenegrin Latin script use exactly the same letters, so
-    # crediting them made an ordinary Croatian sentence ("Koliko košta...")
-    # look strongly Serbian and switch to it even on an English widget.
-    # Latin-script Serbian is distinguished by its marker WORDS
-    # (_RAW_MARKER_WORDS["sr"]) plus _SERBIAN_EXTRA_MARGIN /
-    # MIN_WINNER_SHARE, never by these shared letters.
-    "sr": frozenset("ђјљњћџЂЈЉЊЋЏ"),
+    # ы/э/ё only (Fable CX review finding, 2026-09-19: an earlier "ru"
+    # entry also included ъ, but ъ is an ORDINARY, frequent Bulgarian VOWEL
+    # ("България", "мъж"), not the rare Russian separator-sign it is in
+    # Russian - crediting it here made a genuinely Bulgarian sentence
+    # ("Мога ли да платя с кредитна карта...") look Russian. ы/э/ё remain
+    # genuinely absent from Bulgarian, Ukrainian, Kazakh, Kyrgyz and Serbian
+    # Cyrillic. Bulgarian's own "ъ" signal lives in _BULGARIAN_MEDIAL_YER
+    # instead, scoped to the bg sink only.
+    "ru": frozenset("ыэёЫЭЁ"),
+    # ђ/ћ only (Fable CX review finding, 2026-09-19: an earlier "sr" entry
+    # also included ј/љ/њ/џ, but those four are equally part of the
+    # MACEDONIAN Cyrillic alphabet - crediting them made a genuinely
+    # Macedonian sentence ("Каде да го најдам бројот...") look Serbian.
+    # ђ and ћ are the two Serbian Cyrillic letters Macedonian's own
+    # alphabet uses ѓ/ќ for instead, so they remain genuinely exclusive.
+    # The Latin diacritics đ š ž č ć were REMOVED earlier (S4, 2026-09-19)
+    # for the analogous Croatian/Bosnian reason. Latin-script Serbian is
+    # distinguished by its marker WORDS (_RAW_MARKER_WORDS["sr"]) plus
+    # _SERBIAN_EXTRA_MARGIN / MIN_WINNER_SHARE, never by shared letters.
+    "sr": frozenset("ђћЂЋ"),
 }
 _DISTINCTIVE_MODERATE: dict[str, frozenset[str]] = {
     "es": frozenset("áéíóúÁÉÍÓÚ"),
@@ -485,19 +522,26 @@ def _distinctive_bonus(language: str, raw_message: str) -> tuple[float, float]:
     letters (curated as genuinely exclusive to this language among ALL
     route and sink candidates - Spanish n-tilde/inverted punctuation,
     German sharp s, French cedilla/ligature/circumflex, Russian- and
-    Serbian-exclusive Cyrillic letters) PLUS the POSITIONAL/pattern signals
-    below (Italian's word-final accent, Finnish's doubled-vowel spelling,
-    Serbian's "da li" idiom) - these are specific, multi-character shapes,
-    not a bare shared letter, so they carry the same exclusivity a marker
-    word would. Explicitly NOT exempt: ``_DISTINCTIVE_MODERATE``'s bare
-    accented vowels (á/é/í/ó/ú etc.) - shared too broadly across Romance and
-    other Latin-script languages (Fable CX re-review, 2026-09-19: a
-    Portuguese or Hungarian sentence's own á/é/í/ó/ú handed Spanish a
-    real-looking letter bonus with no Portuguese/Hungarian model to compare
-    against, carrying two wrong-language switches past every other gate).
+    Serbian-exclusive Cyrillic letters) PLUS the WORD-SHAPED positional
+    signals below (Italian's word-final accent, Serbian's "da li" idiom) -
+    these are specific, multi-character shapes, not a bare shared letter,
+    so they carry the same exclusivity a marker word would. Explicitly NOT
+    exempt: ``_DISTINCTIVE_MODERATE``'s bare accented vowels (á/é/í/ó/ú
+    etc.) - shared too broadly across Romance and other Latin-script
+    languages (Fable CX re-review, 2026-09-19: a Portuguese or Hungarian
+    sentence's own á/é/í/ó/ú handed Spanish a real-looking letter bonus
+    with no Portuguese/Hungarian model to compare against, carrying two
+    wrong-language switches past every other gate). Also explicitly NOT
+    exempt (moved out of the exempt set, second Fable re-review,
+    2026-09-19): Finnish's doubled-vowel spelling - a genuinely Estonian
+    sentence ("Milliseid makseviise te veebitellimuste puhul
+    aktsepteerite?") can contain the same doubled-vowel shape (Estonian's
+    own orthography also doubles vowels for length) without being Finnish
+    at all, so this pattern is no longer trusted as word-equivalent, only
+    as ordinary score/margin evidence like a moderate letter.
     ``resolve_answer_language``'s word-evidence floor uses ``exempt_bonus``
-    as word-equivalent evidence; the moderate-only remainder contributes to
-    score/margin, never to that floor.
+    as word-equivalent evidence; the remainder contributes to score/margin,
+    never to that floor.
     """
     exempt_bonus = 0.0
     strong = _DISTINCTIVE_STRONG.get(language)
@@ -506,9 +550,6 @@ def _distinctive_bonus(language: str, raw_message: str) -> tuple[float, float]:
     if language == "it":
         matches = len(_ITALIAN_WORD_FINAL_ACCENT.findall(raw_message))
         exempt_bonus += _ITALIAN_FINAL_ACCENT_WEIGHT * min(matches, 2)
-    if language == "fi":
-        matches = len(_FINNISH_DOUBLE_VOWEL.findall(raw_message))
-        exempt_bonus += _FINNISH_DOUBLE_VOWEL_WEIGHT * min(matches, _FINNISH_DOUBLE_VOWEL_MAX_CREDITS)
     if language == "sr" and _SERBIAN_DA_LI.search(raw_message):
         exempt_bonus += _SERBIAN_DA_LI_WEIGHT
 
@@ -516,16 +557,23 @@ def _distinctive_bonus(language: str, raw_message: str) -> tuple[float, float]:
     moderate = _DISTINCTIVE_MODERATE.get(language)
     if moderate:
         bonus += _MODERATE_CHAR_WEIGHT * sum(1 for char in moderate if char in raw_message)
+    if language == "fi":
+        matches = len(_FINNISH_DOUBLE_VOWEL.findall(raw_message))
+        bonus += _FINNISH_DOUBLE_VOWEL_WEIGHT * min(matches, _FINNISH_DOUBLE_VOWEL_MAX_CREDITS)
     return bonus, exempt_bonus
 
 
 def _sink_distinctive_bonus(language: str, raw_message: str) -> float:
     """Same mechanism as ``_distinctive_bonus``, scoped to the sink table -
-    see ``_SINK_DISTINCTIVE_STRONG`` and ``_BULGARIAN_MEDIAL_YER`` above."""
+    see ``_SINK_DISTINCTIVE_STRONG``, ``_SINK_DISTINCTIVE_MODERATE`` and
+    ``_BULGARIAN_MEDIAL_YER`` above."""
     bonus = 0.0
     strong = _SINK_DISTINCTIVE_STRONG.get(language)
     if strong:
         bonus += _STRONG_CHAR_WEIGHT * sum(1 for char in strong if char in raw_message)
+    moderate = _SINK_DISTINCTIVE_MODERATE.get(language)
+    if moderate:
+        bonus += _MODERATE_CHAR_WEIGHT * sum(1 for char in moderate if char in raw_message)
     if language == "bg":
         matches = len(_BULGARIAN_MEDIAL_YER.findall(raw_message))
         bonus += _BULGARIAN_MEDIAL_YER_WEIGHT * min(matches, _BULGARIAN_MEDIAL_YER_MAX_CREDITS)
@@ -662,6 +710,7 @@ class Detection(NamedTuple):
     sink_language: str | None = None
     sink_score: float = 0.0
     winner_word_evidence: float = 0.0
+    winner_exempt_letter_evidence: float = 0.0
 
 
 def detect_message_language(
@@ -708,6 +757,7 @@ def detect_message_language(
     hit_shares: dict[str, float] = {}
     letter_evidence: dict[str, float] = {}
     word_evidence: dict[str, float] = {}
+    exempt_letter_evidence: dict[str, float] = {}
     token_count = len(scoring_tokens)
     for language in eligible:
         weights = MARKER_WORD_WEIGHTS.get(language, {})
@@ -716,6 +766,7 @@ def detect_message_language(
         scores[language] = word_score + bonus
         letter_evidence[language] = bonus
         word_evidence[language] = word_score + exempt_bonus
+        exempt_letter_evidence[language] = exempt_bonus
         hit_count = sum(1 for token in scoring_tokens if token in weights)
         hit_shares[language] = (hit_count / token_count) if token_count else 0.0
 
@@ -759,6 +810,7 @@ def detect_message_language(
         sink_language,
         sink_score,
         word_evidence[top_language],
+        exempt_letter_evidence[top_language],
     )
 
 
@@ -877,6 +929,108 @@ def _normalize_language_code(code: str) -> str:
     return (code or "").strip().split("-")[0].split("_")[0].casefold()
 
 
+@lru_cache(maxsize=128)
+def _enabled_market_languages(country: str) -> frozenset[str]:
+    """Every language code ENABLED for ``country`` in ``config/markets.json``
+    (read via ``services.market_config.load_market_config``, the same JSON
+    ``_market_name_tokens`` above already reads) - both route-copy and
+    non-route languages, exactly as configured, with no dependency on
+    whether that market's policy content is separately published (that is
+    a narrower, different concept - see ``services.market_config.get_countries``'s
+    own docstring on document authority vs. reply language; this function
+    answers only "what language codes does this market's widget enable").
+
+    Market-scoped answer-language targets (Fable CX re-review, third pass,
+    2026-09-19): presentation follows the customer's OWN language only
+    within the languages their market actually supports - a Macedonian,
+    Bulgarian, Portuguese or UK session can never reach a route-copy
+    language switch at all (their markets enable no OTHER route-copy
+    language), a US or Brazilian session can only ever reach ``es`` (not,
+    say, ``fr`` or ``de``), and so on. This makes an out-of-market
+    wrong-language switch impossible BY CONSTRUCTION, independent of - and
+    in addition to - every evidence-based gate above.
+    """
+    from services.market_config import load_market_config
+
+    normalized = (country or "").strip().upper()
+    if not normalized:
+        return frozenset()
+    for market in load_market_config()["markets"]:
+        if str(market.get("code", "")).upper() != normalized:
+            continue
+        if not market.get("enabled", True):
+            return frozenset()
+        return frozenset(
+            _normalize_language_code(str(language.get("code", "")))
+            for language in market.get("languages", [])
+            if language.get("enabled", True)
+        )
+    return frozenset()
+
+
+def _allowed_switch_targets(country: str | None) -> frozenset[str] | None:
+    """The set of languages ``resolve_answer_language`` may switch INTO for
+    this session, or ``None`` when ``country`` was not supplied (keeps the
+    pre-market-scoping behaviour: any ``ROUTE_COPY_LANGUAGES`` member is
+    reachable, unrestricted by market). "en" is always allowed alongside
+    whatever route-copy languages the market itself enables - the widget's
+    own default language is never off-limits, even for a market (like
+    Macedonia or Bulgaria) whose OWN configured language isn't a
+    route-copy one at all.
+    """
+    if country is None:
+        return None
+    enabled = _enabled_market_languages(country)
+    return frozenset({"en"}) | (enabled & frozenset(ROUTE_COPY_LANGUAGES))
+
+
+def _market_sink_languages(country: str | None) -> frozenset[str]:
+    """The session market's own ENABLED languages that are NOT route-copy
+    (Fable CX re-review, third pass, 2026-09-19, fix B): for a market like
+    Macedonia (mk), Bulgaria (bg) or Brazil/Portugal (pt), that language is
+    the single most likely explanation for the customer's message - more
+    likely than any route-copy relative it happens to resemble - so ANY
+    positive evidence for it takes priority over the ordinary margin-based
+    sink veto below. Restricted to languages this module actually has a
+    coded sink table for (``_SINK_LANGUAGES``); an enabled market language
+    with no coded sink (e.g. Arabic) contributes no evidence either way,
+    which is a documented limitation, not a false negative this function
+    introduces.
+    """
+    if country is None:
+        return frozenset()
+    enabled = _enabled_market_languages(country)
+    return (enabled - frozenset(ROUTE_COPY_LANGUAGES)) & frozenset(_SINK_LANGUAGES)
+
+
+def _market_sink_veto_reason(message: str, market_sinks: frozenset[str]) -> str | None:
+    """True (a veto reason) when any of ``market_sinks`` shows POSITIVE
+    evidence in ``message`` - its distinctive letter present anywhere, or a
+    nonzero sink score built from at least one matching marker word. Unlike
+    the general sink veto (``_sink_veto_reason``, margin-based), this needs
+    no margin comparison at all: the market's own non-route language
+    already outranks every route-copy relative by construction (fix B), so
+    any real evidence for it is enough.
+    """
+    if not market_sinks:
+        return None
+    masked_message = _mask_non_signal_spans(message)
+    scoring_tokens = _tokenize(masked_message)
+    for language in market_sinks:
+        strong = _SINK_DISTINCTIVE_STRONG.get(language, frozenset())
+        if any(character in message for character in strong):
+            return "non_route_language_likely"
+        weights = SINK_MARKER_WORD_WEIGHTS.get(language, {})
+        hit_count = sum(1 for token in scoring_tokens if token in weights)
+        if hit_count < 1:
+            continue
+        word_score = sum(weights.get(token, 0.0) for token in scoring_tokens)
+        bonus = _sink_distinctive_bonus(language, masked_message)
+        if word_score + bonus > 0:
+            return "non_route_language_likely"
+    return None
+
+
 class AnswerLanguage(NamedTuple):
     """The presentation-language decision for one turn.
 
@@ -960,12 +1114,32 @@ def _sink_veto_reason(detection: Detection, message: str) -> str | None:
     return None
 
 
-def resolve_answer_language(message: str, selected_language: str) -> AnswerLanguage:
+def resolve_answer_language(
+    message: str,
+    selected_language: str,
+    *,
+    country: str | None = None,
+) -> AnswerLanguage:
     """Decide the answer language for one turn. Switches away from
     ``selected_language`` ONLY on a strong, unambiguous signal, per the X1
     decision: never on a single-word or very short message, never on a
     numbers/codes-only message, never when the message's detected language
     already matches the selection, and only into a route-copy language.
+
+    ``country`` (Fable CX re-review, third pass, 2026-09-19, fix A - the
+    MAIN fix): when supplied, restricts the reachable switch target to
+    ``{"en"}`` union the session market's own ENABLED languages, intersected
+    with ``ROUTE_COPY_LANGUAGES`` (see ``_allowed_switch_targets``) -
+    presentation follows the customer's language only WITHIN the languages
+    their market actually supports. This mirrors the retrieval-eligibility
+    split the X1 decision already draws (answer language is presentation;
+    ``body.language``/country is authorization) and makes an out-of-market
+    wrong switch impossible by construction, independent of every
+    evidence-based gate below - three rounds of per-pair vocabulary patches
+    (S4, F1, the letters-alone fix) each closed one collision and exposed
+    another; a structural bound on the target set is what actually closes
+    the whole class. ``country=None`` keeps the pre-market-scoping
+    behaviour unchanged, for callers that don't pass it yet.
     """
     tokens = _tokenize(message)
     if len(tokens) < MIN_TOKENS:
@@ -997,6 +1171,24 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
     if detection.language not in ROUTE_COPY_LANGUAGES:
         return AnswerLanguage(selected_language, False, "no_route_copy")  # pragma: no cover - defensive
 
+    # Fable CX re-review, third pass (2026-09-19), fix A - the main fix:
+    # the detected language must be one this session's MARKET actually
+    # supports. This is a hard, evidence-independent bound - checked before
+    # any of the score/margin/share gates below, so a strong-looking but
+    # out-of-market detection can never slip through on evidence alone.
+    allowed_targets = _allowed_switch_targets(country)
+    if allowed_targets is not None and detection.language not in allowed_targets:
+        return AnswerLanguage(selected_language, False, "language_outside_market_scope")
+
+    # Fable CX re-review, third pass (2026-09-19), fix B: the market's own
+    # enabled NON-route language (if any) outranks every route-copy
+    # relative it might resemble - any positive evidence for it vetoes the
+    # switch outright, no margin comparison needed (see
+    # _market_sink_veto_reason).
+    market_sink_veto = _market_sink_veto_reason(message, _market_sink_languages(country))
+    if market_sink_veto is not None:
+        return AnswerLanguage(selected_language, False, market_sink_veto)
+
     script = _script_signal(message)
     margin = detection.score - detection.runner_up
     required_score, required_margin, required_share = _required_thresholds(detection, script, normalized_selected)
@@ -1025,15 +1217,23 @@ def resolve_answer_language(message: str, selected_language: str) -> AnswerLangu
     # lenient/strict split (see _required_thresholds), so this gate applies
     # only to the Latin-script branch.
     non_exempt_letter_evidence = detection.score - detection.winner_word_evidence
-    if (
-        script != "cyrillic"
-        and non_exempt_letter_evidence > _EPSILON
-        and (
-            detection.winner_word_evidence < MIN_WORD_EVIDENCE - _EPSILON
-            or detection.winner_share < MIN_LATIN_SWITCH_SHARE - _EPSILON
-        )
-    ):
-        return AnswerLanguage(selected_language, False, "insufficient_word_evidence")
+    if script != "cyrillic" and non_exempt_letter_evidence > _EPSILON:
+        if detection.winner_word_evidence < MIN_WORD_EVIDENCE - _EPSILON:
+            return AnswerLanguage(selected_language, False, "insufficient_word_evidence")
+        # Fable CX re-review, third pass (2026-09-19): the share floor is
+        # skipped when EXEMPT evidence alone (curated-exclusive letters -
+        # Spanish ñ/¿/¡, etc. - never the shared moderate ones) already
+        # clears MIN_WORD_EVIDENCE on its own. This recovers an unambiguous
+        # Spanish sentence like "¿Qué hago si el producto llega dañado?"
+        # (¿ and ñ alone are 6.0 points of exempt evidence, more than
+        # enough), whose winner_share (0.29) can legitimately fall just
+        # under 0.3 purely because most of its words are ordinary content
+        # words - exempt letters this strong are exactly the kind of
+        # evidence the share floor exists to stand in for when word density
+        # is otherwise thin.
+        exempt_alone_clears_floor = detection.winner_exempt_letter_evidence >= MIN_WORD_EVIDENCE - _EPSILON
+        if not exempt_alone_clears_floor and detection.winner_share < MIN_LATIN_SWITCH_SHARE - _EPSILON:
+            return AnswerLanguage(selected_language, False, "insufficient_word_evidence")
 
     # Scores are sums of float weights (0.2/0.3/0.5/1.0/1.5/2.0/3.0 etc.), so
     # a margin that is mathematically exactly the threshold can land a hair
