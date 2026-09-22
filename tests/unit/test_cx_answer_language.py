@@ -979,6 +979,101 @@ class TestSinkLanguages:
 
 
 # =============================================================================
+# Defect fix (independent review, MEDIUM, 2026-09-22): plain English messages
+# were switching to "fi" in a Finnish-market session (widget "en" or "sv";
+# FI enables en/fi/sv) because `_RAW_MARKER_WORDS["fi"]` contains ordinary
+# English words ("me", "he", among others) that English's OWN table did not
+# also contain, so each scored as UNIQUE Finnish evidence instead of shared,
+# overlap-discounted evidence. Fixed by enriching `_RAW_MARKER_WORDS["en"]`
+# with the missing high-frequency English closed-class words (see
+# answer_language.py's "en" table and CX_LANE7_ANSWER_LANGUAGE.md for the
+# repro table and before/after recall) - the existing overlap-weighting
+# mechanism then discounts the shared words automatically; no threshold was
+# retuned.
+# =============================================================================
+
+# The coordinator's exact three review repro sentences.
+ENGLISH_NOT_FINNISH_REPRO_SENTENCES: tuple[str, ...] = (
+    "Can he send me the invoice on Friday",
+    "Let me know if he has paid on time",
+    "My sponsor told me he would call on Monday",
+)
+
+# Ten more ordinary English customer sentences built from the same "he"/"me"
+# combination the repro sentences exercise (the two words this fix actually
+# adds overlap for against Finnish's own table) - each one reproducibly
+# switched to "fi" on at least one widget before this fix (verified against
+# the pre-fix table); see CX_LANE7_ANSWER_LANGUAGE.md for the before/after
+# breakdown.
+ENGLISH_NOT_FINNISH_ADDITIONAL_SENTENCES: tuple[str, ...] = (
+    "He asked me to call him back before the end of the day",
+    "Please tell him that I will call him when I get home",
+    "She gave me his number so I could call him about the delivery",
+    "He will let me know once the payment has cleared",
+    "Ask him if he can send me a copy of the receipt",
+    "He said he would meet me at the office tomorrow",
+    "I told him to email me the tracking number today",
+    "He wants me to confirm the address before he ships it",
+    "Remind him that he needs to sign the form and send it to me",
+    "He asked me whether the refund had been processed yet",
+)
+
+# The two accent-free Portuguese repro sentences (same coordinator report):
+# "me" + "se" score just enough "fi" evidence, with the pt sink margin
+# exactly at the veto threshold.
+PORTUGUESE_ACCENT_FREE_REPRO_SENTENCES: tuple[str, ...] = (
+    "Como me registo se nao tenho patrocinador?",
+    "Podem dizer-me se a entrega e gratuita?",
+)
+
+
+class TestEnglishMarkerWordEnrichmentFixesFinnishMisdetection:
+    """Independent review defect (MEDIUM, 2026-09-22): a Finnish-market
+    session (`country="FI"`, which enables en/fi/sv) must never switch a
+    plain English message to "fi", on either the "en" or the "sv" widget."""
+
+    def test_the_three_coordinator_repro_sentences_stay_unswitched_or_switch_to_english(self):
+        for message in ENGLISH_NOT_FINNISH_REPRO_SENTENCES:
+            for widget in ("en", "sv"):
+                result = resolve_answer_language(message, widget, country="FI")
+                assert result.answer_language == "en", (widget, message, result)
+                assert not result.switched or result.answer_language == "en", (widget, message, result)
+
+    def test_ten_more_ordinary_english_sentences_never_switch_to_finnish(self):
+        for message in ENGLISH_NOT_FINNISH_ADDITIONAL_SENTENCES:
+            for widget in ("en", "sv"):
+                result = resolve_answer_language(message, widget, country="FI")
+                assert result.answer_language == "en", (widget, message, result)
+
+    def test_english_widget_never_switches_away_from_english(self):
+        """On the "en" widget every sentence must resolve as `matches_selected`
+        (detected as English, so no switch at all) - never a switch to "fi"
+        or anywhere else."""
+        for message in ENGLISH_NOT_FINNISH_REPRO_SENTENCES + ENGLISH_NOT_FINNISH_ADDITIONAL_SENTENCES:
+            result = resolve_answer_language(message, "en", country="FI")
+            assert result.switched is False, (message, result)
+            assert result.reason == "matches_selected", (message, result)
+
+    def test_sv_widget_switches_into_english_not_finnish(self):
+        """On the "sv" widget these are genuinely English messages, so
+        switching INTO "en" is the correct X1 behaviour (not a bug) - the
+        defect was landing on "fi" instead."""
+        for message in ENGLISH_NOT_FINNISH_REPRO_SENTENCES + ENGLISH_NOT_FINNISH_ADDITIONAL_SENTENCES:
+            result = resolve_answer_language(message, "sv", country="FI")
+            assert result.answer_language == "en", (message, result)
+
+    def test_accent_free_portuguese_repros_stay_unswitched_in_a_pt_like_session(self):
+        for message in PORTUGUESE_ACCENT_FREE_REPRO_SENTENCES:
+            result = resolve_answer_language(message, "en", country="PT")
+            assert result.switched is False, (message, result)
+
+    def test_accent_free_portuguese_repros_stay_unswitched_in_a_finnish_session(self):
+        for message in PORTUGUESE_ACCENT_FREE_REPRO_SENTENCES:
+            result = resolve_answer_language(message, "en", country="FI")
+            assert result.switched is False, (message, result)
+
+
+# =============================================================================
 # HELD-OUT SET (Fable CX re-review, third pass, fix D, 2026-09-19). Written
 # ONCE and run ONCE to produce the numbers reported to the coordinator; NOT
 # iterated against afterwards - no sentence below was adjusted, replaced or
