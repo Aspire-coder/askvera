@@ -581,6 +581,10 @@ def _run_header(manifest_sha: str, approval_id: str) -> dict[str, Any]:
         "code_identity": git_code_identity(),
         "prompt_version": settings.PROMPT_VERSION,
         "settings_snapshot": safe_settings_snapshot(),
+        # Sessions are seeded into the memory backend by this tool, so the
+        # reader-session expiry check does not apply to them; recorded here so
+        # a run is never mistaken for one that exercised stored sessions.
+        "session_state": "capture_supplied_memory",
     }
 
 
@@ -710,6 +714,17 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
     previous_memory_backend = settings.CHAT_MEMORY_BACKEND
     settings.CHAT_MEMORY_BACKEND = "memory"
 
+    # A capture's sessions live in that memory backend and are seeded here, so
+    # they never exist in the chat_sessions table. Validating them against it
+    # can only ever fail (observed 2026-09-22: every case ended in
+    # "Session validation failed" with zero calls made), and a capture-supplied
+    # session is not a reader session whose expiry means anything. The run
+    # header records that this ran with capture-supplied session state.
+    from app.orchestrator import chat_orchestrator as _chat_orchestrator
+
+    previous_validate = _chat_orchestrator.validate_and_touch_session
+    _chat_orchestrator.validate_and_touch_session = lambda *_args, **_kwargs: None
+
     orchestrator = AIOrchestrator()
 
     mode = "a" if (args.resume and args.out.exists()) else "w"
@@ -762,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
         return 0
     finally:
         settings.CHAT_MEMORY_BACKEND = previous_memory_backend
+        _chat_orchestrator.validate_and_touch_session = previous_validate
 
 
 if __name__ == "__main__":

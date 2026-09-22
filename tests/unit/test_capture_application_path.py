@@ -489,3 +489,46 @@ def test_max_cost_aborts_cleanly_and_writes_a_checkpoint(tmp_path, monkeypatch):
     assert exit_code == 2
     _, rows = tool.read_checkpoint(out)
     assert 1 <= len(rows) < 3
+
+
+def test_a_capture_does_not_validate_its_own_seeded_sessions(tmp_path, monkeypatch):
+    """The tool seeds sessions into the memory backend, so they never exist in
+    chat_sessions; validating them there can only fail (observed 2026-09-22:
+    every case ended "Session validation failed" with zero calls made)."""
+    import scripts.capture_application_path as capture
+    from app.orchestrator import chat_orchestrator
+
+    calls = []
+    monkeypatch.setattr(
+        chat_orchestrator, "validate_and_touch_session",
+        lambda *args, **kwargs: calls.append(args) or True,
+    )
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test",
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x", "turns": [],
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+
+    # The real orchestrator is constructed (no calls are made by construction);
+    # only the per-case run is replaced, so no model or retrieval call happens.
+    monkeypatch.setattr(
+        capture, "run_one_case",
+        lambda *args, **kwargs: {"case_id": "c1", "call_counts": {key: 0 for key in capture.CALL_CATEGORIES}},
+    )
+    capture.main([
+        "--manifest", str(manifest), "--out", str(out),
+        "--i-have-approval", "TEST-APPROVAL",
+    ])
+
+    rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
+    header = rows[0]
+    assert header["session_state"] == "capture_supplied_memory"
+    assert calls == [], "a capture must not validate its own seeded sessions"
+    # The original function is restored when the run finishes.
+    assert chat_orchestrator.validate_and_touch_session is not None
