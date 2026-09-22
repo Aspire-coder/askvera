@@ -160,6 +160,59 @@ phrase ("för regeln", "for reglen", "for regelen", "säännön mukaan", and
 similar) rather than a generic preposition, so they never had this clash
 and needed no change.
 
+## Independent review finding (2026-09-22, medium)
+
+The F2-A veto additions above were written as BARE conjunctions/relative
+pronouns in several languages, not specific phrases: English ``if\s+i``
+(no verb requirement), Spanish ``si|como``, Italian ``se|come``,
+German/Dutch ``als``, Swedish/Danish/Norwegian ``som``, Finnish ``jos``,
+Russian ``как|если\s+я``, Serbian ``ако``/``као``. Each of these is an
+ORDINARY word in everyday use, not a marker unique to a role/conditional
+clause: Nordic ``som`` is the everyday relative pronoun ("that/which"),
+Spanish ``como``/Italian ``come``/Russian ``как`` are the everyday word
+for "how". A genuine account lookup that happened to contain the word
+anywhere in the question (e.g. Swedish "Vad är mitt saldo SOM jag har
+nu?", Spanish "cuál es mi saldo y COMO puedo verlo?", Russian "какой мой
+баланс, КАК я могу его проверить?") lost the personal-account note
+entirely -- reproduced in all 12 languages by
+``test_bare_conjunction_veto_no_longer_swallows_genuine_lookups`` in
+``tests/unit/test_cx_personal_account.py``.
+
+**Fix.** Every conditional/role veto now requires a specific phrase ending
+in an actual rank word, drawn from a small closed per-language rank-title
+list (manager, supervisor, assistant supervisor, senior supervisor,
+director, and their per-language equivalents) -- no existing rank/role
+vocabulary was found elsewhere in this repository to reuse, so the list is
+closed and inlined per language here, at the same confidence level as the
+rest of that language's pattern:
+
+- en: ``if I reach/qualify/become/hit/am <rank>`` and ``as a/an <rank>``.
+- de: ``wenn ich <rank> werde`` and ``als <rank>``.
+- es: ``si llego a/si alcanzo <rank>`` and ``como <rank>``.
+- fr: ``si je deviens/atteins <rank>`` and ``en tant que <rank>`` --
+  tightened for the same reason even though French was not one of the
+  languages the reviewer reproduced the defect in, since a fix in this
+  module must generalize across languages rather than patch only the
+  reported ones.
+- it: ``se divento <rank>`` and ``come <rank>``.
+- nl: ``als ik <rank> word`` and ``als <rank>``.
+- sv: ``om jag blir <rank>`` and ``som <rank>``.
+- da/no: ``hvis jeg bliver/blir <rank>`` and ``som <rank>``.
+- fi: ``jos minusta tulee <rank>`` (no bare "as a role" shape exists for
+  Finnish in this vocabulary, so only the conditional phrase needed
+  narrowing).
+- ru: ``если я стан(у/ет) <rank>`` and ``как (это) рассчитывается`` -- the
+  bare ``как`` veto was folded into this specific "how is it calculated"
+  phrase, alongside the pre-existing standalone ``рассчитывается`` veto,
+  which is kept unchanged so no coverage is lost.
+- sr: ``ако постан(ем/е) <rank>`` and ``као <rank>``.
+
+Every existing F2-A role/conditional negative probe (e.g. "What is my
+commission this month if I reach Manager?", "Wie hoch ist mein Bonus als
+Supervisor?") stays vetoed after this narrowing -- see
+``test_fable_f2a_extended_veto_probes_are_not_personal_account`` (unchanged)
+and the new ``test_bare_conjunction_fix_keeps_existing_policy_negatives``.
+
 ## Confidence per language
 
 Each language's regex was written from this same five-shape template,
@@ -212,14 +265,24 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:balance|points|volume|account\s+balance)\b
             (?![^.!?]{0,40}?\b(?:requirements?|rule|needed|minimum|quota|
                 to\s+stay|to\s+qualify|to\s+remain|to\s+keep|
-                if\s+i|as\s+an?|in\s+general|under\s+the\s+policy|calculated)\b)
+                if\s+i\s+(?:reach|qualify|become|hit|am)\s+(?:an?\s+)?
+                    (?:manager|supervisor|assistant\s+supervisor|
+                    senior\s+supervisor|director)|
+                as\s+an?\s+(?:manager|supervisor|assistant\s+supervisor|
+                    senior\s+supervisor|director)|
+                in\s+general|under\s+the\s+policy|calculated)\b)
             (?![^.!?]{0,40}?\bfor\s+the\b(?!\s+(?:month|week)\b))
         | \b(?:what\s*'?s|what\s+is|how\s+much\s+is)\s+my\s+
             (?:commission|bonus|earnings)\s+
             (?:this\s+month|last\s+month|this\s+week|so\s+far)\b
             (?![^.!?]{0,40}?\b(?:requirements?|rule|needed|minimum|quota|
                 to\s+stay|to\s+qualify|to\s+remain|to\s+keep|
-                if\s+i|as\s+an?|in\s+general|under\s+the\s+policy|calculated)\b)
+                if\s+i\s+(?:reach|qualify|become|hit|am)\s+(?:an?\s+)?
+                    (?:manager|supervisor|assistant\s+supervisor|
+                    senior\s+supervisor|director)|
+                as\s+an?\s+(?:manager|supervisor|assistant\s+supervisor|
+                    senior\s+supervisor|director)|
+                in\s+general|under\s+the\s+policy|calculated)\b)
         | \bhow\s+(?:much|many)\s+(?:did\s+i\s+earn|points\s+do\s+i\s+have)\b
         | \b(?:what\s*'?s|what\s+is|track)\s+my\s+(?:tracking|order|account)\s+number\b
         """,
@@ -236,7 +299,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
         | \bwie\s+hoch\s+ist\s+mein\s+
             (?:kontostand|guthaben|punktestand)\b
             (?![^.!?]{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
-                mindest\w*|quote|zu\s+behalten|wenn\s+ich|als|
+                mindest\w*|quote|zu\s+behalten|
+                wenn\s+ich\s+(?:ein\w*\s+)?
+                    (?:manager|supervisor|assistent\s+supervisor|
+                    senior\s+supervisor|direktor)\s+werde|
+                als\s+(?:manager|supervisor|assistent\s+supervisor|
+                    senior\s+supervisor|direktor)|
                 im\s+allgemeinen|richtlinie|berechnet|
                 um\s+aktiv\s+zu\s+bleiben|um\s+mich\s+zu\s+
                 qualifizieren)\b)
@@ -245,7 +313,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:provision|bonus|verdienst)\s+
             (?:diesen\s+monat|letzten\s+monat|diese\s+woche|bisher)\b
             (?![^.!?]{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
-                mindest\w*|quote|zu\s+behalten|wenn\s+ich|als|
+                mindest\w*|quote|zu\s+behalten|
+                wenn\s+ich\s+(?:ein\w*\s+)?
+                    (?:manager|supervisor|assistent\s+supervisor|
+                    senior\s+supervisor|direktor)\s+werde|
+                als\s+(?:manager|supervisor|assistent\s+supervisor|
+                    senior\s+supervisor|direktor)|
                 im\s+allgemeinen|richtlinie|berechnet)\b)
         | \bwie\s+viel(?:e)?\s+(?:habe\s+ich\s+verdient|punkte\s+habe\s+ich)\b
         | \b(?:wie\s+lautet|was\s+ist|wo\s+finde\s+ich)\s+meine\s+
@@ -263,7 +336,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldo|puntos)\b
             (?![^.!?]{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|cuota|
                 para\s+(?:permanecer|seguir)\s+activo|para\s+calificar|
-                para\s+mantener|si|como|en\s+general|pol[ií]tica|
+                para\s+mantener|
+                si\s+(?:llego\s+a|alcanzo)\s+(?:un\w*\s+)?
+                    (?:gerente|supervisor|supervisor\s+asistente|
+                    director)|
+                como\s+(?:un\w*\s+)?(?:gerente|supervisor|
+                    supervisor\s+asistente|director)|
+                en\s+general|pol[ií]tica|
                 calculad[oa])\b)
             (?![^.!?]{0,40}?\bpara\s+la\b(?!\s+semana\b))
         | \b(?:cu[aá]l\s+es|cu[aá]nto\s+es)\s+mi\s+
@@ -271,7 +350,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:este\s+mes|el\s+mes\s+pasado|esta\s+semana|hasta\s+ahora)\b
             (?![^.!?]{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|cuota|
                 para\s+(?:permanecer|seguir)\s+activo|para\s+calificar|
-                para\s+mantener|si|como|en\s+general|pol[ií]tica|
+                para\s+mantener|
+                si\s+(?:llego\s+a|alcanzo)\s+(?:un\w*\s+)?
+                    (?:gerente|supervisor|supervisor\s+asistente|
+                    director)|
+                como\s+(?:un\w*\s+)?(?:gerente|supervisor|
+                    supervisor\s+asistente|director)|
+                en\s+general|pol[ií]tica|
                 calculad[oa])\b)
         | \bcu[aá]nto\s+(?:he\s+ganado|puntos\s+tengo)\b
         | \b(?:cu[aá]l\s+es|d[oó]nde\s+encuentro)\s+mi\s+
@@ -290,7 +375,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:solde|nombre\s+de\s+points)\b
             (?![^.!?]{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
                 minimum|quota|pour\s+rester\s+actif|pour\s+me\s+qualifier|
-                pour\s+garder|si\s+je|en\s+tant\s+que|en\s+g[ée]n[ée]ral|
+                pour\s+garder|
+                si\s+je\s+(?:deviens|atteins)\s+(?:un\w*\s+)?
+                    (?:manager|superviseur|superviseur\s+adjoint|
+                    directeur)|
+                en\s+tant\s+que\s+(?:manager|superviseur|
+                    superviseur\s+adjoint|directeur)|
+                en\s+g[ée]n[ée]ral|
                 politique|calcul[ée])\b)
             (?![^.!?]{0,40}?\bpour\s+la\b(?!\s+semaine\b))
         | \b(?:quel\s+est|combien\s+est)\s+mon\s+
@@ -299,7 +390,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 jusqu['’]?\s*[aà]\s+pr[ée]sent)\b
             (?![^.!?]{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
                 minimum|quota|pour\s+rester\s+actif|pour\s+me\s+qualifier|
-                pour\s+garder|si\s+je|en\s+tant\s+que|en\s+g[ée]n[ée]ral|
+                pour\s+garder|
+                si\s+je\s+(?:deviens|atteins)\s+(?:un\w*\s+)?
+                    (?:manager|superviseur|superviseur\s+adjoint|
+                    directeur)|
+                en\s+tant\s+que\s+(?:manager|superviseur|
+                    superviseur\s+adjoint|directeur)|
+                en\s+g[ée]n[ée]ral|
                 politique|calcul[ée])\b)
         | \bcombien\s+(?:ai[- ]je\s+gagn[ée]|de\s+points\s+ai[- ]je)\b
         | \b(?:quel\s+est|o[uù]\s+trouve[- ]je)\s+mon\s+
@@ -319,7 +416,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldo|numero\s+di\s+punti)\b
             (?![^.!?]{0,40}?\b(?:requisit[oi]|regola|necessari[oa]|
                 minim[oa]|quota|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
-                per\s+mantenere|se|come|in\s+generale|politica|
+                per\s+mantenere|
+                se\s+divento\s+(?:un\w*\s+)?
+                    (?:manager|supervisore|supervisore\s+assistente|
+                    direttore)|
+                come\s+(?:un\w*\s+)?(?:manager|supervisore|
+                    supervisore\s+assistente|direttore)|
+                in\s+generale|politica|
                 calcolat[oa])\b)
             (?![^.!?]{0,40}?\bper\s+la\b(?!\s+settimana\b))
         | \b(?:qual\s+[eè]|quanto\s+[eè])\s+(?:il\s+mio|la\s+mia)\s+
@@ -327,7 +430,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:questo\s+mese|il\s+mese\s+scorso|questa\s+settimana|finora)\b
             (?![^.!?]{0,40}?\b(?:requisit[oi]|regola|necessari[oa]|
                 minim[oa]|quota|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
-                per\s+mantenere|se|come|in\s+generale|politica|
+                per\s+mantenere|
+                se\s+divento\s+(?:un\w*\s+)?
+                    (?:manager|supervisore|supervisore\s+assistente|
+                    direttore)|
+                come\s+(?:un\w*\s+)?(?:manager|supervisore|
+                    supervisore\s+assistente|direttore)|
+                in\s+generale|politica|
                 calcolat[oa])\b)
         | \bquanto\s+ho\s+guadagnato\b
         | \b(?:qual\s+[eè]|dove\s+trovo)\s+il\s+mio\s+
@@ -345,7 +454,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldo|aantal\s+punten)\b
             (?![^.!?]{0,40}?\b(?:vereiste(?:n)?|regel|nodig|minimum|quotum|
                 om\s+actief\s+te\s+blijven|om\s+in\s+aanmerking\s+te\s+komen|
-                om\s+te\s+behouden|als\s+ik|als|in\s+het\s+algemeen|
+                om\s+te\s+behouden|
+                als\s+ik\s+(?:een\w*\s+)?
+                    (?:manager|supervisor|assistent\s+supervisor|
+                    directeur)\s+word|
+                als\s+(?:manager|supervisor|assistent\s+supervisor|
+                    directeur)|
+                in\s+het\s+algemeen|
                 beleid|berekend)\b)
             (?![^.!?]{0,40}?\bvoor\s+de\b(?!\s+(?:maand|week)\b))
         | \b(?:wat\s+is|hoeveel\s+is)\s+mijn\s+
@@ -353,7 +468,13 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:deze\s+maand|vorige\s+maand|deze\s+week|tot\s+nu\s+toe)\b
             (?![^.!?]{0,40}?\b(?:vereiste(?:n)?|regel|nodig|minimum|quotum|
                 om\s+actief\s+te\s+blijven|om\s+in\s+aanmerking\s+te\s+komen|
-                om\s+te\s+behouden|als\s+ik|als|in\s+het\s+algemeen|
+                om\s+te\s+behouden|
+                als\s+ik\s+(?:een\w*\s+)?
+                    (?:manager|supervisor|assistent\s+supervisor|
+                    directeur)\s+word|
+                als\s+(?:manager|supervisor|assistent\s+supervisor|
+                    directeur)|
+                in\s+het\s+algemeen|
                 beleid|berekend)\b)
         | \bhoeveel\s+(?:heb\s+ik\s+verdiend|punten\s+heb\s+ik)\b
         | \b(?:wat\s+is|waar\s+vind\s+ik)\s+mijn\s+
@@ -372,7 +493,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldo|po[aä]ng)\b
             (?![^.!?]{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|kvot|
                 f[oö]r\s+att\s+f[oö]rbli\s+aktiv|f[oö]r\s+att\s+kvalificera|
-                f[oö]r\s+att\s+beh[aå]lla|om\s+jag|som|i\s+allm[aä]nhet|
+                f[oö]r\s+att\s+beh[aå]lla|
+                om\s+jag\s+blir\s+(?:chef|supervisor|
+                    assisterande\s+supervisor|direkt[oö]r)|
+                som\s+(?:chef|supervisor|assisterande\s+supervisor|
+                    direkt[oö]r)|
+                i\s+allm[aä]nhet|
                 policyn|ber[aä]knas|
                 f[oö]r\s+regeln)\b)
         | \b(?:vad\s+[aä]r|hur\s+mycket\s+[aä]r)\s+min\s+
@@ -381,7 +507,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 hittills)\b
             (?![^.!?]{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|kvot|
                 f[oö]r\s+att\s+f[oö]rbli\s+aktiv|f[oö]r\s+att\s+kvalificera|
-                f[oö]r\s+att\s+beh[aå]lla|om\s+jag|som|i\s+allm[aä]nhet|
+                f[oö]r\s+att\s+beh[aå]lla|
+                om\s+jag\s+blir\s+(?:chef|supervisor|
+                    assisterande\s+supervisor|direkt[oö]r)|
+                som\s+(?:chef|supervisor|assisterande\s+supervisor|
+                    direkt[oö]r)|
+                i\s+allm[aä]nhet|
                 policyn|ber[aä]knas)\b)
         | \bhur\s+mycket\s+(?:har\s+jag\s+tj[aä]nat|po[aä]ng\s+har\s+jag)\b
         | \b(?:vad\s+[aä]r|var\s+hittar\s+jag)\s+mitt\s+
@@ -400,7 +531,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldo|po[iî]nt(?:sum)?)\b
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+at\s+forblive\s+aktiv|for\s+at\s+kvalificere|
-                for\s+at\s+beholde|hvis\s+jeg|som|generelt|politikken|
+                for\s+at\s+beholde|
+                hvis\s+jeg\s+bliver\s+(?:leder|supervisor|
+                    assisterende\s+supervisor|direkt[oø]r)|
+                som\s+(?:leder|supervisor|assisterende\s+supervisor|
+                    direkt[oø]r)|
+                generelt|politikken|
                 beregnes|
                 for\s+reglen)\b)
         | \b(?:hvad\s+er|hvor\s+meget\s+er)\s+min\s+
@@ -409,7 +545,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 indtil\s+videre)\b
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+at\s+forblive\s+aktiv|for\s+at\s+kvalificere|
-                for\s+at\s+beholde|hvis\s+jeg|som|generelt|politikken|
+                for\s+at\s+beholde|
+                hvis\s+jeg\s+bliver\s+(?:leder|supervisor|
+                    assisterende\s+supervisor|direkt[oø]r)|
+                som\s+(?:leder|supervisor|assisterende\s+supervisor|
+                    direkt[oø]r)|
+                generelt|politikken|
                 beregnes)\b)
         | \bhvor\s+meget\s+(?:har\s+jeg\s+tjent|point\s+har\s+jeg)\b
         | \b(?:hvad\s+er|hvor\s+finder\s+jeg)\s+mit\s+
@@ -428,7 +569,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldo|po[eé]ngsum)\b
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+[aå]\s+forbli\s+aktiv|for\s+[aå]\s+kvalifisere|
-                for\s+[aå]\s+beholde|hvis\s+jeg|som|generelt|policyen|
+                for\s+[aå]\s+beholde|
+                hvis\s+jeg\s+blir\s+(?:leder|supervisor|
+                    assisterende\s+supervisor|direkt[oø]r)|
+                som\s+(?:leder|supervisor|assisterende\s+supervisor|
+                    direkt[oø]r)|
+                generelt|policyen|
                 beregnes|
                 for\s+regelen)\b)
         | \b(?:hva\s+er|hvor\s+mye\s+er)\s+min\s+
@@ -437,7 +583,12 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 s[aå]\s+langt)\b
             (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+[aå]\s+forbli\s+aktiv|for\s+[aå]\s+kvalifisere|
-                for\s+[aå]\s+beholde|hvis\s+jeg|som|generelt|policyen|
+                for\s+[aå]\s+beholde|
+                hvis\s+jeg\s+blir\s+(?:leder|supervisor|
+                    assisterende\s+supervisor|direkt[oø]r)|
+                som\s+(?:leder|supervisor|assisterende\s+supervisor|
+                    direkt[oø]r)|
+                generelt|policyen|
                 beregnes)\b)
         | \bhvor\s+mye\s+(?:har\s+jeg\s+tjent|po[eé]ng\s+har\s+jeg)\b
         | \b(?:hva\s+er|hvor\s+finner\s+jeg)\s+mitt\s+
@@ -455,7 +606,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:saldoni|pisteideni\s+m[aä][aä]r[aä])\b
             (?![^.!?]{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
                 tarvitaan|v[aä]himm[aä]is\w*|kiinti[oö]\w*|
-                s[aä]ilytt[aä][aä]kseni|jos|roolissa|yleens[aä]|
+                s[aä]ilytt[aä][aä]kseni|
+                jos\s+minusta\s+tulee\s+(?:esimies|supervisor|
+                    apulaisvalvoja|johtaja)|
+                roolissa|yleens[aä]|
                 k[aä]yt[aä]nn[oö]n\s+mukaan|lasketaan|
                 pysy[aä][aä]kseni\s+aktiivisena|
                 t[aä]ytt[aä][aä]kseni\s+vaatimuksen)\b)
@@ -464,7 +618,10 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
                 t[aä]h[aä]n\s+menness[aä])\b
             (?![^.!?]{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
                 tarvitaan|v[aä]himm[aä]is\w*|kiinti[oö]\w*|
-                s[aä]ilytt[aä][aä]kseni|jos|roolissa|yleens[aä]|
+                s[aä]ilytt[aä][aä]kseni|
+                jos\s+minusta\s+tulee\s+(?:esimies|supervisor|
+                    apulaisvalvoja|johtaja)|
+                roolissa|yleens[aä]|
                 k[aä]yt[aä]nn[oö]n\s+mukaan|lasketaan)\b)
         | \bpaljonko\s+(?:olen\s+ansainnut|pisteit[aä]\s+minulla\s+on)\b
         | \b(?:mik[aä]\s+on|mist[aä]\s+l[oö]yd[aä]n)\s+
@@ -484,15 +641,21 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:платёж|заказ|бонус|комиссион)
         | какой\s+мой\s+(?:баланс|остаток\s+баллов)
             (?![^.!?]{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
-                минимум|квота|чтобы\s+сохранить|если\s+я|как|
-                в\s+общем|согласно\s+политике|рассчитывается|
+                минимум|квота|чтобы\s+сохранить|
+                если\s+я\s+стан\w+\s+(?:менеджер\w*|супервайзер\w*|
+                    ассистент\w*\s+супервайзера|директор\w*)|
+                как\s+(?:это\s+)?рассчитывается|рассчитывается|
+                в\s+общем|согласно\s+политике|
                 чтобы\s+остаться\s+активным|чтобы\s+соответствовать)\b)
         | как(?:ая|ой)\s+мо[яй]\s+(?:комиссия|бонус|заработок)\s+
             (?:в\s+этом\s+месяце|в\s+прошлом\s+месяце|на\s+этой\s+неделе|
                 на\s+сегодняшний\s+день)
             (?![^.!?]{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
-                минимум|квота|чтобы\s+сохранить|если\s+я|как|
-                в\s+общем|согласно\s+политике|рассчитывается)\b)
+                минимум|квота|чтобы\s+сохранить|
+                если\s+я\s+стан\w+\s+(?:менеджер\w*|супервайзер\w*|
+                    ассистент\w*\s+супервайзера|директор\w*)|
+                как\s+(?:это\s+)?рассчитывается|рассчитывается|
+                в\s+общем|согласно\s+политике)\b)
         | сколько\s+(?:я\s+заработал|у\s+меня\s+баллов)
         | (?:какой\s+мой|где\s+найти\s+мой)\s+
             (?:номер\s+отслеживания|номер\s+заказа|номер\s+счёта)
@@ -511,14 +674,24 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
         | колико\s+је\s+мо(?:ј|ја|је)\s+
             (?:стање|број\s+поена)
             (?![^.!?]{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|квота|
-                да\s+задржим|ако|као|уопштено|према\s+политици|
+                да\s+задржим|
+                ако\s+постан\w+\s+(?:менаџер\w*|супервизор\w*|
+                    помоћник\w*\s+супервизора|директор\w*)|
+                као\s+(?:менаџер\w*|супервизор\w*|
+                    помоћник\w*\s+супервизора|директор\w*)|
+                уопштено|према\s+политици|
                 израчунава|
                 да\s+останем\s+активан|да\s+испуним\s+услов)\b)
         | коли(?:ка|ко)\s+је\s+мо(?:ј|ја|је)\s+
             (?:провизија|бонус|зарада)\s+
             (?:овог\s+месеца|прошлог\s+месеца|ове\s+недеље|до\s+сада)
             (?![^.!?]{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|квота|
-                да\s+задржим|ако|као|уопштено|према\s+политици|
+                да\s+задржим|
+                ако\s+постан\w+\s+(?:менаџер\w*|супервизор\w*|
+                    помоћник\w*\s+супервизора|директор\w*)|
+                као\s+(?:менаџер\w*|супервизор\w*|
+                    помоћник\w*\s+супервизора|директор\w*)|
+                уопштено|према\s+политици|
                 израчунава)\b)
         | колико\s+сам\s+(?:зарадио|поена\s+имам)
         | (?:колико\s+је\s+мо(?:ј|ја|је)|где\s+да\s+нађем\s+мо(?:ј|ја|је))\s+

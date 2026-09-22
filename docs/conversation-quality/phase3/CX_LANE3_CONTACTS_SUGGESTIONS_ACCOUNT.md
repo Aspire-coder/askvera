@@ -214,12 +214,65 @@ two more gaps, now fixed and covered by
   la"/"voor de"/"für die"; the other six languages use a rule-specific
   phrase and never had this clash.
 
+An independent review (2026-09-22, medium) found that the F2-A veto list
+itself had been written as bare conjunctions/relative pronouns in several
+languages instead of specific phrases: English `if\s+i` (with no verb
+requirement), Spanish `si|como`, Italian `se|come`, German/Dutch `als`,
+Swedish/Danish/Norwegian `som`, Finnish `jos`, Russian `как|если\s+я`,
+Serbian `ако`/`као`. Each of these is an ordinary word in everyday use --
+Nordic `som` is the everyday relative pronoun ("that/which"), Spanish
+`como`/Italian `come`/Russian `как` are the everyday word for "how" -- so
+any genuine account lookup that happened to contain one of them anywhere
+in the sentence lost the personal-account note. Reproduced (and fixed) in
+all 12 languages, covered by
+`test_bare_conjunction_veto_no_longer_swallows_genuine_lookups`:
+
+| language | lost the note before the fix |
+| --- | --- |
+| sv | "Vad är mitt saldo som jag har nu?" |
+| da | "Hvad er min saldo som jeg har nu?" |
+| no | "Hva er min saldo som jeg har nå?" |
+| ru | "Какой мой баланс, как я могу его проверить?" |
+| es | "¿Cuál es mi saldo y como puedo verlo?" |
+| it | "Qual è il mio saldo e come posso vederlo?" |
+| nl | "Wat is mijn saldo als ik nu inlog?" |
+| en | "What is my commission this month, if I may ask?" |
+| de | "Wie hoch ist mein Kontostand, wenn ich mich einlogge?" |
+| fr | "Quel est mon solde si je le vérifie maintenant?" |
+| fi | "Mikä on saldoni, jos kirjaudun sisään?" |
+| sr | "Колико је моје стање, као што сад имам?" |
+
+Fix: every conditional/role veto now requires a specific phrase ending in
+an actual rank word, drawn from a small closed per-language rank-title
+list (manager, supervisor, assistant supervisor, senior supervisor,
+director, and their per-language equivalents -- no existing rank
+vocabulary was found elsewhere in the repository to reuse, so this list is
+closed and inlined per language, matching this module's existing
+discipline): English "if I reach/qualify/become/hit/am `<rank>`" and "as
+a/an `<rank>`"; German "wenn ich `<rank>` werde" and "als `<rank>`";
+Spanish "si llego a/si alcanzo `<rank>`" and "como `<rank>`"; Italian "se
+divento `<rank>`" and "come `<rank>`"; Dutch "als ik `<rank>` word" and
+"als `<rank>`"; Swedish "om jag blir `<rank>`" and "som `<rank>`";
+Danish/Norwegian "hvis jeg bliver/blir `<rank>`" and "som `<rank>`";
+Finnish "jos minusta tulee `<rank>`"; Russian "если я стан(у/ет) `<rank>`"
+and "как (это) рассчитывается" (the bare "как" veto was folded into this
+specific "how is it calculated" phrase, alongside the pre-existing
+standalone "рассчитывается" veto, kept unchanged); Serbian "ако
+постан(ем/е) `<rank>`" and "као `<rank>`". French's `si\s+je`/`en\s+tant\s+que`
+vetoes were tightened the same way ("si je deviens/atteins `<rank>`", "en
+tant que `<rank>`") even though French was not one of the languages the
+reviewer reproduced the defect in, since every fix in this module must
+generalize across languages rather than patch only the reported ones.
+Every existing F2-A role/conditional negative (e.g. "What is my commission
+this month if I reach Manager?", "Wie hoch ist mein Bonus als
+Supervisor?") stays vetoed after the narrowing -- see
+`test_bare_conjunction_fix_keeps_existing_policy_negatives` and the
+pre-existing `test_fable_f2a_extended_veto_probes_are_not_personal_account`.
+
 ## Run results
 
-- `tests/unit/test_cx_contacts_suggestions.py` + `tests/unit/test_cx_personal_account.py`: 211 passed
-- `tests/conversation/test_contact_completion_country_scope.py` + `test_contact_completion_orchestrator_wiring.py` + `test_contact_completion_unit.py` + `test_contacts_type_and_country_fidelity.py` + `test_p2fix_reference_contact_edges.py` + `tests/unit/test_response_quality.py` + `tests/unit/test_conversation_outcome.py`: 113 passed
-- `tests/conversation/` (full directory): 351 passed
-- `tests/unit/test_cx_*.py` + `tests/conversation` + `tests/conversation_pack/cx` (full run): 985 passed, 9 xfailed
-- `flake8` on all Lane 3 files: clean
-- `git diff --check`: clean
+- `tests/unit/test_cx_personal_account.py`: 208 passed
+- `tests/unit/test_cx_*.py` + `tests/conversation` + `tests/conversation_pack/cx` (full run): 1011 passed, 9 xfailed
+- `flake8` on `config/personal_account_vocabulary.py` and
+  `tests/unit/test_cx_personal_account.py`: clean
 - `git diff --check`: clean

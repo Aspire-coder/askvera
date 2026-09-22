@@ -368,6 +368,82 @@ def test_fable_f2b_for_the_month_or_week_is_a_time_marker_not_purpose(language: 
     assert detect_personal_account_request(question, language) is True
 
 
+# --- Independent review finding (2026-09-22, medium): the F2-A veto list
+# was written as bare conjunctions/relative pronouns in several languages
+# ("if\s+i", es "si|como", it "se|come", de/nl "als", sv/da/no "som", fi
+# "jos", ru "как|если я", sr "ако"/"као") instead of specific phrases. A
+# bare word is an ORDINARY word in ordinary use -- Swedish/Danish/Norwegian
+# "som" is the everyday relative pronoun ("that/which"), Spanish "como" and
+# Italian "come" and Russian "как" are the everyday word for "how", so any
+# genuine lookup that happened to use one of these words anywhere in the
+# question lost the personal-account note entirely. Fixed by narrowing
+# every conditional/role veto to a specific phrase that requires an actual
+# rank word (a small closed per-language rank-title list: manager,
+# supervisor, assistant supervisor, senior supervisor, director, and their
+# per-language equivalents -- no such list already existed in this
+# repository to reuse) immediately after the conditional/role marker:
+# English "if I reach/qualify/become/hit/am <rank>" and "as a/an <rank>";
+# German "wenn ich <rank> werde" and "als <rank>"; Spanish "si llego a/si
+# alcanzo <rank>" and "como <rank>"; Italian "se divento <rank>" and "come
+# <rank>"; Dutch "als ik <rank> word" and "als <rank>"; Swedish "om jag
+# blir <rank>" and "som <rank>"; Danish/Norwegian "hvis jeg
+# bliver/blir <rank>" and "som <rank>"; Finnish "jos minusta tulee <rank>";
+# Russian "если я стану <rank>" and "как (это) рассчитывается" (the bare
+# "как" was folded into this specific "how is it calculated" phrase, next
+# to the pre-existing standalone "рассчитывается" veto, which is kept
+# unchanged); Serbian "ако постанем <rank>" and "као <rank>". French's
+# "si\s+je"/"en\s+tant\s+que" vetoes were tightened the same way ("si je
+# deviens/atteins <rank>", "en tant que <rank>") for the same
+# generalize-across-languages discipline even though French was not one of
+# the languages the reviewer reproduced the defect in.
+#
+# Below: the reviewer's repro set that must get the note back (was False,
+# must now be True) in every language, plus the existing F2-A/role/
+# conditional positives (already covered above) that must STAY vetoed
+# (still False) now that the veto phrases are narrower, confirming the
+# narrowing didn't drop real coverage. --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("sv", "Vad är mitt saldo som jag har nu?"),
+        ("da", "Hvad er min saldo som jeg har nu?"),
+        ("no", "Hva er min saldo som jeg har nå?"),
+        ("ru", "Какой мой баланс, как я могу его проверить?"),
+        ("es", "¿Cuál es mi saldo y como puedo verlo?"),
+        ("it", "Qual è il mio saldo e come posso vederlo?"),
+        ("nl", "Wat is mijn saldo als ik nu inlog?"),
+        ("en", "What is my commission this month, if I may ask?"),
+        ("de", "Wie hoch ist mein Kontostand, wenn ich mich einlogge?"),
+        ("fr", "Quel est mon solde si je le vérifie maintenant?"),
+        ("fi", "Mikä on saldoni, jos kirjaudun sisään?"),
+        ("sr", "Колико је моје стање, као што сад имам?"),
+    ],
+)
+def test_bare_conjunction_veto_no_longer_swallows_genuine_lookups(
+    language: str, question: str
+) -> None:
+    assert detect_personal_account_request(question, language) is True
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("de", "Brauche ich meine Bestellnummer für eine Rücksendung?"),
+        ("en", "Do I need my order number to return a product?"),
+        ("en", "What is my volume requirement to stay active?"),
+        ("en", "What is my balance requirement for the 2CC rule?"),
+        ("en", "What is my points quota to keep my status?"),
+        ("en", "What is my volume and how is it calculated under the policy?"),
+    ],
+)
+def test_bare_conjunction_fix_keeps_existing_policy_negatives(
+    language: str, question: str
+) -> None:
+    assert detect_personal_account_request(question, language) is False
+
+
 def test_unrecognised_language_never_matches() -> None:
     assert detect_personal_account_request("Where is my order?", "xx") is False
 
