@@ -17,9 +17,14 @@ presentation (answer language) and must never blur.
 
 ```python
 detect_message_language(message, *, candidates=ROUTE_COPY_LANGUAGES) -> Detection(language, score, runner_up, reason)
-resolve_answer_language(message, selected_language) -> AnswerLanguage(answer_language, switched, reason)
+resolve_answer_language(message, selected_language, *, country=None) -> AnswerLanguage(answer_language, switched, reason)
 retrieval_language(selected_language, answer_language) -> str  # always returns selected_language
 ```
+
+`country` (added in the market-scoping fix below) is optional and defaults
+to `None`, which keeps the pre-market-scoping behaviour unchanged for
+callers that don't pass it yet - wiring `body.country` through is the
+coordinator's job, per `CX_LANES.md`.
 
 `ROUTE_COPY_LANGUAGES = ("da", "de", "en", "es", "fi", "fr", "it", "nl", "no", "ru", "sr", "sv")`
 - the 12 `config/conversation_routes.json` locale keys; `resolve_answer_language`
@@ -602,3 +607,126 @@ which it does completely.
 - No `tests/unit/test_prompt*.py` files exist in this worktree to re-run.
 - `flake8 app/orchestrator/answer_language.py tests/unit/test_cx_answer_language.py` - clean.
 - `git diff --check` - clean.
+
+## Fable CX re-review, third pass (fixed 2026-09-19, worktree `askvera-cx-lane7`, branch `cx/lane7-fable3-20260919`, base head `37c4e64`)
+
+**Finding.** An independent review of the second-pass fixes found five more
+wrong-language switches, all sharing one root cause: `resolve_answer_language`
+had no notion of which market the session is actually in, so it would switch
+into ANY `ROUTE_COPY_LANGUAGES` member the evidence pointed at, even one the
+session's own market never enables. Concretely: `mk` -> `sr` (Macedonian and
+Serbian Cyrillic overlap on `ј`/`љ`/`њ`/`џ`, which were still in `sr`'s
+distinctive-letter set), `bg` -> `ru` (`ъ` is an ordinary Bulgarian vowel, not
+the rare Russian separator sign it was credited as), `et` -> `fi` (Estonian's
+own orthography doubles vowels too, and Finnish's doubled-vowel bonus was
+still exempt evidence with no Estonian competitor to veto it), a letter-free
+`pt` -> `es` (two genuinely Portuguese sentences with no accented letters at
+all matched Spanish's shared-word list better than the thin `pt` sink table),
+and one genuine Spanish question ("¿Qué hago si el producto llega dañado?")
+that the second-pass share floor had started blocking outright.
+
+**Fixes (A-D):**
+
+- **(A) Market-scoped switch targets - the main, structural fix.**
+  `resolve_answer_language` gained a keyword-only `country` parameter. When
+  supplied, the reachable switch target is bounded to `{"en"}` union the
+  session market's own ENABLED languages (`config/markets.json` via
+  `services.market_config`, read through the new `_enabled_market_languages`),
+  intersected with `ROUTE_COPY_LANGUAGES` (`_allowed_switch_targets`). This
+  makes an out-of-market switch impossible by construction, independent of
+  every evidence-based gate below it - three rounds of per-pair vocabulary
+  patches (S4, F1, the letters-alone fix) each closed one collision and
+  exposed another; a structural bound on the target set is what actually
+  closes the whole class. `country=None` keeps the pre-market-scoping
+  behaviour unchanged.
+- **(B) Market sink priority.** When the session market enables a NON-route
+  language (`pt` for BR/PT, `mk`, `bg`, or any other configured non-route
+  language this module has a coded sink table for), any positive evidence
+  for it (`_market_sink_veto_reason`) vetoes the switch outright, no margin
+  comparison needed - the market's own language already outranks any
+  route-copy relative it might resemble.
+- **(C) Letter fixes.**
+  - `sr`'s Cyrillic strong-letter set narrowed to `ђ`/`ћ` only (removed
+    `ј`/`љ`/`њ`/`џ`, which are equally part of the Macedonian alphabet).
+  - `ru`'s strong-letter set narrowed to `ы`/`э`/`ё` only (removed `ъ`, an
+    ordinary Bulgarian vowel, not Russian-exclusive); Bulgarian's own signal
+    still lives in `_BULGARIAN_MEDIAL_YER`, scoped to the `bg` sink.
+  - `et` added to `_SINK_LANGUAGES` and `_SINK_RAW_MARKER_WORDS`, with `õ` as
+    its exclusive strong letter and `ä`/`ö`/`ü` moved to a new
+    `_SINK_DISTINCTIVE_MODERATE` tier (route-shared, so scored but not
+    vetoing); Finnish's doubled-vowel bonus moved out of `_distinctive_bonus`'s
+    exempt path into ordinary (non-exempt) score/margin evidence, since it is
+    no longer trusted as word-equivalent once Estonian can produce the same
+    shape.
+  - `pt`'s sink marker-word table thickened with `quero`, `pedido`, `ontem`,
+    `posso`, `fazer`, `isso`, and the common Portuguese pronoun set
+    (`meu`/`minha`/`meus`/`minhas`/`eu`/`ele`/`ela`/`nos`/`eles`/`elas`) plus
+    `esta`/`este`/`isto`, to catch letter-free Portuguese sentences.
+  - The Latin-script word-evidence share floor is now skipped when EXEMPT
+    letter evidence alone (curated-exclusive letters only, never the shared
+    moderate ones) already clears `MIN_WORD_EVIDENCE` on its own
+    (`winner_exempt_letter_evidence`, threaded through `Detection`) - this
+    recovers "¿Qué hago si el producto llega dañado?" (`¿` + `ñ` alone clear
+    the floor) without loosening the floor for thinner cases.
+- **(D) Frozen held-out measurement set.** `tests/unit/test_cx_answer_language.py::TestHeldOutMarketScopedSet`,
+  written once and never tuned against (see the module comment above
+  `HELD_OUT_ROUTE_CASES` for the no-iteration discipline): 4 realistic
+  customer questions per `ROUTE_COPY_LANGUAGES` member (12 x 4 = 48) plus 4
+  per coded sink language (`pt hu ro pl tr hr mk bg uk et`, 10 x 4 = 40) = 88
+  cases total, each with a realistic session `country` and `widget="en"`
+  (or a non-English widget for the `en` rows, to exercise a real switch
+  INTO English).
+
+**Repro verification** (the coordinator's exact review sentences, all via
+`resolve_answer_language(message, "en", country=<market>)`):
+
+| Market | Sentence | Result |
+| --- | --- | --- |
+| MK | "Каде да го најдам бројот на мојата нарачка?" | unswitched (`language_outside_market_scope`) |
+| MK | "Како можам да станам дистрибутер на компанијата?" | unswitched (`language_outside_market_scope`) |
+| MK | "Колку чини доставата на нарачката во Македонија?" | unswitched (`language_outside_market_scope`) |
+| BG | "Мога ли да платя с кредитна карта при поръчка?" | unswitched (`language_outside_market_scope`) |
+| BG | "Къде мога да намеря номера на поръчката си?" | unswitched (`language_outside_market_scope`) |
+| BALTICS | "Milliseid makseviise te veebitellimuste puhul aktsepteerite?" | unswitched (`language_outside_market_scope`) |
+| PT | "Quero cancelar o meu pedido de ontem, como posso fazer isso?" | unswitched (`language_outside_market_scope`) |
+| PT | "Quem é o meu patrocinador e como posso contactá-lo?" | unswitched (`language_outside_market_scope`) |
+| HU | "Milyen fizetési módokat fogadnak el?" | unswitched (`language_outside_market_scope`) |
+| US | "¿Qué hago si el producto llega dañado?" | **switches to `es`** (`strong_signal`) |
+
+All nine review repros stay unswitched, now vetoed by the structural
+market-scope gate itself (fix A) before any letter/word evidence gate is
+even reached; the genuine Spanish question still switches (fix C's
+exempt-alone floor skip).
+
+**Held-out measurement (lane-internal bars, from this frozen set only -
+NOT the same population as the tuned acceptance/brand-market/sink sets
+above, and not to be conflated with their bars):**
+
+| Held-out subset | Precision | Recall |
+| --- | --- | --- |
+| Route languages (48 cases: 12 languages x 4) | 100% (0 wrong-language switches) | 28/48 (58.3%) |
+| Sink languages (40 cases: 10 languages x 4) | 100% (0 wrong-language switches) | 40/40 (100%) |
+| Combined (88 cases) | 100% (0/88 wrong-language switches) | - |
+
+The recall asserts are intentionally loose regression floors around the
+measured values (`>= 0.50` route, `>= 0.90` sink) so this held-out file
+stays a regression guard for what was actually measured once, not a target
+future edits chase - see the module comment for the no-retuning discipline.
+The precision assertion (`test_zero_wrong_language_switches_across_the_entire_held_out_set`)
+is the hard, non-negotiable bar per the coordinator's brief.
+
+Every existing precision assertion from the S4/F1/second-pass fixes above
+is unchanged and still enforced - none was deleted or loosened by this
+pass.
+
+## Verification run (2026-09-22, worktree `askvera-cx-lane7`, branch `cx/lane7-fable3-20260919`)
+
+- `pytest tests/unit/test_cx_answer_language.py` - 50 passed.
+- `pytest tests/unit/test_cx_answer_language.py tests/unit/test_cx_outcome_wiring.py tests/conversation tests/conversation_pack/cx` -
+  513 passed, 9 xfailed (same pre-existing, individually pinned CX Lane 6
+  xfails as the prior verification run; unchanged).
+- `flake8 app/orchestrator/answer_language.py tests/unit/test_cx_answer_language.py` - clean.
+- `git diff --check` - clean.
+- All nine coordinator review repro sentences confirmed unswitched via a
+  manual `resolve_answer_language(..., country=...)` call each; the Spanish
+  repro confirmed switching to `es`. See the repro table above.
