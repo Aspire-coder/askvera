@@ -90,7 +90,27 @@ _RAW_MARKER_WORDS: dict[str, str] = {
     "en": (
         "the a an of to in on at is are was were be been do does did "
         "and or but this that these those what how where when why who which "
-        "you your we our my it its not for with"
+        "you your we our my it its not for with "
+        # CX Lane 7 defect fix (2026-09-22, independent review, MEDIUM): the
+        # table above was missing several of English's own MOST frequent
+        # closed-class words - "me", "he", "she", "they", "if", "can",
+        # "could", "will", "would", "have", "has", "had", "from", "no" - so
+        # each scored as UNIQUE evidence for whichever OTHER language's
+        # table happened to contain the same spelling (Finnish's "me"/"he"/
+        # "te", in particular), letting plain English sentences like "Can he
+        # send me the invoice on Friday" outscore English itself and switch
+        # to Finnish in a Finnish-market session. The existing overlap
+        # weighting (_word_overlap_weight) already discounts any word shared
+        # between two languages automatically - it just had nothing to
+        # discount against, because English's own copy of these very common
+        # words was never in the table to begin with. Adding them (not
+        # removing anything, and not touching any other language's table)
+        # lets that existing mechanism do its job: "me"/"he" become shared
+        # en/fi evidence at half weight instead of Finnish-exclusive evidence
+        # at full weight. See docs/conversation-quality/phase3/
+        # CX_LANE7_ANSWER_LANGUAGE.md for the repro table and before/after
+        # recall.
+        "me he she they if can could will would have has had from no"
     ),
     "de": (
         "der die das den dem ein eine einer und oder aber ist sind war waren "

@@ -730,3 +730,112 @@ pass.
 - All nine coordinator review repro sentences confirmed unswitched via a
   manual `resolve_answer_language(..., country=...)` call each; the Spanish
   repro confirmed switching to `es`. See the repro table above.
+
+## Independent review defect (fixed 2026-09-22, worktree `askvera-cx-lane7`, branch `cx/lane7-fable4-20260922`): plain English mis-detected as Finnish
+
+**Finding (MEDIUM, real traffic):** a plain ENGLISH message switched to
+`fi` in a Finnish-market session (`country="FI"`, widget `en` or `sv` - FI
+enables en/fi/sv, so market scoping alone does not stop it). 7 of the
+reviewer's 10 ordinary English sentences switched.
+
+**Cause:** `_RAW_MARKER_WORDS["fi"]` (see the "fi" entry above) contains
+`me` and `he` - both ordinary, extremely common English words - while
+`_RAW_MARKER_WORDS["en"]` did not contain them (nor several of English's
+other most frequent closed-class words: `she`, `they`, `if`, `can`,
+`could`, `will`, `would`, `have`, `has`, `had`, `from`, `no`). The overlap
+weighting (`_word_overlap_weight`) already discounts any word shared
+between two languages' tables automatically - the bug was never in that
+mechanism, only in English's own table being thinner than its peers for
+exactly these words, so `me`/`he` scored as evidence UNIQUE to Finnish
+(full weight) instead of shared en/fi evidence (half weight).
+
+Related LOW finding, same root cause: two accent-free Portuguese sentences
+also scored `fi` (from `me` + `se`), with the `pt` sink veto margin sitting
+exactly at the threshold.
+
+**Fix:** enriched `_RAW_MARKER_WORDS["en"]` with the missing words -
+`me he she they if can could will would have has had from no` - appended
+to the existing table (nothing removed, nothing re-tuned). No other
+language's table, no weight, no threshold changed. This is the principled
+fix the coordinator's brief asked for, not a per-word veto: the existing
+overlap-weighting mechanism now has English's own copy of these words to
+discount against, exactly as it already does for `la`/`de`/`en`/`que` etc.
+across the Romance/Germanic tables.
+
+**Audit of the other 11 tables:** re-checked each of `de fr es it nl sv no
+da ru sr` (plus the sink tables) against a real closed-class frequency
+list for that language. Each already carries the ~25-40-word density the
+module docstring calls for and each already covers its own most frequent
+pronouns/auxiliaries (e.g. German already has `ich du er sie wir`; French
+already has `je tu il elle nous vous ils`; Russian already has `я ты он
+она мы вы они`). No other table was found to be missing a word anywhere
+near as fundamental as English's own missing `he`/`me` - English's table
+was measurably the thin one, which matches the review finding exactly.
+No other table was changed, and no threshold in this file was re-tuned
+(the fix did not require it).
+
+**Repro table** (`resolve_answer_language(message, widget, country="FI")`):
+
+| Sentence | Widget | Before | After |
+| --- | --- | --- | --- |
+| "Can he send me the invoice on Friday" | en | `fi`, switched (WRONG) | `en`, not switched |
+| "Can he send me the invoice on Friday" | sv | `fi`, switched (WRONG) | `en`, switched (correct - genuinely English) |
+| "Let me know if he has paid on time" | en | `fi`, switched (WRONG) | `en`, not switched |
+| "Let me know if he has paid on time" | sv | `fi`, switched (WRONG) | `en`, switched (correct) |
+| "My sponsor told me he would call on Monday" | en | `fi`, switched (WRONG) | `en`, not switched |
+| "My sponsor told me he would call on Monday" | sv | `fi`, switched (WRONG) | `en`, switched (correct) |
+| "He will let me know once the payment has cleared" | en | `fi`, switched (WRONG) | `en`, not switched |
+| "He will let me know once the payment has cleared" | sv | `fi`, switched (WRONG) | `en`, switched (correct) |
+| "He said he would meet me at the office tomorrow" | en | `fi`, switched (WRONG) | `en`, not switched |
+| "He said he would meet me at the office tomorrow" | sv | `fi`, switched (WRONG) | `en`, switched (correct) |
+| "Como me registo se nao tenho patrocinador?" (country=PT) | en | not switched (`language_outside_market_scope` - already correct, PT market doesn't enable `fi`) | not switched (`language_outside_market_scope`) |
+| "Como me registo se nao tenho patrocinador?" (country=FI) | en | `fi`, switched (WRONG) | not switched (`below_threshold`) |
+| "Podem dizer-me se a entrega e gratuita?" (country=PT) | en | not switched (`language_outside_market_scope` - already correct) | not switched (`matches_selected`) |
+| "Podem dizer-me se a entrega e gratuita?" (country=FI) | en | `fi`, switched (WRONG) | not switched (`matches_selected`) |
+
+Confirmed against the actual pre-fix code (via `git stash`, not from memory):
+all 5 English sentences above switched to `fi` on BOTH the `en` and `sv`
+widgets before the fix (10/10 wrong switches). Of the 2 Portuguese
+sentences x 2 markets, the `country=PT` cases were already correctly
+unswitched before the fix (the earlier market-scope gate already protects
+a PT-market session, since PT's own market doesn't enable `fi`); the
+`country=FI` cases both wrongly switched to `fi` before the fix and are
+fixed by the table change. Zero of the 13 English sentences and zero of
+the 4 Portuguese (sentence x market) combinations switch to `fi` after the
+fix, on any widget or market tested. 8 more ordinary English sentences
+(13 total, listed in `ENGLISH_NOT_FINNISH_ADDITIONAL_SENTENCES` /
+`ENGLISH_NOT_FINNISH_REPRO_SENTENCES` in
+`tests/unit/test_cx_answer_language.py`) were checked the same way; two of
+them ("He will let me know once the payment has cleared" and "He said he
+would meet me at the office tomorrow") also reproduced the wrong `fi`
+switch pre-fix and are now correct.
+
+**Recall, before vs. after (all measured, not asserted-then-assumed):**
+
+| Set | Before | After | Change |
+| --- | --- | --- | --- |
+| English-on-`sv`-widget-in-FI-market (13 sentences: 3 repro + 10 additional) - correctly switching to `en`, not `fi` | 6/13 switched correctly to `en`; 5/13 switched WRONGLY to `fi`; 2/13 missed (no switch) | 13/13 switched correctly to `en` | **+7 correct, 5 wrong switches eliminated** |
+| English-on-`en`-widget-in-FI-market (same 13 sentences) - staying `en`, not switching to `fi` | 11/13 correctly stayed `en`; 2/13 switched WRONGLY to `fi` | 13/13 correctly stayed `en` | **+2 correct, 2 wrong switches eliminated** |
+| Portuguese accent-free repros (2 sentences) x (country=PT, country=FI) - staying unswitched | 2/4 stayed unswitched (the 2 `country=PT` cases, already protected by the market-scope gate); 2/4 (`country=FI`) wrongly switched to `fi` | 4/4 stayed unswitched | **+2 correct, 2 wrong switches eliminated** |
+| Frozen 88-case held-out set (`HELD_OUT_ROUTE_CASES` + `HELD_OUT_SINK_CASES`) | 28/48 route recall, 40/40 sink recall, 0/88 wrong switches | 28/48 route recall, 40/40 sink recall, 0/88 wrong switches | unchanged (no case in this set happens to exercise the `he`/`me` collision) |
+| Acceptance set, brand/market set, sink negative set, non-route-copy set (all existing suites) | 0 wrong switches (all passing) | 0 wrong switches (all passing) | unchanged |
+
+Recall improved for the English-on-non-`en`-widget case specifically, as
+expected (English is now properly scored against its Finnish look-alikes).
+No other language's recall dropped: the frozen 88-case held-out set's
+route recall (28/48) and sink recall (40/40) are numerically identical
+before and after, and every other existing acceptance/brand/sink/
+non-route-copy suite still passes at its prior 0-wrong-switches bar. No
+existing assertion was deleted or loosened; the numbers restated above
+(28/48, 40/40, 0/88, 50/50, etc.) are the same measured values already in
+this file, re-verified against the current code, not new targets.
+
+**Verification run (2026-09-22, branch `cx/lane7-fable4-20260922`):**
+
+- `pytest tests/unit/test_cx_answer_language.py` - 56 passed (50 pre-existing
+  + 6 new, all new tests in `TestEnglishMarkerWordEnrichmentFixesFinnishMisdetection`).
+- `pytest tests/unit/test_cx_answer_language.py tests/unit/test_cx_outcome_wiring.py tests/conversation tests/conversation_pack/cx` -
+  524 passed, 9 xfailed (same pre-existing, individually pinned CX Lane 6
+  xfails as every prior verification run in this file; unchanged).
+- `flake8 app/orchestrator/answer_language.py tests/unit/test_cx_answer_language.py` - clean.
+- `git diff --check` - clean.
