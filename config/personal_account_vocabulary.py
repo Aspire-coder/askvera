@@ -95,12 +95,16 @@ exactly the same words as a value lookup. **Fix:** each language's
 current-value branch gains a bounded negative lookahead (the next few words
 after the noun, not the whole rest of the sentence) that vetoes the match
 when a requirement/rule/policy-purpose word follows within a short, bounded
-window (up to 40 characters, so it stays scoped to the same clause rather
-than the whole rest of the sentence): "requirement(s)", "rule", "needed",
-"minimum", "to stay/to qualify/to remain (active)", "for the ..." (and the
-per-language equivalents inlined in each language's pattern below). "What
-is my balance?" alone still matches -- the lookahead only vetoes when one
-of these words is actually present nearby.
+window (up to 40 characters, EXCLUDING ".", "!" and "?" -- so a second,
+unrelated sentence later in the same message, such as "Wie hoch ist mein
+Kontostand? Wie wird die Provision berechnet?", never leaks a veto word
+into the first sentence's lookup; Fable re-review, 2026-09-19, same
+clause-boundary discipline as ``app/response/contact_completion.py``'s
+``_negated_before``): "requirement(s)", "rule", "needed", "minimum", "to
+stay/to qualify/to remain (active)", "for the ..." (and the per-language
+equivalents inlined in each language's pattern below). "What is my
+balance?" alone still matches -- the lookahead only vetoes when one of
+these words is actually present nearby, in the same clause.
 
 **F3 (low, all 12 languages).** The S1 narrowing was slightly too aggressive
 in the other direction: "What is my commission this month?" and "Did my
@@ -118,6 +122,43 @@ never matches, because the new shape's noun must be followed directly by one
 of the closed time-marker phrases, nothing else; (b) the completed-event
 shape's optional linking word gains "get" ("did my bonus GET paid") beside
 the existing "been" ("has my bonus BEEN paid").
+
+## Fable CX review findings F2-A/F2-B (2026-09-19, re-review of F2/F3, both low)
+
+**F2-A.** The veto word list was missing "quota"/"to keep" ("What is my
+points quota to keep my status?" still matched the current-value shape),
+and the new F3 time-marker shape had no veto at all, so a trailing role/
+conditional/general/policy clause after the time marker ("What is my
+commission this month IF I reach Manager?", "... AS A Supervisor IN
+GENERAL?") still got the note. **Fix:** both shapes now share the same
+extended veto word list -- "quota", "to keep", a conditional trigger ("if
+I"), a role trigger ("as a/an"), "in general", "under the policy",
+"calculated" (and the per-language equivalents) -- applied identically to
+the current-value shape and the F3 time-marker shape. Extending this list
+surfaced a pre-existing bounded-window bug: the veto lookahead's `.{0,40}?`
+wildcard matched across sentence punctuation, so a second, UNRELATED
+sentence later in the same multi-sentence message could leak a veto word
+into the first sentence's genuine lookup (reproduced by the existing
+integration test in ``tests/unit/test_cx_compose.py`` for "Wie hoch ist
+mein Kontostand? Wie wird die Provision berechnet?" -- the calculation
+question in the SECOND sentence was vetoing the balance lookup in the
+FIRST). Fixed alongside F2-A: every veto lookahead's wildcard is now
+``[^.!?]{0,40}?``, confining the scan to the same clause, matching
+``app/response/contact_completion.py``'s existing clause-boundary
+discipline.
+
+**F2-B.** The "for the ..." veto (and its Romance/Dutch/German
+generic-preposition equivalents "para la"/"pour la"/"per la"/"voor de"/
+"für die") was too broad: "What is my volume FOR THE MONTH?" is a genuine
+time-scoped lookup, not a purpose clause, but it contained the same "for
+the" text the veto matched on. **Fix:** each of those six languages' "for
+the"-style veto alternative gained its own negative lookahead excluding
+"month"/"week" (and their per-language equivalents) immediately after --
+"for the 2CC rule" still vetoes; "for the month"/"for the week" no longer
+does. The other six languages (sv, da, no, fi, ru, sr) use a rule-specific
+phrase ("för regeln", "for reglen", "for regelen", "säännön mukaan", and
+similar) rather than a generic preposition, so they never had this clash
+and needed no change.
 
 ## Confidence per language
 
@@ -169,11 +210,16 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:been\s+|get\s+)?(?:receive[d]?|arrive[d]?|paid|processed|ship(?:ped)?)\b
         | \b(?:what\s*'?s|what\s+is)\s+my\s+
             (?:balance|points|volume|account\s+balance)\b
-            (?!.{0,40}?\b(?:requirements?|rule|needed|minimum|
-                to\s+stay|to\s+qualify|to\s+remain|for\s+the)\b)
+            (?![^.!?]{0,40}?\b(?:requirements?|rule|needed|minimum|quota|
+                to\s+stay|to\s+qualify|to\s+remain|to\s+keep|
+                if\s+i|as\s+an?|in\s+general|under\s+the\s+policy|calculated)\b)
+            (?![^.!?]{0,40}?\bfor\s+the\b(?!\s+(?:month|week)\b))
         | \b(?:what\s*'?s|what\s+is|how\s+much\s+is)\s+my\s+
             (?:commission|bonus|earnings)\s+
             (?:this\s+month|last\s+month|this\s+week|so\s+far)\b
+            (?![^.!?]{0,40}?\b(?:requirements?|rule|needed|minimum|quota|
+                to\s+stay|to\s+qualify|to\s+remain|to\s+keep|
+                if\s+i|as\s+an?|in\s+general|under\s+the\s+policy|calculated)\b)
         | \bhow\s+(?:much|many)\s+(?:did\s+i\s+earn|points\s+do\s+i\s+have)\b
         | \b(?:what\s*'?s|what\s+is|track)\s+my\s+(?:tracking|order|account)\s+number\b
         """,
@@ -189,12 +235,18 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:eingegangen|angekommen|bezahlt|versendet|ausgezahlt)\b
         | \bwie\s+hoch\s+ist\s+mein\s+
             (?:kontostand|guthaben|punktestand)\b
-            (?!.{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
-                mindest\w*|um\s+aktiv\s+zu\s+bleiben|um\s+mich\s+zu\s+
-                qualifizieren|f[uü]r\s+die)\b)
+            (?![^.!?]{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
+                mindest\w*|quote|zu\s+behalten|wenn\s+ich|als|
+                im\s+allgemeinen|richtlinie|berechnet|
+                um\s+aktiv\s+zu\s+bleiben|um\s+mich\s+zu\s+
+                qualifizieren)\b)
+            (?![^.!?]{0,40}?\bf[uü]r\s+die\b(?!\s+(?:woche)\b))
         | \b(?:wie\s+hoch\s+ist|was\s+ist)\s+mein(?:e)?\s+
             (?:provision|bonus|verdienst)\s+
             (?:diesen\s+monat|letzten\s+monat|diese\s+woche|bisher)\b
+            (?![^.!?]{0,40}?\b(?:anforderung(?:en)?|regel|erforderlich|
+                mindest\w*|quote|zu\s+behalten|wenn\s+ich|als|
+                im\s+allgemeinen|richtlinie|berechnet)\b)
         | \bwie\s+viel(?:e)?\s+(?:habe\s+ich\s+verdient|punkte\s+habe\s+ich)\b
         | \b(?:wie\s+lautet|was\s+ist|wo\s+finde\s+ich)\s+meine\s+
             (?:sendungsverfolgungsnummer|bestellnummer|kontonummer)\b
@@ -209,12 +261,18 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:pago|comisi[oó]n|bono|pedido)\b
         | \bcu[aá]l\s+es\s+mi\s+
             (?:saldo|puntos)\b
-            (?!.{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|
+            (?![^.!?]{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|cuota|
                 para\s+(?:permanecer|seguir)\s+activo|para\s+calificar|
-                para\s+la)\b)
+                para\s+mantener|si|como|en\s+general|pol[ií]tica|
+                calculad[oa])\b)
+            (?![^.!?]{0,40}?\bpara\s+la\b(?!\s+semana\b))
         | \b(?:cu[aá]l\s+es|cu[aá]nto\s+es)\s+mi\s+
             (?:comisi[oó]n|bono|ganancia)\s+
             (?:este\s+mes|el\s+mes\s+pasado|esta\s+semana|hasta\s+ahora)\b
+            (?![^.!?]{0,40}?\b(?:requisitos?|regla|necesario|m[ií]nimo|cuota|
+                para\s+(?:permanecer|seguir)\s+activo|para\s+calificar|
+                para\s+mantener|si|como|en\s+general|pol[ií]tica|
+                calculad[oa])\b)
         | \bcu[aá]nto\s+(?:he\s+ganado|puntos\s+tengo)\b
         | \b(?:cu[aá]l\s+es|d[oó]nde\s+encuentro)\s+mi\s+
             n[uú]mero\s+de\s+(?:seguimiento|pedido|cuenta)\b
@@ -230,13 +288,19 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             [ée]t[ée]\s+pay[ée]e?|arriv[ée]e?)\b
         | \bquel\s+est\s+mon\s+
             (?:solde|nombre\s+de\s+points)\b
-            (?!.{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
-                minimum|pour\s+rester\s+actif|pour\s+me\s+qualifier|
-                pour\s+la)\b)
+            (?![^.!?]{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
+                minimum|quota|pour\s+rester\s+actif|pour\s+me\s+qualifier|
+                pour\s+garder|si\s+je|en\s+tant\s+que|en\s+g[ée]n[ée]ral|
+                politique|calcul[ée])\b)
+            (?![^.!?]{0,40}?\bpour\s+la\b(?!\s+semaine\b))
         | \b(?:quel\s+est|combien\s+est)\s+mon\s+
             (?:bonus|commission|gains?)\s+
             (?:ce\s+mois[- ]ci|le\s+mois\s+dernier|cette\s+semaine|
                 jusqu['’]?\s*[aà]\s+pr[ée]sent)\b
+            (?![^.!?]{0,40}?\b(?:exigences?|r[èe]gle|requis|n[ée]cessaire|
+                minimum|quota|pour\s+rester\s+actif|pour\s+me\s+qualifier|
+                pour\s+garder|si\s+je|en\s+tant\s+que|en\s+g[ée]n[ée]ral|
+                politique|calcul[ée])\b)
         | \bcombien\s+(?:ai[- ]je\s+gagn[ée]|de\s+points\s+ai[- ]je)\b
         | \b(?:quel\s+est|o[uù]\s+trouve[- ]je)\s+mon\s+
             num[ée]ro\s+de\s+(?:suivi|commande|compte)\b
@@ -253,12 +317,18 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:ricevut[oa]|arrivat[oa]|pagat[oa])\b
         | \bqual\s+[eè]\s+il\s+mio\s+
             (?:saldo|numero\s+di\s+punti)\b
-            (?!.{0,40}?\b(?:requisit[oi]|regola|necessari[oa]|
-                minim[oa]|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
-                per\s+la)\b)
+            (?![^.!?]{0,40}?\b(?:requisit[oi]|regola|necessari[oa]|
+                minim[oa]|quota|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
+                per\s+mantenere|se|come|in\s+generale|politica|
+                calcolat[oa])\b)
+            (?![^.!?]{0,40}?\bper\s+la\b(?!\s+settimana\b))
         | \b(?:qual\s+[eè]|quanto\s+[eè])\s+(?:il\s+mio|la\s+mia)\s+
             (?:bonus|commissione|guadagno)\s+
             (?:questo\s+mese|il\s+mese\s+scorso|questa\s+settimana|finora)\b
+            (?![^.!?]{0,40}?\b(?:requisit[oi]|regola|necessari[oa]|
+                minim[oa]|quota|per\s+rimanere\s+attiv[oa]|per\s+qualificarmi|
+                per\s+mantenere|se|come|in\s+generale|politica|
+                calcolat[oa])\b)
         | \bquanto\s+ho\s+guadagnato\b
         | \b(?:qual\s+[eè]|dove\s+trovo)\s+il\s+mio\s+
             numero\s+di\s+(?:tracciamento|ordine|conto)\b
@@ -273,12 +343,18 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:ontvangen|aangekomen|betaald|verzonden)\b
         | \bwat\s+is\s+mijn\s+
             (?:saldo|aantal\s+punten)\b
-            (?!.{0,40}?\b(?:vereiste(?:n)?|regel|nodig|minimum|
+            (?![^.!?]{0,40}?\b(?:vereiste(?:n)?|regel|nodig|minimum|quotum|
                 om\s+actief\s+te\s+blijven|om\s+in\s+aanmerking\s+te\s+komen|
-                voor\s+de)\b)
+                om\s+te\s+behouden|als\s+ik|als|in\s+het\s+algemeen|
+                beleid|berekend)\b)
+            (?![^.!?]{0,40}?\bvoor\s+de\b(?!\s+(?:maand|week)\b))
         | \b(?:wat\s+is|hoeveel\s+is)\s+mijn\s+
             (?:commissie|bonus|verdiensten)\s+
             (?:deze\s+maand|vorige\s+maand|deze\s+week|tot\s+nu\s+toe)\b
+            (?![^.!?]{0,40}?\b(?:vereiste(?:n)?|regel|nodig|minimum|quotum|
+                om\s+actief\s+te\s+blijven|om\s+in\s+aanmerking\s+te\s+komen|
+                om\s+te\s+behouden|als\s+ik|als|in\s+het\s+algemeen|
+                beleid|berekend)\b)
         | \bhoeveel\s+(?:heb\s+ik\s+verdiend|punten\s+heb\s+ik)\b
         | \b(?:wat\s+is|waar\s+vind\s+ik)\s+mijn\s+
             (?:trackingnummer|bestelnummer|rekeningnummer)\b
@@ -294,13 +370,19 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:mottagits|kommit|betalats|skickats)\b
         | \bvad\s+[aä]r\s+(?:min|mitt)\s+
             (?:saldo|po[aä]ng)\b
-            (?!.{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|
+            (?![^.!?]{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|kvot|
                 f[oö]r\s+att\s+f[oö]rbli\s+aktiv|f[oö]r\s+att\s+kvalificera|
+                f[oö]r\s+att\s+beh[aå]lla|om\s+jag|som|i\s+allm[aä]nhet|
+                policyn|ber[aä]knas|
                 f[oö]r\s+regeln)\b)
         | \b(?:vad\s+[aä]r|hur\s+mycket\s+[aä]r)\s+min\s+
             (?:provision|bonus|intj[aä]ning)\s+
             (?:denna\s+m[aå]nad|f[oö]rra\s+m[aå]naden|denna\s+vecka|
                 hittills)\b
+            (?![^.!?]{0,40}?\b(?:krav|regel|beh[oö]vs|minimum|kvot|
+                f[oö]r\s+att\s+f[oö]rbli\s+aktiv|f[oö]r\s+att\s+kvalificera|
+                f[oö]r\s+att\s+beh[aå]lla|om\s+jag|som|i\s+allm[aä]nhet|
+                policyn|ber[aä]knas)\b)
         | \bhur\s+mycket\s+(?:har\s+jag\s+tj[aä]nat|po[aä]ng\s+har\s+jag)\b
         | \b(?:vad\s+[aä]r|var\s+hittar\s+jag)\s+mitt\s+
             (?:sp[aå]rningsnummer|ordernummer|kontonummer)\b
@@ -316,13 +398,19 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:modtaget|ankommet|betalt|afsendt)\b
         | \bhvad\s+er\s+min\s+
             (?:saldo|po[iî]nt(?:sum)?)\b
-            (?!.{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|
+            (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+at\s+forblive\s+aktiv|for\s+at\s+kvalificere|
+                for\s+at\s+beholde|hvis\s+jeg|som|generelt|politikken|
+                beregnes|
                 for\s+reglen)\b)
         | \b(?:hvad\s+er|hvor\s+meget\s+er)\s+min\s+
             (?:provision|bonus|indtjening)\s+
             (?:denne\s+m[aå]ned|sidste\s+m[aå]ned|denne\s+uge|
                 indtil\s+videre)\b
+            (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
+                for\s+at\s+forblive\s+aktiv|for\s+at\s+kvalificere|
+                for\s+at\s+beholde|hvis\s+jeg|som|generelt|politikken|
+                beregnes)\b)
         | \bhvor\s+meget\s+(?:har\s+jeg\s+tjent|point\s+har\s+jeg)\b
         | \b(?:hvad\s+er|hvor\s+finder\s+jeg)\s+mit\s+
             (?:sporingsnummer|ordrenummer|kontonummer)\b
@@ -338,13 +426,19 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:mottatt|ankommet|betalt|sendt)\b
         | \bhva\s+er\s+min\s+
             (?:saldo|po[eé]ngsum)\b
-            (?!.{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|
+            (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
                 for\s+[aå]\s+forbli\s+aktiv|for\s+[aå]\s+kvalifisere|
+                for\s+[aå]\s+beholde|hvis\s+jeg|som|generelt|policyen|
+                beregnes|
                 for\s+regelen)\b)
         | \b(?:hva\s+er|hvor\s+mye\s+er)\s+min\s+
             (?:provisjon|bonus|inntjening)\s+
             (?:denne\s+m[aå]neden|forrige\s+m[aå]ned|denne\s+uken|
                 s[aå]\s+langt)\b
+            (?![^.!?]{0,40}?\b(?:krav|regel|n[oø]dvendig|minimum|kvote|
+                for\s+[aå]\s+forbli\s+aktiv|for\s+[aå]\s+kvalifisere|
+                for\s+[aå]\s+beholde|hvis\s+jeg|som|generelt|policyen|
+                beregnes)\b)
         | \bhvor\s+mye\s+(?:har\s+jeg\s+tjent|po[eé]ng\s+har\s+jeg)\b
         | \b(?:hva\s+er|hvor\s+finner\s+jeg)\s+mitt\s+
             (?:sporingsnummer|bestillingsnummer|kontonummer)\b
@@ -359,12 +453,19 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:vastaanotettu|saapunut|maksettu|l[aä]hetetty)\b
         | \bmik[aä]\s+on\s+
             (?:saldoni|pisteideni\s+m[aä][aä]r[aä])\b
-            (?!.{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
-                tarvitaan|v[aä]himm[aä]is\w*|pysy[aä][aä]kseni\s+aktiivisena|
+            (?![^.!?]{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
+                tarvitaan|v[aä]himm[aä]is\w*|kiinti[oö]\w*|
+                s[aä]ilytt[aä][aä]kseni|jos|roolissa|yleens[aä]|
+                k[aä]yt[aä]nn[oö]n\s+mukaan|lasketaan|
+                pysy[aä][aä]kseni\s+aktiivisena|
                 t[aä]ytt[aä][aä]kseni\s+vaatimuksen)\b)
         | \bmik[aä]\s+on\s+(?:palkkioni|bonukseni|ansioni)\s+
             (?:t[aä]ss[aä]\s+kuussa|viime\s+kuussa|t[aä]ll[aä]\s+viikolla|
                 t[aä]h[aä]n\s+menness[aä])\b
+            (?![^.!?]{0,40}?\b(?:vaatimus\w*|s[aä][aä]nt[oö]\w*|
+                tarvitaan|v[aä]himm[aä]is\w*|kiinti[oö]\w*|
+                s[aä]ilytt[aä][aä]kseni|jos|roolissa|yleens[aä]|
+                k[aä]yt[aä]nn[oö]n\s+mukaan|lasketaan)\b)
         | \bpaljonko\s+(?:olen\s+ansainnut|pisteit[aä]\s+minulla\s+on)\b
         | \b(?:mik[aä]\s+on|mist[aä]\s+l[oö]yd[aä]n)\s+
             (?:seurantanumeroni|tilausnumeroni|tilinumeroni)\b
@@ -382,11 +483,16 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
         | (?:получен\s+ли\s+мой|пришёл\s+ли\s+мой|поступил\s+ли\s+мой)\s+
             (?:платёж|заказ|бонус|комиссион)
         | какой\s+мой\s+(?:баланс|остаток\s+баллов)
-            (?!.{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
-                минимум|чтобы\s+остаться\s+активным|чтобы\s+соответствовать)\b)
+            (?![^.!?]{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
+                минимум|квота|чтобы\s+сохранить|если\s+я|как|
+                в\s+общем|согласно\s+политике|рассчитывается|
+                чтобы\s+остаться\s+активным|чтобы\s+соответствовать)\b)
         | как(?:ая|ой)\s+мо[яй]\s+(?:комиссия|бонус|заработок)\s+
             (?:в\s+этом\s+месяце|в\s+прошлом\s+месяце|на\s+этой\s+неделе|
                 на\s+сегодняшний\s+день)
+            (?![^.!?]{0,40}?\b(?:требовани[ея]|правил[оа]|нужен|нужно|
+                минимум|квота|чтобы\s+сохранить|если\s+я|как|
+                в\s+общем|согласно\s+политике|рассчитывается)\b)
         | сколько\s+(?:я\s+заработал|у\s+меня\s+баллов)
         | (?:какой\s+мой|где\s+найти\s+мой)\s+
             (?:номер\s+отслеживания|номер\s+заказа|номер\s+счёта)
@@ -404,11 +510,16 @@ _PERSONAL_ACCOUNT_PATTERNS: dict[str, re.Pattern[str]] = {
             (?:примљена|стигла|исплаћена|послата)
         | колико\s+је\s+мо(?:ј|ја|је)\s+
             (?:стање|број\s+поена)
-            (?!.{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|
+            (?![^.!?]{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|квота|
+                да\s+задржим|ако|као|уопштено|према\s+политици|
+                израчунава|
                 да\s+останем\s+активан|да\s+испуним\s+услов)\b)
         | коли(?:ка|ко)\s+је\s+мо(?:ј|ја|је)\s+
             (?:провизија|бонус|зарада)\s+
             (?:овог\s+месеца|прошлог\s+месеца|ове\s+недеље|до\s+сада)
+            (?![^.!?]{0,40}?\b(?:услов\w*|правил[оа]|потребан|минимум|квота|
+                да\s+задржим|ако|као|уопштено|према\s+политици|
+                израчунава)\b)
         | колико\s+сам\s+(?:зарадио|поена\s+имам)
         | (?:колико\s+је\s+мо(?:ј|ја|је)|где\s+да\s+нађем\s+мо(?:ј|ја|је))\s+
             (?:број\s+за\s+праћење|број\s+поруџбине|број\s+рачуна)

@@ -184,17 +184,42 @@ topic the predicate declines).
   rule (directory-field and contact-field cases), unsupported-topic
   filtering, excluded-kind filtering, predicate argument-passing, and
   determinism.
-- `tests/unit/test_cx_personal_account.py`: 41 tests - one positive per
+- `tests/unit/test_cx_personal_account.py`: 190 tests - one positive per
   lookup shape in English, positives in all 11 non-English route
   languages, the four negative shapes named in the brief across en/es/fr/de
   plus a no-possessive Russian negative, an unrecognised-language negative,
-  empty/`None` input, and region-tagged language-code normalization
-  (`fr-FR`).
+  empty/`None` input, region-tagged language-code normalization (`fr-FR`),
+  the S1/F2/F3 rate-and-need and time-marker probes, and Fable's F2-A/F2-B
+  re-review probes below.
+
+Fable's re-review of the F2/F3 fix (2026-09-19, both low priority) found
+two more gaps, now fixed and covered by
+`test_fable_f2a_extended_veto_probes_are_not_personal_account` and
+`test_fable_f2b_for_the_month_or_week_is_a_time_marker_not_purpose`:
+
+- **F2-A** - the veto word list was missing "quota"/"to keep", and the F3
+  time-marker shape had no veto at all, so a trailing role/conditional/
+  general/policy/calculated clause ("if I reach Manager", "as a Supervisor
+  in general", "under the policy", "how is it calculated") still triggered
+  the note. Fixed by extending the veto list identically on both shapes,
+  in all languages where each shape exists, and by confining every veto
+  lookahead to `[^.!?]{0,40}?` (clause-bounded, not sentence-unbounded) so
+  a second sentence in a multi-sentence message can no longer leak a veto
+  word into an earlier, unrelated lookup.
+- **F2-B** - the "for the ..." veto (and its es/fr/it/nl/de generic-
+  preposition equivalents) was too broad and wrongly vetoed a genuine
+  time-scoped lookup, "What is my volume for the month?". Fixed with a
+  negative lookahead excluding "month"/"week" (and per-language
+  equivalents) immediately after "for the"/"para la"/"pour la"/"per
+  la"/"voor de"/"für die"; the other six languages use a rule-specific
+  phrase and never had this clash.
 
 ## Run results
 
-- `tests/unit/test_cx_contacts_suggestions.py` + `tests/unit/test_cx_personal_account.py`: 67 passed
-- `tests/conversation/test_contact_completion_country_scope.py` + `test_contact_completion_orchestrator_wiring.py` + `test_contact_completion_unit.py` + `test_contacts_type_and_country_fidelity.py` + `test_p2fix_reference_contact_edges.py` + `tests/unit/test_response_quality.py` + `tests/unit/test_conversation_outcome.py`: 104 passed
-- `tests/conversation/` (full directory): 350 passed
+- `tests/unit/test_cx_contacts_suggestions.py` + `tests/unit/test_cx_personal_account.py`: 211 passed
+- `tests/conversation/test_contact_completion_country_scope.py` + `test_contact_completion_orchestrator_wiring.py` + `test_contact_completion_unit.py` + `test_contacts_type_and_country_fidelity.py` + `test_p2fix_reference_contact_edges.py` + `tests/unit/test_response_quality.py` + `tests/unit/test_conversation_outcome.py`: 113 passed
+- `tests/conversation/` (full directory): 351 passed
+- `tests/unit/test_cx_*.py` + `tests/conversation` + `tests/conversation_pack/cx` (full run): 985 passed, 9 xfailed
 - `flake8` on all Lane 3 files: clean
+- `git diff --check`: clean
 - `git diff --check`: clean
