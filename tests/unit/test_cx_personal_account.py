@@ -26,6 +26,21 @@ my commission this month?", "Did my bonus get paid this month?"); see
 Both are covered in all 12 languages, and every S1 negative above is
 re-asserted in ``test_fable_s1_rate_and_need_probes_are_not_personal_account``
 to confirm F2/F3 did not reopen S1.
+
+Fable's re-review of the F2/F3 fix (2026-09-19, all confirmed) found two
+more low-priority gaps in the veto lists, both low priority: F2-A --
+"What is my volume and how is it calculated under the policy?" and "What is
+my points quota to keep my status?" still matched the current-value shape
+(the veto word list lacked "quota"/"to keep", and had no role/conditional/
+general/policy/calculated veto at all), and the new F3 time-marker shape had
+no trailing veto, so "What is my commission this month if I reach Manager?"
+and "How much is my bonus this month as a Supervisor in general?" wrongly
+got the note. See
+``test_fable_f2a_extended_veto_probes_are_not_personal_account`` for every
+reproduction, in every language where the corresponding shape exists. F2-B
+-- the "for the ..." veto was too broad and wrongly excluded a genuine
+time-scoped lookup, "What is my volume for the month?"; see
+``test_fable_f2b_for_the_month_or_week_is_a_time_marker_not_purpose``.
 """
 
 from __future__ import annotations
@@ -259,6 +274,97 @@ def test_fable_f2_requirement_purpose_probes_are_not_personal_account(language: 
     ],
 )
 def test_fable_f3_commission_bonus_with_time_marker_is_personal_account(language: str, question: str) -> None:
+    assert detect_personal_account_request(question, language) is True
+
+
+# --- Fable CX review finding F2-A (2026-09-19, low): the veto list needed
+# "quota"/"to keep" on the current-value shape, and a role/conditional/
+# general/policy/calculated veto on the F3 time-marker shape too. Covered
+# in every language where each shape exists (Finnish and the Slavic
+# languages have no F3-shaped positive for "if I..."/"as a role", so those
+# are omitted rather than forced). --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        # Current-value shape: "quota" / "to keep" additions.
+        ("en", "What is my volume and how is it calculated under the policy?"),
+        ("en", "What is my points quota to keep my status?"),
+        ("de", "Wie hoch ist mein Guthaben, wenn ich Supervisor werde?"),
+        ("de", "Wie hoch ist mein Punktestand Quote, um meinen Status zu behalten?"),
+        ("es", "¿Cuál es mi saldo y cómo se calcula según la política?"),
+        ("es", "¿Cuál es mi cuota de puntos para mantener mi estado?"),
+        ("fr", "Quel est mon solde et comment est-il calculé selon la politique?"),
+        ("fr", "Quel est mon quota de points pour garder mon statut?"),
+        ("it", "Qual è il mio saldo e come viene calcolato secondo la politica?"),
+        ("it", "Qual è la mia quota di punti per mantenere il mio stato?"),
+        ("nl", "Wat is mijn saldo en hoe wordt het berekend volgens het beleid?"),
+        ("nl", "Wat is mijn quotum aan punten om mijn status te behouden?"),
+        ("sv", "Vad är mitt saldo och hur beräknas det enligt policyn?"),
+        ("sv", "Vad är min poäng kvot för att behålla min status?"),
+        ("da", "Hvad er min saldo, og hvordan beregnes det ifølge politikken?"),
+        ("da", "Hvad er min pointsum kvote for at beholde min status?"),
+        ("no", "Hva er min saldo, og hvordan beregnes det ifølge policyen?"),
+        ("no", "Hva er min poengsum kvote for å beholde min status?"),
+        ("fi", "Mikä on saldoni ja miten se lasketaan käytännön mukaan?"),
+        ("fi", "Mikä on pisteideni määrä kiintiö säilyttääkseni asemani?"),
+        ("ru", "Какой мой баланс и как это рассчитывается согласно политике?"),
+        ("ru", "Какой мой остаток баллов квота, чтобы сохранить мой статус?"),
+        ("sr", "Колико је моје стање и како се то израчунава према политици?"),
+        ("sr", "Колико је мој број поена квота да задржим свој статус?"),
+        # F3 time-marker shape: role/conditional/general veto.
+        ("en", "What is my commission this month if I reach Manager?"),
+        ("en", "How much is my bonus this month as a Supervisor in general?"),
+        ("de", "Wie hoch ist meine Provision diesen Monat, wenn ich Manager werde?"),
+        ("de", "Wie hoch ist mein Bonus diesen Monat als Supervisor im Allgemeinen?"),
+        ("es", "¿Cuál es mi comisión este mes si llego a Gerente?"),
+        ("es", "¿Cuánto es mi bono este mes como Supervisor en general?"),
+        ("fr", "Quel est mon bonus ce mois-ci si je deviens Manager?"),
+        ("fr", "Combien est ma commission ce mois-ci en tant que Superviseur en général?"),
+        ("it", "Qual è la mia commissione questo mese se divento Manager?"),
+        ("it", "Quanto è il mio bonus questo mese come Supervisore in generale?"),
+        ("nl", "Wat is mijn commissie deze maand als ik Manager word?"),
+        ("nl", "Hoeveel is mijn bonus deze maand als Supervisor in het algemeen?"),
+        ("sv", "Vad är min provision denna månad om jag blir chef?"),
+        ("sv", "Hur mycket är min bonus denna månad som chef i allmänhet?"),
+        ("da", "Hvad er min provision denne måned, hvis jeg bliver leder?"),
+        ("da", "Hvor meget er min bonus denne måned som leder generelt?"),
+        ("no", "Hva er min provisjon denne måneden hvis jeg blir leder?"),
+        ("no", "Hvor mye er min bonus denne måneden som leder generelt?"),
+        ("fi", "Mikä on palkkioni tässä kuussa, jos minusta tulee esimies?"),
+        ("ru", "Какая моя комиссия в этом месяце, если я стану менеджером?"),
+        ("sr", "Колика је моја провизија овог месеца ако постанем менаџер?"),
+    ],
+)
+def test_fable_f2a_extended_veto_probes_are_not_personal_account(language: str, question: str) -> None:
+    assert detect_personal_account_request(question, language) is False
+
+
+# --- Fable CX review finding F2-B (2026-09-19, low): "for the month/week"
+# (or "for this month") is a time marker, not a purpose clause -- it must
+# NOT be vetoed by the requirement/rule exclusion. Only the languages whose
+# veto phrase is a generic preposition+determiner (en/de/es/fr/it/nl) can
+# clash with this; the others (sv/da/no/fi/ru/sr) use a rule-specific
+# phrase ("för regeln", "säännön mukaan", ...) that never overlaps with
+# "for the month/week" in the first place. ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("en", "What is my volume for the month?"),
+        ("en", "What is my balance for the week?"),
+        ("en", "What is my points for this month?"),
+        ("de", "Wie hoch ist mein Guthaben für die Woche?"),
+        ("es", "¿Cuál es mi saldo para la semana?"),
+        ("fr", "Quel est mon solde pour la semaine?"),
+        ("it", "Qual è il mio saldo per la settimana?"),
+        ("nl", "Wat is mijn saldo voor de maand?"),
+        ("nl", "Wat is mijn saldo voor de week?"),
+    ],
+)
+def test_fable_f2b_for_the_month_or_week_is_a_time_marker_not_purpose(language: str, question: str) -> None:
     assert detect_personal_account_request(question, language) is True
 
 
