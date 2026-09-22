@@ -11,10 +11,12 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.risk.models import RiskContext
 from app.risk.policies.income_claim_policy import IncomeClaimPolicy
+from app.risk.policies.income_claim_translations import is_covered_language
 from config import settings
 from services.aws_clients import get_aws_clients
 from services.market_config import find_market_mentions, find_shared_office_record_countries
 from services.guardrails import is_policy_safety_question
+from utils.directory_fields import directory_field_intent_present, localized_policy_wording_present
 from utils.logging import get_logger
 
 from .glossary import approved_joined_term_queries, glossary_queries
@@ -157,7 +159,227 @@ OWN_MARKET_DIRECTORY_FIELD_RE = re.compile(
     r"\bpayment\s+methods?\b",
     re.IGNORECASE,
 )
-DIRECTORY_POLICY_WORDING_RE = re.compile(r"\bpolic(?:y|ies)\b|\brules?\b", re.IGNORECASE)
+# R05/N6 fourth follow-up (2026-09-18, coordinator review of 88da3cc/0b1f0e3,
+# finding S1): "policy"/"rules" alone missed the common English
+# regulation(s)/"terms and conditions" synonyms, so a question like "What
+# are the regulations of Forever Norway on the delivery address?" fell
+# through to the multilingual directory disjunct and was wrongly promoted
+# to "directory". A bare "\bterms\b" is deliberately NOT added: "terms"
+# alone is dominated by the unrelated "in terms of X" idiom ("in terms of
+# delivery cost") and would suppress genuine directory questions on that
+# idiom alone.
+#
+# R05/N6 fifth follow-up (2026-09-18, coordinator review of d77c13f): the
+# fourth follow-up's own "terms of" addition still matched *inside* that
+# same "in terms of X" idiom ("What are the office hours in terms of
+# weekends?" - directory_topic_route via "office hours" wrongly suppressed
+# to "policy"), because "terms of" is a literal substring of "in terms of".
+# Fixed with a fixed-width negative lookbehind, "(?<!\bin\s)" - Python
+# requires a fixed-width lookbehind, and "\bin\s" is exactly 3 characters
+# wide (\b itself consumes none) - so "terms of" still matches "terms of
+# service"/"terms of payment" (nothing "in "-prefixed immediately before
+# "terms") but not "in terms of X" (where "terms" is immediately preceded
+# by the standalone word "in "). The lookbehind's own "\b" before "in"
+# means a word merely ending in "...in " (e.g. "certain terms of service")
+# is not excluded, since "in" there is not its own word. This was chosen
+# over an explicit "terms of (sale|service|use|payment|business|
+# membership)" phrase list as the simpler, still-auditable fix: it keeps
+# one general "terms of X" pattern (matching any policy-document object,
+# not just a hand-picked list) while surgically excluding only the one
+# idiom that caused the false suppression, rather than trading a
+# single-line regex for an open-ended list that would need its own upkeep
+# as new "terms of ..." policy-document phrasings appear.
+#
+# R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438, MEDIUM
+# finding): a Fable review ran 35 idiom/subordinate-clause probes and found
+# 27 newly, wrongly suppressed to "policy". The fifth follow-up's own
+# plural-only "conditions" was itself still wrong: "road conditions near
+# Forever Ghana's office address" and "weather conditions" are genuine
+# directory-adjacent English sentences where "conditions" means
+# circumstances, not a policy document - the plural is exactly as
+# idiomatic for that sense as the singular was for "Is the office in good
+# condition?" (removed in the fifth follow-up). Likewise bare
+# "\bguidelines?\b" was dominated in practice by someone's personal/
+# professional guidance ("guidelines from my doctor"), not a Forever policy
+# document. Both are now removed entirely; only the COMPOUND "terms and
+# conditions" phrase (never a bare "conditions") and "regulation(s)"
+# survive, mirroring the same "keep only the words whose dominant sense is
+# a policy document" decision applied to ``POLICY_WORDING_TERMS``
+# (``config/directory_field_vocabulary.py`` - see that module's own,
+# larger comment for the full non-English rationale and the reopened
+# "bare conditions" limitation this accepts, honestly, in both languages).
+# R05/N6 eighth follow-up (2026-09-18, coordinator review of a53dcae, LOW
+# finding 1): "(?<!\bin\s)" only excluded "terms of" when the immediately
+# preceding word is "in" - it missed the sibling idiom "within terms of X"
+# ("within" ends in the letters "in", but that "in" is not its own word, so
+# "\bin\s" never matched there and "within terms of" was wrongly treated as
+# the accepted "terms of X" policy-document phrasing). A second, separate
+# fixed-width lookbehind, "(?<!\bwithin\s)", excludes that sibling idiom the
+# same way, without changing the first lookbehind's own behaviour (each
+# lookbehind is independently fixed-width, so Python allows two in
+# sequence). Also fixed here: whitespace collapse used to happen only in
+# ``_runtime_scope_intent``, so "in  terms  of" (irregular/doubled
+# whitespace) could still leak through the other three call sites below
+# that read ``DIRECTORY_POLICY_WORDING_RE`` directly against the raw,
+# uncollapsed message. ``directory_policy_wording_present`` is now the one
+# source of truth for "does this text use policy/rules-document wording",
+# used at every one of the four call sites (this module's own
+# ``_runtime_scope_intent`` and ``own_market_directory_route``, plus
+# ``app/retrieval/opensearch_sections.py``'s ``_directory_guard_topic_match``
+# and ``own_market_field``) instead of each site calling
+# ``DIRECTORY_POLICY_WORDING_RE.search`` on a differently (or not at all)
+# normalized string. The regex itself stays exported - a unit test in
+# ``tests/unit/test_r05_directory_protection_intent.py`` imports it
+# directly to test the pattern in isolation from whitespace collapsing.
+DIRECTORY_POLICY_WORDING_RE = re.compile(
+    r"\bpolic(?:y|ies)\b|\brules?\b|\bregulations?\b|"
+    r"\bterms\s+and\s+conditions\b|(?<!\bin\s)(?<!\bwithin\s)\bterms\s+of\b",
+    re.IGNORECASE,
+)
+
+
+def directory_policy_wording_present(text: str) -> bool:
+    """Whitespace-normalized single source of truth for ``DIRECTORY_POLICY_WORDING_RE``.
+
+    Collapses any run of whitespace to a single space
+    (``" ".join(text.split())``) before searching, so irregular/doubled
+    whitespace (e.g. "in  terms  of", double-spaced) cannot defeat the
+    regex's own fixed-width negative lookbehinds, which only recognize
+    exactly one space between "in"/"within" and "terms". Every call site
+    that needs to know whether a message uses policy/rules-document
+    wording should call this function rather than searching the regex
+    directly against a possibly-uncollapsed string.
+    """
+    return bool(DIRECTORY_POLICY_WORDING_RE.search(" ".join((text or "").split())))
+
+
+# These values are emitted only from the runtime query-planning boundary.  They
+# deliberately describe routing, not an answer or an expected benchmark label.
+_RUNTIME_SCOPE_INTENTS = frozenset({
+    "policy", "directory", "international_sponsoring", "ambiguous", "unknown",
+})
+
+
+def _authorized_policy_market(country: object) -> str | None:
+    """Return the request's explicit two-letter policy authority, if usable."""
+    value = str(country or "").strip().upper()
+    return value if len(value) == 2 and value.isascii() and value.isalpha() else None
+
+
+def _runtime_scope_intent(
+    message: str,
+    *,
+    include_global_documents: bool,
+    named_markets: set[str],
+    shared_office_markets: set[str],
+    deterministic_directory_route: bool,
+    language: str = "en",
+) -> dict[str, str]:
+    """Record the explicit runtime scope decision without replay inference.
+
+    A planner's global-scope hint on its own remains ambiguous.  Directory and
+    sponsoring protection may rely only on a deterministic route that the
+    runtime itself applied to this request.
+
+    R05/N6 follow-up (2026-09-18): an independent review found that every
+    regex this function (and the ``deterministic_directory_route`` inputs
+    computed for it in ``_planned_retrieval_plan``) reads matches English
+    vocabulary only, so a genuinely directory-intentioned question phrased
+    in Spanish, French, German, or any other non-English language fell
+    through to "ambiguous" and lost the directory bonus entirely (8.0 ->
+    0.0) - see the R05_N6 doc's "Language coverage" note and this fix's
+    entry below it. ``language`` - the request language already threaded
+    through every call site (``_planned_retrieval_plan`` already takes it as
+    a parameter; no new plumbing was needed) - now also asks
+    ``directory_field_intent_present`` (``utils/directory_fields.py``) whether
+    the question, interpreted in that language, names a canonical directory
+    field (phone, email, address, website, business hours, payment methods,
+    delivery cost/time, fax) using the same reviewed 13-language vocabulary
+    ``config/directory_field_vocabulary.py`` already carries for field
+    removal/restoration, plus a small closed English-only synonym set for
+    "reach"/"contact" and "credit/debit card(s)" (see that module's
+    docstring). This is purely additive: it can only ever turn "ambiguous"
+    into "directory" when a directory field is genuinely named, never the
+    reverse, so every existing English-only recognition path (this
+    function's own ``SPONSORING_QUESTION_RE`` branch,
+    ``deterministic_directory_route``'s own inputs) and every suppression
+    path (``policy``/``ambiguous`` still gate the country bonus to 0.0 in
+    ``app/retrieval/opensearch_sections.py``'s
+    ``_directory_record_country_score``) are unchanged. A ``language`` this
+    module's vocabulary does not recognize falls back to exactly the
+    English-only recognition this function already had before this change -
+    no worse than before.
+
+    R05/N6 second follow-up (2026-09-18): an independent re-review found
+    this function's policy-wording suppression - ``is_policy_safety_question``
+    and ``DIRECTORY_POLICY_WORDING_RE`` (at the time, ``policy|rules`` only;
+    see that regex's own comment above for what it has grown to cover since,
+    through the fourth/fifth/sixth follow-ups) - is itself English-only,
+    while the ``directory_field_intent_present`` disjunct just added is
+    13-language. That asymmetry let a non-English POLICY question that also
+    names a directory field (e.g. Spanish "Cual es la politica de
+    Forever Norway sobre los metodos de pago?") skip this English-only
+    branch and fall straight into the multilingual directory disjunct below,
+    reopening the N6 class of bug for non-English policy questions - the
+    English equivalent already correctly stayed "policy"/0.0.
+    ``localized_policy_wording_present`` (``utils/directory_fields.py``, backed
+    by ``config/directory_field_vocabulary.py``'s small, closed, per-language
+    ``POLICY_WORDING_TERMS`` - see that module's own comment for exactly
+    what it covers, which has changed since this paragraph was written)
+    closes that gap the same way ``directory_field_intent_present`` closed
+    the recognition gap: checked here, first, so a genuine policy-wording
+    match keeps the question "policy" regardless of what
+    ``deterministic_directory_route`` or the field disjunct below would
+    otherwise compute. A ``language`` neither vocabulary covers falls back
+    to exactly the English-only behaviour this function already had - no
+    worse than before.
+
+    R05/N6 sixth follow-up (2026-09-18, coordinator review of 99ec438): the
+    text this function matches against is now whitespace-collapsed first
+    (``" ".join(text.split())``) so a run of repeated/irregular whitespace
+    (e.g. "in  terms  of", double-spaced) cannot slip past the fixed-width
+    negative lookbehind in ``DIRECTORY_POLICY_WORDING_RE`` - that
+    lookbehind only recognizes exactly one space between "in" and "terms",
+    so un-collapsed double whitespace would have let "in terms of" leak
+    through as if it were the accepted "terms of X" phrasing. Every regex
+    in this function (and every downstream call this collapsed ``text`` is
+    threaded to - ``directory_field_intent_present``,
+    ``localized_policy_wording_present``) benefits identically, since none
+    of their own patterns depend on preserving original whitespace runs.
+
+    R05/N6 eighth follow-up (2026-09-18, coordinator review of a53dcae):
+    this whitespace collapse was previously local to this function only -
+    the other three call sites that read ``DIRECTORY_POLICY_WORDING_RE``
+    directly (``own_market_directory_route`` below,
+    ``opensearch_sections._directory_guard_topic_match``, and
+    ``opensearch_sections``'s ``own_market_field``) did not collapse
+    whitespace themselves, so the same "in  terms  of" leak was still
+    possible through those three routes. ``directory_policy_wording_present``
+    (this module) is now the single source of truth: it collapses
+    whitespace and searches the regex in one place, called from all four
+    sites, so the collapse below is redundant with that helper's own but
+    kept for the other regexes (``is_policy_safety_question``,
+    ``SPONSORING_QUESTION_RE``) this function also matches against.
+    """
+    text = " ".join((message or "").split())
+    if (
+        is_policy_safety_question(text)
+        or directory_policy_wording_present(text)
+        or localized_policy_wording_present(text, language=language)
+    ):
+        intent, source = "policy", "deterministic_policy_route"
+    elif SPONSORING_QUESTION_RE.search(text):
+        intent, source = "international_sponsoring", "deterministic_sponsoring_route"
+    elif not include_global_documents:
+        intent, source = "policy", "local_policy_only"
+    elif deterministic_directory_route:
+        intent, source = "directory", "deterministic_directory_route"
+    elif directory_field_intent_present(text, language=language):
+        intent, source = "directory", "multilingual_directory_field_route"
+    else:
+        intent, source = "ambiguous", "planner_global_scope_only"
+    assert intent in _RUNTIME_SCOPE_INTENTS
+    return {"provenance": "runtime", "intent": intent, "decision_source": source}
 
 
 def _verified_conversation_intent(
@@ -185,10 +407,14 @@ def _verified_conversation_intent(
     income_policy = IncomeClaimPolicy()
     if income_policy.evaluate(context):
         return intent, False
-    # No income-adjacent vocabulary means the planner's label is an obvious
-    # false positive and must not prevent retrieval. Ambiguous income-adjacent
-    # wording still receives the independent semantic check below.
-    if not income_policy.has_income_context(message):
+    # Fix A (2026-09-15, PR #154 follow-up): absence of income vocabulary only
+    # justifies skipping the semantic check below when we actually cover the
+    # language being written. An uncovered language (or a script no covered
+    # language uses, regardless of the declared language) always falls
+    # through to the semantic check instead - has_income_context() finding
+    # nothing there just means our vocabulary has a gap, not that the message
+    # is safe. See income_claim_translations.is_covered_language().
+    if not income_policy.has_income_context(message) and is_covered_language(language, message):
         return "knowledge", True
     system_prompt = (
         "Independently verify whether the user requests a guaranteed, typical, projected, or personalised "
@@ -235,6 +461,8 @@ class RetrievalQueryPlan:
     conversation_intent: str = "knowledge"
     conversation_subtype: str = ""
     intent_confidence: float = 0.0
+    runtime_scope_intent: dict[str, str] | None = None
+    authorized_policy_market: str | None = None
 
 
 def _metadata_value(metadata: dict[str, Any], *keys: str) -> str:
@@ -529,7 +757,16 @@ def _planned_retrieval_plan(
         # The shared strict check excludes appended instructions and compound
         # requests. Retrieve policy evidence; do not let an advisory classifier
         # turn a question about prohibited claims into a request to make one.
-        return RetrievalQueryPlan(base_queries, include_global_documents=False)
+        return RetrievalQueryPlan(
+            base_queries,
+            include_global_documents=False,
+            runtime_scope_intent={
+                "provenance": "runtime",
+                "intent": "policy",
+                "decision_source": "deterministic_policy_safety_route",
+            },
+            authorized_policy_market=_authorized_policy_market(country),
+        )
     joined_term_queries = approved_joined_term_queries(message, country, language)
     glossary = glossary_queries(message, country, language)
     if not settings.BEDROCK_QUERY_PLANNER_ENABLED:
@@ -537,6 +774,12 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(
             [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
+            runtime_scope_intent={
+                "provenance": "runtime",
+                "intent": "unknown",
+                "decision_source": "planner_disabled",
+            },
+            authorized_policy_market=_authorized_policy_market(country),
         )
 
     system_prompt = (
@@ -598,25 +841,72 @@ def _planned_retrieval_plan(
         # named markets. Keep the model planner as a helpful hint, but enforce
         # this scope from shared market configuration so planner omissions do
         # not hide approved cross-market evidence.
-        named_markets = find_market_mentions(message)
         # Imported here: opensearch_sections imports this module at load time.
-        from .opensearch_sections import _directory_target_country_names
+        from .opensearch_sections import (
+            _DIRECTORY_DETAIL_RE,
+            _directory_guard_topic_match,
+            _directory_target_country_names,
+        )
 
+        named_markets = find_market_mentions(message)
+        shared_office_markets = find_shared_office_record_countries(message)
+        operational_directory_route = bool(
+            DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries]))
+        ) and bool(FOREVER_NAMED_RECORD_RE.search(message or "") or named_markets or shared_office_markets)
+        own_market_directory_route = (
+            bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
+            and not directory_policy_wording_present(message)
+            and bool(_directory_target_country_names(message, country))
+        )
+        # R05/N6: the same topical gate that already decides whether the
+        # post-selector dominance guard may fire (`_directory_guard_topic_match`
+        # - directory/contact/logistics detail wording, or "bonus", and never
+        # policy/rules wording) also counts as a deterministic directory route
+        # here. It is reused verbatim, not reinvented, and is not country- or
+        # case-specific. This recovers cross-market sponsoring/bonus questions
+        # (e.g. "How much do I need to earn before Forever Ghana pays my
+        # bonus?") that name no operational-field keyword and no "sponsor" root
+        # word, so they were falling through to "ambiguous" and losing
+        # directory protection alongside the genuine Norway-shaped regression.
+        #
+        # R05/N6 follow-up (2026-09-18, independent review NOTE 6): reusing
+        # `_directory_guard_topic_match` verbatim means its own "bonus" branch
+        # fires here too - and a Norway-shaped, own-market policy question
+        # ("I cancelled my Forever Norge distributorship... and do I keep my
+        # old downline and their bonus?") would then be wrongly classified as
+        # "directory" on the word "bonus" alone, exactly the class of bug
+        # this whole task exists to close. The distinguishing signal already
+        # exists and needs no new vocabulary: the Ghana bonus control names a
+        # market (Ghana) the requesting session is explicitly OUTSIDE of ("a
+        # foreign FBO"/GB session), while the Norway case names only the
+        # session's OWN market (a Norwegian FBO asking about their own
+        # Norwegian distributorship). So the "bonus"-only match (no
+        # `_DIRECTORY_DETAIL_RE`/`DIRECTORY_OPERATIONAL_QUESTION_RE` wording
+        # alongside it) is trusted only when a literal "sponsor" root word is
+        # present, or a named market differs from the request's own
+        # `country` - i.e. this is a genuinely cross-market question, not a
+        # question about the requester's own market that merely mentions
+        # "bonus". A "bonus"-only match WITH other directory/operational
+        # wording already present is untouched, since that wording is its
+        # own independent, non-"bonus" signal.
+        directory_topic_route = bool(_directory_guard_topic_match(message))
+        if directory_topic_route and not (
+            _DIRECTORY_DETAIL_RE.search(message or "") or DIRECTORY_OPERATIONAL_QUESTION_RE.search(message or "")
+        ):
+            own_market_code = str(country or "").strip().upper()
+            directory_topic_route = bool(SPONSORING_QUESTION_RE.search(message or "")) or bool(
+                named_markets - {own_market_code}
+            )
         include_global_documents = (
             include_global_documents
             or bool(SPONSORING_QUESTION_RE.search(message or ""))
             or bool(named_markets)
-            or bool(find_shared_office_record_countries(message))
-            or bool(DIRECTORY_OPERATIONAL_QUESTION_RE.search(" ".join([message, *planned_queries])))
-            and bool(FOREVER_NAMED_RECORD_RE.search(message or ""))
+            or bool(shared_office_markets)
+            or operational_directory_route
             # An own-market operational question with no country named opens
             # the directory only when the session market resolves to a record
             # name, so the global search is always filtered to that record.
-            or (
-                bool(OWN_MARKET_DIRECTORY_FIELD_RE.search(message or ""))
-                and not DIRECTORY_POLICY_WORDING_RE.search(message or "")
-                and bool(_directory_target_country_names(message, country))
-            )
+            or own_market_directory_route
         )
     except (BotoCoreError, ClientError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         LOGGER.exception("query_planner_failed", correlation_id=correlation_id)
@@ -626,6 +916,12 @@ def _planned_retrieval_plan(
         return RetrievalQueryPlan(
             [*base_queries, *joined_term_queries, *glossary],
             include_global_documents=True,
+            runtime_scope_intent={
+                "provenance": "runtime",
+                "intent": "unknown",
+                "decision_source": "planner_unavailable",
+            },
+            authorized_policy_market=_authorized_policy_market(country),
         )
 
     conversation_intent, intent_overridden = _verified_conversation_intent(
@@ -707,6 +1003,17 @@ def _planned_retrieval_plan(
         conversation_intent=conversation_intent,
         conversation_subtype=conversation_subtype,
         intent_confidence=intent_confidence,
+        runtime_scope_intent=_runtime_scope_intent(
+            message,
+            include_global_documents=include_global_documents,
+            named_markets=named_markets,
+            shared_office_markets=shared_office_markets,
+            deterministic_directory_route=(
+                operational_directory_route or own_market_directory_route or directory_topic_route
+            ),
+            language=language,
+        ),
+        authorized_policy_market=_authorized_policy_market(country),
     )
 
 

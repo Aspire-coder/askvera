@@ -11,11 +11,10 @@ ROLE_CONTENT_SCOPES = {
     "compliance_officer": "Full policy, IDS, audit, and compliance reference content.",
 }
 
-# Keep enrollment availability separate from directory facts. A sponsoring
-# directory can retain a historical minimum-order field after a market stops
-# accepting new FBOs. Add a market here only when current approved policy
-# establishes that enrollment is unavailable.
-FBO_ENROLLMENT_UNAVAILABLE_MARKETS = frozenset({"US"})
+# Fix B (2026-09-15): enrollment availability moved out of this hardcoded set
+# and into config/markets.json's per-market "fboEnrollmentAvailable" field -
+# see services/market_config.fbo_enrollment_is_unavailable(), which this
+# module's function of the same name now delegates to.
 
 # Fallback copy keeps the same compliance boundaries, but says them in a
 # warmer, more helpful voice because these messages often become the whole
@@ -29,7 +28,8 @@ FALLBACK_RESPONSES = {
     "insufficient_evidence": (
         "The approved policy documents currently available do not contain enough "
         "information to answer this question clearly. Please rephrase the question or "
-        "contact Forever Living support for an official answer."
+        "contact Forever Living support for an official answer.\n\n"
+        "You can also reach Forever Living Customer Care at [PHONE]."
     ),
     "income_claim": (
         "I can't share income projections or guarantees - that's not something I'm "
@@ -62,5 +62,16 @@ def role_scope_for(role: str) -> str:
 
 
 def fbo_enrollment_is_unavailable(country: str) -> bool:
-    """Return whether current approved policy blocks new FBO enrollment."""
-    return str(country or "").strip().upper() in FBO_ENROLLMENT_UNAVAILABLE_MARKETS
+    """Return whether current approved policy blocks new FBO enrollment.
+
+    Delegates to services.market_config, which reads this from
+    config/markets.json's per-market "fboEnrollmentAvailable" field. The
+    import is function-local, not at module top, because
+    services.market_config's own module-level imports are simple stdlib
+    ones today, but this keeps config.vera_persona (loaded very early, by
+    app.prompts.builder and app.orchestrator) from ever being able to form
+    an import cycle with services.market_config as that module grows.
+    """
+    from services.market_config import fbo_enrollment_is_unavailable as _config_fbo_enrollment_is_unavailable
+
+    return _config_fbo_enrollment_is_unavailable(country)

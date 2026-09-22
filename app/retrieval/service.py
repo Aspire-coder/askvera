@@ -7,7 +7,7 @@ from app.metrics.health import record_retrieval_outcome
 from app.metrics.pipeline import record_pipeline_metric
 from config import settings
 
-from .models import RetrievalResult
+from .models import RetrievalAvailability, RetrievalResult
 from .providers import BedrockRetrievalProvider, RetrievalProvider
 
 
@@ -58,11 +58,13 @@ class RetrievalService:
         provider = self._current_provider()
         try:
             result = provider.retrieve(message, country, language, role, correlation_id)
-            success = True
+            success = result.availability is RetrievalAvailability.AVAILABLE or bool(result.documents)
             return result
         finally:
-            # Zero documents is a legitimate no-match, not a failure; only an
-            # exception from the provider counts against RetrievalHealth.
+            # Zero documents from a completed search is a legitimate no-match.
+            # A provider outage, including a partial outage that produced no
+            # usable documents, is a health failure even though it returned a
+            # typed result rather than raising.
             record_retrieval_outcome(success=success)
             record_pipeline_metric(
                 stage=STAGE_RETRIEVAL,
@@ -76,6 +78,7 @@ class RetrievalService:
                     "provider": type(provider).__name__,
                     "sourceCount": len(result.documents) if result else 0,
                     "confidence": round(float(result.confidence), 3) if result else 0.0,
+                    "availability": result.availability.value if result else "unavailable",
                 },
             )
 

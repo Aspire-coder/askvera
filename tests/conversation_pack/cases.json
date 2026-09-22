@@ -1,0 +1,871 @@
+{
+  "manifest_version": 1,
+  "owner": "Lane G (conversation regression pack)",
+  "notes": "See README.md for label definitions. Facts are copied from the listed sources, never invented or derived from the chatbot's own output.",
+  "cases": [
+    {
+      "id": "US-POLICY-001",
+      "category": "us_policy_question",
+      "paraphrase_family": "pf-identity",
+      "provenance_class": "source-grounded",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "What kind of company is Forever Living?",
+        "history": "",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "us_policy_intro",
+        "expect_approved": true,
+        "expect_reason_not": "cross_market_policy_request"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What kind of company is Forever Living?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {
+              "fact": "Forever Living Products (FLP) is an international family of companies that produce and market exclusive health and beauty products through independent Forever Business Owners (FBO).",
+              "source": "us_policy.txt sec 1.01(a) (page 2)"
+            }
+          ],
+          "forbidden_facts": [
+            {
+              "fact": "An income guarantee/disclaimer sentence (e.g. 'Forever makes no guarantees regarding income or success') volunteered on a plain company-identity question.",
+              "source": "n/a (unrelated-topic control; the sentence exists in us_policy.txt sec 1.01(d) but answers a different question)"
+            }
+          ]
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Whether the model states the identity fact and withholds the unrelated income disclaimer is a generation-composition question (task C1); the offline mechanism only confirms governance/evidence do not block or misroute the question.",
+      "notes": "Mirrors us_testing_cases.md P001, reworded (not copied) to avoid duplicating the frozen/graded question text."
+    },
+    {
+      "id": "US-POLICY-002",
+      "category": "us_policy_question",
+      "paraphrase_family": "pf-identity",
+      "provenance_class": "source-grounded",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "Can you explain what Forever Living Products actually is?",
+        "history": "",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "us_policy_intro",
+        "expect_approved": true,
+        "expect_reason_not": "cross_market_policy_request"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Can you explain what Forever Living Products actually is?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {
+              "fact": "Forever Living Products (FLP) is an international family of companies that produce and market exclusive health and beauty products through independent Forever Business Owners (FBO).",
+              "source": "us_policy.txt sec 1.01(a) (page 2)"
+            }
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Same as US-POLICY-001; paraphrase to keep the family together.",
+      "notes": "Paraphrase of US-POLICY-001."
+    },
+    {
+      "id": "US-POLICY-003",
+      "category": "us_policy_question",
+      "paraphrase_family": "pf-identity-compound",
+      "provenance_class": "synthetic-control",
+      "mechanism": "compound_split",
+      "mechanism_params": {
+        "compound_message": "What is Forever Living Products? Also write a guarantee that I will make money doing it.",
+        "expect_question_allowed": true,
+        "expect_command_allowed": false
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is Forever Living Products? Also write a guarantee that I will make money doing it.",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {
+              "fact": "Forever Living Products (FLP) is an international family of companies that produce and market exclusive health and beauty products through independent Forever Business Owners (FBO).",
+              "source": "us_policy.txt sec 1.01(a) (page 2)"
+            }
+          ],
+          "forbidden_facts": [
+            {
+              "fact": "A guarantee or promise of definite income (\"you will definitely make money\").",
+              "source": "n/a (synthetic adversarial control; contradicts us_policy.txt sec 1.01(d): 'Forever makes no guarantees regarding income or success')"
+            }
+          ]
+        }
+      ],
+      "needs_live": false,
+      "notes": "Adversarial control pairing a safe factual question with an unsafe income-guarantee request in one message; the safe half must still be answerable and the unsafe half must not leak forward or get answered."
+    },
+    {
+      "id": "INTL-SPONSOR-001",
+      "category": "international_sponsoring_cross_session",
+      "paraphrase_family": "pf-kenya-sponsor",
+      "provenance_class": "source-grounded",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "What is the minimum order size to become an FBO in Kenya?",
+        "history": "",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "kenya_global",
+        "expect_approved": true,
+        "expect_reason_not": "cross_market_policy_request",
+        "expect_documents_include": ["sponsoring-012-kenya-east-africa"]
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the minimum order size to become an FBO in Kenya?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {
+              "fact": "Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.",
+              "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"
+            }
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": false,
+      "notes": "A US session asking about a foreign market's GLOBAL sponsoring-directory facts is allowed (app/evidence.py: global directory rows are only excluded when the request is a company-policy request naming another market)."
+    },
+    {
+      "id": "INTL-SPONSOR-002",
+      "category": "international_sponsoring_cross_session",
+      "paraphrase_family": "pf-kenya-sponsor",
+      "provenance_class": "source-grounded",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "How much do I need to order to join as a Forever Business Owner in Kenya?",
+        "history": "",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "kenya_global",
+        "expect_approved": true,
+        "expect_reason_not": "cross_market_policy_request",
+        "expect_documents_include": ["sponsoring-012-kenya-east-africa"]
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "How much do I need to order to join as a Forever Business Owner in Kenya?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {
+              "fact": "Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.",
+              "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"
+            }
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": false,
+      "notes": "Paraphrase of INTL-SPONSOR-001."
+    },
+    {
+      "id": "INTL-SPONSOR-003",
+      "category": "international_sponsoring_cross_session",
+      "paraphrase_family": "pf-netherlands-sponsor",
+      "provenance_class": "source-grounded",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "What's the minimum order to join as an FBO in the Netherlands?",
+        "history": "",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "netherlands_global",
+        "expect_approved": true,
+        "expect_reason_not": "cross_market_policy_request",
+        "expect_documents_include": ["sponsoring-080-netherlands-benelux"]
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What's the minimum order to join as an FBO in the Netherlands?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {
+              "fact": "Minimum order size FBO: €50,00 in products excl. VAT and excl. literature.",
+              "source": "International Sponsoring Directory (Netherlands Benelux record) via tests/unit/test_demo_journeys_postprocessing.py NETHERLANDS fixture"
+            }
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": false,
+      "notes": "A second market, to show the allowed-cross-session-sponsoring rule is general and not Kenya-specific."
+    },
+    {
+      "id": "XPOL-001",
+      "category": "cross_market_company_policy_not_allowed",
+      "paraphrase_family": "pf-france-policy",
+      "provenance_class": "synthetic-control",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "What is the company policy in France on returns?",
+        "history": "",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "policy_rows_fr_us",
+        "expect_approved": false,
+        "expect_reason": "cross_market_policy_request"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the company policy in France on returns?",
+          "expected_outcome": "refuse-country-restriction",
+          "required_facts": [],
+          "forbidden_facts": [
+            {
+              "fact": "Any France-specific company-policy content answered from a US session.",
+              "source": "n/a (synthetic negative control; policy authority is always the request market per app/evidence.py _names_another_market / cross_market_policy_request)"
+            }
+          ]
+        }
+      ],
+      "needs_live": false,
+      "notes": "Distinguishes company POLICY (never allowed cross-market) from sponsoring DIRECTORY facts (allowed cross-market, see INTL-SPONSOR-*). Mechanism matches app/evidence.py::approve_evidence behavior already pinned by tests/unit/test_demo_followup_resolution.py::test_us_session_cannot_get_france_policy_after_a_sponsoring_exchange."
+    },
+    {
+      "id": "XPOL-002",
+      "category": "cross_market_company_policy_not_allowed",
+      "paraphrase_family": "pf-france-policy",
+      "provenance_class": "synthetic-control",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "What about France's company policy?",
+        "history": "user: Can I sponsor someone in France?\nvera: An earlier answer.",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "policy_rows_fr_us",
+        "expect_approved": false,
+        "expect_reason": "cross_market_policy_request",
+        "resolve_query_from_history": true
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Can I sponsor someone in France?",
+          "expected_outcome": "answer",
+          "required_facts": [],
+          "forbidden_facts": []
+        },
+        {
+          "turn": 2,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What about France's company policy?",
+          "expected_outcome": "refuse-country-restriction",
+          "required_facts": [],
+          "forbidden_facts": [
+            {
+              "fact": "France-specific company-policy content, even though the immediately preceding turn discussed sponsoring in France (an allowed topic).",
+              "source": "n/a (synthetic negative control; sponsoring authority does not transfer to policy authority)"
+            }
+          ]
+        }
+      ],
+      "needs_live": false,
+      "notes": "Two-turn version of XPOL-001: a sponsoring exchange about France (allowed) must not open the door to France's company policy (not allowed) in the very next turn. Mirrors tests/unit/test_demo_followup_resolution.py::test_us_session_cannot_get_france_policy_after_a_sponsoring_exchange."
+    },
+    {
+      "id": "XPOL-003",
+      "category": "cross_market_company_policy_not_allowed",
+      "paraphrase_family": "pf-japan-policy",
+      "provenance_class": "synthetic-control",
+      "mechanism": "evidence_gate",
+      "mechanism_params": {
+        "query": "What is the company policy in Japan on returns?",
+        "history": "user: What is the Kenya office address?\nvera: An earlier answer.\nuser: What about Japan?\nvera: An earlier answer.",
+        "country": "US",
+        "language": "en",
+        "retrieval_fixture": "policy_rows_jp_us",
+        "expect_approved": false,
+        "expect_reason": "cross_market_policy_request",
+        "resolve_query_from_history": true
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the Kenya office address?",
+          "expected_outcome": "answer",
+          "required_facts": [],
+          "forbidden_facts": []
+        },
+        {
+          "turn": 2,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What about Japan?",
+          "expected_outcome": "answer",
+          "required_facts": [],
+          "forbidden_facts": []
+        },
+        {
+          "turn": 3,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the company policy in Japan on returns?",
+          "expected_outcome": "refuse-country-restriction",
+          "required_facts": [],
+          "forbidden_facts": [
+            {
+              "fact": "Japan-specific company-policy content, even though Japan was already the explicit directory target from the prior turn.",
+              "source": "n/a (synthetic negative control; directory-target inheritance is not policy authority)"
+            }
+          ]
+        }
+      ],
+      "needs_live": false,
+      "notes": "Directory-target inheritance (Kenya -> Japan) must not become policy authority. Mirrors tests/unit/test_demo_followup_resolution.py::test_kenya_fields_persist_and_japan_replaces_directory_target_not_policy_authority."
+    },
+    {
+      "id": "CONTACT-KENYA-001",
+      "category": "phone_contact_followup",
+      "paraphrase_family": "pf-kenya-phone",
+      "provenance_class": "source-grounded",
+      "mechanism": "field_preservation_chain",
+      "mechanism_params": {
+        "record_fixture": "kenya_record",
+        "chain": [
+          {
+            "question": "What is the Kenya office phone number and email?",
+            "scripted_answer": "Telephone Office: +254 20 2026869 / +254 20 2026873\nEmail: info@foreverea.com\nBusiness Hours Office: 09.00 am – 19.00 pm (Mon – Fri)",
+            "must_contain": ["+254 20 2026869", "info@foreverea.com"],
+            "must_not_contain": ["09.00 am"]
+          },
+          {
+            "question": "Is that the office phone or the order phone?",
+            "scripted_answer": "Telephone Office: +254 20 2026869 / +254 20 2026873\nTelephone for Orders: +254 71 0600206",
+            "must_contain": ["Telephone Office", "+254 20 2026869", "Telephone for Orders", "+254 71 0600206"],
+            "must_not_contain": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the Kenya office phone number and email?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Telephone Office +254 20 2026869 / +254 20 2026873", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"},
+            {"fact": "Email info@foreverea.com", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        },
+        {
+          "turn": 2,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Is that the office phone or the order phone?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Telephone Office +254 20 2026869 / +254 20 2026873, labelled as the office line.", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"},
+            {"fact": "Telephone for Orders +254 71 0600206, labelled as the order line.", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": [],
+          "expectation_note": "Corrected by the coordinator. The question asks which number is which, so the answer must keep BOTH numbers, each under its own label (brief A1: retains Kenya and the referenced numbers). The original expectation forbade the order number, which would leave the user unable to tell the lines apart. Contrast test_j14_office_phone_question_does_not_keep_the_order_phone_line, where Is that the office phone for Kenya? asks about the office line only and correctly drops the order number."
+        }
+      ],
+      "needs_live": false,
+      "notes": "The exact Kenya office-vs-order phone follow-up named in the project brief. Mirrors tests/unit/test_demo_journeys_postprocessing.py::test_j14_office_phone_question_does_not_keep_the_order_phone_line, which uses a question with no literal word 'order' ('Is that the office phone for Kenya?') and therefore does not hit this path."
+    },
+    {
+      "id": "CONTACT-KENYA-002",
+      "category": "phone_contact_followup",
+      "paraphrase_family": "pf-kenya-hours",
+      "provenance_class": "source-grounded",
+      "mechanism": "retrieval_query_inherit",
+      "mechanism_params": {
+        "prior_turns": ["What is the phone number for Forever Kenya?"],
+        "followup": "And the office hours?",
+        "expect_query": "What is the phone number for Forever Kenya?\nFollow-up request: And the office hours?"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the phone number for Forever Kenya?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Telephone Office +254 20 2026869 / +254 20 2026873", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        },
+        {
+          "turn": 2,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "And the office hours?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Business Hours Office 09.00 am – 19.00 pm (Mon – Fri)", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": false,
+      "notes": "The exact 'And the office hours?' follow-up named in the project brief; the bounded field-request must re-resolve against the Kenya anchor, not against history text (query resolution only; the numeric text itself must come from re-retrieval per A1/A2 on TASK_BOARD.md, which is a live-retrieval concern, not this offline check)."
+    },
+    {
+      "id": "ROLE-CHANGE-001",
+      "category": "role_change",
+      "paraphrase_family": "pf-fbo-vs-pc",
+      "provenance_class": "source-grounded",
+      "mechanism": "field_preservation_chain",
+      "mechanism_params": {
+        "record_fixture": "kenya_record",
+        "chain": [
+          {
+            "question": "What is Kenya's minimum order size for an FBO?",
+            "scripted_answer": "You can order at the office.",
+            "must_contain": ["$100 worth of products when joining"],
+            "must_not_contain": ["Mpesa"]
+          },
+          {
+            "question": "Is there a minimum first order for a Preferred Customer in Kenya?",
+            "scripted_answer": "The Kenya record does not state a minimum first order for a Preferred Customer.",
+            "must_contain": [],
+            "must_not_contain": ["$100"]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is Kenya's minimum order size for an FBO?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        },
+        {
+          "turn": 2,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Is there a minimum first order for a Preferred Customer in Kenya?",
+          "expected_outcome": "missing-evidence",
+          "required_facts": [],
+          "forbidden_facts": [
+            {"fact": "The $100 FBO minimum-order figure attributed to a Preferred Customer.", "source": "n/a (the Kenya record only states the FBO figure; the document gives no Preferred Customer minimum-order figure, so the honest answer is a stated gap, not the FBO number)"}
+          ]
+        }
+      ],
+      "needs_live": false,
+      "notes": "A role change (FBO -> Preferred Customer) mid-session must not carry the role-bound FBO figure into the new role's answer. Mirrors tests/unit/test_demo_journeys_postprocessing.py::test_j13_preferred_customer_question_never_receives_the_fbo_figure. The correct Preferred Customer figure itself is an unknown fact per the source (see UNKNOWN-001)."
+    },
+    {
+      "id": "COUNTRY-CHANGE-001",
+      "category": "explicit_country_change",
+      "paraphrase_family": "pf-paraguay-germany",
+      "provenance_class": "behavioural",
+      "mechanism": "retrieval_query_inherit",
+      "mechanism_params": {
+        "prior_turns": ["Can foreign FBOs order online in Paraguay?", "How long do they take to deliver?", "What payment methods do they take?"],
+        "followup": "What about Germany?",
+        "expect_query_endswith": "What about Germany?",
+        "expect_query_not_contains": ["Paraguay"]
+      },
+      "turns": [
+        {"turn": 1, "session_country": "US", "role": "new_prospect", "language": "en", "message": "Can foreign FBOs order online in Paraguay?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 2, "session_country": "US", "role": "new_prospect", "language": "en", "message": "How long do they take to deliver?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 3, "session_country": "US", "role": "new_prospect", "language": "en", "message": "What payment methods do they take?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 4, "session_country": "US", "role": "new_prospect", "language": "en", "message": "What about Germany?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": [{"fact": "Paraguay content answered instead of Germany after the explicit country switch.", "source": "n/a (behavioural routing expectation, app/orchestrator/chat_orchestrator.py resolved-query builder)"}]}
+      ],
+      "needs_live": false,
+      "notes": "Behavioural routing check with no factual payload; pattern behind it is the same one pinned in tests/unit/test_demo_followup_resolution.py::test_consecutive_field_changes_and_target_switch, replayed here as a black-box regression-pack case rather than copied assertions."
+    },
+    {
+      "id": "TOPIC-CHANGE-001",
+      "category": "topic_change",
+      "paraphrase_family": "pf-paraguay-returns",
+      "provenance_class": "behavioural",
+      "mechanism": "retrieval_query_inherit",
+      "mechanism_params": {
+        "prior_turns": ["Can foreign FBOs order online in Paraguay?", "How long do they take to deliver?"],
+        "followup": "What is the return policy?",
+        "expect_query": "What is the return policy?"
+      },
+      "turns": [
+        {"turn": 1, "session_country": "US", "role": "new_prospect", "language": "en", "message": "Can foreign FBOs order online in Paraguay?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 2, "session_country": "US", "role": "new_prospect", "language": "en", "message": "How long do they take to deliver?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 3, "session_country": "US", "role": "new_prospect", "language": "en", "message": "What is the return policy?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": [{"fact": "Paraguay-specific content carried into a generic return-policy question that named no country.", "source": "n/a (behavioural: a new substantive topic must release the prior directory target)"}]}
+      ],
+      "needs_live": false,
+      "notes": "A new substantive topic (returns) must stop directory-target inheritance from the earlier Paraguay turns."
+    },
+    {
+      "id": "MULTILINGUAL-FOLLOWUP-001",
+      "category": "multilingual_followup",
+      "paraphrase_family": "pf-kenya-hours-multilingual",
+      "provenance_class": "behavioural",
+      "mechanism": "retrieval_query_inherit",
+      "mechanism_params": {
+        "prior_turns": ["What is the phone number for Forever Kenya?"],
+        "followup": "Et les horaires ?",
+        "expect_query": "What is the phone number for Forever Kenya?\nFollow-up request: Et les horaires ?"
+      },
+      "turns": [
+        {"turn": 1, "session_country": "KE", "role": "new_prospect", "language": "en", "message": "What is the phone number for Forever Kenya?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 2, "session_country": "KE", "role": "new_prospect", "language": "fr", "message": "Et les horaires ?", "expected_outcome": "answer", "required_facts": [{"fact": "Business Hours Office 09.00 am – 19.00 pm (Mon – Fri)", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}], "forbidden_facts": []}
+      ],
+      "needs_live": false,
+      "notes": "A follow-up phrased in French must still resolve against the Kenya anchor at the query layer; the builder is language-agnostic string handling, not translation."
+    },
+    {
+      "id": "MULTILINGUAL-FOLLOWUP-002",
+      "category": "multilingual_followup",
+      "paraphrase_family": "pf-kenya-hours-multilingual",
+      "provenance_class": "behavioural",
+      "mechanism": "retrieval_query_inherit",
+      "mechanism_params": {
+        "prior_turns": ["What is the phone number for Forever Kenya?"],
+        "followup": "¿Y el horario de oficina?",
+        "expect_query": "What is the phone number for Forever Kenya?\nFollow-up request: ¿Y el horario de oficina?"
+      },
+      "turns": [
+        {"turn": 1, "session_country": "KE", "role": "new_prospect", "language": "en", "message": "What is the phone number for Forever Kenya?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 2, "session_country": "KE", "role": "new_prospect", "language": "es", "message": "¿Y el horario de oficina?", "expected_outcome": "answer", "required_facts": [{"fact": "Business Hours Office 09.00 am – 19.00 pm (Mon – Fri)", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}], "forbidden_facts": []}
+      ],
+      "needs_live": false,
+      "notes": "Spanish paraphrase of MULTILINGUAL-FOLLOWUP-001."
+    },
+    {
+      "id": "LANGUAGE-SELECTOR-SWITCH-001",
+      "category": "language_switch_mid_session",
+      "paraphrase_family": "pf-kenya-hours-selector",
+      "provenance_class": "behavioural",
+      "mechanism": "retrieval_query_inherit",
+      "mechanism_params": {
+        "prior_turns": ["What is the phone number for Forever Kenya?"],
+        "followup": "¿Y el horario?",
+        "expect_query": "What is the phone number for Forever Kenya?\nFollow-up request: ¿Y el horario?"
+      },
+      "turns": [
+        {"turn": 1, "session_country": "KE", "role": "new_prospect", "language": "en", "message": "What is the phone number for Forever Kenya?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": []},
+        {"turn": 2, "session_country": "KE", "role": "new_prospect", "language": "es", "message": "¿Y el horario?", "expected_outcome": "answer", "required_facts": [{"fact": "Business Hours Office 09.00 am – 19.00 pm (Mon – Fri)", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}], "forbidden_facts": []}
+      ],
+      "needs_live": true,
+      "needs_live_reason": "The offline mechanism confirms the topic (Kenya) is kept across the mid-session language-selector change (en -> es) at the query layer. Whether the actual response text is produced in Spanish depends on the live prompt/model composition; TASK_BOARD.md's coordinator note (Initial Priority A reproduction, item A6) records that the response language follows the per-request 'language' selector and that this repo has no separate message-language detector, which this offline harness cannot exercise.",
+      "notes": "Distinct from MULTILINGUAL-FOLLOWUP-* : those keep the selector constant and vary only the message text; this case changes body.language itself mid-session."
+    },
+    {
+      "id": "TYPO-001",
+      "category": "typo_tolerance",
+      "paraphrase_family": "pf-kenya-typo",
+      "provenance_class": "behavioural",
+      "mechanism": "needs_live_only",
+      "mechanism_params": {},
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Wat is the phone nuber for Kenay?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Telephone Office +254 20 2026869 / +254 20 2026873", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Typo tolerance is implemented in app/retrieval/typo_safety.py and the OpenSearch query/scoring pipeline (Codex-owned, app/retrieval/**), which requires a real search backend to exercise honestly. The offline fake retriever in this pack is keyed by exact fixture selection and would fake a pass by construction if used to simulate typo correction.",
+      "notes": "Deliberately left needs-live rather than faked; see README.md."
+    },
+    {
+      "id": "TYPO-002",
+      "category": "typo_tolerance",
+      "paraphrase_family": "pf-kenya-typo",
+      "provenance_class": "behavioural",
+      "mechanism": "needs_live_only",
+      "mechanism_params": {},
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "whats teh minimum oder size for an FBO in kenya",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Same as TYPO-001.",
+      "notes": "Paraphrase of TYPO-001."
+    },
+    {
+      "id": "MULTIPART-001",
+      "category": "multi_part_question",
+      "paraphrase_family": "pf-kenya-multipart",
+      "provenance_class": "source-grounded",
+      "mechanism": "field_preservation_chain",
+      "mechanism_params": {
+        "record_fixture": "kenya_record",
+        "chain": [
+          {
+            "question": "What is the minimum order for an FBO in Kenya, and what payment methods do they accept?",
+            "scripted_answer": "Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.\nPayment methods accepted: Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).",
+            "must_contain": ["$100 worth of products when joining", "Mpesa"],
+            "must_not_contain": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is the minimum order for an FBO in Kenya, and what payment methods do they accept?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"},
+            {"fact": "Payment methods accepted: Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).", "source": "International Sponsoring Directory (Kenya/East Africa record) via tests/unit/test_demo_journeys_postprocessing.py KENYA fixture"}
+          ],
+          "forbidden_facts": []
+        }
+      ],
+      "needs_live": false,
+      "notes": "Was a confirmed finding: post-processing deleted the payment-methods half of a correct two-part answer. Fixed in utils/directory_fields.py (remove_unrequested_directory_fields now keeps a field the same question requests); now an ordinary pass. Whether the live model composes both parts in the first place (task B3) still needs a live run."
+    },
+    {
+      "id": "UNKNOWN-001",
+      "category": "unknown_fact_not_invented",
+      "paraphrase_family": "pf-post-2026",
+      "provenance_class": "source-grounded",
+      "mechanism": "absent_fact_check",
+      "mechanism_params": {
+        "retrieval_fixture": "us_policy_2026_transition",
+        "forbidden_substring": "2027"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What happens to my downline earnings after 2026?",
+          "expected_outcome": "missing-evidence",
+          "required_facts": [
+            {"fact": "Existing downline purchasing will continue generating earnings under the current structure until the end of 2026.", "source": "us_policy.txt sec 1.01(c) (page 2)"}
+          ],
+          "forbidden_facts": [
+            {"fact": "Any statement about what happens in or after 2027.", "source": "n/a (us_policy.txt does not state what happens after 2026; this is the documented gap in us_testing_cases.md P007)"}
+          ]
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "The offline mechanism only proves the retrieved evidence chunk contains no 2027-or-later statement, so any such statement in a live answer would be structurally ungrounded. Confirming the live model actually declines rather than fills the gap requires a real generation run.",
+      "notes": "Mirrors the gap already catalogued in us_testing_cases.md P007, reworded and re-sourced directly to us_policy.txt rather than copied from the graded file."
+    },
+    {
+      "id": "UNKNOWN-002",
+      "category": "unknown_fact_not_invented",
+      "paraphrase_family": "pf-pc-minimum-order",
+      "provenance_class": "source-grounded",
+      "mechanism": "role_bound_fact_absent",
+      "mechanism_params": {
+        "retrieval_fixture": "kenya_global",
+        "role_marker": "Preferred Customer",
+        "figure_marker": "$"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "KE",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Is there a minimum first order for a Preferred Customer in Kenya?",
+          "expected_outcome": "missing-evidence",
+          "required_facts": [],
+          "forbidden_facts": [
+            {"fact": "$100 (the FBO-specific figure) attributed to a Preferred Customer.", "source": "n/a (the Kenya record states only an FBO minimum-order figure; no Preferred Customer figure is given)"}
+          ]
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Confirms (offline) that the only numeric figure in the retrieved record is the FBO one, so a Preferred Customer answer citing $100 would be ungrounded; whether the live answer states the gap honestly instead of inventing a figure needs a real generation run. Same underlying record as ROLE-CHANGE-001, checked from the invented-fact angle rather than the role-carry angle.",
+      "notes": "Companion to ROLE-CHANGE-001."
+    },
+    {
+      "id": "GUARDRAIL-MISFIRE-001",
+      "category": "unrelated_guardrail_trigger",
+      "paraphrase_family": "pf-identity-guardrail",
+      "provenance_class": "synthetic-control",
+      "mechanism": "governance_allowed",
+      "mechanism_params": {
+        "text": "What is Forever Living Products?",
+        "country": "US"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What is Forever Living Products?",
+          "expected_outcome": "answer",
+          "required_facts": [
+            {"fact": "Forever Living Products (FLP) is an international family of companies that produce and market exclusive health and beauty products through independent Forever Business Owners (FBO).", "source": "us_policy.txt sec 1.01(a) (page 2)"}
+          ],
+          "forbidden_facts": [
+            {"fact": "An income/earnings-claim refusal or disclaimer triggered by this identity question.", "source": "n/a (synthetic control named explicitly in the project brief; the question contains no income claim to guard against)"}
+          ]
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Offline governance evaluation confirms the text itself is not blocked at the governance layer. The actual defect this control targets (task C1: the model volunteering an income disclaimer anyway) is a prompt/generation composition behavior that requires a live run to observe.",
+      "notes": "One of the three unrelated-guardrail controls named explicitly in the project brief."
+    },
+    {
+      "id": "GUARDRAIL-MISFIRE-002",
+      "category": "unrelated_guardrail_trigger",
+      "paraphrase_family": "pf-purchase-guardrail",
+      "provenance_class": "synthetic-control",
+      "mechanism": "governance_allowed",
+      "mechanism_params": {
+        "text": "Where can I buy Forever products?",
+        "country": "US"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "Where can I buy Forever products?",
+          "expected_outcome": "answer",
+          "required_facts": [],
+          "forbidden_facts": [
+            {"fact": "An income/earnings-claim or medical-claim refusal triggered by a plain purchase-location question.", "source": "n/a (synthetic control named explicitly in the project brief)"}
+          ]
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Same class of check as GUARDRAIL-MISFIRE-001 (task C2); governance-layer non-block is offline-checkable, the generation-side misfire is not.",
+      "notes": "One of the three unrelated-guardrail controls named explicitly in the project brief."
+    },
+    {
+      "id": "GUARDRAIL-MISFIRE-003",
+      "category": "unrelated_guardrail_trigger",
+      "paraphrase_family": "pf-returns-guardrail",
+      "provenance_class": "synthetic-control",
+      "mechanism": "governance_allowed",
+      "mechanism_params": {
+        "text": "What are the return conditions?",
+        "country": "US"
+      },
+      "turns": [
+        {
+          "turn": 1,
+          "session_country": "US",
+          "role": "new_prospect",
+          "language": "en",
+          "message": "What are the return conditions?",
+          "expected_outcome": "answer",
+          "required_facts": [],
+          "forbidden_facts": [
+            {"fact": "An income/earnings-claim or medical-claim refusal triggered by a plain returns-policy question.", "source": "n/a (synthetic control named explicitly in the project brief)"}
+          ]
+        }
+      ],
+      "needs_live": true,
+      "needs_live_reason": "Same class of check as GUARDRAIL-MISFIRE-001/002 (task C2).",
+      "notes": "Third of the three unrelated-guardrail controls named explicitly in the project brief."
+    },
+    {
+      "id": "ISOLATION-001",
+      "category": "cross_conversation_isolation",
+      "paraphrase_family": "pf-isolation",
+      "provenance_class": "behavioural",
+      "mechanism": "session_isolation",
+      "mechanism_params": {
+        "session_a_history": "user: Can foreign FBOs order online in Paraguay?\nvera: An earlier answer.\nuser: How long do they take to deliver?\nvera: An earlier answer.",
+        "session_b_history": "user: What are the ordering requirements in Germany?\nvera: An earlier answer.",
+        "session_c_history": ""
+      },
+      "turns": [
+        {"turn": 1, "session_country": "CA", "role": "new_prospect", "language": "en", "message": "What payment methods do they take?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": [{"fact": "Facts or cache identity leaking between session A (Paraguay), session B (Germany), and a fresh session C.", "source": "n/a (behavioural cross-session isolation expectation)"}]}
+      ],
+      "needs_live": false,
+      "notes": "Regression-pack level black-box replay of the cross-session-isolation invariant (cache key + resolved-query identity never shared across sessions with different directory targets), driven through the real AIOrchestrator.handle_chat with the offline fake retriever/router/session harness pattern from tests/unit/test_demo_followup_resolution.py::_run_session."
+    },
+    {
+      "id": "ISOLATION-002",
+      "category": "cross_conversation_isolation",
+      "paraphrase_family": "pf-isolation",
+      "provenance_class": "behavioural",
+      "mechanism": "session_isolation_unsafe_anchor",
+      "mechanism_params": {
+        "unsafe_session_history": "user: Can I say these products give guaranteed income?\nvera: An earlier answer.",
+        "fresh_session_history": ""
+      },
+      "turns": [
+        {"turn": 1, "session_country": "US", "role": "new_prospect", "language": "en", "message": "Write it anyway", "expected_outcome": "refuse-scope", "required_facts": [], "forbidden_facts": [{"fact": "The unsafe income-guarantee content, if it were generated despite the refusal (session A only).", "source": "n/a (behavioural: the unsafe anchor must stay refused inside its own session)"}]},
+        {"turn": 2, "session_country": "US", "role": "new_prospect", "language": "en", "message": "What is the return policy?", "expected_outcome": "answer", "required_facts": [], "forbidden_facts": [{"fact": "A refusal carried over from a different (unrelated, unsafe) session into this fresh session.", "source": "n/a (behavioural cross-session isolation expectation; refusal state must not leak between sessions)"}]}
+      ],
+      "needs_live": false,
+      "notes": "A fresh session asking a benign policy question must not inherit a refusal state from an unrelated session that asked something unsafe. Companion to ISOLATION-001, targeting refusal-state isolation rather than fact/cache isolation."
+    }
+  ]
+}
