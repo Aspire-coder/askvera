@@ -499,10 +499,11 @@ def test_a_capture_does_not_validate_its_own_seeded_sessions(tmp_path, monkeypat
     from app.orchestrator import chat_orchestrator
 
     calls = []
-    monkeypatch.setattr(
-        chat_orchestrator, "validate_and_touch_session",
-        lambda *args, **kwargs: calls.append(args) or True,
-    )
+    for name in capture.CAPTURE_ISOLATION:
+        monkeypatch.setattr(
+            chat_orchestrator, name,
+            (lambda n: lambda *args, **kwargs: calls.append(n))(name),
+        )
 
     manifest = tmp_path / "m.json"
     manifest.write_text(json.dumps({
@@ -529,6 +530,12 @@ def test_a_capture_does_not_validate_its_own_seeded_sessions(tmp_path, monkeypat
     rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
     header = rows[0]
     assert header["session_state"] == "capture_supplied_memory"
-    assert calls == [], "a capture must not validate its own seeded sessions"
-    # The original function is restored when the run finishes.
-    assert chat_orchestrator.validate_and_touch_session is not None
+    assert header["capture_isolation"] == sorted(capture.CAPTURE_ISOLATION)
+    assert calls == [], f"a capture must not reach a reader store: {calls}"
+    # Every replaced name is restored when the run finishes.
+    for name in capture.CAPTURE_ISOLATION:
+        assert getattr(chat_orchestrator, name) is not None
+    # The isolation list covers the reader-session, consent, audit and cache
+    # seams, and nothing that the capture exists to measure.
+    assert {"validate_and_touch_session", "has_valid_consent", "write_audit_event"} <= set(capture.CAPTURE_ISOLATION)
+    assert not {"approve_evidence", "resolve_answer_language"} & set(capture.CAPTURE_ISOLATION)

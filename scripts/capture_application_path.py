@@ -64,6 +64,31 @@ MAX_SELECTOR_CALLS_PER_CASE = 1
 MAX_RERANKER_CALLS_PER_CASE = 1
 MAX_GENERATION_CALLS_PER_CASE = 1
 CALL_CATEGORIES = ("retrieval", "embedding", "planner_or_translation", "selector", "reranker", "generation")
+
+# Capture isolation: what a capture replaces in the orchestrator module, and why.
+# A capture is a synthetic run. Its sessions are seeded into the memory backend
+# by this tool, so they exist in no store: the reader-session and consent checks
+# can only fail against them (observed 2026-09-22 under approval
+# R10-2026-09-22-KRISH: "Session validation failed", then "Consent validation
+# failed", each aborting every case with zero calls made). Equally, a synthetic
+# run must not WRITE into production stores - audit rows, cache entries or
+# session rows attributed to readers who do not exist - and must not READ a
+# cached answer, which would hide the behaviour the capture exists to measure.
+#
+# Everything the capture is for stays real and untouched: retrieval, evidence
+# approval, the model, validators, governance and the conversation layer. The
+# run header records this list, so a capture can never be mistaken for a run
+# that exercised stored sessions, consent, caching or auditing.
+CAPTURE_ISOLATION: dict[str, Any] = {
+    "validate_and_touch_session": lambda *_args, **_kwargs: None,
+    "has_valid_consent": lambda *_args, **_kwargs: True,
+    "write_audit_event": lambda *_args, **_kwargs: None,
+    "get_cache_value": lambda *_args, **_kwargs: None,
+    "set_cache_value": lambda *_args, **_kwargs: None,
+    "semantic_cache_active": lambda *_args, **_kwargs: False,
+    "get_semantic_cache_value": lambda *_args, **_kwargs: None,
+    "set_semantic_cache_value": lambda *_args, **_kwargs: None,
+}
 MAX_CALLS_PER_CASE = {
     "retrieval": MAX_RETRIEVAL_CALLS_PER_CASE,
     "embedding": MAX_EMBEDDING_CALLS_PER_CASE,
@@ -585,6 +610,7 @@ def _run_header(manifest_sha: str, approval_id: str) -> dict[str, Any]:
         # reader-session expiry check does not apply to them; recorded here so
         # a run is never mistaken for one that exercised stored sessions.
         "session_state": "capture_supplied_memory",
+        "capture_isolation": sorted(CAPTURE_ISOLATION),
     }
 
 
@@ -714,16 +740,12 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
     previous_memory_backend = settings.CHAT_MEMORY_BACKEND
     settings.CHAT_MEMORY_BACKEND = "memory"
 
-    # A capture's sessions live in that memory backend and are seeded here, so
-    # they never exist in the chat_sessions table. Validating them against it
-    # can only ever fail (observed 2026-09-22: every case ended in
-    # "Session validation failed" with zero calls made), and a capture-supplied
-    # session is not a reader session whose expiry means anything. The run
-    # header records that this ran with capture-supplied session state.
+    # Capture isolation (see CAPTURE_ISOLATION below). Restored in `finally`.
     from app.orchestrator import chat_orchestrator as _chat_orchestrator
 
-    previous_validate = _chat_orchestrator.validate_and_touch_session
-    _chat_orchestrator.validate_and_touch_session = lambda *_args, **_kwargs: None
+    previous_isolation = {name: getattr(_chat_orchestrator, name) for name in CAPTURE_ISOLATION}
+    for name, replacement in CAPTURE_ISOLATION.items():
+        setattr(_chat_orchestrator, name, replacement)
 
     orchestrator = AIOrchestrator()
 
@@ -777,7 +799,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
         return 0
     finally:
         settings.CHAT_MEMORY_BACKEND = previous_memory_backend
-        _chat_orchestrator.validate_and_touch_session = previous_validate
+        for name, original in previous_isolation.items():
+            setattr(_chat_orchestrator, name, original)
 
 
 if __name__ == "__main__":
