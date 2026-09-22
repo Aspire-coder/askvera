@@ -539,3 +539,17 @@ def test_a_capture_does_not_validate_its_own_seeded_sessions(tmp_path, monkeypat
     # seams, and nothing that the capture exists to measure.
     assert {"validate_and_touch_session", "has_valid_consent", "write_audit_event"} <= set(capture.CAPTURE_ISOLATION)
     assert not {"approve_evidence", "resolve_answer_language"} & set(capture.CAPTURE_ISOLATION)
+
+
+def test_a_case_record_carries_the_conversation_layer_diagnostics():
+    """A capture must record what the conversation layer decided: the turn's
+    typed outcome, the CX additions applied, any answer-language switch and any
+    detected self-correction. Without these a capture cannot evaluate CX."""
+    import scripts.capture_application_path as capture
+
+    import pathlib
+
+    source = pathlib.Path(capture.__file__).read_text(encoding="utf-8")
+    assert '"conversation_outcome"' in source
+    for key in ("outcome", "cx_applied", "answer_language", "conversation_repair"):
+        assert f'"{key}"' in source, key

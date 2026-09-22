@@ -577,6 +577,18 @@ def run_one_case(
             "relevant_evidence": (rank_lists or {}).get("selector_relevant_evidence"),
         } if rank_lists is not None else "unavailable",
         "approved_evidence": response.citations if response is not None else [],
+        # The conversation layer's own record of the turn: the one typed
+        # outcome, which CX additions were applied, an answer-language switch
+        # and a detected self-correction. Diagnostics the orchestrator already
+        # attached (app/response/outcome.py, cx_compose.py); nothing is
+        # recomputed here, and a run predating that layer simply has none.
+        "conversation_outcome": {
+            key: (response.metadata or {}).get(key)
+            for key in ("outcome", "cx_applied", "answer_language", "conversation_repair")
+        } if response is not None else "unavailable",
+        "suggestions": [
+            item.get("key") for item in (response.suggestions or []) if isinstance(item, dict)
+        ] if response is not None else "unavailable",
         "call_counts": call_counts,
         "latency_seconds": round(latency_seconds, 6),
         "capture_errors": (diagnostic_capture or {}).get("errors", []) if diagnostic_capture else [],
