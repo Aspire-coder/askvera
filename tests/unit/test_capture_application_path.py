@@ -609,3 +609,38 @@ def test_a_capture_refuses_to_run_when_the_generations_cannot_be_read(tmp_path, 
             "--i-have-approval", "TEST-APPROVAL",
         ])
     assert "retrieval would match nothing" in str(error.value)
+
+
+def test_a_capture_does_not_publish_metrics(tmp_path, monkeypatch):
+    """Synthetic turns must not land in the dashboards that describe real
+    traffic (observed 2026-09-22: 12 capture turns published
+    delivered_responses and pipeline timings tagged environment=production)."""
+    import scripts.capture_application_path as capture
+    from app.metrics import metrics_publisher
+
+    monkeypatch.setattr(capture, "read_active_generations", lambda: [{"active_ingestion_id": "x"}])
+    seen = {}
+    monkeypatch.setattr(
+        capture, "run_one_case",
+        lambda *a, **k: seen.setdefault("enabled_during_run", metrics_publisher.enabled) or {
+            "case_id": "c1", "call_counts": {key: 0 for key in capture.CALL_CATEGORIES},
+        },
+    )
+    metrics_publisher.enabled = True
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test", "turns": [],
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x",
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+    capture.main(["--manifest", str(manifest), "--out", str(out), "--i-have-approval", "TEST-APPROVAL"])
+
+    assert seen["enabled_during_run"] is False, "metrics must not publish during a capture"
+    assert metrics_publisher.enabled is True, "the publisher is restored afterwards"
+    header = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+    assert header["metrics_published"] is False

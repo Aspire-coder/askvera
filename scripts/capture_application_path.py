@@ -637,6 +637,9 @@ def _run_header(manifest_sha: str, approval_id: str) -> dict[str, Any]:
         # a run is never mistaken for one that exercised stored sessions.
         "session_state": "capture_supplied_memory",
         "capture_isolation": sorted(CAPTURE_ISOLATION),
+        # Metric publishing is disabled for a capture, so synthetic turns never
+        # reach the dashboards that describe real traffic.
+        "metrics_published": False,
     }
 
 
@@ -794,6 +797,16 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
                 "--allow-empty-corpus to capture that path deliberately."
             )
 
+    # A capture's turns are synthetic, so its metrics must not land in the
+    # dashboards that describe real traffic. Observed on 2026-09-22 (approval
+    # R10-2026-09-22-KRISH): 12 capture turns published delivered_responses,
+    # fallback_responses and pipeline timings tagged environment=production.
+    # The in-process counters still work; only publishing stops.
+    from app.metrics import metrics_publisher as _metrics_publisher
+
+    previous_metrics_enabled = _metrics_publisher.enabled
+    _metrics_publisher.enabled = False
+
     # Capture isolation (see CAPTURE_ISOLATION below). Restored in `finally`.
     from app.orchestrator import chat_orchestrator as _chat_orchestrator
 
@@ -853,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
         return 0
     finally:
         settings.CHAT_MEMORY_BACKEND = previous_memory_backend
+        _metrics_publisher.enabled = previous_metrics_enabled
         for name, original in previous_isolation.items():
             setattr(_chat_orchestrator, name, original)
 
