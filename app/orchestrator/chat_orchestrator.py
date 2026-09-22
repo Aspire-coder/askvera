@@ -1282,7 +1282,7 @@ class AIOrchestrator:
         )
         evidence_token = _TURN_EVIDENCE.set(None)
         try:
-            answer_language = resolve_answer_language(scrubbed_input, body.language)
+            answer_language = resolve_answer_language(scrubbed_input, body.language, country=body.country)
         except Exception:  # noqa: BLE001 - CX must never break a turn
             LOGGER.exception("cx_answer_language_failed", correlation_id=correlation_id)
             answer_language = AnswerLanguage(body.language, False, "detector_error")

@@ -246,17 +246,18 @@ def test_answer_language_switch_never_changes_retrieval_eligibility_or_shares_a_
     monkeypatch.setattr(chat_orchestrator, "build_cache_key",
                         lambda q, country, language, role: cache_keys.append(language) or f"{q}|{country}|{language}|{role}")
 
-    def _run(message, widget_language):
+    def _run(message, widget_language, country="CA"):
         retriever = _RecordingRetriever([_kenya_directory_row()])
         orchestrator = AIOrchestrator(retriever=retriever, router=_Router("Forever Kenya accepts Mpesa."),
                                       validator=_Validator(), governance=_Governance())
         real_build = orchestrator.prompt_builder.build
         orchestrator.prompt_builder.build = lambda *a, **k: prompt_languages.append(k.get("language")) or real_build(*a, **k)
-        body = ChatRequest(message=message, sessionId="s", country="US", language=widget_language)
+        body = ChatRequest(message=message, sessionId="s", country=country, language=widget_language)
         return orchestrator.handle_chat(body, "cid"), retriever
 
-    # A question that clearly switches today; Lane 7 is improving recall on
-    # questions containing brand and market names (e.g. "…par Forever Kenya ?").
+    # A Canadian session: French is one of that market's own languages, so the
+    # answer may switch into it (in a Britain session, which enables English
+    # only, the same question stays in English - see the market-scope test).
     switched, retriever = _run("Comment est-ce que je peux payer ma commande chez Forever Kenya ?", "en")
     assert switched.metadata["answer_language"]["answer"] == "fr"
     assert switched.metadata["outcome"]["language"] == "fr"
@@ -480,3 +481,24 @@ def test_a_failing_pre_retrieval_hook_never_breaks_the_turn(monkeypatch, target)
     )
     assert response.answer
     assert "outcome" in response.metadata
+
+
+@pytest.mark.parametrize("message,country,widget,expected", [
+    # The market scopes which languages an answer may switch into: English, or
+    # a route language the session market itself enables. Britain enables only
+    # English, so a French question there is answered in English; the United
+    # States enables Spanish, so a Spanish question there switches.
+    ("Quels sont les frais de livraison pour une commande en France ?", "GB", "en", "en"),
+    ("Quels sont les frais de livraison pour une commande en France ?", "US", "en", "en"),
+    ("¿Qué hago si el producto llega dañado?", "US", "en", "es"),
+    ("¿Qué hago si el producto llega dañado?", "DE", "en", "en"),
+    ("Wie hoch sind die Versandkosten für eine Bestellung?", "DE", "en", "de"),
+])
+def test_the_answer_language_stays_inside_the_market_scope(monkeypatch, message, country, widget, expected):
+    _repair_harness(monkeypatch, "")
+    orchestrator = AIOrchestrator(retriever=_Retriever([]), router=_Router("x"),
+                                  validator=_Validator(), governance=_Governance())
+    response = orchestrator.handle_chat(
+        ChatRequest(message=message, sessionId="s", country=country, language=widget), "cid"
+    )
+    assert response.metadata["outcome"]["language"] == expected, response.metadata.get("answer_language")
