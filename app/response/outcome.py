@@ -116,6 +116,50 @@ _FAILURE_LAYER_KINDS: dict[str, OutcomeKind] = {
 # see EvidenceDecision.reason there for the full reason vocabulary.
 _CROSS_MARKET_POLICY_REASON = "cross_market_policy_request"
 
+# --- metadata["intent"] -> OutcomeKind, for the refusal-shaped semantic-route
+# responses that carry no failure_layer at all --------------------------------
+#
+# app/orchestrator/chat_orchestrator.py's semantic/claim route
+# (_conversation_route_response, roughly lines 4171-4248) delivers reviewed
+# refusal copy via response_builder.fallback(...) without ever setting
+# metadata["failure_layer"], so derive_outcome would otherwise see
+# failure_layer=None and default to OutcomeKind.ANSWER for these turns (the
+# route-delivered refusal copy is real refusal copy, not a generated answer).
+# These three metadata["intent"] values are the exact ones that route writes
+# for a refusal, and are copied through unchanged here, never re-derived:
+#
+#   "income_claim"          - written as metadata["intent"] on both the
+#                              "candidate_guardrail_phrasing" and the plain
+#                              "semantic_route" fallback for intent ==
+#                              "income_claim".
+#   "medical_claim"         - written as metadata["intent"] on the
+#                              "candidate_guardrail_phrasing" fallback taken
+#                              before localized_claim_response runs, and on
+#                              the plain "semantic_route" fallback when
+#                              localized_claim_response found no reviewed
+#                              answer.
+#   "product_disease_claim" - the claim_scope services/claim_safety.py's
+#                              localized_claim_response(...) returns (via
+#                              classify_claim_scope) when a medical_claim
+#                              message also names a product plus a disease
+#                              claim; chat_orchestrator.py writes this exact
+#                              claim_scope string as metadata["intent"] on
+#                              the "reviewed_claim_copy" fallback.
+_REFUSAL_INTENT_KINDS: dict[str, OutcomeKind] = {
+    "income_claim": OutcomeKind.SAFETY_REFUSAL,
+    "medical_claim": OutcomeKind.SAFETY_REFUSAL,
+    "product_disease_claim": OutcomeKind.SAFETY_REFUSAL,
+}
+
+# Deliberately EXCLUDED from _REFUSAL_INTENT_KINDS: the same semantic route
+# also writes metadata["intent"] == "off_topic" or "assistant_meta" for
+# ordinary conversational copy (small talk, capability questions, off-topic
+# redirects) that is not a safety refusal at all -- no existing OutcomeKind
+# fits them, and app/response/cx_compose.py's _NO_ADDITION_KINDS suppresses
+# every CX addition (suggestions, contact offers) for SAFETY_REFUSAL, which
+# would wrongly silence those additions on benign, non-refusal copy. They
+# keep today's OutcomeKind.ANSWER behaviour.
+
 # The existing directory-record marker (app/retrieval/opensearch_sections.py,
 # app/orchestrator/chat_orchestrator.py) that identifies a global directory
 # record answering an international-sponsoring question, as opposed to an
@@ -321,7 +365,12 @@ def derive_outcome(
     reason = getattr(evidence_decision, "reason", None)
 
     if failure_layer is None:
-        kind = OutcomeKind.ANSWER
+        # No failure_layer at all: ordinarily a generated answer, but the
+        # semantic-route refusal copy (see _REFUSAL_INTENT_KINDS above) also
+        # carries no failure_layer, so it must be recognised here by intent
+        # instead, or it would be mistyped OutcomeKind.ANSWER. A present
+        # failure_layer always takes the branch below instead, unchanged.
+        kind = _REFUSAL_INTENT_KINDS.get(str(metadata.get("intent") or ""), OutcomeKind.ANSWER)
     elif failure_layer == "evidence_gate" and reason == _CROSS_MARKET_POLICY_REASON:
         kind = OutcomeKind.CROSS_MARKET_POLICY
     else:
