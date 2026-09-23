@@ -31,6 +31,7 @@ def test_system_prompt_gives_the_deliverable_disclaimer_wording():
 
     assert "income depends on each fbo's own effort and sales" in prompt
     assert 'never "guarantee(d)"' in prompt
+    assert 'never "guarantee(d)", even quoted' in prompt
 
 
 def test_the_prompted_disclaimer_is_delivered_in_a_contract_terms_answer():
