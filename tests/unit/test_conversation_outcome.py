@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from app.response.outcome import (
     ConversationOutcome,
     OutcomeKind,
@@ -506,6 +508,76 @@ def test_candidate_narrowing_fallback_sets_clarification_subject() -> None:
     )
     assert outcome.kind is OutcomeKind.CLARIFICATION
     assert outcome.clarification_subject == "candidate_narrowing"
+
+
+# --- refusal routes with no failure_layer: typed by metadata["intent"] -----
+
+
+@pytest.mark.parametrize(
+    "intent",
+    ["income_claim", "medical_claim", "product_disease_claim"],
+)
+@pytest.mark.parametrize(
+    "language,country",
+    [
+        ("en", "US"),
+        ("fr", "FR"),
+        ("de", "DE"),
+        ("fi", "FI"),
+    ],
+)
+def test_semantic_route_refusal_intent_types_safety_refusal_across_languages_and_markets(
+    intent: str, language: str, country: str
+) -> None:
+    # app/orchestrator/chat_orchestrator.py's semantic/claim route delivers
+    # this refusal copy via response_builder.fallback(...) with no
+    # failure_layer at all -- only metadata["intent"]. This must be typed
+    # SAFETY_REFUSAL regardless of language/market, because the fix keys on
+    # the existing intent value, never on the rendered text.
+    outcome = derive_outcome(
+        metadata={
+            "intent": intent,
+            "fallback": False,
+            "response_source": "reviewed_claim_copy" if intent == "product_disease_claim" else "semantic_route",
+        },
+        language=language,
+        country=country,
+        question="Does this product cure my illness?",
+        answer_text="I can't make that claim.",
+    )
+    assert outcome.kind is OutcomeKind.SAFETY_REFUSAL
+    assert outcome.failure_layer is None
+
+
+@pytest.mark.parametrize("intent", ["off_topic", "assistant_meta"])
+def test_off_topic_and_assistant_meta_intents_stay_answer(intent: str) -> None:
+    # These two intents also reach the semantic route with no failure_layer,
+    # but they are ordinary conversational copy, not a safety refusal --
+    # they must keep today's OutcomeKind.ANSWER behaviour so CX suggestions
+    # and contact offers are not wrongly suppressed on benign copy.
+    outcome = derive_outcome(
+        metadata={"intent": intent, "fallback": False, "response_source": "semantic_route"},
+        language="en",
+        country="US",
+        question="Thanks, that's helpful!",
+        answer_text="You're welcome!",
+    )
+    assert outcome.kind is OutcomeKind.ANSWER
+
+
+def test_present_failure_layer_still_takes_precedence_over_refusal_intent() -> None:
+    # A present failure_layer must keep its existing precedence: even if
+    # metadata["intent"] happens to also carry one of the refusal-intent
+    # values, that must never change the outcome the failure_layer already
+    # determines.
+    outcome = derive_outcome(
+        metadata={"failure_layer": "evidence_contract", "intent": "income_claim"},
+        language="en",
+        country="US",
+        question="What is the return policy?",
+        answer_text="",
+    )
+    assert outcome.kind is OutcomeKind.EVIDENCE_MISSING
 
 
 def test_no_hardcoded_case_ids_in_this_module() -> None:
