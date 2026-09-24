@@ -1,5 +1,20 @@
 # US product docs: training guide vs PM product sheet comparison
 
+> **Correction (2026-09-24, after rendering the sheets).** Every sheet's Supplement Facts panel is drawn as
+> graphics, so `pdftotext` does not read it, and findings that a sheet "does not mention" a fact were made
+> without the panel. Rendering the pages shows four such findings are wrong:
+>
+> - **C12 ImmuBlend zinc: withdrawn.** The panel lists Zinc (as zinc gluconate) 15 mg, 136% DV. The sheet agrees with the guide.
+> - **C19 Marine Collagen 15 kcal / 4 g protein: withdrawn.** The panel shows Calories 15 and Protein 4 g, matching the guide.
+> - **C7 AloeTurm pack size: resolved.** The panel shows "Servings Per Container 10", matching the guide's 10 lozenges.
+> - **Fiber Fusion (sheet-only check): withdrawn.** The panel lists Zinc (as zinc gluconate) 1.5 mg and the
+>   "Proprietary Forever Fiber Blend" (soluble corn fiber, psyllium, apple and citrus fiber and others).
+>
+> C1/C2 (Propolis parabens), C5 (AloeTurm gelatin), C18 (Marine Collagen "No Added Sugars") and the guide-only
+> warnings (Absorbent-D 18+, B12 pregnancy, Marine Collagen "For adult use only", Propolis bee allergy) were
+> re-checked against the rendered pages and still stand. Other "only in guide" rows about amounts should be read
+> against the rendered panels before anyone relies on them.
+
 Source: `pdftotext -layout <file>.pdf -` output of each source PDF. Line numbers `[Gnn]` = training-guide txt line, `[Snn]` = PM-sheet txt line.
 Where the layout extraction was ambiguous, `pdftotext -raw` of the original PDF was checked (noted "raw").
 

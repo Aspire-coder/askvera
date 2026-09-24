@@ -129,14 +129,14 @@ See `COMPLIANCE_REVIEW.md`. Key facts for the reviewer:
 
 ## 6. Duplicates and versions
 
-See `DUPLICATES_DIFF.md`: 19 contradictions across the 8 overlapping products, plus warnings that appear only in the guides. The most material are:
+See `DUPLICATES_DIFF.md`. It first reported 19 contradictions across the 8 overlapping products. Rendering the sheets later showed that 3 of them (C7, C12, C19) and one sheet-only finding were artifacts of text extraction, because the Supplement Facts panels are graphics (see the correction at the top of that file). The most material remaining items are:
 
 - **Propolis Creme preservatives.** The sheet (v4, Jan 2026) lists methyl- and propylparaben; the guide says the product is paraben-free.
 - **AloeTurm gelatin.** The guide says "bovine gelatin from a non-cattle source", which contradicts itself and matters for halal and vegetarian questions.
 - **Marine Collagen.** The guide says "No Added Sugars", but grape juice concentrate is the second ingredient on the sheet.
-- **ImmuBlend zinc.** The guide says it contains zinc; the sheet text does not.
+- ~~**ImmuBlend zinc.**~~ Withdrawn: the sheet's Supplement Facts panel lists zinc 15 mg.
 - **Marketing wording.** Several sheet claims ("scientifically proven", "heart function", "cardiovascular function") are phrases the guides tell staff not to use.
-- **Warnings only in the guides.** Adults-only for Absorbent-D, AloeTurm and Marine Collagen; the B12 pregnancy caution; the Propolis bee allergy.
+- **Warnings only in the guides** (re-checked against the rendered sheets): adults 18+ for Absorbent-D; "For adult use only" for Marine Collagen; the B12 pregnancy caution; the Propolis bee allergy.
 
 The guide PDFs are newer files, generated 2026-09-22, but they are derived from the product pages and FAQs. For label facts, the sheet or the physical label is the suggested source of truth.
 
@@ -154,7 +154,7 @@ The guide PDFs are newer files, generated 2026-09-22, but they are derived from 
 ## 8. Decisions for the user
 
 - **D1. Training guides.** Ingest none of the 9 guides (recommended while they carry the internal-only banner), all of them, or only after written local approval? If they are ingested, what version and effective date should they use?
-- **D2. Document type.** Approve adding `product_information` (recommended), or accept `policy`? With `policy`, 6 PDFs fail and the chunks are mislabelled as company policy.
+- **D2. Document type.** DECIDED 2026-09-24: `product_information`.
 - **D3. Compliance sign-off.** Review each flagged statement in `COMPLIANCE_REVIEW.md`. Should the bot quote benefit claims at all, and must every product answer carry the FDA disclaimer?
 - **D4. Authoritative source per product.** Sheet or guide, for each contradiction in `DUPLICATES_DIFF.md`, or confirm against the physical US label first.
 - **D5. Spanish and other non-English US sessions.** Allow English product sources through the fallback (current behaviour), or exclude this document type from the fallback?

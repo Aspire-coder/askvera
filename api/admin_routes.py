@@ -894,6 +894,11 @@ async def upload_document(
             status_code=400,
             detail="Company policies must be restricted to their selected market.",
         )
+    if document_type == "product_information" and access_scope != "country":
+        raise HTTPException(
+            status_code=400,
+            detail="Product information must be restricted to its selected market.",
+        )
     if document_type == "office_directory" and access_scope != "global":
         raise HTTPException(
             status_code=400,

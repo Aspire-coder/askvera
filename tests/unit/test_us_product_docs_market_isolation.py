@@ -317,3 +317,21 @@ def test_global_availability_would_leak_them_to_every_market():
         leaked = _admitted(_vector_query("Forever Absorbent-D", country, "en", scope="global"), rows)
         assert len(leaked) == 24, country
         assert all(_has_current_locale_document([_retrieved(row)], country, "en") for row in rows)
+
+
+# --- the product_information document type ---------------------------------------
+
+
+def test_product_information_is_an_accepted_upload_type():
+    from services.knowledge_ingestion import DOCUMENT_TYPES
+
+    assert "product_information" in DOCUMENT_TYPES
+    assert {entry["form_fields"]["document_type"] for entry in DOCUMENTS} == {"product_information"}
+
+
+def test_prompt_labels_product_sections_as_product_information_not_policy():
+    from app.prompts.builder import _section_label
+
+    assert _section_label({"document_type": "product_information"}, False) == "Product information"
+    assert _section_label({"document_type": "policy"}, False) == "Policy"
+    assert _section_label({"document_type": "office_directory"}, True) == "Directory"
