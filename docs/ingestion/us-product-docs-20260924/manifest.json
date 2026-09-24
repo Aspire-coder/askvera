@@ -1,0 +1,741 @@
+{
+  "manifest_version": 1,
+  "prepared": "2026-09-24",
+  "status": "DRY RUN - nothing uploaded, indexed or activated",
+  "source_directory": "us-product-docs-20260924 (operator-local stable copy, see SHA256SUMS.txt)",
+  "checksums_verified": "sha256sum -c SHA256SUMS.txt: 24/24 OK",
+  "invariants": {
+    "country": "US",
+    "language": "en",
+    "access_scope": "country (never 'global')",
+    "document_type": "product_information (requires code change; 'policy' is rejected: see plan)",
+    "review_before_publish": true
+  },
+  "notes": [
+    "document_version/effective_date for product sheets are inferred from the MMDDYY in the filename; confirm.",
+    "Training guides carry no date or version; decision D1 must supply them if they are ingested.",
+    "proposed_upload_filename gives the admin portal a clean source_file; the original name is kept here for audit."
+  ],
+  "documents": [
+    {
+      "source_file": "Forever_Absorbent-D_Training_Guide.pdf",
+      "sha256": "a22f6512448c881898e6e93a9d127ff59158a6269699317ef71430bb48c0672c",
+      "size_bytes": 282860,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever Absorbent-D",
+      "product_number": "672",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-absorbent-d-672.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-absorbent-d",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-absorbent-d",
+      "dry_run": {
+        "generic_extractor_sections": 54,
+        "policy_extractor_sections": 39
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_Aloe_First_Training_Guide.pdf",
+      "sha256": "fb55968ed4eaa1d9ce8f309a2faaa72db75c546a5873b407cececdaef18f2e8b",
+      "size_bytes": 280315,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever Aloe First",
+      "product_number": "040",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-aloe-first-040.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-aloe-first",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-aloe-first",
+      "dry_run": {
+        "generic_extractor_sections": 32,
+        "policy_extractor_sections": 33
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_Aloe_Propolis_Creme_Training_Guide.pdf",
+      "sha256": "21b29fd1e3ad98d7e153ebae17f5db26e98c8c7f04a3bf553a1608ddcff93b3f",
+      "size_bytes": 304409,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Aloe Propolis Creme",
+      "product_number": "051",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-aloe-propolis-creme-051.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-aloe-propolis-creme",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-aloe-propolis-creme",
+      "dry_run": {
+        "generic_extractor_sections": 36,
+        "policy_extractor_sections": 36
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_AloeTurm_Training_Guide.pdf",
+      "sha256": "2f03aea62248b67a14b26f0348e94ba01d20fab4bea01b73be56e4c1cf79560f",
+      "size_bytes": 413580,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever AloeTurm",
+      "product_number": "676",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-aloeturm-676.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-aloeturm",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-aloeturm",
+      "dry_run": {
+        "generic_extractor_sections": 39,
+        "policy_extractor_sections": "error:ValueError"
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_B12_Plus_Training_Guide.pdf",
+      "sha256": "75528e5dd3335f09c8d72f926395889797c3c75a4e779ad33d8af1bb86474743",
+      "size_bytes": 326540,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever B12 Plus",
+      "product_number": "188",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-b12-plus-188.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-b12-plus",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-b12-plus",
+      "dry_run": {
+        "generic_extractor_sections": 51,
+        "policy_extractor_sections": 23
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_Freedom_Training_Guide.pdf",
+      "sha256": "b8d6b34b6e15667000cc6c4d4209b7dfe935b5e57f1730322a2eeb604c8f21c2",
+      "size_bytes": 319415,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever Freedom",
+      "product_number": "896",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-freedom-896.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-freedom",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-freedom",
+      "dry_run": {
+        "generic_extractor_sections": 43,
+        "policy_extractor_sections": "error:ValueError"
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_ImmuBlend_Training_Guide_1.pdf",
+      "sha256": "e854b5736df9181eda904f57c0e807ec142b44f9dcaa70b9f1e38851efe5de2e",
+      "size_bytes": 405001,
+      "pages": 11,
+      "requires_ocr": false,
+      "product": "Forever ImmuBlend",
+      "product_number": "355",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-immublend-355.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-immublend",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-immublend",
+      "dry_run": {
+        "generic_extractor_sections": 50,
+        "policy_extractor_sections": 43
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever_iVision_Training_Guide.pdf",
+      "sha256": "d24845da14b6e61d73983076d5fe5995087a0a58c31849cc15460ab08c1b6fce",
+      "size_bytes": 532177,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever iVision",
+      "product_number": "624",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-ivision-624.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-ivision",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-ivision",
+      "dry_run": {
+        "generic_extractor_sections": 37,
+        "policy_extractor_sections": 26
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "Forever-Marine-Collagen-Training-Guide.pdf",
+      "sha256": "672a2b57182e3fdbfcf251bd910c57911af0f4d387b74d6ccd47169df4c9c3c8",
+      "size_bytes": 425090,
+      "pages": 10,
+      "requires_ocr": false,
+      "product": "Forever Marine Collagen",
+      "product_number": "713",
+      "doc_kind": "training_guide",
+      "proposed_upload_filename": "US-EN-training-guide-forever-marine-collagen-713.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "",
+        "effective_date": "",
+        "expiry_date": "",
+        "logical_document_id": "us-training-guide-forever-marine-collagen",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-training-guide-forever-marine-collagen",
+      "dry_run": {
+        "generic_extractor_sections": 47,
+        "policy_extractor_sections": 26
+      },
+      "recommendation": "HOLD: guide is marked 'AI-ASSISTED CONTENT - INTERNAL GUIDANCE ONLY - LOCAL REVIEW AND APPROVAL REQUIRED'; ingest only with written approval (decision D1)"
+    },
+    {
+      "source_file": "PM Nutritionals - Forever Pro-B Ultra - US -091026 (1).pdf",
+      "sha256": "552e8b8cf849a7441e8dba527687f58e1ed3772a2b251222ad44dd61e9a65a15",
+      "size_bytes": 594377,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Pro-B Ultra",
+      "product_number": "710",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-pro-b-ultra-710.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "091026",
+        "effective_date": "2026-09-10",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-pro-b-ultra",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-pro-b-ultra",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Bee-AloePropolisCreme-US-EN-v4-012326.pdf",
+      "sha256": "94f813161dda02070bab0d2c430563dff670d14fd4d5aa928855d203520eca37",
+      "size_bytes": 410683,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Aloe Propolis Creme",
+      "product_number": "051",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-aloe-propolis-creme-051.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "v4-012326",
+        "effective_date": "2026-01-23",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-aloe-propolis-creme",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-aloe-propolis-creme",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 3
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Drinks-Forever Freedom 2025-US-v4-090925 (3).pdf",
+      "sha256": "c7152a73825bb5940f0bedc7b2be9b9a9a84f41774195c69a62e2c7bfd20a6b2",
+      "size_bytes": 536360,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Freedom",
+      "product_number": "896",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-freedom-896.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "v4-090925",
+        "effective_date": "2025-09-09",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-freedom",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-freedom",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 5
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Drinks-ForeverAloeVeraGelPET-US-EN-v2-031226.pdf",
+      "sha256": "5cd8a56bcc2afc8fc6be17858a9cbd1bf49541a7c7c35c2a7733d4487a5af653",
+      "size_bytes": 738190,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Aloe Vera Gel",
+      "product_number": "815",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-aloe-vera-gel-815.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "v2-031226",
+        "effective_date": "2026-03-12",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-aloe-vera-gel",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-aloe-vera-gel",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-B12Plus-US-EN-071526 (1).pdf",
+      "sha256": "b90931e1bb97cc5484ab1c46bc6403ab6b675a7b2f6eebcc51fdcd61748a7c16",
+      "size_bytes": 196785,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever B12 Plus",
+      "product_number": "188",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-b12-plus-188.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "071526",
+        "effective_date": "2026-07-15",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-b12-plus",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-b12-plus",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-Fiber Fusion-US-EN-051126 (2).pdf",
+      "sha256": "888e0c1ba48814a1dceefe1355375a82484e8382e86786deacbdd4abccc9c3a9",
+      "size_bytes": 913582,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Fiber Fusion",
+      "product_number": "702",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-fiber-fusion-702.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "051126",
+        "effective_date": "2026-05-11",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-fiber-fusion",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-fiber-fusion",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-ForeverAbsorbantD-US-EN-061925 (2).pdf",
+      "sha256": "e1071f4677d5b898b05522662c104f1f403cb8cbc61bd442cec8c22afa419c68",
+      "size_bytes": 348113,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Absorbent-D",
+      "product_number": "672",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-absorbent-d-672.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "061925",
+        "effective_date": "2025-06-19",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-absorbent-d",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-absorbent-d",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": "error:ValueError"
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-ForeverAloeTurm-US-EN-061925 (1).pdf",
+      "sha256": "89060b155dd2ec94fe66cea810cb1e77d49d2819529207a9f1f5f7046cf36ee5",
+      "size_bytes": 365159,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever AloeTurm",
+      "product_number": "676",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-aloeturm-676.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "061925",
+        "effective_date": "2025-06-19",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-aloeturm",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-aloeturm",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": "error:ValueError"
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-ForeverImmuBlend-US-EN-071626 (3).pdf",
+      "sha256": "34769fea1abed6d098633561a2ddc65ccef5bae86977e0c0fc240aa50a7f22a7",
+      "size_bytes": 196343,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever ImmuBlend",
+      "product_number": "355",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-immublend-355.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "071626",
+        "effective_date": "2026-07-16",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-immublend",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-immublend",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-ForeverKids-US-EN-080826 (1).pdf",
+      "sha256": "d9ad20f0613d2150888fb9e4c4abfd98ecc0a825ba04b41e755ea6506b2b2efe",
+      "size_bytes": 660331,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Kids",
+      "product_number": "354",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-kids-354.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "080826",
+        "effective_date": "2026-08-08",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-kids",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-kids",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": "error:ValueError"
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-Nutritionals-ForeverMarineCollagen-US-EN-v11-051526 (4).pdf",
+      "sha256": "a5e4043d58f16dfdccb2822a04374af46f65ebf7d725bd60deb6d341dc3a5d7c",
+      "size_bytes": 547969,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Marine Collagen",
+      "product_number": "713",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-marine-collagen-713.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "v11-051526",
+        "effective_date": "2026-05-15",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-marine-collagen",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-marine-collagen",
+      "dry_run": {
+        "generic_extractor_sections": 5,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-PersonalCare-AloeFirstSpray-US-EN-072326.pdf",
+      "sha256": "69e12b53f96057b0ce4ccd6b03ca7b64937a68251d844712d7206d8360bbffd7",
+      "size_bytes": 386524,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Aloe First",
+      "product_number": "040",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-aloe-first-040.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "072326",
+        "effective_date": "2026-07-23",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-aloe-first",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-aloe-first",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 4
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-PersonalCare-ForeverBrightToothgel-US-EN-020326 (1).pdf",
+      "sha256": "a29e559db5737d650b25b35c6d0f314691c8b2c20712a70828aa42e203069699",
+      "size_bytes": 503146,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Bright Toothgel",
+      "product_number": "028",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-bright-toothgel-028.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "020326",
+        "effective_date": "2026-02-03",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-bright-toothgel",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-bright-toothgel",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": "error:ValueError"
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-SkinCare-AloeVeraGelly-US-EN-071426 (1).pdf",
+      "sha256": "db3a4665330d2f5f8a75443c9f01364f6437bfa57951ed386b7f1ad211e13efa",
+      "size_bytes": 147052,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Aloe Vera Gelly",
+      "product_number": "061",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-aloe-vera-gelly-061.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "071426",
+        "effective_date": "2026-07-14",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-aloe-vera-gelly",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-aloe-vera-gelly",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 2
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    },
+    {
+      "source_file": "PM-SkinCare-ForeverAloeLips-US-EN-070726 (2).pdf",
+      "sha256": "34e0bfd6b675a903be3e0dc426a1033ca76c7d6c970f407db591642857ab02aa",
+      "size_bytes": 186627,
+      "pages": 1,
+      "requires_ocr": false,
+      "product": "Forever Aloe Lips",
+      "product_number": "022",
+      "doc_kind": "product_sheet",
+      "proposed_upload_filename": "US-EN-product-sheet-forever-aloe-lips-022.pdf",
+      "form_fields": {
+        "country": "US",
+        "language": "en",
+        "document_type": "product_information",
+        "access_scope": "country",
+        "document_version": "070726",
+        "effective_date": "2026-07-07",
+        "expiry_date": "",
+        "logical_document_id": "us-product-sheet-forever-aloe-lips",
+        "document_owner": "DECISION_REQUIRED",
+        "approval_reference": "DECISION_REQUIRED",
+        "review_before_publish": true
+      },
+      "expected_stable_document_id": "country:US:en:product_information:us-product-sheet-forever-aloe-lips",
+      "dry_run": {
+        "generic_extractor_sections": 6,
+        "policy_extractor_sections": 4
+      },
+      "recommendation": "INGEST after compliance review (decision D3)"
+    }
+  ]
+}
