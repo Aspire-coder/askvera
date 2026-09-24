@@ -1325,6 +1325,48 @@ def test_phone_survives_real_output_pipeline(monkeypatch, question, answer, cont
     assert not validated.metadata.get("fallback")
 
 
+def test_all_numeric_repair_keeps_the_reviewed_contact_sentence_while_removing_an_invented_figure(
+    monkeypatch,
+) -> None:
+    """Coordinator review, 2026-09-24: the all-numeric branch of
+    _validate_response must use the same grounding set as
+    NumericGroundingValidator.validate (numeric_grounding_documents), or
+    detection flags only the invented figure while repair deletes the
+    reviewed contact sentence too. Both critical codes here are
+    NUMERIC_CLAIM_UNGROUNDED, so this exercises the pre-existing all-numeric
+    branch, not the new history/numeric-mixed one."""
+    from services import pii
+    monkeypatch.setattr(pii, "_detect_pii_entities", lambda text, _: [])
+
+    answer = (
+        "There is a one-time signup bonus of 4500 Case Credits. "
+        "You can also call Customer Care at 1-888-440-ALOE (2563)."
+    )
+    # No document_type/directory_kind: this must not be classified as a
+    # directory record, or HistoryGroundingValidator also runs and this stops
+    # exercising the pre-existing all-numeric branch.
+    source = RetrievedDocument(
+        id="us-policy", title="US-EN-Company-Policy.pdf",
+        content="Section 4: There is a one-time signup bonus of 300 Case Credits for new FBOs.",
+        source="s3://policy/US-EN-Company-Policy.pdf", country="US", language="en", score=.9,
+        metadata={},
+    )
+    evidence = RetrievalResult(documents=[source], citations=[source.to_source()], confidence=.9)
+    response = ChatResponse(answer=answer, citations=evidence.citations, suggestions=[], cards=[],
+                            confidence=.9, metadata={}, correlation_id="test")
+    body = ChatRequest(message="Signup bonus and customer care number?", sessionId="session-1",
+                       country="US", language="en")
+    orchestrator = AIOrchestrator(governance=_FakeGovernance())
+
+    validated = orchestrator._validate_response(response, body, "test", retrieval_result=evidence)
+
+    assert not validated.metadata.get("fallback")
+    assert "1-888-440-ALOE (2563)" in validated.answer
+    assert "4500" not in validated.answer
+    assert validated.metadata.get("numeric_claim_repair") is True
+    assert validated.metadata.get("removed_numeric_claims") == ["4500"]
+
+
 def test_directory_evidence_failure_asks_for_a_specific_detail(monkeypatch) -> None:
     """Ambiguous directory requests should invite clarification, not dead-end."""
     orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())

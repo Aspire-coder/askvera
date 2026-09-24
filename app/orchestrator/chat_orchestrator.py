@@ -53,6 +53,7 @@ from app.retrieval.cache_evidence import restore_evidence, serialize_evidence
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
 from app.validation.validators.numeric_grounding_validator import (
+    numeric_grounding_documents,
     remove_unsupported_numeric_sentences,
     removal_diagnostics,
 )
@@ -4561,7 +4562,7 @@ class AIOrchestrator:
             ):
                 repaired_answer, removed_numbers = remove_unsupported_numeric_sentences(
                     chat_response.answer,
-                    retrieval_result.documents,
+                    numeric_grounding_documents(retrieval_result.documents, body.country),
                 )
                 numeric_repair_attempt = {
                     "answer": repaired_answer,
