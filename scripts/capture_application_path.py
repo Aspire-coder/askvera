@@ -493,6 +493,83 @@ def _extract_ingestion_ids(diagnostic_capture: dict[str, Any] | None) -> list[st
     return sorted(ids)
 
 
+# --------------------------------------------------------------------------
+# Evidence-decision recording: observes the evidence gate's own decision
+# (approve_evidence's return value) separately from what the customer
+# finally received. A governance refusal replaces the answer with fallback
+# copy carrying no citations, so a turn where evidence WAS approved and an
+# answer WAS generated, then refused, otherwise reads as "no evidence" --
+# see "approved_evidence" and "evidence_decision" in run_one_case's record.
+#
+# Purely observational, unlike CAPTURE_ISOLATION above: CAPTURE_ISOLATION
+# replaces behaviour, this only watches it. The wrapper calls the original
+# with identical arguments and returns the SAME object unchanged.
+# --------------------------------------------------------------------------
+
+# Decisions recorded during the current case's run_one_case call. Reset at
+# the start of each case; a case that never reaches approve_evidence
+# (pre-retrieval routes, refusals before retrieval) simply leaves this
+# empty, which _evidence_decision_summary represents as called=False.
+_EVIDENCE_DECISIONS: list[Any] = []
+
+
+def install_evidence_decision_recorder(module: Any) -> Any:
+    """Wrap `module.approve_evidence` to record its decisions; return the original.
+
+    Installed alongside CAPTURE_ISOLATION's patching in `main()`, in the same
+    `finally` block, but tracked separately since it does not belong to
+    CAPTURE_ISOLATION (it never replaces behaviour). Restore with
+    `restore_evidence_decision_recorder(module, original)`.
+    """
+    original = module.approve_evidence
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        try:
+            _EVIDENCE_DECISIONS.append(result)
+        except Exception:  # noqa: BLE001 - recording must never affect the turn
+            pass
+        return result
+
+    module.approve_evidence = wrapper
+    return original
+
+
+def restore_evidence_decision_recorder(module: Any, original: Any) -> None:
+    module.approve_evidence = original
+
+
+def _evidence_decision_summary(decisions: list[Any]) -> dict[str, Any]:
+    """Summarize the evidence-gate decisions made during one case.
+
+    Top-level approved/reason/document_count reflect the LAST decision (the
+    one that governed the turn); "decisions" lists every call, since a turn
+    can call approve_evidence more than once (e.g. a reapproval of global
+    evidence). Attributes are read defensively with getattr, since
+    EvidenceDecision is only a documented shape here, not an import.
+    """
+    if not decisions:
+        return {"called": False, "approved": None, "reason": None, "document_count": None, "decisions": []}
+
+    entries: list[dict[str, Any]] = []
+    for decision in decisions:
+        evidence = getattr(decision, "evidence", None)
+        document_count = len(evidence) if evidence is not None else None
+        entries.append({
+            "approved": getattr(decision, "approved", None),
+            "reason": getattr(decision, "reason", None),
+            "document_count": document_count,
+        })
+    last = entries[-1]
+    return {
+        "called": True,
+        "approved": last["approved"],
+        "reason": last["reason"],
+        "document_count": last["document_count"],
+        "decisions": entries,
+    }
+
+
 def run_one_case(
     orchestrator: "Any",
     case: dict[str, Any],
@@ -507,6 +584,8 @@ def run_one_case(
     """
     from app.orchestrator import chat_orchestrator
     from utils.validators import ChatRequest
+
+    _EVIDENCE_DECISIONS.clear()
 
     session_id = f"capture-{case['id']}"
     _seed_session_history(session_id, case["turns"], correlation_id)
@@ -590,7 +669,15 @@ def run_one_case(
             "selected_ranks": (rank_lists or {}).get("selector_selected_ranks"),
             "relevant_evidence": (rank_lists or {}).get("selector_relevant_evidence"),
         } if rank_lists is not None else "unavailable",
+        # The final RESPONSE's citations -- what the customer actually
+        # received. This is empty whenever governance replaced the answer
+        # with fallback copy carrying no citations, even on a turn where
+        # evidence WAS approved and an answer WAS generated. "evidence_decision"
+        # below is the evidence gate's OWN decision, recorded separately, so
+        # the two together distinguish "no evidence found" from "evidence was
+        # approved but the answer was refused afterwards".
         "approved_evidence": response.citations if response is not None else [],
+        "evidence_decision": _evidence_decision_summary(list(_EVIDENCE_DECISIONS)),
         # The conversation layer's own record of the turn: the one typed
         # outcome, which CX additions were applied, an answer-language switch
         # and a detected self-correction. Diagnostics the orchestrator already
@@ -640,6 +727,11 @@ def _run_header(manifest_sha: str, approval_id: str) -> dict[str, Any]:
         # Metric publishing is disabled for a capture, so synthetic turns never
         # reach the dashboards that describe real traffic.
         "metrics_published": False,
+        # Whether this run recorded the evidence gate's own decision
+        # (see "evidence_decision" in each case record) separately from what
+        # the customer received. Lets an analyst tell which checkpoints have
+        # the field.
+        "evidence_decision_recorded": True,
     }
 
 
@@ -814,6 +906,11 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
     for name, replacement in CAPTURE_ISOLATION.items():
         setattr(_chat_orchestrator, name, replacement)
 
+    # Evidence-decision recording (see the section above run_one_case). Kept
+    # separate from CAPTURE_ISOLATION -- it only observes approve_evidence,
+    # never replaces it -- but installed and restored alongside it here.
+    previous_approve_evidence = install_evidence_decision_recorder(_chat_orchestrator)
+
     orchestrator = AIOrchestrator()
 
     mode = "a" if (args.resume and args.out.exists()) else "w"
@@ -869,6 +966,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
         _metrics_publisher.enabled = previous_metrics_enabled
         for name, original in previous_isolation.items():
             setattr(_chat_orchestrator, name, original)
+        restore_evidence_decision_recorder(_chat_orchestrator, previous_approve_evidence)
 
 
 if __name__ == "__main__":

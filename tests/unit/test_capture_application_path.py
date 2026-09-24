@@ -644,3 +644,241 @@ def test_a_capture_does_not_publish_metrics(tmp_path, monkeypatch):
     assert metrics_publisher.enabled is True, "the publisher is restored afterwards"
     header = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
     assert header["metrics_published"] is False
+
+
+# --------------------------------------------------------------------------
+# Evidence-decision recording
+#
+# "approved_evidence" is the final RESPONSE's citations: what the customer
+# received. A governance refusal replaces the answer with fallback copy that
+# carries no citations, so a turn where evidence WAS approved and an answer
+# WAS generated, then refused, otherwise reads as "no evidence" (the 2026-09-22
+# root-cause misread this change fixes). "evidence_decision" records the
+# evidence gate's own decision separately, so the two can be told apart.
+# --------------------------------------------------------------------------
+
+
+class _EmptyAnswerRouter:
+    """A model that answers, but whose text is later cleaned up to nothing --
+    standing in for a governance/output-cleanup refusal after evidence was
+    approved and generation ran (`_handle_scrubbed_chat`'s
+    `if not chat_response.answer.strip()` branch, which clears citations)."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def generate(self, *_: object, **__: object) -> ModelResponse:
+        self.call_count += 1
+        return ModelResponse(text="", citations=[], confidence=0.9, provider="test", model_name="model-under-test")
+
+
+class _BlockingGovernance:
+    def evaluate(self, **_: object) -> GovernanceDecision:
+        return GovernanceDecision(allowed=False, action=GovernanceAction.BLOCK, provider="test", reason="blocked")
+
+
+class _ReapprovingRouter:
+    """Simulates a turn where approve_evidence is called more than once (e.g.
+    `_route_or_approve_evidence`'s cross-market reapproval of global evidence),
+    by calling it again itself before answering."""
+
+    def generate(self, *_: object, **__: object) -> ModelResponse:
+        empty_result = RetrievalResult(documents=[], citations=[], confidence=0.0, metadata={})
+        chat_orchestrator.approve_evidence("second call", empty_result, "CA", "en")
+        return ModelResponse(
+            text="The service fee is 2.50.", citations=[], confidence=0.9,
+            provider="test", model_name="model-under-test",
+        )
+
+
+def _run_one_case_with_recorder(orchestrator, case, **kwargs) -> dict:
+    original = tool.install_evidence_decision_recorder(chat_orchestrator)
+    try:
+        return tool.run_one_case(orchestrator, case, **kwargs)
+    finally:
+        tool.restore_evidence_decision_recorder(chat_orchestrator, original)
+
+
+def test_evidence_decision_records_approval_when_an_answer_is_delivered():
+    orchestrator = _orchestrator()
+    case = tool._runtime_fields(_case("approved-and-delivered", message="What is the service fee?"))
+
+    record = _run_one_case_with_recorder(orchestrator, case, correlation_id="test-corr", capture_final_answer=False)
+
+    assert record["evidence_decision"]["called"] is True
+    assert record["evidence_decision"]["approved"] is True
+    assert record["evidence_decision"]["document_count"] == 1
+    assert record["evidence_decision"]["decisions"] == [
+        {"approved": True, "reason": record["evidence_decision"]["reason"], "document_count": 1},
+    ]
+    assert record["approved_evidence"], "the delivered answer should carry the approved citation"
+
+
+def test_evidence_decision_key_case_approved_evidence_empty_while_the_gate_approved():
+    """The exact misreading this change fixes: the evidence gate approved
+    evidence and an answer was generated, but the delivered response carries
+    no citations. approved_evidence alone would misread this as "no evidence
+    found"; evidence_decision.approved is True and says otherwise."""
+    orchestrator = AIOrchestrator(retriever=_Retriever(), router=_EmptyAnswerRouter(), governance=_Governance())
+    case = tool._runtime_fields(_case("empty-delivered-answer", message="What is the service fee?"))
+
+    record = _run_one_case_with_recorder(orchestrator, case, correlation_id="test-corr", capture_final_answer=False)
+
+    assert record["approved_evidence"] == []
+    assert record["evidence_decision"]["called"] is True
+    assert record["evidence_decision"]["approved"] is True
+    assert record["evidence_decision"]["document_count"] == 1
+
+
+def test_evidence_decision_when_approve_evidence_is_never_called():
+    """A pre-retrieval refusal (here, a governance block, which runs before
+    `_route_or_approve_evidence`) never reaches the evidence gate."""
+    orchestrator = AIOrchestrator(retriever=_Retriever(), router=_Router(), governance=_BlockingGovernance())
+    case = tool._runtime_fields(_case("governance-blocked", message="What is the service fee?"))
+
+    record = _run_one_case_with_recorder(orchestrator, case, correlation_id="test-corr", capture_final_answer=False)
+
+    assert record["evidence_decision"] == {
+        "called": False, "approved": None, "reason": None, "document_count": None, "decisions": [],
+    }
+
+
+def test_evidence_decision_records_every_call_and_the_top_level_reflects_the_last():
+    orchestrator = AIOrchestrator(retriever=_Retriever(), router=_ReapprovingRouter(), governance=_Governance())
+    case = tool._runtime_fields(_case("reapproved", message="What is the service fee?"))
+
+    record = _run_one_case_with_recorder(orchestrator, case, correlation_id="test-corr", capture_final_answer=False)
+
+    decisions = record["evidence_decision"]["decisions"]
+    assert len(decisions) == 2
+    assert decisions[0] == {"approved": True, "reason": "approved", "document_count": 1}
+    assert decisions[1] == {"approved": False, "reason": "no_evidence", "document_count": 0}
+    # Top-level reflects the LAST decision -- the one that governed the turn.
+    assert record["evidence_decision"]["approved"] is False
+    assert record["evidence_decision"]["reason"] == "no_evidence"
+    assert record["evidence_decision"]["document_count"] == 0
+
+
+class _RecordingModule:
+    """A bare attribute holder standing in for the chat_orchestrator module,
+    so the wrapper's identity/exception behaviour can be tested in isolation
+    from the real orchestrator."""
+
+
+def test_evidence_decision_wrapper_returns_the_identical_object():
+    sentinel = object()
+    module = _RecordingModule()
+    module.approve_evidence = lambda *args, **kwargs: sentinel
+
+    original = tool.install_evidence_decision_recorder(module)
+    tool._EVIDENCE_DECISIONS.clear()
+    try:
+        result = module.approve_evidence("q", "retrieval-result", "CA", "en")
+        assert result is sentinel
+        assert tool._EVIDENCE_DECISIONS == [sentinel]
+    finally:
+        tool.restore_evidence_decision_recorder(module, original)
+
+    assert module.approve_evidence is original
+
+
+def test_evidence_decision_wrapper_propagates_an_exception_unchanged():
+    module = _RecordingModule()
+
+    def raising_approve_evidence(*args, **kwargs):
+        raise ValueError("boom")
+
+    module.approve_evidence = raising_approve_evidence
+
+    original = tool.install_evidence_decision_recorder(module)
+    tool._EVIDENCE_DECISIONS.clear()
+    try:
+        with pytest.raises(ValueError, match="boom"):
+            module.approve_evidence("q", "retrieval-result", "CA", "en")
+        assert tool._EVIDENCE_DECISIONS == [], "an exception from the original must record nothing"
+    finally:
+        tool.restore_evidence_decision_recorder(module, original)
+
+    assert module.approve_evidence is raising_approve_evidence
+
+
+def test_evidence_decision_recorder_is_installed_during_main_and_restored_after(tmp_path, monkeypatch):
+    import scripts.capture_application_path as capture
+
+    monkeypatch.setattr(capture, "read_active_generations", lambda: [{"active_ingestion_id": "x"}])
+    original_before = chat_orchestrator.approve_evidence
+    seen = {}
+
+    def _fake_run_one_case(*_a: object, **_k: object) -> dict:
+        seen["wrapped_during_run"] = chat_orchestrator.approve_evidence is not original_before
+        return {"case_id": "c1", "call_counts": {key: 0 for key in capture.CALL_CATEGORIES}}
+
+    monkeypatch.setattr(capture, "run_one_case", _fake_run_one_case)
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test", "turns": [],
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x",
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+    capture.main(["--manifest", str(manifest), "--out", str(out), "--i-have-approval", "TEST-APPROVAL"])
+
+    assert seen["wrapped_during_run"] is True
+    assert chat_orchestrator.approve_evidence is original_before
+
+
+def test_evidence_decision_recorder_is_restored_even_when_the_run_raises(tmp_path, monkeypatch):
+    import scripts.capture_application_path as capture
+
+    monkeypatch.setattr(capture, "read_active_generations", lambda: [{"active_ingestion_id": "x"}])
+    original_before = chat_orchestrator.approve_evidence
+
+    def _boom(*a, **k):
+        raise RuntimeError("case blew up")
+
+    monkeypatch.setattr(capture, "run_one_case", _boom)
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test", "turns": [],
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x",
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+
+    with pytest.raises(RuntimeError, match="case blew up"):
+        capture.main(["--manifest", str(manifest), "--out", str(out), "--i-have-approval", "TEST-APPROVAL"])
+
+    assert chat_orchestrator.approve_evidence is original_before
+
+
+def test_run_header_records_evidence_decision_recorded(tmp_path, monkeypatch):
+    import scripts.capture_application_path as capture
+
+    monkeypatch.setattr(capture, "read_active_generations", lambda: [{"active_ingestion_id": "x"}])
+    monkeypatch.setattr(
+        capture, "run_one_case",
+        lambda *a, **k: {"case_id": "c1", "call_counts": {key: 0 for key in capture.CALL_CATEGORIES}},
+    )
+
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({
+        "manifest_version": 1,
+        "cases": [{
+            "id": "c1", "split": "development", "exposure": "test", "turns": [],
+            "message": "What payment methods are accepted?", "country": "US",
+            "language": "en", "role": "new_prospect", "expectations": "x",
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+    capture.main(["--manifest", str(manifest), "--out", str(out), "--i-have-approval", "TEST-APPROVAL"])
+
+    header = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+    assert header["evidence_decision_recorded"] is True
