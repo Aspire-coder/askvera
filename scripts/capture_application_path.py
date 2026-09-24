@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import inspect
 import json
 import subprocess
 import sys
@@ -570,6 +571,210 @@ def _evidence_decision_summary(decisions: list[Any]) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------
+# Output-governance and output-validation recording.
+#
+# On 2026-09-24, four journeys (r10-05..r10-08) had five approved documents,
+# the model generated an answer, and the risk engine refused that answer
+# (governance log: risk HIGH, risk_action REFUSE, failure_layer risk_policy).
+# The capture only ever recorded the final (refused) answer, so there was no
+# way to see what the model had actually written or which risk issue fired.
+# Ten further journeys were replaced by output-validator fallbacks with no
+# record of which validator issues fired; those had to be recovered from
+# production logs. These two recorders close both gaps, purely by observing.
+#
+# NOTE: because these observe the answer BEFORE a governance refusal, the
+# checkpoint can now contain model-generated answer text that governance
+# went on to refuse. That text never reached a customer -- it is captured
+# here only for offline analysis of synthetic capture journeys.
+#
+# Observation point: _evaluate_governance (app/orchestrator/chat_orchestrator.py)
+# calls `self.governance_engine.evaluate(...)`, where `governance_engine` is
+# an instance attribute (defaulting to the module-level GovernanceEngine
+# singleton in app/governance/engine.py, but a test or caller may hand
+# AIOrchestrator any duck-typed object with an `evaluate` method -- the
+# fakes in this test suite do exactly that). Patching the *class* method
+# would miss those, so this wraps `evaluate` on the specific object the
+# orchestrator instance actually holds -- the narrowest point that still
+# works for both the real engine and a substituted one. Output validation
+# is symmetric: `self.output_validator.validate` is wrapped the same way.
+# Both are installed once per `main()` run (after the orchestrator is
+# constructed) and restored in the same `finally` block as the other seams.
+# --------------------------------------------------------------------------
+
+# Governance evaluations of a GENERATED ANSWER (is_generated_answer=True)
+# recorded during the current case. Input-side evaluations are not recorded.
+_OUTPUT_GOVERNANCE_EVALUATIONS: list[dict[str, Any]] = []
+
+# Output-validator results recorded during the current case, in call order
+# (so the first entry is the first validation and any later entry is a
+# re-validation after repair -- see _validate_response's numeric-repair path).
+_OUTPUT_VALIDATION_RESULTS: list[dict[str, Any]] = []
+
+
+def _truncate(text: Any, limit: int = 300) -> Any:
+    return text[:limit] if isinstance(text, str) else text
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _restore_attr(obj: Any, attr_name: str, original: Any) -> None:
+    """Restore `obj.<attr_name>` to `original` after a recorder wrapped it.
+
+    `original` is usually the class's own bound method (the real
+    GovernanceEngine/OutputValidator, or a fake test double whose `evaluate`/
+    `validate` is a normal instance method): in that case the wrapper's
+    `obj.<attr_name> = wrapper` assignment created a shadowing instance
+    attribute that did not exist before, so the cleanest restore is to
+    delete that instance attribute and let normal class-level dispatch
+    resume -- `obj.<attr_name> = original` would work too, but would leave
+    the instance permanently shadowing the class method with a pinned bound
+    method object.
+
+    `original` can also already have BEEN an instance-level override before
+    the recorder ran (e.g. a bare test double that assigns
+    `engine.evaluate = lambda ...` directly, with no class attribute at
+    all). Deleting would wrongly erase that override, so this only deletes
+    when `original` is verifiably the class's own bound method for `obj`;
+    otherwise it assigns `original` back explicitly.
+    """
+    class_attr = inspect.getattr_static(type(obj), attr_name, None)
+    is_class_bound_method = (
+        inspect.ismethod(original)
+        and getattr(original, "__self__", None) is obj
+        and getattr(original, "__func__", None) is class_attr
+    )
+    if is_class_bound_method and attr_name in vars(obj):
+        del obj.__dict__[attr_name]
+    else:
+        setattr(obj, attr_name, original)
+
+
+def install_output_governance_recorder(orchestrator: Any) -> Any:
+    """Wrap `orchestrator.governance_engine.evaluate`; return the original.
+
+    Records only calls made with is_generated_answer=True (an evaluation of
+    what the model wrote, not of the customer's input). Restore with
+    `restore_output_governance_recorder(orchestrator, original)`.
+    """
+    engine = orchestrator.governance_engine
+    original = engine.evaluate
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        try:
+            if kwargs.get("is_generated_answer"):
+                metadata = getattr(result, "metadata", None) or {}
+                risk_metadata = metadata.get("risk") if isinstance(metadata, dict) else None
+                risk_issues = []
+                for issue in (risk_metadata or {}).get("issues") or []:
+                    if not isinstance(issue, dict):
+                        continue
+                    # Copy exactly the keys _risk_metadata (app/governance/
+                    # engine.py) actually puts on each issue -- there is no
+                    # "message" key there, but "policy" says WHICH policy
+                    # refused the answer, which is the field most needed here.
+                    risk_issues.append({
+                        "code": issue.get("code"),
+                        "level": issue.get("level"),
+                        "action": issue.get("action"),
+                        "source": issue.get("source"),
+                        "policy": issue.get("policy"),
+                        "policyVersion": issue.get("policyVersion"),
+                    })
+                _OUTPUT_GOVERNANCE_EVALUATIONS.append({
+                    "text": kwargs.get("text"),
+                    "allowed": getattr(result, "allowed", None),
+                    "provider": getattr(result, "provider", None),
+                    "action": _enum_value(getattr(result, "action", None)),
+                    "reason": _truncate(getattr(result, "reason", None)),
+                    "risk_level": _enum_value(getattr(result, "risk_level", None)),
+                    "risk_action": _enum_value(getattr(result, "risk_action", None)),
+                    "risk_metadata_highest_risk": (risk_metadata or {}).get("highestRisk"),
+                    "risk_metadata_action": (risk_metadata or {}).get("action"),
+                    "risk_issues": risk_issues,
+                })
+        except Exception:  # noqa: BLE001 - recording must never affect the turn
+            pass
+        return result
+
+    engine.evaluate = wrapper
+    return original
+
+
+def restore_output_governance_recorder(orchestrator: Any, original: Any) -> None:
+    _restore_attr(orchestrator.governance_engine, "evaluate", original)
+
+
+def _output_governance_summary(evaluations: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize the output-governance evaluations made during one case.
+
+    "refused" reflects the LAST evaluation, the one that governed the turn.
+    """
+    return {
+        "called": bool(evaluations),
+        "evaluations": evaluations,
+        "refused": bool(evaluations) and not bool(evaluations[-1].get("allowed")),
+    }
+
+
+def install_output_validation_recorder(orchestrator: Any) -> Any:
+    """Wrap `orchestrator.output_validator.validate`; return the original.
+
+    Restore with `restore_output_validation_recorder(orchestrator, original)`.
+    """
+    validator = orchestrator.output_validator
+    original = validator.validate
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        try:
+            context = kwargs.get("context")
+            if context is None and args:
+                context = args[0]
+            chat_response = getattr(context, "chat_response", None)
+            answer = getattr(chat_response, "answer", None)
+            answer_length = len(answer) if isinstance(answer, str) else None
+
+            issues = []
+            for issue in getattr(result, "issues", None) or []:
+                issues.append({
+                    "code": getattr(issue, "code", None),
+                    "severity": _enum_value(getattr(issue, "severity", None)),
+                    "message": _truncate(getattr(issue, "message", None)),
+                })
+
+            has_critical = None
+            has_critical_method = getattr(result, "has_critical", None)
+            if callable(has_critical_method):
+                try:
+                    has_critical = has_critical_method()
+                except Exception:  # noqa: BLE001 - recording must never affect the turn
+                    has_critical = None
+
+            _OUTPUT_VALIDATION_RESULTS.append({
+                "issues": issues,
+                "has_critical": has_critical,
+                "answer_length": answer_length,
+            })
+        except Exception:  # noqa: BLE001 - recording must never affect the turn
+            pass
+        return result
+
+    validator.validate = wrapper
+    return original
+
+
+def restore_output_validation_recorder(orchestrator: Any, original: Any) -> None:
+    _restore_attr(orchestrator.output_validator, "validate", original)
+
+
+def _output_validation_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"called": bool(results), "results": results}
+
+
 def run_one_case(
     orchestrator: "Any",
     case: dict[str, Any],
@@ -586,6 +791,8 @@ def run_one_case(
     from utils.validators import ChatRequest
 
     _EVIDENCE_DECISIONS.clear()
+    _OUTPUT_GOVERNANCE_EVALUATIONS.clear()
+    _OUTPUT_VALIDATION_RESULTS.clear()
 
     session_id = f"capture-{case['id']}"
     _seed_session_history(session_id, case["turns"], correlation_id)
@@ -678,6 +885,18 @@ def run_one_case(
         # approved but the answer was refused afterwards".
         "approved_evidence": response.citations if response is not None else [],
         "evidence_decision": _evidence_decision_summary(list(_EVIDENCE_DECISIONS)),
+        # Governance evaluations of the model's GENERATED ANSWER, recorded
+        # separately from the delivered response. When "refused" is True, the
+        # "text" of the last evaluation is what the model actually wrote --
+        # text that governance went on to refuse, so it never reached a
+        # customer. Kept here for offline analysis of synthetic capture
+        # journeys only (see the recorder's module comment above run_one_case).
+        "output_governance": _output_governance_summary(list(_OUTPUT_GOVERNANCE_EVALUATIONS)),
+        # Output-validator results in call order (a second entry is a
+        # re-validation after a numeric-claim repair attempt); tells us which
+        # validator issues fired on a turn the checkpoint otherwise only shows
+        # as a fallback answer.
+        "output_validation": _output_validation_summary(list(_OUTPUT_VALIDATION_RESULTS)),
         # The conversation layer's own record of the turn: the one typed
         # outcome, which CX additions were applied, an answer-language switch
         # and a detected self-correction. Diagnostics the orchestrator already
@@ -732,6 +951,12 @@ def _run_header(manifest_sha: str, approval_id: str) -> dict[str, Any]:
         # the customer received. Lets an analyst tell which checkpoints have
         # the field.
         "evidence_decision_recorded": True,
+        # Whether this run recorded output-governance evaluations of the
+        # model's generated answer ("output_governance" in each case record)
+        # and output-validator results ("output_validation"). Lets an analyst
+        # tell which checkpoints carry the new fields.
+        "output_governance_recorded": True,
+        "output_validation_recorded": True,
     }
 
 
@@ -913,6 +1138,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
 
     orchestrator = AIOrchestrator()
 
+    # Output-governance and output-validation recording (see the section
+    # above run_one_case). Installed after the orchestrator exists, since
+    # both wrap objects the orchestrator instance holds rather than the
+    # chat_orchestrator module; restored in the same `finally` block as the
+    # other seams.
+    previous_governance_evaluate = install_output_governance_recorder(orchestrator)
+    previous_validator_validate = install_output_validation_recorder(orchestrator)
+
     mode = "a" if (args.resume and args.out.exists()) else "w"
     running_totals = {key: 0 for key in CALL_CATEGORIES}
     for row in existing_rows:
@@ -967,6 +1200,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901
         for name, original in previous_isolation.items():
             setattr(_chat_orchestrator, name, original)
         restore_evidence_decision_recorder(_chat_orchestrator, previous_approve_evidence)
+        restore_output_governance_recorder(orchestrator, previous_governance_evaluate)
+        restore_output_validation_recorder(orchestrator, previous_validator_validate)
 
 
 if __name__ == "__main__":
