@@ -10,10 +10,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from utils.logging import get_logger
-
-LOGGER = get_logger("services.market_config")
-
 DEFAULT_MARKETS_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "markets.json"
 DEFAULT_GLOBAL_DIRECTORY_MARKETS_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "config" / "global_directory_markets.json"
@@ -24,14 +20,6 @@ DEFAULT_SPONSORING_DIRECTORY_ALIASES_CONFIG_PATH = (
 )
 REQUIRED_MARKET_FIELDS = {"code", "name", "enabled", "defaultLanguage", "languages", "privacyVersion", "displayOrder"}
 REQUIRED_LANGUAGE_FIELDS = {"code", "name", "enabled"}
-
-# Fix B (2026-09-15): fbo_enrollment_is_unavailable() below fails safe, not open,
-# when markets.json cannot be read or parsed - this is the previously known
-# restricted set (config/vera_persona.py used to hardcode it), kept only as
-# that fallback. Returning False for the US in a config-read failure would let
-# an answer imply US enrollment is available, which is worse than being overly
-# restrictive for every other market too.
-_FALLBACK_FBO_ENROLLMENT_UNAVAILABLE_MARKETS = frozenset({"US"})
 
 
 def _config_path() -> Path:
@@ -458,8 +446,6 @@ def _validate_market_config(config: dict[str, Any], config_path: Path) -> None:
 
         if not isinstance(market["enabled"], bool):
             raise RuntimeError(f"Invalid market config: {code}.enabled must be true or false.")
-        if "fboEnrollmentAvailable" in market and not isinstance(market["fboEnrollmentAvailable"], bool):
-            raise RuntimeError(f"Invalid market config: {code}.fboEnrollmentAvailable must be true or false.")
         if not isinstance(market["displayOrder"], int):
             raise RuntimeError(f"Invalid market config: {code}.displayOrder must be a number.")
         if market["displayOrder"] in seen_display_orders:
@@ -485,43 +471,6 @@ def get_markets() -> list[dict[str, Any]]:
         if market.get("enabled", True) and str(market.get("code") or "").upper() in published
     ]
     return sorted(enabled_markets, key=lambda market: (market.get("displayOrder", 9999), market.get("name", "")))
-
-
-def fbo_enrollment_is_unavailable(country: str) -> bool:
-    """Return whether current market config blocks new FBO enrollment for a country.
-
-    Fix B (2026-09-15): this moved out of config/vera_persona.py's hardcoded
-    frozenset into markets.json's per-market ``fboEnrollmentAvailable`` field
-    (validated in ``_validate_market_config``), so a market's enrollment
-    status is data, not code. ``config.vera_persona.fbo_enrollment_is_unavailable``
-    stays the public import path every caller already uses and now delegates
-    here.
-
-    Deliberately not its own lru_cache: it is cheap to recompute and
-    ``load_market_config()`` (which it reads) is already cached, matching
-    ``_all_configured_market_names()`` above.
-
-    Fails safe, not open: if markets.json cannot be read or parsed, this falls
-    back to the previously known restricted set
-    (``_FALLBACK_FBO_ENROLLMENT_UNAVAILABLE_MARKETS``) rather than returning
-    False - returning False for the US on a config failure would let an
-    answer imply US enrollment is available.
-    """
-    normalized = str(country or "").strip().upper()
-    if not normalized:
-        return False
-    try:
-        markets = load_market_config()["markets"]
-    except (OSError, json.JSONDecodeError, RuntimeError):
-        LOGGER.warning(
-            "market_config_read_failed_fbo_enrollment_fallback",
-            country=normalized,
-        )
-        return normalized in _FALLBACK_FBO_ENROLLMENT_UNAVAILABLE_MARKETS
-    for market in markets:
-        if str(market.get("code") or "").upper() == normalized:
-            return market.get("fboEnrollmentAvailable") is False
-    return False
 
 
 def market_display_name(code: str) -> str:
@@ -618,26 +567,8 @@ def get_widget_country_codes() -> set[str]:
 
 @lru_cache(maxsize=1)
 def _localized_market_names() -> dict[str, list[str]]:
-    """Load market_name_aliases.json's per-market alias names, with any alias
-    that collides with a closed-class function word in a configured
-    language (e.g. Estonian "Tai" for Thailand, which is also the Finnish
-    word for "or") excluded before it ever becomes a match pattern - see
-    ``config.alias_function_word_guard`` for the guard itself and why the
-    exclusion happens here rather than by hand-editing the generated JSON.
-    Every exclusion is logged (auditable), never silent.
-    """
-    from config.alias_function_word_guard import filter_function_word_aliases
-
     path = DEFAULT_MARKETS_CONFIG_PATH.with_name("market_name_aliases.json")
-    raw_names = json.loads(path.read_text(encoding="utf-8"))["names"]
-    filtered_names, excluded = filter_function_word_aliases(raw_names)
-    if excluded:
-        LOGGER.warning(
-            "market_alias_function_word_collision_excluded",
-            excluded_count=len(excluded),
-            excluded=[f"{code}:{alias}" for code, alias in excluded],
-        )
-    return filtered_names
+    return json.loads(path.read_text(encoding="utf-8"))["names"]
 
 
 def find_market_mentions(message: str) -> set[str]:

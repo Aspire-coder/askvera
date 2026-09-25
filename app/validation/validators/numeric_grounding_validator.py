@@ -7,10 +7,8 @@ import unicodedata
 from dataclasses import dataclass
 
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
-from config.timing_stage_vocabulary import TIMING_STAGE_VOCABULARY
 from services.market_config import find_market_mentions, market_adjective_codes
 from utils.redaction import PHONE_RE
-from utils.sentence_spans import abbreviation_or_initial_before
 
 
 # Numbers are universal. Claim extraction deliberately does not depend on unit
@@ -348,27 +346,6 @@ def _is_acronym(word: str) -> bool:
     return 2 <= len(word) <= 6 and word.isupper()
 
 
-def _acronym_with_suffix(word: str) -> bool:
-    """True for a bare acronym, or the same acronym with a plural/possessive suffix.
-
-    The corpus itself inflects a role acronym like any other word - "FBO" and
-    "FBOs" name the same role (see _FBO_ROLE_RE, which matches both). Freeing
-    a sentence-initial capitalised word only ahead of the bare, unsuffixed
-    spelling left the plural bound to it: "For FBOs, the minimum order size is
-    50 USD" kept {"for", "fbos"} as the only subject, and no source sentence
-    repeats "for" beside its figure. A correctly grounded amount was then
-    reported unsupported and deleted. Stripping a plain "s" or a possessive
-    "'s"/"'s" before testing is a spelling rule, not a language-specific word
-    list, so it applies to any acronym this corpus uses.
-    """
-    if _is_acronym(word):
-        return True
-    for suffix in ("'s", "’s", "s"):
-        if word.endswith(suffix) and _is_acronym(word[: -len(suffix)]):
-            return True
-    return False
-
-
 def _entity_phrases(text: str) -> list[tuple[str, bool, bool]]:
     """Capitalised phrases, each flagged when it is an acronym freed from a segment's first word,
     and whether the phrase itself begins at the segment's first word.
@@ -412,7 +389,7 @@ def _entity_phrases(text: str) -> list[tuple[str, bool, bool]]:
             and len(segment_words) >= 2
             and entities[first_entity][0] == f"{segment_words[0]} {segment_words[1]}"
             and _is_title_case_word(segment_words[0])
-            and _acronym_with_suffix(segment_words[1])
+            and _is_acronym(segment_words[1])
         ):
             entities[first_entity] = (segment_words[1], True, False)
     return entities
@@ -772,54 +749,6 @@ _MEASURE_WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 _TIME_KINDS = frozenset({"hour", "day", "week", "month", "year"})
 _MEASURE_TOKEN_RE = re.compile(r"[^\W\d_]+|[\d.;:!?()\[\]]")
-
-
-# The process stage (delivery, approval, processing, payment, settlement,
-# waiting period, office hours) a timing figure belongs to, read from cue words
-# and short phrases in the surrounding clause or sentence -- never from a
-# figure's value alone. Terms come only from config/timing_stage_vocabulary.py,
-# unioned across every covered language, the same way _MEASURE_WORDS above
-# reads a unit word in any of this corpus's languages without first deciding
-# which one the text is in.
-_STAGE_TERMS: dict[str, set[str]] = {}
-for _language_terms in TIMING_STAGE_VOCABULARY.values():
-    for _stage, _terms in _language_terms.items():
-        _STAGE_TERMS.setdefault(_stage, set()).update(_terms)
-_STAGE_PATTERNS: dict[str, re.Pattern[str]] = {
-    stage: re.compile(
-        r"\b(?:" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + r")\b",
-        re.IGNORECASE | re.UNICODE,
-    )
-    for stage, terms in _STAGE_TERMS.items()
-}
-
-
-def _classify_stage(text: str) -> str:
-    """Return the one timing-process stage cued in this text, or "" when none or more than one is.
-
-    Conservative on purpose: a clause naming cues for two different stages (an
-    application that is "processed" as part of being "approved") or naming
-    none at all returns "", so a claim is never newly flagged just because its
-    stage, or the source's, could not be read with confidence.
-    """
-    normalized = _normalize(text)
-    matched = {stage for stage, pattern in _STAGE_PATTERNS.items() if pattern.search(normalized)}
-    return next(iter(matched)) if len(matched) == 1 else ""
-
-
-def _stage_mismatch(claim_stage: str, source_text: str, occurrence_start: int, occurrence_end: int) -> bool:
-    """True when this source occurrence is confidently a DIFFERENT timing stage than the claim's.
-
-    ``claim_stage`` is already "" for a non-timing figure or an unclassifiable
-    claim sentence (see the call site), so this only ever narrows a figure the
-    rest of the function would otherwise accept.
-    """
-    if not claim_stage:
-        return False
-    source_stage = _classify_stage(_rule_segment(source_text, occurrence_start, occurrence_end))
-    return bool(source_stage) and source_stage != claim_stage
-
-
 # A comma ends the figure's clause for its period: in "25 Case Credits, and
 # Home Office approval, which takes days, is needed" the days are not the limit's.
 # A colon ends it only before a space: Finnish writes "2 CC:n arvosta".
@@ -1244,19 +1173,6 @@ def _claim_is_supported(
     # A grouped source amount supports only a claim that could be the same money:
     # "2,000 CC" or "9,440 TND" in the answer never borrows "2.000 francs CFA".
     grouped_amounts = not claim_kind or _currency_groups_thousands(claim_kind)
-    # A timing figure borrowed from a different process stage is not support,
-    # even though the number itself is genuinely in the source: "3 working
-    # days" stated for delivery must not ground "3 working days" claimed for
-    # approval. Read only when the claim itself counts a time unit or names a
-    # period ("25 Case Credits in any calendar Month" does not qualify;
-    # "3 working days" or "within 48 hours" does), and only when the claim's
-    # own sentence names exactly one stage -- otherwise this never tightens
-    # anything, matching every other numeric claim exactly as before.
-    claim_stage = (
-        _classify_stage(claim.sentence)
-        if claim_kind in _TIME_KINDS or claim_period in _TIME_KINDS
-        else ""
-    )
     for number in _number_variants(claim.number):
         for window, occurrence_start, occurrence_end in _source_occurrences(
             source_text, number, grouped_amounts=grouped_amounts
@@ -1268,8 +1184,6 @@ def _claim_is_supported(
             # was kept. Compared only when both sides write a unit or a period.
             source_kind, source_period = _measure(source_text, occurrence_start, occurrence_end)
             if not _measures_agree((claim_kind, claim_period), (source_kind, source_period)):
-                continue
-            if _stage_mismatch(claim_stage, source_text, occurrence_start, occurrence_end):
                 continue
             if not _occurrence_can_support(
                 source_text, occurrence_start, occurrence_end, claim_letter, claim_reads_as_clock, clock_spans
@@ -1400,35 +1314,11 @@ def _extract_claims(answer: str) -> list[MeasurableClaim]:
     return claims
 
 
-# A spelled-out number immediately before a parenthesised figure ("five (5)
-# working days") is the common legal/policy convention of restating a number
-# in digits, not a footnote or citation marker - "(5)" here is exactly the
-# kind of timing figure this validator must still stage-check, the same as
-# any other. Without this, "Approval takes five (5) working days." against a
-# source stating "Delivery takes five (5) working days." was never even
-# extracted as a claim, so the process-stage mismatch (approval borrowing
-# delivery's number) went uncaught (Fable Phase 2 review, finding 3c). Kept
-# deliberately small and English-only for now: broadening it to every
-# covered language is future work, not part of this fix.
-_SPELLED_OUT_NUMBER_WORDS = frozenset({
-    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
-    "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
-    "hundred",
-})
-
-
-def _preceded_by_spelled_out_number(answer: str, open_index: int) -> bool:
-    """True when the "(" (or "[") at ``open_index`` is right after a spelled-out number word."""
-    word_match = re.search(r"[^\W\d_]+\s*$", answer[:open_index])
-    return bool(word_match and word_match.group(0).strip().casefold() in _SPELLED_OUT_NUMBER_WORDS)
-
-
 def _is_structural_reference(answer: str, start: int, end: int) -> bool:
     """Ignore presentation numbers that are not measurable factual claims."""
     before = answer[start - 1 : start] if start else ""
     after = answer[end : end + 1]
-    if before in {"[", "("} and after in {"]", ")"} and not _preceded_by_spelled_out_number(answer, start - 1):
+    if before in {"[", "("} and after in {"]", ")"}:
         return True
 
     line_start = answer.rfind("\n", 0, start) + 1
@@ -1915,24 +1805,9 @@ def remove_unsupported_numeric_sentences(answer: str, source_documents: list[obj
     # Decimal/time separators are not sentence endings. A bare period search
     # left fragments such as "00 pm" after deleting a sentence with 09.00-17.00.
     abbreviations = list(re.finditer(r"\b(?:[^\W\d_]\.){2,}", answer))
-    # A single abbreviation ("approx.", "Nr.", "ca.") or an initial ("J.") is
-    # not the letter-dot-letter-dot shape above, so the bare period search
-    # still read it as a sentence end. Deleting the unsupported number that
-    # followed then left the abbreviation or initial standing alone: "The fee
-    # is approx." or "Contact J. R." (fragment audit, Phase 2 Lane D,
-    # 2026-09-18). abbreviation_or_initial_before answers only "is this period
-    # abbreviation punctuation" and leaves what follows to this function's own
-    # boundary regex - unlike utils.sentence_spans.sentence_boundaries, which
-    # also requires an uppercase letter, quote, line break or end of text to
-    # follow before calling anything a boundary. That fuller rule reads "You
-    # must generate 120 Open Group Case Credits. (There is an exception ..."
-    # as one sentence, because "(" is not uppercase/quote/newline, and a
-    # first attempt at this fix (round 1) deleted the grounded "120" sentence
-    # along with the exception clause that came after it.
     boundaries = [match for match in re.finditer(r"[.!?](?=\s|$)|\n", answer)
                   if not any(abbreviation.start() <= match.start() < abbreviation.end()
-                             for abbreviation in abbreviations)
-                  and not (match.group() == "." and abbreviation_or_initial_before(answer, match.start()))]
+                             for abbreviation in abbreviations)]
     for claim in unsupported:
         left = max((match.end() for match in boundaries if match.end() <= claim.start), default=0)
         right = next((match.end() for match in boundaries if match.start() >= claim.end), len(answer))

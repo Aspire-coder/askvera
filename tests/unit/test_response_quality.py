@@ -40,7 +40,7 @@ def test_us_reviewed_contacts_replace_known_placeholders() -> None:
         "US",
     )
 
-    assert answer == "Call 1-888-440-ALOE (2563) or visit www.foreverliving.com."
+    assert answer == "Call (888) 440-ALOE (2563) or visit www.foreverliving.com."
     assert changes == ["phone_replaced", "website_replaced"]
     assert contains_unresolved_placeholder(answer) is False
 
@@ -53,9 +53,9 @@ def test_non_us_markets_never_inherit_us_phone() -> None:
         country = market["code"]
         answer, _ = remove_or_replace_contact_placeholders("Customer Care: [PHONE]", country)
         if country == "US":
-            assert "1-888-440-ALOE (2563)" in answer
+            assert "(888) 440-ALOE (2563)" in answer
         else:
-            assert "1-888-440-ALOE (2563)" not in answer
+            assert "(888) 440-ALOE (2563)" not in answer
             assert "[PHONE]" not in answer
         assert contact_for_country(country).get("website") == "www.foreverliving.com"
 

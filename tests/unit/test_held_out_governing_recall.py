@@ -162,26 +162,12 @@ def test_an_artifact_case_the_fixture_does_not_know_is_refused():
 
 
 def test_outcomes_are_labelled_offline_for_artifacts_that_predate_the_label():
-    # Updated 2026-09-18 (Phase 3, Lane 4): config/conversation_routes.json
-    # now carries a reviewed "cross_market_policy_scope" key for "en" (the
-    # CX_LANES.md message-key table), which scripts/run_benchmark.py's
-    # classify_outcome already looked up via _cross_market_scope_copy before
-    # this key existed anywhere. That reviewed copy is what a live run
-    # produces now, not the orchestrator's English-only fallback constant
-    # (CROSS_MARKET_POLICY_SCOPE_RESPONSE), so this offline-labelling fixture
-    # uses the same reviewed copy classify_outcome resolves.
-    from app.evidence import configured_conversation_response
-
-    # Coordinator, 2026-09-18: the delivered copy has the market filled in.
-    cross_market_scope_copy = configured_conversation_response("cross_market_policy_scope", "en")[0].replace(
-        "{country}", "Sweden"
-    )
-    assert "{" not in cross_market_scope_copy
+    from app.orchestrator.chat_orchestrator import CROSS_MARKET_POLICY_SCOPE_RESPONSE
 
     pack_cases = {ABSTAIN_CASE["id"]: ABSTAIN_CASE, ANSWER_CASE["id"]: ANSWER_CASE}
     recorded = {"outcome": "answered", "basis": "recorded", "declining_copy": None}
     artifact = _artifact({
-        ABSTAIN_CASE["id"]: [{"answer": cross_market_scope_copy, "abstained": True, "passed": True}],
+        ABSTAIN_CASE["id"]: [{"answer": CROSS_MARKET_POLICY_SCOPE_RESPONSE, "abstained": True, "passed": True}],
         ANSWER_CASE["id"]: [{"answer": "x", "passed": False, "diagnostic_outcome": recorded}],
     })
 

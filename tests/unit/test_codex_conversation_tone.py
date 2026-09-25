@@ -28,62 +28,8 @@ TEMPLATES = ROOT / "app" / "prompts" / "templates.py"
 # casing typo in the Russian income disclaimer ("Сша" -> "США").
 # Updated 2026-09-14: the prompt now forbids raw field trailers and requires
 # explicit handling of conflicting directory and policy sources.
-# Updated 2026-09-16: the US test plan requires that a declined question also
-# offers Customer Care contact. insufficient_evidence gained an appended
-# sentence carrying the existing [PHONE] placeholder token (en, fr, es, de,
-# nl - the locales that already carry reviewed copy for this key); the
-# remaining configured locales continue to translate the English source on
-# demand and pick up the new sentence automatically.
-# Updated 2026-09-18 (Phase 2, Lane A, task A7): added one new key,
-# "reference_clarification", to the "responses" object of every locale that
-# already had a "responses" block (en, fr, es, de, nl, it, fi, no, sv) - the
-# localized copy asking which of two or more candidate markets an
-# unresolved back-reference ("the other one") meant, with a "{candidates}"
-# placeholder the orchestrator fills in. No existing key's value changed, and
-# "pt" was left with no locale block, as before, since it never had one.
-# (Fable review, 2026-09-18, finding T1: this comment previously also named
-# "sr" and "ru", but config/conversation_routes.json never gained a
-# "reference_clarification" key for either locale; corrected the comment
-# only - the hash below and the config file are unchanged.)
-# Updated 2026-09-18 (Phase 3, Lane 4, CX localization/rendering task): every
-# locale gained the CX_LANES.md message-key set (evidence_missing_detail,
-# dependency_unavailable, cross_market_policy_scope,
-# international_directory_note, personal_account_limit, partial_answer_gap,
-# clarify_field, clarify_country, clarify_role, repair_ack, contact_offer,
-# suggest_intro, the four suggest_topic_* keys) plus ten field_label_<field>
-# keys for the canonical directory fields (utils/directory_fields.py /
-# config/directory_field_vocabulary.py). it/da/fi/no/sr/sv/ru also gained a
-# "bedrock_error" entry (none of these seven locales had one before), since
-# "dependency_unavailable" reuses that same string per locale. No existing
-# key's value changed anywhere. This is purely additive; the new non-English
-# copy is Lane 4's own translation and needs native review (see
-# docs/conversation-quality/phase3/CX_LANE4_LOCALIZATION.md).
-# Updated 2026-09-19 (Fable CX review finding S5): "insufficient_evidence"
-# was reviewed copy for only 5 of the 12 route locales (en fr es de nl); the
-# other 7 (it da fi no sr sv ru) had none at all, so app/response/cx_render.py's
-# render() floored to English for them while the base orchestrator path
-# (app.evidence.localized_conversation_response) translated at runtime via
-# Bedrock - a mismatch that could deliver a bilingual answer (translated base
-# text with an appended English CX sentence) and that always defeated
-# app/response/cx_compose.py's generic-copy recognition (evidence_missing_detail
-# and the personal-account note never applied) for those 7 locales. Added
-# "insufficient_evidence" for it/da/fi/no/sr/sv/ru, matching the exact
-# two-paragraph shape (generic sentence; then a "[PHONE]"-placeholder contact
-# line) the existing en/fr/es/de/nl entries already use. No existing key's
-# value changed anywhere. This new copy is Lane 4's own translation and needs
-# native review (see docs/conversation-quality/phase3/CX_LANE4_LOCALIZATION.md).
-ROUTES_REST_SHA256 = "3ec04c67e6959926bfca3f738d6517c629854593bc4719225bc5d8110d952213"
-# Updated 2026-09-18 (conversation-quality project): four rules edited in
-# place, all additive in meaning, with the rendered prompt held under the
-# existing 4392-character budget (4247 -> 4381), so no budget assertion moved.
-# "role" joined the no-transfer list (FBO vs Preferred Customer figures); the
-# qualifications rule now asks for mandatory qualifications, amounts, periods,
-# exceptions and alternative routes stated concretely, and for a named contact
-# rather than leaving it unnamed; the compound-request rule now also names a part
-# the evidence does not establish, keeping "prohibited or unavailable parts". PROMPT_VERSION was bumped with it, because
-# both caches key on it. These are instructions only: whether live answers
-# improve is unverified without a live run.
-TEMPLATE_LATER_SHA256 = "a6728cac7378e9889ecca0cd4da8784330129d757610da15a2d5dcd03fd4b90b"
+ROUTES_REST_SHA256 = "6d96b23fecb190e72e45afd435b63e155d0cbe12542509c41f663f27413a1f55"
+TEMPLATE_LATER_SHA256 = "a599a86c86d9ad125b78ff4619218fb3f365e19ce1408009fdf9c5d05e81b5f4"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
     "wellbeing": "Thanks for asking! I'm here to help. What's on your mind?",

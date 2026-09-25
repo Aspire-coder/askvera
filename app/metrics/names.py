@@ -25,12 +25,6 @@ DELIVERED_RESPONSES_METRIC = "DeliveredResponses"
 FALLBACK_RESPONSES_METRIC = "FallbackResponses"
 FALLBACK_BY_LAYER_METRIC = "FallbackResponsesByLayer"
 NUMERIC_REPAIRS_METRIC = "NumericClaimRepairs"
-# Distinct from FALLBACK_BY_LAYER_METRIC: every dependency_unavailable
-# fallback also counts there, but this one exists so a dependency outage can
-# be alarmed on directly (see docs/conversation-quality/phase2/
-# DEPENDENCY_ALARM_SPEC.md) without having to subtract every other fallback
-# layer out of FallbackResponsesByLayer first.
-DEPENDENCY_UNAVAILABLE_METRIC = "DependencyUnavailable"
 
 PIPELINE_STAGE_METRIC_NAMES = {
     "governance": GOVERNANCE_LATENCY,
@@ -51,25 +45,17 @@ SYSTEM_METRIC_NAMES = {
     "fallback_responses": FALLBACK_RESPONSES_METRIC,
     "fallback_by_layer": FALLBACK_BY_LAYER_METRIC,
     "numeric_claim_repairs": NUMERIC_REPAIRS_METRIC,
-    "dependency_unavailable": DEPENDENCY_UNAVAILABLE_METRIC,
 }
 
-# System metrics that carry one or more extra CloudWatch dimensions, each
-# taken from the metric's own metadata: {metric name: [(metadata key,
-# dimension name), ...]}.
+# System metrics that carry one extra CloudWatch dimension, taken from the
+# metric's own metadata: {metric name: (metadata key, dimension name)}.
 #
 # Cardinality is the reason this is an explicit allowlist rather than "promote
 # every metadata key". CloudWatch bills per distinct dimension combination, so
 # only bounded, enumerable values belong here. `failure_layer` is drawn from a
-# fixed set defined in the orchestrator, not from user input; `component` is
-# drawn from app.orchestrator.dependency_contract.DEPENDENCY_COMPONENTS, and
-# `availability` from app.metrics.responses.DEPENDENCY_AVAILABILITY_VALUES
-# (the R02 RetrievalAvailability labels "unavailable"/"degraded", plus
-# "exception" for a dependency failure that escaped as a raised exception
-# rather than a routed availability value).
+# fixed set defined in the orchestrator, not from user input.
 SYSTEM_METRIC_DIMENSIONS = {
-    "fallback_by_layer": [("failure_layer", "FailureLayer")],
-    "dependency_unavailable": [("component", "Component"), ("availability", "Availability")],
+    "fallback_by_layer": ("failure_layer", "FailureLayer"),
 }
 
 # Substituted when a dimension's metadata value is missing or blank.

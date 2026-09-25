@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from app.metrics import STAGE_RESPONSE_BUILD
 from app.metrics.pipeline import record_pipeline_metric
 from utils.logging import get_logger
-from utils.sentence_spans import split_sentences
 
 from .models import ChatResponse
 
@@ -396,12 +395,7 @@ class ResponseBuilder:
         delivered = f" {self._comparable_text(delivered_answer, identifiers)} "
         kept: list[str] = []
         complete = True
-        # utils.sentence_spans, not a bare "[.!?]\s+" split: a decimal, an
-        # abbreviation, an initial, an email or a URL inside a model sentence
-        # must not be read as its own "unit" here, or a real sentence is
-        # compared against `delivered` one broken fragment at a time and
-        # wrongly judged missing.
-        for unit in split_sentences(built_answer or ""):
+        for unit in re.split(r"(?<=[.!?])\s+|\n", built_answer or ""):
             comparable = self._comparable_text(unit, identifiers)
             # A line made only of source markers is presentation the orchestrator
             # removes on purpose; losing it removes no claim.
@@ -423,7 +417,7 @@ class ResponseBuilder:
         the model wrote still follows it.
         """
         built = f" {self._comparable_text(built_answer, identifiers)} "
-        units = split_sentences(delivered_answer or "")
+        units = [unit for unit in re.split(r"(?<=[.!?])\s+|\n", delivered_answer or "") if unit.strip()]
         last = -1
         for index, unit in enumerate(units):
             comparable = self._comparable_text(unit, identifiers)

@@ -39,10 +39,9 @@ Sub-commands
 ``views``       Measure how the selector view truncates extraction rows and
                 held-out governing passages, and whether it names each row's
                 governing heading.
-``rrf``         Compare the production merge, plain reciprocal rank fusion, and
-                the isolated scope-aware V2 fusion on a captured per-query
-                candidate file. Without a capture of the live text *and* vector
-                lists this reports BLOCKED.
+``rrf``         Compare the production merge against reciprocal rank fusion on
+                a captured per-query candidate file. Without a capture of the
+                live text *and* vector lists this reports BLOCKED.
 ``convert-artifact``
                 Build that capture file (``approximate: false``) from a
                 ``run_benchmark`` artifact whose final turn carries the
@@ -61,8 +60,6 @@ Capture schema (``askvera-retrieval-capture/1``)::
      "cases": [{"case_id": "...", "question": "...", "country": "NO", "language": "no",
                 "required_sections": ["NO:17.08-c"], "required_ids": [],
                 "target_country_names": [], "ranking_queries": [], "prefer_outline": false,
-                "runtime_scope_intent": null, "authorized_policy_market": null,
-                "context_resolution": null,
                 "searches": [{"kind": "text|vector|exact|outline|global_text|global_vector",
                               "query": "...", "weight": 1.0,
                               "hits": [{"_id": "...", "_score": <raw OpenSearch score>,
@@ -86,11 +83,6 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from app.experimental.evidence_first_v2.capture_provenance import validate_capture_provenance  # noqa: E402
-
 CAPTURE_SCHEMA = "askvera-retrieval-capture/1"
 _TOKEN_RE = re.compile(r"\d+(?:[.,]\d+)+|[^\W_]+", re.UNICODE)
 _BM25_K1 = 1.2
@@ -713,127 +705,15 @@ def _recall(positions: dict[str, int | None], depth: int) -> float | None:
     return round(sum(1 for position in positions.values() if position and position <= depth) / len(positions), 4)
 
 
-def _rows_for_identifiers(
-    identifiers: list[str] | tuple[str, ...],
-    by_id: dict[str, tuple[dict[str, Any], float]],
-) -> list[tuple[dict[str, Any], float]]:
-    """Resolve a captured ordering to rows, rejecting identity ambiguity."""
-    resolved: list[tuple[dict[str, Any], float]] = []
-    seen: set[str] = set()
-    for identifier in identifiers:
-        if identifier in seen:
-            continue
-        seen.add(identifier)
-        pair = by_id.get(identifier)
-        if pair is not None:
-            resolved.append(pair)
-    return resolved
-
-
-def _row_identity(row: dict[str, Any]) -> tuple[str, str, str, str, str, str, str]:
-    """Return every available field that disambiguates a public row ID."""
-    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-    return (
-        str(row.get("id") or ""),
-        str(row.get("source_file") or metadata.get("source_file") or ""),
-        str(row.get("document_version") or metadata.get("document_version") or ""),
-        str(row.get("content_hash") or metadata.get("content_hash") or ""),
-        str(row.get("section_id") or metadata.get("section_id") or ""),
-        str(row.get("country") or metadata.get("country") or "").upper(),
-        str(row.get("access_scope") or metadata.get("access_scope") or "").casefold(),
-    )
-
-
-def _strict_row_index(rows: list[tuple[dict[str, Any], float]]) -> dict[str, tuple[dict[str, Any], float]]:
-    """Index only public IDs whose full captured identities agree."""
-    indexed: dict[str, tuple[dict[str, Any], float]] = {}
-    identities: dict[str, tuple[str, str, str, str, str, str, str]] = {}
-    for row, score in rows:
-        identity = _row_identity(row)
-        identifier = identity[0]
-        if not identifier:
-            raise ValueError("merged row lacks a public document id")
-        previous = identities.get(identifier)
-        if previous is not None and previous != identity:
-            raise ValueError("conflicting merged identities for one public document id")
-        identities.setdefault(identifier, identity)
-        indexed.setdefault(identifier, (row, score))
-    return indexed
-
-
-def _captured_source_ids(case: dict[str, Any]) -> dict[str, str]:
-    """Map an OpenSearch hit ID once, rejecting an ambiguous source mapping."""
-    mapped: dict[str, str] = {}
-    for search in case["searches"]:
-        for hit in search["hits"]:
-            identifier = str(hit.get("_id") or "")
-            source_id = str((hit.get("_source") or {}).get("id") or identifier)
-            if not identifier or not source_id:
-                raise ValueError("captured hit lacks an identifier")
-            previous = mapped.get(identifier)
-            if previous is not None and previous != source_id:
-                raise ValueError("captured identifier maps to conflicting public source ids")
-            mapped.setdefault(identifier, source_id)
-    return mapped
-
-
-def _selector_observability(
-    pre_selector: list[tuple[dict[str, Any], float]], post_selector: list[dict[str, Any]], limit: int
-) -> dict[str, Any]:
-    """Expose selector quota replacements without changing selector behavior."""
-    pre_limit_ids = [str(row.get("id") or "") for row, _score in pre_selector[:limit]]
-    post_ids = [str(row.get("id") or "") for row in post_selector]
-    pre_set = set(pre_limit_ids)
-    post_set = set(post_ids)
-    return {
-        "pre_selector_count": len(pre_selector),
-        "selector_limit": limit,
-        "post_selector_count": len(post_selector),
-        "evicted_ids": [identifier for identifier in pre_limit_ids if identifier and identifier not in post_set],
-        "quota_added_ids": [identifier for identifier in post_ids if identifier and identifier not in pre_set],
-    }
-
-
-def _metric_summary(reports: list[dict[str, Any]], prefix: str) -> dict[str, Any]:
-    """Summarize only cases whose pack supplies a positive required section."""
-    positions = [
-        position
-        for report in reports
-        for position in report[f"{prefix}_positions"].values()
-    ]
-    if not positions:
-        return {"scored_sections": 0, "recall": {depth: None for depth in (5, 10, 30)}}
-    return {
-        "scored_sections": len(positions),
-        "recall": {
-            depth: round(sum(position is not None and position <= depth for position in positions) / len(positions), 4)
-            for depth in (5, 10, 30)
-        },
-        "present": sum(position is not None for position in positions),
-    }
-
-
-def compare_capture(
-    runtime: dict[str, Any],
-    capture: dict[str, Any],
-    k: int = 60,
-    current_order_weight: float = 4.0,
-) -> dict[str, Any]:
-    """Replay current, plain RRF, and scope-aware V2 fusion on saved lists."""
+def compare_capture(runtime: dict[str, Any], capture: dict[str, Any], k: int = 60) -> dict[str, Any]:
+    """Replay the production merge and an RRF ordering over the same captured lists."""
     if capture.get("schema") != CAPTURE_SCHEMA:
         raise ValueError(f"capture schema must be {CAPTURE_SCHEMA}")
-    from app.experimental.evidence_first_v2.scope_aware_fusion import fuse as scope_aware_fuse
-
     sections = runtime["sections"]
     settings = runtime["settings"]
     limit = max(settings.OPENSEARCH_RESULT_COUNT, settings.OPENSEARCH_EVIDENCE_SELECTOR_CANDIDATE_COUNT)
     reports: list[dict[str, Any]] = []
     for case in capture["cases"]:
-        runtime_scope_intent, authorized_policy_market, context_resolution = validate_capture_provenance(
-            case.get("runtime_scope_intent"),
-            case.get("authorized_policy_market"),
-            case.get("context_resolution"),
-        )
         text_hits, vector_hits = _flatten_capture(case)
         rows = sections.OpenSearchSectionProvider()._merge_hits(
             text_hits,
@@ -844,70 +724,24 @@ def compare_capture(
             target_country_names=set(case.get("target_country_names") or []),
         )
         production = [row for row, _score in sections._selector_candidates(rows, limit)]
-        by_id = _strict_row_index(rows)
-        captured_to_source_id = _captured_source_ids(case)
-        rrf_identifiers = [
-            source_id
-            for identifier, _score in reciprocal_rank_fusion(case["searches"], k)
-            if (source_id := captured_to_source_id.get(identifier, identifier)) in by_id
-        ]
-        fused_pairs = _rows_for_identifiers(rrf_identifiers, by_id)
+        by_id = {str(row.get("id") or ""): (row, score) for row, score in rows}
+        fused_pairs = [by_id[identifier] for identifier, _score in reciprocal_rank_fusion(case["searches"], k) if identifier in by_id]
         fused = [row for row, _score in sections._selector_candidates(fused_pairs, limit)]
-        scope_result = scope_aware_fuse(
-            case["searches"],
-            [str(row.get("id") or "") for row, _score in rows],
-            target_country_names=case.get("target_country_names") or [],
-            runtime_scope_intent=runtime_scope_intent,
-            # Country is deliberately not a replay fallback.  A policy market
-            # must have been recorded at the original runtime boundary.
-            authorized_policy_market=authorized_policy_market,
-            context_resolution=context_resolution,
-            rrf_k=k,
-            current_order_weight=current_order_weight,
-        )
-        scope_pairs = _rows_for_identifiers(scope_result.order, by_id)
-        scope_aware = [row for row, _score in sections._selector_candidates(scope_pairs, limit)]
         required_ids = list(case.get("required_ids") or [])
         required_sections = list(case.get("required_sections") or [])
         production_positions = _required_positions(production, required_ids, required_sections)
         rrf_positions = _required_positions(fused, required_ids, required_sections)
-        scope_aware_pre_positions = _required_positions([row for row, _score in scope_pairs], required_ids, required_sections)
-        scope_aware_positions = _required_positions(scope_aware, required_ids, required_sections)
         reports.append(
             {
                 "case_id": case.get("case_id", ""),
                 "production_positions": production_positions,
                 "rrf_positions": rrf_positions,
-                "scope_aware_pre_selector_positions": scope_aware_pre_positions,
-                "scope_aware_positions": scope_aware_positions,
-                "scope_aware_post_selector_positions": scope_aware_positions,
                 "production_recall": {depth: _recall(production_positions, depth) for depth in (5, 10, 30)},
                 "rrf_recall": {depth: _recall(rrf_positions, depth) for depth in (5, 10, 30)},
-                "scope_aware_recall": {depth: _recall(scope_aware_positions, depth) for depth in (5, 10, 30)},
                 "candidate_overlap": len({str(row.get("id")) for row in production} & {str(row.get("id")) for row in fused}),
-                "scope_aware_candidate_overlap": len({str(row.get("id")) for row in production} & {str(row.get("id")) for row in scope_aware}),
-                "scope_aware": {
-                    "protected_global_ids": list(scope_result.protected_global_ids),
-                    "rejected_policy_ids": list(scope_result.rejected_policy_ids),
-                    "used_follow_up_fallback": scope_result.used_follow_up_fallback,
-                    "context_status": scope_result.context_status,
-                    "scope_intent_status": scope_result.scope_intent_status,
-                    "authorized_policy_market": authorized_policy_market,
-                    "selector": _selector_observability(scope_pairs, scope_aware, limit),
-                },
             }
         )
-    return {
-        "k": k,
-        "current_order_weight": current_order_weight,
-        "approximate": bool(capture.get("approximate")),
-        "cases": reports,
-        "summary": {
-            "current": _metric_summary(reports, "production"),
-            "plain_rrf": _metric_summary(reports, "rrf"),
-            "scope_aware": _metric_summary(reports, "scope_aware"),
-        },
-    }
+    return {"k": k, "approximate": bool(capture.get("approximate")), "cases": reports}
 
 
 def command_rrf(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
@@ -922,7 +756,7 @@ def command_rrf(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         )
     runtime = _import_runtime(args.code_root)
     capture = json.loads(Path(args.capture).read_text(encoding="utf-8"))
-    return compare_capture(runtime, capture, args.k, getattr(args, "current_order_weight", 4.0)), 0
+    return compare_capture(runtime, capture, args.k), 0
 
 
 # --- Runner-artifact converter ------------------------------------------------
@@ -949,18 +783,6 @@ class CaptureFormatError(ValueError):
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _validate_runtime_provenance(rank_lists: dict[str, Any]) -> None:
-    """Validate optional V2 provenance while accepting legacy version-1 lists."""
-    try:
-        validate_capture_provenance(
-            rank_lists.get("runtime_scope_intent"),
-            rank_lists.get("authorized_policy_market"),
-            rank_lists.get("context_resolution"),
-        )
-    except ValueError as exc:
-        raise CaptureFormatError(str(exc)) from exc
 
 
 def _is_number(value: Any) -> bool:
@@ -1029,7 +851,6 @@ def validate_rank_lists(rank_lists: Any) -> None:
         raise CaptureFormatError(f"{RANK_LISTS_KEY}.version must be {RANK_LISTS_VERSION}")
     if rank_lists.get("recording_failed"):
         raise CaptureFormatError(f"{RANK_LISTS_KEY} reports that recording failed")
-    _validate_runtime_provenance(rank_lists)
     documents = _validate_rank_list_documents(rank_lists)
     searches = rank_lists.get("searches")
     if not isinstance(searches, list):
@@ -1117,9 +938,6 @@ def capture_case_from_rank_lists(
         "required_sections": required_sections,
         "required_ids": [],
         "target_country_names": list(rank_lists.get("target_country_names") or []),
-        "runtime_scope_intent": rank_lists.get("runtime_scope_intent"),
-        "authorized_policy_market": rank_lists.get("authorized_policy_market"),
-        "context_resolution": rank_lists.get("context_resolution"),
         # Planner and typo ranking queries are query text, which the capture
         # deliberately omits; the production replay runs without them.
         "ranking_queries": [],
@@ -1303,8 +1121,6 @@ def _parser() -> argparse.ArgumentParser:
     rrf = sub.add_parser("rrf")
     rrf.add_argument("--capture")
     rrf.add_argument("--k", type=int, default=60)
-    rrf.add_argument("--current-order-weight", type=float, default=4.0, help="bounded continuity weight for scope-aware fusion")
-    rrf.add_argument("--output", help="save the comparison JSON; never replaced")
 
     convert = sub.add_parser("convert-artifact", help="build a capture file from a run_benchmark artifact's rank lists")
     convert.add_argument("--artifact", required=True, help="run_benchmark artifact JSON")
@@ -1330,15 +1146,6 @@ def main(argv: list[str] | None = None) -> int:
         payload, code = command_convert_artifact(args)
     else:
         payload, code = command_rrf(args)
-        if args.output and code == 0:
-            output = Path(args.output)
-            if output.exists():
-                payload, code = {"status": "REFUSED", "reason": f"output already exists: {output}"}, 2
-            else:
-                output.parent.mkdir(parents=True, exist_ok=True)
-                with output.open("x", encoding="utf-8", newline="\n") as handle:
-                    json.dump(payload, handle, ensure_ascii=True, indent=2, default=str)
-                    handle.write("\n")
     _write_json(payload)
     return code
 

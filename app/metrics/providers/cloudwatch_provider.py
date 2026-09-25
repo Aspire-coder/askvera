@@ -238,15 +238,13 @@ class CloudWatchMetricsProvider:
 
     @staticmethod
     def _extra_dimensions(metric: SystemMetric) -> list[dict[str, str]]:
-        """Return the allowlisted metadata dimensions for this metric, if any."""
-        mappings = SYSTEM_METRIC_DIMENSIONS.get(metric.name)
-        if not mappings:
+        """Return the one allowlisted metadata dimension for this metric, if any."""
+        mapping = SYSTEM_METRIC_DIMENSIONS.get(metric.name)
+        if not mapping:
             return []
-        dimensions = []
-        for metadata_key, dimension_name in mappings:
-            value = str((metric.metadata or {}).get(metadata_key) or "").strip()
-            dimensions.append({"Name": dimension_name, "Value": value or UNKNOWN_DIMENSION_VALUE})
-        return dimensions
+        metadata_key, dimension_name = mapping
+        value = str((metric.metadata or {}).get(metadata_key) or "").strip()
+        return [{"Name": dimension_name, "Value": value or UNKNOWN_DIMENSION_VALUE}]
 
     @staticmethod
     def _base_dimensions(environment: str, version: str, hostname: str) -> list[dict[str, str]]:

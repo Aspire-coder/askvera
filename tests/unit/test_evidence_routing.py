@@ -3,18 +3,14 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from app.evidence import (
-    EvidenceDecision,
     approve_evidence,
     assistant_meta_response,
     classify_intent,
     is_planner_trusted_low_risk_subtype,
     localized_conversation_response,
-    with_approved_evidence,
 )
-from app.retrieval.models import RetrievedDocument, RetrievalAvailability, RetrievalResult
+from app.retrieval.models import RetrievedDocument, RetrievalResult
 from config import settings
 from services import controlled_copy
 from services.market_config import get_countries, load_policy_locales
@@ -347,31 +343,6 @@ def test_global_document_is_valid_evidence_for_every_locale() -> None:
     )
 
     assert decision.approved
-
-
-@pytest.mark.parametrize("availability", list(RetrievalAvailability))
-def test_approved_evidence_preserves_provider_availability(availability) -> None:
-    """Evidence approval must not erase the provider's outage state."""
-    document = RetrievedDocument(
-        id="us-policy",
-        title="US policy",
-        content="Manager qualifications are described here.",
-        source="s3://approved/us-policy.pdf",
-        country="US",
-        language="en",
-        score=0.9,
-    )
-    result = RetrievalResult(
-        documents=[document],
-        citations=[document.to_source()],
-        confidence=0.9,
-        availability=availability,
-    )
-    decision = EvidenceDecision(True, "approved", [document], "policy_fact", True, 0.9, 0.9)
-
-    approved = with_approved_evidence(result, decision)
-
-    assert approved.availability is availability
 
 
 def test_raw_score_does_not_approve_very_low_confidence_evidence() -> None:

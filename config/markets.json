@@ -2653,7 +2653,6 @@
       "region": "North America",
       "displayOrder": 502,
       "defaultLanguage": "en",
-      "fboEnrollmentAvailable": false,
       "languages": [
         {
           "code": "en",

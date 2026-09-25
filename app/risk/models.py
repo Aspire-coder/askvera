@@ -80,14 +80,6 @@ class RiskContext:
     correlation_id: str
     chat_response: ChatResponse | None = None
     validation_result: ValidationResult | None = None
-    allow_claim_topics: bool = False
-    """Suppresses CLAIM-TOPIC risk policies (medical/income claim) for this pass.
-
-    Set only by GovernanceEngine, and only for the answer-side pass where the
-    orchestrator has established that the generated answer explains a
-    reviewed policy. off_topic and every other risk policy are unaffected;
-    see RiskPolicyMetadata.is_claim_topic and RiskEngine.evaluate.
-    """
 
 
 def _risk_rank(level: RiskLevel) -> int:

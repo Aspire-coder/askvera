@@ -1,21 +1,19 @@
 """AI chat orchestration for AskVera."""
 
-import hashlib
 import re
 import unicodedata
 from contextvars import ContextVar
 from dataclasses import replace
 from functools import lru_cache
 from time import perf_counter
-from typing import Any, NamedTuple
+from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.metrics.health import record_validation_outcome
-from app.metrics.responses import record_delivered_response, record_dependency_unavailable, record_numeric_repair
+from app.metrics.responses import record_delivered_response, record_numeric_repair
 from app.models.responses import ModelResponse
 from app.orchestrator.compound_requests import separate_question_and_command
-from app.orchestrator.dependency_contract import dependency_component_for_exception
 from app.operations import pipeline_trace_store
 from app.models.router import ModelRouter, model_router
 from app.evidence import (
@@ -32,14 +30,6 @@ from app.evidence import (
 from app.evidence_contract import parse_evidence_contract
 from app.prompts import PromptBuilder
 from app.response import ChatResponse, ResponseBuilder, response_builder
-from app.orchestrator.answer_language import AnswerLanguage, resolve_answer_language
-from app.orchestrator.conversation_repair import detect_repair, might_be_repair, one_question, typo_clarification
-from app.orchestrator.reference_resolution import _user_turns
-from app.response.cx_compose import compose_cx_response
-from app.response.cx_render import join_alternatives as cx_join_alternatives, render as cx_render
-from app.response.outcome import derive_outcome
-from app.response.partial_answer import evidenced_fields
-from app.response.suggestions import topic_fields
 from app.response.quality import (
     contact_for_country,
     format_period_not_covered,
@@ -48,7 +38,7 @@ from app.response.quality import (
     unsupported_requested_years,
 )
 from app.retrieval import RetrievalService, confidence_from_sources, retrieval_service
-from app.retrieval.models import RetrievalAvailability, RetrievalResult
+from app.retrieval.models import RetrievalResult
 from app.retrieval.cache_evidence import restore_evidence, serialize_evidence
 from app.governance import GovernanceDecision, GovernanceEngine, governance_engine
 from app.validation import OutputValidator, ValidationContext, ValidationResult, output_validator, validation_summary
@@ -91,20 +81,10 @@ from services.pii import contains_sensitive_pii_placeholder, remove_unresolved_p
 from services.session import append_session_turn, get_session_history
 from services.session_service import validate_and_touch_session
 from utils.exceptions import SessionExpiredError
-from utils.exceptions import (
-    AwsServiceError,
-    BedrockServiceError,
-    BedrockTimeoutError,
-    LowConfidenceError,
-    LowConfidenceThresholdError,
-    RetrievalMissError,
-)
+from utils.exceptions import LowConfidenceError, LowConfidenceThresholdError, RetrievalMissError
 from utils.inline_citations import separate_verified_citations
-from app.response.contact_completion import (
-    build_contact_supplement_with_fax_fallback,
-    recommends_contact_in_language,
-)
 from utils.directory_fields import (
+    build_support_contact_supplement,
     canonical_requested_order_size,
     directory_field_conflicts,
     parse_directory_fields,
@@ -116,10 +96,8 @@ from utils.directory_fields import (
     restore_missing_requested_directory_fields,
     restore_missing_requested_order_size,
 )
-from utils.directory_records import record_matches_any_target, record_segments
 from utils.logging import get_logger
 from utils.validators import ChatRequest
-from app.orchestrator.reference_resolution import might_reference_market, resolve_reference
 
 LOGGER = get_logger("app.orchestrator")
 # Reference follow-ups point back at the prior answer with no new subject of
@@ -179,86 +157,6 @@ def _follow_up_tokens(text: str, *, casefold: bool = True) -> tuple[str, ...]:
     return tuple(re.findall(r"[^\W_]+", unaccented.casefold() if casefold else unaccented, flags=re.UNICODE))
 
 
-class _FollowUpWord(NamedTuple):
-    """One tokenized word: its exact surface span, plus a comparison form
-
-    derived from that SAME span - never from a separately re-tokenized copy
-    of the string. R03 correction 9 BLOCKER: `_follow_up_tokens` (folded) and
-    a since-removed `_follow_up_raw_tokens` (unfolded) were tokenized
-    independently and assumed to stay aligned index-for-index. They didn't:
-    NFD input (a combining accent is not a `\\w` character, so "hän" split
-    into "ha"+"n") and a character with an NFKD compatibility expansion
-    ("½" -> "1(fraction slash)2") changed the token COUNT differently in each
-    array, corrupting every index built from one array and read from the
-    other - including a wrong, trusted market substitution and an IndexError
-    crash reachable from `handle_chat`. `_follow_up_words` tokenizes ONCE, so
-    a raw span and its folded form can never drift apart.
-    """
-
-    raw: str
-    folded: str
-    start: int
-    end: int
-
-
-def _follow_up_words(text: str) -> tuple[_FollowUpWord, ...]:
-    """Tokenize ONCE, with spans, over text NFC-normalized a single time.
-
-    Each word's `folded` comparison form (accent-stripped, casefolded) is
-    derived from that word's own matched substring only - never from a
-    whole-string filter applied before tokenizing - so `folded` and `raw`
-    can never disagree on token count or position. NFC (canonical
-    composition) is used rather than NFKD/NFKC (compatibility
-    decomposition), so this tokenizing pass itself never expands one
-    character into several and shifts spans; `_follow_up_unaccented` still
-    applies NFKD, but only inside one already-matched word, where it cannot
-    change how many words there are.
-    """
-    normalized = unicodedata.normalize("NFC", text or "")
-    return tuple(
-        _FollowUpWord(match.group(), _follow_up_unaccented(match.group()).casefold(), match.start(), match.end())
-        for match in re.finditer(r"[^\W_]+", normalized, flags=re.UNICODE)
-    )
-
-
-# R03 correction 11: the ONLY tokenizer used to decide the two trusted
-# Finnish shapes (T1/T2 - see `AIOrchestrator._resolve_finnish_anaphoric`).
-# It is `_follow_up_words` with ONE difference: an internal hyphen joins
-# rather than splits a token, so a hyphenated compound market name reads as
-# ONE token, never as its last component alone. That difference matters
-# exactly once, but matters a lot: "Pohjois-Koreassa" (North Korea) must
-# never be checked against a configured stem as bare "koreassa" (South
-# Korea) - the wrong-market bug an independent review found in correction
-# 10. Everything else about this tokenizer - one NFC-normalizing pass, a
-# raw span and its accent-stripped/casefolded form derived from that same
-# span - is identical to `_follow_up_words`, so the NFD/NFKD-expansion
-# blocker fixes there apply here unchanged.
-_FINNISH_SHAPE_TOKEN = re.compile(r"[^\W_]+(?:-[^\W_]+)*", re.UNICODE)
-
-
-def _finnish_shape_words(text: str) -> tuple[_FollowUpWord, ...]:
-    normalized = unicodedata.normalize("NFC", text or "")
-    return tuple(
-        _FollowUpWord(match.group(), _follow_up_unaccented(match.group()).casefold(), match.start(), match.end())
-        for match in _FINNISH_SHAPE_TOKEN.finditer(normalized)
-    )
-
-
-# A closed set of clitics grown only from forms actually seen (R03
-# correction 11 reviewer repros): "-kin" ("also/even") and "-ko" (the
-# question clitic) attach AFTER the case ending, so a locative-shaped token
-# can still be place-shaped once one is stripped off ("ugandassaKIN",
-# "suomessaKIN", "suomestaKIN"). Not a general Finnish clitic stripper.
-_FINNISH_CLITIC_SUFFIXES = ("kin", "ko")
-
-
-def _finnish_shape_strip_clitic(token: str) -> str:
-    for suffix in _FINNISH_CLITIC_SUFFIXES:
-        if len(token) > len(suffix) + 2 and token.endswith(suffix):
-            return token[: -len(suffix)]
-    return token
-
-
 def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Pattern[str]:
     """One pattern over space-joined follow-up tokens; each fragment matches from a word start.
 
@@ -272,186 +170,6 @@ def _follow_up_stem_pattern(*fragments: str, word_start: bool = True) -> re.Patt
 
 def _follow_up_token_set(*phrases: str) -> frozenset[str]:
     return frozenset(token for phrase in phrases for token in _follow_up_tokens(phrase))
-
-
-# --- Finnish "Entä jos hän..." earned-trust place resolution ---------------
-# R03 correction 8 (earned trust): a single decision function collects every
-# place signal across the WHOLE message before deciding anything, rather than
-# trusting by default the moment one supporting token is seen. R03 correction
-# 9 redefines what counts as a "place candidate" (see the docstring on
-# `AIOrchestrator._resolve_finnish_anaphoric`) after an independent review
-# found the case-ending test alone both missed unsupported forms of a
-# configured market and over-fired on ordinary case-marked nouns with no
-# place meaning at all.
-#
-# One documented, closed grammatical set: the Finnish inner-locative and
-# directional case endings, matched on a whole accent-stripped, casefolded
-# token (never a substring of a longer word). This is a case-ending SHAPE
-# test, not a place list, so it generalizes to any noun-like token: inessive
-# (-ssa "in"), elative (-sta "from"), adessive (-lla "at/with"), ablative
-# (-lta "from at"), allative (-lle "to"), and a short illative approximated
-# as either a doubled vowel followed by "n" (e.g. "Ugandaan") or a stem-final
-# "h" plus vowel plus "n" (e.g. "maahan"). The doubled-vowel branch excludes
-# an immediately preceding "ss" so the inessive-possessive form "-ssaan"/
-# "-sseen" (e.g. "tiimissään"/"toimistossaan" -> unaccented "tiimissaan"/
-# "toimistossaan") is not mistaken for illative case. By itself this shape
-# test is necessary but no longer sufficient to call a token residue - see
-# `_resolve_finnish_anaphoric`.
-# Known limitation: this is an approximation of Finnish morphology (matched
-# on accent-stripped text, so ä/ö are not distinguished from a/o), not a full
-# morphological analyzer; see the R03 correction 8/9 handoffs for others.
-_FINNISH_LOCATIVE_CASE_ENDING = re.compile(
-    r"(?:ssa|sta|lla|lta|lle)$|(?<!ss)([aeiouy])\1n$|h[aeiouy]n$",
-)
-# A small closed negation set that can invert the meaning of the residence
-# verb that follows it ("ei asu" = "does not live"). Kept as a fixed
-# grammatical list so it is never grown ad hoc for one phrase.
-_FINNISH_RESIDENCE_NEGATION_TOKENS = frozenset({"ei", "eika", "enaa"})
-# How many tokens after a negation word still count as "scoping" the
-# residence verb. 2 covers both direct negation ("ei asu", the verb at
-# offset 1) and the perfect tense, whose auxiliary sits between the
-# negation and the verb ("ei ole asunut", the verb at offset 2) - R03
-# correction 9 NOTE. This also already covers "ei enää asu" (another
-# negation-set word, "enää", sitting at offset 1 and the verb at offset 2),
-# which R03 correction 8's handoff incorrectly listed as unhandled.
-_FINNISH_NEGATION_WINDOW = 2
-# The one Finnish verb stem ("asu-": "asuu" lives, "asu" its negated stem,
-# "asunut" its perfect participle...) strong enough that an UNKNOWN place as
-# its complement is a confident, unambiguous residence claim - safe to drop
-# the prior anchor entirely (``standalone``) rather than guess. Matched as a
-# prefix, not an exact token, so tense/mood variants ("asunut", "asuisi")
-# are covered without listing every inflection.
-_FINNISH_STRONG_RESIDENCE_STEMS = ("asu",)
-# Weaker residence/location verb stems: real location semantics, but not
-# residence itself, so an UNKNOWN place as their complement only keeps
-# ordinary (untrusted) context (``unresolved``) rather than going fully
-# standalone. "muutta-" = move(s) [to], "sijaits-"/"sijait-" = is/are
-# located, "oleskel-" = resides/stays temporarily; "kotoisin" is not a verb
-# stem but the fixed idiom "on kotoisin X" = "is originally from X".
-_FINNISH_WEAK_RESIDENCE_STEMS = ("tyoskentel", "muutta", "sijaits", "sijait", "oleskel")
-_FINNISH_RESIDENCE_IDIOM_TOKENS = frozenset({"kotoisin"})
-# R03 correction 10: the olla ("to be") forms - "on", "olla", "ole", "oli",
-# "ollut" - are the single most common way to say someone IS somewhere
-# ("on atlantisissa", "on narniassa"), and correction 9 left them out of the
-# verb vocabulary entirely, which wrongly promoted an unknown place after
-# "on" to a TRUSTED resolved follow-up (Fable's correction-9 review; R03
-# forbids trusting an unrecognised place). Olla only counts as a WEAK
-# location verb for a LOCATIVE complement - inessive ("-ssa"/"-ssä", "on
-# atlantisissa") or adessive ("-lla"/"-llä") - never for a bare nominative
-# complement ("on johtaja"), which carries no case ending at all and so
-# never reaches this check in the first place.
-_FINNISH_OLLA_LOCATION_TOKENS = frozenset({"on", "olla", "ole", "oli", "ollut"})
-_FINNISH_INESSIVE_OR_ADESSIVE_ENDING = re.compile(r"(?:ssa|lla)$")
-# The full verb-stem vocabulary the negation window checks against - a
-# negated residence-adjacent verb of ANY of these strengths must never be
-# trusted, even though only the strong stem controls standalone-vs-unresolved
-# for an unknown place.
-_FINNISH_RESIDENCE_VERB_STEMS = _FINNISH_STRONG_RESIDENCE_STEMS + _FINNISH_WEAK_RESIDENCE_STEMS
-# How many PRECEDING tokens a residence/location verb stem may sit within,
-# relative to its complement, and still govern it ("asuu nyt pysyvästi
-# ugandassa" - 2 adverbs between verb and place). Matches the modifier gaps
-# already accepted by earlier R03 corrections.
-_FINNISH_RESIDENCE_VERB_WINDOW = 3
-# The minimum length of a configured market name/alias used as a stem-prefix
-# candidate (R03 correction 9 SHOULD-FIX (i)) - short enough real names exist
-# (e.g. "Chad", "Cuba", "Mali", each 4 letters unaccented), but this floor
-# keeps an unrelated short word from accidentally sharing a market's prefix.
-_FINNISH_MARKET_STEM_MIN_LENGTH = 4
-# R03 correction 11 T1's closed temporal/aspectual adverb set - see the
-# longer note below. Defined here (ahead of the function-word set) because
-# every one of these adverbs is also, by construction, a function word: it
-# can appear inside the configured form without ever being place-shaped
-# residue.
-_FINNISH_TEMPORAL_ASPECTUAL_ADVERBS = frozenset(
-    {"nyt", "edelleen", "yha", "viela", "pysyvasti", "nykyaan", "jo", "taas"}
-)
-# Function words that appear in the configured "Entä jos hän..." form itself,
-# or as ordinary connectors/adverbs seen inside it, and must never be scored
-# as place-shaped residue even when their ending coincidentally matches a
-# case ending (e.g. "edelleen" ends like a short illative; "siellä" ends like
-# an adessive; "tiimissään" - inessive plus possessive - ends like an
-# illative too). This is a closed list grown only from forms actually seen
-# in this configured follow-up, not a general Finnish stop-word list.
-_FINNISH_ANAPHORIC_FUNCTION_WORDS = frozenset(
-    {
-        "enta", "jos", "han", "hanen",
-        "on", "ja", "mutta", "tai",
-        "siella", "myos",
-        "tyoskentelee",
-        "asuu", "asu",
-        *_FINNISH_TEMPORAL_ASPECTUAL_ADVERBS,
-        *_FINNISH_RESIDENCE_NEGATION_TOKENS,
-    }
-)
-# --- R03 correction 11: the two trusted shapes ------------------------------
-# The independent review of correction 10 found a fourth class of hole, all
-# the same root cause: residue detection over open-ended Finnish morphology
-# keeps missing new forms - negated "olla" ("ei ole ugandassa"), a clitic on
-# an UNCONFIGURED place ("asuu narniassakin"), verb-after-place word order
-# ("hän narniassa asuu"), an adverb long enough to push the verb outside the
-# old fixed window ("asuu nyt jo monta vuotta narniassa"), and a hyphenated
-# compound market name matching the WRONG market's stem ("Pohjois-Koreassa"
-# -> KR, South Korea). Chasing each new shape with another special case
-# cannot converge - Finnish morphology is open-ended. Correction 11 inverts
-# the default instead: trust (and market substitution) is granted ONLY when
-# the whole message fits one of two narrow, documented shapes -
-# `AIOrchestrator._finnish_market_swap_shape` (T1) or
-# `AIOrchestrator._finnish_non_place_shape` (T2), both read only from
-# `_resolve_finnish_anaphoric`. Every ``resolved`` outcome the OLD residue
-# detector below would still produce is re-gated against these two shapes
-# before it is returned; every OTHER outcome (``standalone``, ``unresolved``)
-# is unchanged, because none of the reviewer's new repros was ever wrongly
-# marked ``standalone`` or ``unresolved`` - only wrongly marked ``resolved``.
-# The cost asymmetry justifies the narrowing: a false ``unresolved`` only
-# costs V2 its trusted fallback ordering, while a false ``resolved`` can
-# retrieve the wrong market outright.
-#
-# T1 - market swap. "Entä jos hän" + an optional run of this closed
-# temporal/aspectual adverb set (NOT a place list) + a non-negated
-# residence/location verb from the existing vocabulary (any negation token
-# ANYWHERE in the message disqualifies T1 outright - correction 10's
-# negation-WINDOW arithmetic is gone, because an adverb can always push the
-# verb one token further than the last window size chosen) + an optional run
-# of the same adverbs + EXACTLY ONE configured-market inessive token, matched
-# as a WHOLE token (`_finnish_shape_words` keeps an internal hyphen inside one
-# token, so "Pohjois-Koreassa" can never match the stem "koreassa") +
-# an optional trailing clause built only from already-known function words
-# (e.g. "ja työskentelee siellä") + end punctuation.
-#
-# T2 - non-place follow-up (role or ordinary topic; context kept and
-# trusted, but nothing is substituted). "Entä jos hän" + content with NO
-# locative-case-bearing token at all (`_FINNISH_LOCATIVE_CASE_ENDING`,
-# checked on the bare token AND on the token with a clitic stripped, so
-# "narniassakin" is still caught even though the clitic suffix itself does
-# not end in a case ending), NO capitalised non-initial token, and NO
-# configured-market name stem. KNOWN LIMITATION: the same case-ending test
-# also flags an ordinary time illative ("...24 kuukauteen") and a handful of
-# unrelated words that happen to end in a doubled vowel plus "n" ("mukaan",
-# "jälkeen") - correction 11 accepts this as a false-negative-toward-safety
-# rather than special-casing each one, per the documented cost asymmetry;
-# see the R03-CORRECTION-11 handoff.
-
-
-class _FinnishAnaphoricResolution(NamedTuple):
-    """The one earned-trust result: both query construction and provenance
-
-    read this and only this - neither recomputes the underlying evidence.
-    ``decision`` is one of ``resolved`` (safe to trust as a dependent
-    follow-up; ``code`` names the one market to substitute, or is ``None``
-    when no place evidence exists at all), ``standalone`` (untrusted enough
-    that the current message must not borrow the prior anchor at all), or
-    ``unresolved`` (keep the prior anchor for retrieval, but never mark it as
-    a trusted resolved follow-up or attach a prior-turn ID). ``spans`` holds
-    the exact (start, end) position of every message span (in the NFC text
-    `_resolve_finnish_anaphoric` derived everything from) that should be
-    replaced with ``code``'s display name - every occurrence of a repeated
-    resolved market, not only the first (R03 correction 9 NOTE).
-    """
-
-    decision: str
-    code: str | None
-    spans: tuple[tuple[int, int], ...]
-    reason: str
 
 
 # W14: the same short follow-up shapes in every conversation language. Offline
@@ -773,9 +491,11 @@ def _support_contact_response_is_ineligible(chat_response: ChatResponse) -> bool
     )
 
 
-# Shared with app/response/outcome.py through utils/directory_records.py.
-_support_contact_segments = record_segments
-_directory_record_matches_a_target = record_matches_any_target
+def _support_contact_segments(value: str) -> list[str]:
+    """Split a directory ``record_country`` (or a market name) into lower-cased
+    word segments on both "/" and whitespace - "Kenya/East Africa" ->
+    ["kenya", "east", "africa"]."""
+    return [part.casefold() for part in re.split(r"[/\s]+", value.strip()) if part]
 
 
 def _resolve_support_contact_target_names(lookup_text: str, country: str) -> list[str]:
@@ -800,6 +520,20 @@ def _resolve_directory_field_target_names(lookup_text: str, country: str) -> lis
     session_name = market_display_name(country)
     session_aliases = sorted(find_sponsoring_directory_alias_countries(session_name or ""))
     return session_aliases or ([session_name] if session_name else [])
+
+
+def _directory_record_matches_a_target(record_country: str, target_names: list[str]) -> bool:
+    """True only for a whole-segment/word match - never a region word (``East
+    Africa``, ``Benelux``) or a country named only inside a record's body."""
+    tokens = _support_contact_segments(record_country)
+    for name in target_names:
+        name_words = _support_contact_segments(name)
+        width = len(name_words)
+        if not width or width > len(tokens):
+            continue
+        if any(tokens[start:start + width] == name_words for start in range(len(tokens) - width + 1)):
+            return True
+    return False
 
 
 def _find_matching_support_contact_record(documents: list, target_names: list[str]):
@@ -984,38 +718,6 @@ CROSS_MARKET_POLICY_SCOPE_RESPONSE = (
 DIAGNOSTIC_CAPTURE_ENABLED = False
 DIAGNOSTIC_CAPTURE_VERSION = 1
 _DIAGNOSTIC_CAPTURE: ContextVar[dict[str, Any] | None] = ContextVar("askvera_diagnostic_capture", default=None)
-_UNFILLED_CX_PLACEHOLDER_RE = re.compile(r"\{(?:country|topic|fields|options|contact)\}")
-# CX: the turn's final evidence decision, read once at the delivery choke point
-# to derive the conversation outcome. Set in _route_or_approve_evidence; scoped
-# to one turn by _handle_chat (set to None on entry, reset in finally).
-_TURN_EVIDENCE: ContextVar[EvidenceDecision | None] = ContextVar("askvera_turn_evidence", default=None)
-# CX (approval 6, option B): the language the ANSWER is written in, resolved
-# once per turn from the message. Presentation only - the prompt, localized
-# copy, answer post-processing and output validation. Retrieval, evidence
-# approval, governance and source eligibility keep body.language (the widget's
-# selected language), unchanged. None outside a turn.
-_ANSWER_LANGUAGE: ContextVar[str | None] = ContextVar("askvera_answer_language", default=None)
-
-
-def _answer_language(body: ChatRequest) -> str:
-    """The turn's answer language; the selected language when not switched."""
-    return _ANSWER_LANGUAGE.get() or body.language
-
-
-def _topic_evidenced(topic: str, evidence_documents: tuple) -> bool:
-    """A follow-up topic is suggested only when this turn's approved evidence
-    carries a value for one of its directory fields; never from nothing."""
-    fields = topic_fields(topic)
-    return bool(fields) and bool(fields & evidenced_fields(evidence_documents))
-
-
-def _cache_language(body: ChatRequest) -> str:
-    """Cache-key language: distinct when the answer language was switched, so a
-    switched answer is never served to a request answered in the selected one."""
-    answer = _answer_language(body)
-    return body.language if answer == body.language else f"{body.language}>{answer}"
-
-
 _CAPTURED_DOCUMENT_METADATA = (
     "section_id", "parent_section_id", "access_scope", "document_type", "parent_bound_child",
     "ingestion_id", "logical_document_id", "content_hash",
@@ -1064,10 +766,6 @@ def _append_diagnostic_retrieval(capture: dict[str, Any], stage: str, retrieval_
     capture["retrievals"].append({
         "stage": stage,
         "confidence": retrieval_result.confidence,
-        # R02 provider state, so a capture can tell a completed empty search
-        # from a partial or total outage (R09). Diagnostic only; nothing reads it.
-        "availability": getattr(getattr(retrieval_result, "availability", None), "value", None),
-        "failed_search_channels": list(metadata.get("failed_search_channels") or []),
         "documents": [
             {
                 "id": document.id,
@@ -1280,47 +978,11 @@ class AIOrchestrator:
             preserve_location_names=True,
             preserve_person_names=True,
         )
-        evidence_token = _TURN_EVIDENCE.set(None)
-        try:
-            answer_language = resolve_answer_language(scrubbed_input, body.language, country=body.country)
-        except Exception:  # noqa: BLE001 - CX must never break a turn
-            LOGGER.exception("cx_answer_language_failed", correlation_id=correlation_id)
-            answer_language = AnswerLanguage(body.language, False, "detector_error")
-        language_token = _ANSWER_LANGUAGE.set(answer_language.answer_language)
-        try:
-            resolved_input, reference_clarification = self._resolve_unresolved_reference(
-                scrubbed_input, body, correlation_id
-            )
-            repair_metadata: dict[str, object] = {}
-            if reference_clarification is None:
-                try:
-                    resolved_input, reference_clarification, repair_metadata = self._repair_or_clarify(
-                        resolved_input, body, correlation_id
-                    )
-                except Exception:  # noqa: BLE001 - CX must never break a turn
-                    LOGGER.exception("cx_repair_failed", correlation_id=correlation_id)
-                    reference_clarification, repair_metadata = None, {}
-            if reference_clarification is not None:
-                response = reference_clarification
-            else:
-                response = self._mixed_request_response(body, resolved_input, correlation_id, candidate_flags)
-                if response is None:
-                    response = self._handle_scrubbed_chat(body, resolved_input, correlation_id, candidate_flags)
-            response = self._attach_conversation_outcome(response, body, resolved_input)
-            if repair_metadata:
-                response = self._replace_answer(response, response.answer, repair_metadata)
-            if answer_language.switched:
-                response = self._replace_answer(
-                    response, response.answer,
-                    {"answer_language": {"selected": body.language, "answer": answer_language.answer_language,
-                                         "reason": answer_language.reason}},
-                )
-        finally:
-            _ANSWER_LANGUAGE.reset(language_token)
-            _TURN_EVIDENCE.reset(evidence_token)
-        # Persist the original request (never a reference-resolution rewrite) and
-        # the actual delivered response exactly once, including refusals, cache
-        # hits and partial mixed-intent answers.
+        response = self._mixed_request_response(body, scrubbed_input, correlation_id, candidate_flags)
+        if response is None:
+            response = self._handle_scrubbed_chat(body, scrubbed_input, correlation_id, candidate_flags)
+        # Persist the original request and the actual delivered response exactly
+        # once, including refusals, cache hits and partial mixed-intent answers.
         append_session_turn(body.sessionId, scrubbed_input, response.answer, correlation_id)
         # Counted at the same single choke point, and for the same reason: this
         # is the one place every return path has converged, so the fallback rate
@@ -1329,54 +991,6 @@ class AIOrchestrator:
         # deliveries and are correctly absent.
         record_delivered_response(response.metadata)
         return response
-
-    def _attach_conversation_outcome(
-        self, response: ChatResponse, body: ChatRequest, question: str,
-    ) -> ChatResponse:
-        """CX: derive the turn's one typed outcome from decisions already made.
-
-        Runs once, at the choke point every return path converges on, so every
-        answer and every fallback carries metadata["outcome"]. It classifies;
-        it never changes the answer, the citations or any existing metadata.
-        """
-        outcome = derive_outcome(
-            metadata=response.metadata,
-            language=_answer_language(body),
-            country=body.country,
-            question=question,
-            answer_text=response.answer,
-            evidence_decision=_TURN_EVIDENCE.get(),
-        )
-        evidence_documents = tuple(getattr(_TURN_EVIDENCE.get(), "evidence", None) or ())
-        try:
-            response, _applied = compose_cx_response(
-                response,
-                outcome,
-                question=question,
-                language=_answer_language(body),
-                country=body.country,
-                evidence_documents=evidence_documents,
-                topic_supported=lambda topic, _country: _topic_evidenced(topic, evidence_documents),
-            )
-        except Exception:  # noqa: BLE001 - CX must never break a turn
-            # Fail open: deliver the pipeline's own response with its outcome.
-            LOGGER.exception("cx_compose_failed", kind=outcome.kind.value)
-            response = self._replace_answer(
-                response, response.answer, {"outcome": outcome.to_metadata(), "cx_applied": []}
-            )
-        if _UNFILLED_CX_PLACEHOLDER_RE.search(response.answer or ""):
-            # Never expected: every CX copy is filled before delivery. Logged
-            # (not rewritten) so monitoring catches the bug class.
-            LOGGER.error("cx_unfilled_placeholder_delivered", failure_layer=outcome.failure_layer, kind=outcome.kind.value)
-        # compose_cx_response writes metadata["outcome"] (promoted to
-        # partial_answer when fields are unsupported) and metadata["cx_applied"]
-        # when it composes; kinds it passes through untouched still carry both.
-        missing = {
-            key: value
-            for key, value in (("outcome", outcome.to_metadata()), ("cx_applied", []))
-            if key not in response.metadata
-        }
-        return self._replace_answer(response, response.answer, missing) if missing else response
 
     def _mixed_request_response(
         self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
@@ -1399,114 +1013,11 @@ class AIOrchestrator:
         safe_body = body.model_copy(update={"message": question})
         response = self._handle_scrubbed_chat(safe_body, question, correlation_id, candidate_flags)
         decline = self._governance_user_message(
-            command_decision, _answer_language(body), body.country, command, correlation_id,
+            command_decision, body.language, body.country, command, correlation_id,
         )
         return self._replace_answer(response, f"{response.answer}\n\n{decline}", {
             "mixed_intent": True, "refused_part_count": 1,
         })
-
-    def _dependency_unavailable_response(
-        self,
-        body: ChatRequest,
-        correlation_id: str,
-        component: str,
-        *,
-        retrieval_result: RetrievalResult | None = None,
-        retrieval_availability: str | None = None,
-    ) -> ChatResponse:
-        """Build the shared dependency_unavailable fallback and record its metric.
-
-        One place that builds this fallback shape (the localized bedrock_error
-        copy under failure_layer=dependency_unavailable) and one place that
-        records the DependencyUnavailable metric for it -- exactly once per
-        call. Used today by the retrieve() and generate() dependency catches
-        below, both of which have only a raised exception to go on (no R02
-        availability value), so they leave `retrieval_availability` unset and
-        this method records the metric's `availability` dimension as
-        "exception". At integration, Codex's two R02 routing sites (for
-        RetrievalAvailability.UNAVAILABLE, and DEGRADED with no usable final
-        evidence after country-scope reapproval) call this same method with a
-        real `retrieval_availability` value ("unavailable"/"degraded"), which
-        is then also recorded on the response's own metadata as
-        `retrieval_availability` for anyone inspecting the delivered answer.
-        """
-        record_dependency_unavailable(component, retrieval_availability or "exception")
-        metadata: dict[str, Any] = {"failure_layer": "dependency_unavailable"}
-        if retrieval_availability:
-            metadata["retrieval_availability"] = retrieval_availability
-        return self._validate_response(
-            self.response_builder.fallback(
-                localized_conversation_response("bedrock_error", _answer_language(body))
-                or FALLBACK_RESPONSES["bedrock_error"],
-                correlation_id,
-                metadata=metadata,
-            ),
-            body,
-            correlation_id,
-            retrieval_result=retrieval_result,
-        )
-
-    def _retrieve_or_dependency_response(
-        self,
-        retrieval_query: str,
-        body: ChatRequest,
-        correlation_id: str,
-        *,
-        context_resolution: dict[str, str] | None = None,
-    ) -> tuple[RetrievalResult | None, ChatResponse | None]:
-        """Run retrieval, surfacing an escaping dependency exception as a fallback.
-
-        Returns ``(retrieval_result, None)`` on success, including an empty
-        result or a DEGRADED one; availability routing (R02) happens later in
-        `_route_or_approve_evidence`, after country-scope reapproval. Returns
-        ``(None, response)`` only when `retrieve()` itself raised one of the
-        recognized dependency exceptions. Callers must check the second element
-        and return it immediately without using the first.
-
-        `context_resolution` is the runtime follow-up provenance from
-        `_build_retrieval_query_with_provenance` (R03). It is attached to this
-        request's rank-list capture for the duration of the call only, and is
-        diagnostic: it never changes what is retrieved. The token is reset in
-        `finally`, so it is also reset when a dependency failure returns early.
-        """
-        from app.retrieval.opensearch_sections import (
-            reset_rank_list_context_resolution,
-            set_rank_list_context_resolution,
-        )
-
-        context_token = set_rank_list_context_resolution(context_resolution)
-        try:
-            retrieval_result = self.retriever.retrieve(
-                retrieval_query, body.country, body.language, body.role, correlation_id
-            )
-        except (AwsServiceError, BotoCoreError, ClientError, ConnectionError, TimeoutError, OSError) as exc:
-            # C5: a dependency failure that escapes retrieval raised straight out
-            # of handle_chat, with no answer and no persisted turn. It now gets
-            # the localized bedrock_error copy under its own layer, because an
-            # unreachable dependency is not the same as documents that lack the
-            # answer ("evidence_gate"/"low_confidence").
-            #
-            # LIMITATION (Fable review, 2026-09-18): this catches only what
-            # escapes the provider. AwsServiceError is the embedding path
-            # (services/embeddings.py). A real OpenSearch outage never reaches
-            # here: it is now covered instead by Codex's R02
-            # RetrievalResult.availability contract, routed at the
-            # integration layer, not by this except clause. See
-            # docs/conversation-quality/codex-requests/C5-retrieval-outage-masked-as-no-evidence.md.
-            #
-            # MONITORING: a failure caught here is an HTTP 200 fallback. It
-            # counts toward fallback_by_layer{dependency_unavailable} and the
-            # HighFallbackRate alarm, not the request error rate (HighErrorRate).
-            # That trade-off is pending the user's approval.
-            LOGGER.exception("retrieval_dependency_unavailable", correlation_id=correlation_id)
-            response = self._dependency_unavailable_response(
-                body, correlation_id, dependency_component_for_exception(exc),
-            )
-            return None, response
-        finally:
-            reset_rank_list_context_resolution(context_token)
-        _record_diagnostic_retrieval("question", retrieval_result)
-        return retrieval_result, None
 
     def _handle_scrubbed_chat(
         self, body: ChatRequest, scrubbed_input: str, correlation_id: str, candidate_flags: CandidateFlags,
@@ -1518,30 +1029,25 @@ class AIOrchestrator:
         if chat_response:
             return chat_response
         history = get_session_history(body.sessionId, correlation_id)
-        retrieval_query, context_resolution = self._build_retrieval_query_with_provenance(
-            scrubbed_input, history, correlation_id, session_id=body.sessionId,
-        )
+        retrieval_query = self._build_retrieval_query(scrubbed_input, history, correlation_id)
         request_query = self._build_request_query(scrubbed_input, retrieval_query, history)
         governance_decision = self._evaluate_governance(
             self._governance_text(scrubbed_input, request_query), body, correlation_id
         )
         if not governance_decision.allowed:
             return self._governance_fallback(
-                governance_decision, correlation_id, _answer_language(body), body.country, body.message, candidate_flags
+                governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
             )
 
-        cache_key = build_cache_key(request_query, body.country, _cache_language(body), body.role)
+        cache_key = build_cache_key(request_query, body.country, body.language, body.role)
         cached_response = self._cached_response(
             cache_key, body, correlation_id, scrubbed_input, resolved_request=request_query
         )
         if cached_response:
             return cached_response
 
-        retrieval_result, dependency_response = self._retrieve_or_dependency_response(
-            retrieval_query, body, correlation_id, context_resolution=context_resolution,
-        )
-        if dependency_response is not None:
-            return dependency_response
+        retrieval_result = self.retriever.retrieve(retrieval_query, body.country, body.language, body.role, correlation_id)
+        _record_diagnostic_retrieval("question", retrieval_result)
         chat_response, retrieval_result, evidence_decision = self._route_or_approve_evidence(
             retrieval_query,
             retrieval_result,
@@ -1563,7 +1069,7 @@ class AIOrchestrator:
             user_question=scrubbed_input,
             conversation=history,
             country=body.country,
-            language=_answer_language(body),
+            language=body.language,
             role=body.role,
             retrieval_result=retrieval_result,
             metadata={"correlation_id": correlation_id},
@@ -1583,7 +1089,7 @@ class AIOrchestrator:
                     )
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
+                    self._insufficient_evidence_message(body.language, body.message),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -1591,46 +1097,11 @@ class AIOrchestrator:
                 correlation_id,
                 retrieval_result=retrieval_result,
             )
-        except (BedrockTimeoutError, BedrockServiceError):
-            # MONITORING: this used to reach the route as HTTP 504/502 and count
-            # toward HighErrorRate. It is now an HTTP 200 fallback counted
-            # toward fallback_by_layer{dependency_unavailable} and
-            # HighFallbackRate (35%, 2x15 min, 20-delivery floor), so a Bedrock
-            # outage on a quiet deployment may not page. Pending user approval.
-            #
-            # Deliberately narrow. generate() can also raise ConfigurationError,
-            # which is a deploy defect rather than a transient outage: telling
-            # the user "try again in a moment" would be false and would hide
-            # the defect, so it still propagates to the route's error envelope.
-            # GuardrailBlockedError must never be relabelled as a technical
-            # hiccup either, which a broad AskVeraError catch would have done.
-            #
-            # C5: model_router.generate can also fail with a dependency error
-            # that is NOT a LowConfidenceError (e.g. BedrockTimeoutError,
-            # BedrockServiceError - raised when Bedrock itself times out or
-            # errors, not when the model simply lacked evidence). Previously
-            # this propagated straight out of handle_chat, past every
-            # ChatResponse-producing path, and was only ever caught (if at
-            # all) by api/routes.py's `except AskVeraError` - which returns a
-            # completely different response SHAPE (a `success: false` error
-            # envelope with an HTTP error status) instead of an ordinary chat
-            # answer. That means it never ran through response_builder or
-            # output validation, was never persisted to session history
-            # (append_session_turn runs after this call, in _handle_chat),
-            # and never carried a metadata.failure_layer at all - so a caller
-            # that only inspects failure_layer (or a Lane G regression case
-            # expecting a normal chat turn) sees nothing. Route it through
-            # the same fallback path used for every other failure kind
-            # instead, with its own distinct layer name.
-            LOGGER.exception("model_dependency_unavailable", correlation_id=correlation_id)
-            return self._dependency_unavailable_response(
-                body, correlation_id, "generation", retrieval_result=retrieval_result,
-            )
         _record_diagnostic_raw_answer(model_response.text)
 
         if model_response.finish_reason == "guardrail_intervened":
             return self.response_builder.fallback(
-                localized_conversation_response("guardrail_blocked", _answer_language(body))
+                localized_conversation_response("guardrail_blocked", body.language)
                 or (
                     "I couldn't provide that response because it did not pass AskVera's safety checks. "
                     "Please rephrase the question without private information or unsafe claims."
@@ -1646,7 +1117,7 @@ class AIOrchestrator:
         if contracted_response is None:
             return self._validate_response(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
+                    self._insufficient_evidence_message(body.language, body.message),
                     correlation_id,
                     metadata={"failure_layer": "evidence_contract"},
                 ),
@@ -1672,7 +1143,7 @@ class AIOrchestrator:
         chat_response = self._secure_and_complete_response(
             chat_response,
             retrieval_result,
-            _answer_language(body),
+            body.language,
             correlation_id,
             user_question=body.message,
             country=body.country,
@@ -1694,7 +1165,7 @@ class AIOrchestrator:
         )
         if not governance_decision.allowed:
             return self._governance_fallback(
-                governance_decision, correlation_id, _answer_language(body), body.country, body.message, candidate_flags
+                governance_decision, correlation_id, body.language, body.country, body.message, candidate_flags
             )
         self._record_semantic_shadow_result(
             semantic_candidate,
@@ -1763,7 +1234,6 @@ class AIOrchestrator:
         focused_answer, extra_fields_removed = remove_unrequested_directory_fields(
             chat_response.answer,
             user_question,
-            language=language,
         )
         if extra_fields_removed:
             chat_response = self._replace_answer(
@@ -1901,7 +1371,7 @@ class AIOrchestrator:
         if not chat_response.answer.strip():
             refusal = self._replace_answer(
                 chat_response,
-                self._insufficient_evidence_message(language, user_question, country),
+                self._insufficient_evidence_message(language, user_question),
                 {"empty_after_output_cleanup": True, "fallback": True},
             )
             # The refusal states no policy fact, so it cites no source. Keeping
@@ -1960,7 +1430,6 @@ class AIOrchestrator:
             completed_answer,
             field_sets,
             user_question,
-            language=language,
         )
         completed_answer, contact_fields = restore_missing_directory_contacts(
             completed_answer,
@@ -1989,7 +1458,7 @@ class AIOrchestrator:
             _support_contact_approved_fields(document)
             for document in matched_documents
         ]
-        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question, language=language)
+        source_conflicts = directory_field_conflicts(conflict_field_sets, user_question)
         if not source_conflicts:
             return chat_response
 
@@ -2055,10 +1524,9 @@ class AIOrchestrator:
         the answer *already* cites backs the answer too, so that citation is
         deliberately left unmarked. Citations stay a flat list of dicts.
         """
-        answer_recommends_contact = bool(
-            _CARE_CONTACT_RECOMMENDATION_RE.search(chat_response.answer or "")
-        ) or recommends_contact_in_language(chat_response.answer or "", language)
-        if _support_contact_response_is_ineligible(chat_response) or not answer_recommends_contact:
+        if _support_contact_response_is_ineligible(chat_response) or not _CARE_CONTACT_RECOMMENDATION_RE.search(
+            chat_response.answer or ""
+        ):
             return chat_response
 
         lookup_text = resolved_request or user_question or ""
@@ -2074,7 +1542,7 @@ class AIOrchestrator:
         if not approved_fields:
             return self._replace_answer(chat_response, chat_response.answer, {"support_contact_unavailable": True})
 
-        supplement = build_contact_supplement_with_fax_fallback(
+        supplement = build_support_contact_supplement(
             chat_response.answer,
             approved_fields,
             True,
@@ -2170,17 +1638,10 @@ class AIOrchestrator:
         evidence = restore_evidence(cached.get("evidence"), body.country, body.language)
         if evidence is None:
             return None
-        # CX: a cache hit skips _route_or_approve_evidence, so record the
-        # restored (previously approved) evidence as this turn's decision; the
-        # composer then treats a hit exactly like the miss that produced it.
-        _TURN_EVIDENCE.set(EvidenceDecision(
-            approved=True, reason="cache_restored", evidence=list(evidence.documents),
-            query_intent="cached", exact_topic_match=False, top_score=1.0, score_margin=0.0,
-        ))
         chat_response = self._secure_and_complete_response(
             self.response_builder.from_cached(cached, correlation_id),
             evidence,
-            _answer_language(body),
+            body.language,
             correlation_id,
             user_question=body.message,
             country=body.country,
@@ -2207,7 +1668,7 @@ class AIOrchestrator:
                 cache_type=cache_type,
             )
             return self._governance_fallback(
-                governance_decision, correlation_id, _answer_language(body), body.country, body.message
+                governance_decision, correlation_id, body.language, body.country, body.message
             )
         return chat_response
 
@@ -2226,7 +1687,7 @@ class AIOrchestrator:
         cached = get_semantic_cache_value(
             retrieval_query,
             body.country,
-            _cache_language(body),
+            body.language,
             body.role,
             retrieval_result,
             correlation_id,
@@ -2389,7 +1850,6 @@ class AIOrchestrator:
                 **(retrieval_result.metadata or {}),
                 "evidence_contract": {"status": "accepted", "evidence_ids": list(contract.evidence_ids)},
             },
-            availability=retrieval_result.availability,
         )
         LOGGER.info(
             "evidence_contract_accepted",
@@ -2413,47 +1873,15 @@ class AIOrchestrator:
 
     def _build_retrieval_query(self, user_message: str, history: str, correlation_id: str) -> str:
         """Return the substantive question used to retrieve follow-up evidence."""
-        query, _context = self._build_retrieval_query_with_provenance(user_message, history, correlation_id)
-        return query
-
-    @staticmethod
-    def _prior_user_turn_capture_id(session_id: str, position: int, message: str) -> str:
-        """Return an opaque ID for the actual compact-history turn selected."""
-        if not session_id:
-            return ""
-        digest = hashlib.sha256(f"{session_id}\x00{position}\x00{message}".encode("utf-8")).hexdigest()
-        return f"history-user-{position + 1}-{digest[:16]}"
-
-    def _build_retrieval_query_with_provenance(
-        self, user_message: str, history: str, correlation_id: str, *, session_id: str = "",
-    ) -> tuple[str, dict[str, str]]:
-        """Build retrieval text plus runtime-only dependent-follow-up provenance."""
         user_message = self._normalize_malformed_spacing(user_message, correlation_id)
         if not self._needs_history_context(user_message, history):
-            return user_message, {"provenance": "runtime", "status": "not_dependent"}
-        # Computed once, on THIS original message, before any canonicalization
-        # rewrites it - `_contains_topic_shift_marker` below reads this same
-        # value instead of re-deriving the Finnish decision from a
-        # canonicalized/lowercased variant of the text, which could in
-        # principle disagree with the decision already acted on (R03
-        # correction 9 NOTE).
-        finnish_decision = (
-            self._finnish_anaphoric_trust_decision(user_message)[0]
-            if self._is_finnish_anaphoric_follow_up(user_message)
-            else None
-        )
-        ambiguous_finnish_context = finnish_decision == "unresolved"
-        user_message = self._canonicalize_finnish_anaphoric_market(user_message)
+            return user_message
 
         user_messages = self._user_messages_from_history(history)
         if not user_messages:
-            return user_message, {"provenance": "runtime", "status": "unresolved"}
+            return user_message
 
-        anchor_source = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
-        anchor_position = max(
-            (index for index, value in enumerate(user_messages) if value == anchor_source), default=-1
-        )
-        anchor = anchor_source
+        anchor = user_messages[0] if "first question" in user_message.lower() else self._latest_context_anchor(user_messages)
         # An explicit new directory market replaces the anchor's market; the
         # topic still carries. Live 2026-09-12 (W7): "What about delivery cost
         # for Gambia?" after a Mali question kept "in Mali" here, retrieval
@@ -2462,10 +1890,8 @@ class AIOrchestrator:
         if not anchor:
             # Every candidate was an instruction rather than a question (or named
             # only the replaced market), so there is nothing left to anchor against.
-            return user_message, {"provenance": "runtime", "status": "unresolved"}
-        if anchor != user_message and self._contains_topic_shift_marker(
-            user_message.lower(), finnish_topic_shift=finnish_decision is not None and finnish_decision != "standalone",
-        ):
+            return user_message
+        if anchor != user_message and self._contains_topic_shift_marker(user_message.lower()):
             # A topic-shift follow-up ("what about Kenya?") introduces a new
             # subject that a bare anchor substitution would silently drop.
             # Keep the prior topic with the new subject for retrieval; any market
@@ -2482,13 +1908,7 @@ class AIOrchestrator:
             original_length=len(user_message),
             contextual_length=len(contextual_query),
         )
-        if ambiguous_finnish_context:
-            return contextual_query, {"provenance": "runtime", "status": "unresolved"}
-        context = {"provenance": "runtime", "status": "resolved_dependent_follow_up"}
-        prior_turn_id = self._prior_user_turn_capture_id(session_id, anchor_position, anchor_source)
-        if prior_turn_id:
-            context["prior_user_turn_id"] = prior_turn_id
-        return contextual_query, context
+        return contextual_query
 
     def _governance_text(self, user_message: str, request_query: str) -> str:
         """Return the text governance judges: the action being requested NOW.
@@ -2605,11 +2025,8 @@ class AIOrchestrator:
         normalized = " ".join(user_message.lower().split())
         if not normalized:
             return False
-        message = " ".join(user_message.split())
         word_count = len(normalized.split())
-        if self._is_finnish_anaphoric_follow_up(message):
-            decision, _code, _reason = self._finnish_anaphoric_trust_decision(message)
-            return decision != "standalone"
+        message = " ".join(user_message.split())
         if word_count <= 14 and CONTINUATION_TERMS.search(normalized):
             return True
         if (
@@ -2695,452 +2112,13 @@ class AIOrchestrator:
             or self._is_market_only_ellipsis(normalized_message)
         )
 
-    def _contains_topic_shift_marker(
-        self, normalized_message: str, *, finnish_topic_shift: bool | None = None,
-    ) -> bool:
-        """Match markers that introduce a new subject alongside a reference cue.
-
-        ``finnish_topic_shift`` lets a caller that already computed the
-        earned-trust Finnish decision for this exact (pre-canonicalization)
-        message pass that result through, so this never re-derives a
-        possibly different decision from a canonicalized/lowercased variant
-        of the text (R03 correction 9 NOTE). Left as ``None``, it recomputes
-        - correct for the other caller, the anchor walk over PRIOR historical
-        messages, which has no such precomputed decision to reuse.
-        """
-        if finnish_topic_shift is None:
-            finnish_topic_shift = (
-                self._is_finnish_anaphoric_follow_up(normalized_message)
-                and self._finnish_anaphoric_trust_decision(normalized_message)[0] != "standalone"
-            )
+    def _contains_topic_shift_marker(self, normalized_message: str) -> bool:
+        """Match markers that introduce a new subject alongside a reference cue."""
         return (
             self._matches_marker(normalized_message, FOLLOW_UP_TOPIC_SHIFT_MARKERS)
             or self._is_market_ellipsis(normalized_message)
             or self._localized_follow_up_shape(normalized_message) in {"market", "topic_shift"}
-            or finnish_topic_shift
         )
-
-    @staticmethod
-    def _is_finnish_anaphoric_follow_up(message: str) -> bool:
-        """Recognize the configured Finnish ``Entä jos hän...`` follow-up form.
-
-        This is intentionally a grammar-bound reference signal, not a country,
-        role, or topic rule. The third-person Finnish pronoun makes the prior
-        user turn necessary, unlike a new standalone ``Entä jos haluan...``
-        question. The normal no-history and unrecognised-place guards still
-        run before this can affect retrieval.
-        """
-        tokens = _follow_up_tokens(message)
-        return (
-            4 <= len(tokens) <= 18
-            and tokens[:2] == ("enta", "jos")
-            and bool({"han", "hanen"}.intersection(tokens))
-        )
-
-    @staticmethod
-    @lru_cache(maxsize=1)
-    def _finnish_inessive_market_codes() -> dict[str, str]:
-        """Map safe configured ``-ssa`` place forms to one market code only.
-
-        Keys are normalized EXACTLY like the message tokens they are matched
-        against: accent-stripped, then whitespace/casefold-normalized. Earlier
-        corrections normalized only the casing, so an accented configured name
-        (e.g. a market whose alias contains "ä"/"ö") built a key that could
-        never match its own accent-stripped token; this generalizes the fix to
-        every accented single-word name instead of special-casing one market.
-        """
-        candidates: dict[str, set[str]] = {}
-        aliases = _localized_market_names()
-        for market in [*load_market_config()["markets"], *load_global_directory_markets()]:
-            code = str(market.get("code") or "").upper()
-            if not code:
-                continue
-            for name in [market.get("name"), *aliases.get(code, [])]:
-                normalized_name = _normalize_market_text(_follow_up_unaccented(str(name or "")))
-                if normalized_name and " " not in normalized_name:
-                    candidates.setdefault(f"{normalized_name}ssa", set()).add(code)
-        return {
-            form: next(iter(codes))
-            for form, codes in candidates.items()
-            if len(codes) == 1
-        }
-
-    @staticmethod
-    @lru_cache(maxsize=1)
-    def _finnish_market_name_stems() -> dict[str, str]:
-        """Map safe single-word configured market NAME STEMS to one market code.
-
-        Unlike `_finnish_inessive_market_codes`, this is the bare accent-
-        stripped, casefolded name/alias itself, with no ``ssa`` appended -
-        used only as a ``startswith`` prefix test (`_finnish_market_stem_prefix`)
-        so ANY other Finnish case form of a configured market (clitic
-        "-kin"/"-ko", partitive, essive, illative, elative...) is recognized
-        as being ABOUT that market, without enumerating each grammatical case.
-        Names shorter than `_FINNISH_MARKET_STEM_MIN_LENGTH` are dropped so an
-        unrelated word cannot accidentally share a market's short prefix.
-        """
-        candidates: dict[str, set[str]] = {}
-        aliases = _localized_market_names()
-        for market in [*load_market_config()["markets"], *load_global_directory_markets()]:
-            code = str(market.get("code") or "").upper()
-            if not code:
-                continue
-            for name in [market.get("name"), *aliases.get(code, [])]:
-                normalized_name = _normalize_market_text(_follow_up_unaccented(str(name or "")))
-                if normalized_name and " " not in normalized_name and len(normalized_name) >= _FINNISH_MARKET_STEM_MIN_LENGTH:
-                    candidates.setdefault(normalized_name, set()).add(code)
-        return {
-            stem: next(iter(codes))
-            for stem, codes in candidates.items()
-            if len(codes) == 1
-        }
-
-    def _finnish_market_stem_prefix(self, token: str) -> str | None:
-        """Return the configured market stem ``token`` extends, if any.
-
-        Only a token STRICTLY LONGER than the bare stem counts - the bare
-        nominative form itself (``token == stem``) is not residue; it is
-        either the market's plain name (handled by the whole-message direct
-        mention check) or an unrelated word coincidentally equal to a short
-        stem. Also excludes the one supported inessive form, which is
-        already handled as a trusted exact match, not residue.
-        """
-        for stem, code in self._finnish_market_name_stems().items():
-            if len(token) > len(stem) and token.startswith(stem) and token != f"{stem}ssa":
-                return stem
-        return None
-
-    @staticmethod
-    def _finnish_residence_verb_tier(tokens: tuple[str, ...], place_index: int) -> str | None:
-        """Return ``"strong"``/``"weak"``/``None`` for a residence/location verb
-
-        governing ``tokens[place_index]``, looked up within the preceding
-        `_FINNISH_RESIDENCE_VERB_WINDOW` tokens (covers a short adverbial gap,
-        e.g. "asuu nyt pysyvästi ugandassa"). Only the strong stem ("asu-",
-        genuine residence) makes an UNKNOWN place confident enough to go
-        standalone; the weaker location verbs, INCLUDING olla ("on"/"olla"/
-        "ole"/"oli"/"ollut") when the complement itself is inessive or
-        adessive - never a bare nominative complement like "on johtaja" -
-        only keep it as ordinary, untrusted residue (R03 correction 10).
-        """
-        start = max(0, place_index - _FINNISH_RESIDENCE_VERB_WINDOW)
-        olla_governs_this_complement = bool(_FINNISH_INESSIVE_OR_ADESSIVE_ENDING.search(tokens[place_index]))
-        tier: str | None = None
-        for index in range(start, place_index):
-            token = tokens[index]
-            if any(token.startswith(stem) for stem in _FINNISH_STRONG_RESIDENCE_STEMS):
-                return "strong"
-            if (
-                token in _FINNISH_RESIDENCE_IDIOM_TOKENS
-                or any(token.startswith(stem) for stem in _FINNISH_WEAK_RESIDENCE_STEMS)
-                or (olla_governs_this_complement and token in _FINNISH_OLLA_LOCATION_TOKENS)
-            ):
-                tier = "weak"
-        return tier
-
-    @staticmethod
-    def _finnish_negation_scopes_residence(tokens: tuple[str, ...]) -> bool:
-        """True when a closed negation word precedes a residence/location verb
-
-        (of any strength, plus the "kotoisin" idiom) within
-        `_FINNISH_NEGATION_WINDOW` tokens - e.g. "ei asu" (offset 1) or the
-        perfect tense "ei ole asunut" (offset 2, skipping the "ole"
-        auxiliary). A negated residence claim must never be trusted, since
-        trusting it would assert the opposite of what was actually said.
-        """
-        for index, token in enumerate(tokens):
-            if token not in _FINNISH_RESIDENCE_NEGATION_TOKENS:
-                continue
-            window_end = min(index + 1 + _FINNISH_NEGATION_WINDOW, len(tokens))
-            for candidate in tokens[index + 1:window_end]:
-                if candidate in _FINNISH_RESIDENCE_IDIOM_TOKENS or any(
-                    candidate.startswith(stem) for stem in _FINNISH_RESIDENCE_VERB_STEMS
-                ):
-                    return True
-        return False
-
-    def _finnish_market_swap_shape(self, message: str) -> tuple[str, tuple[tuple[int, int], ...]] | None:
-        """T1 (R03 correction 11): the ONLY shape trusted enough to swap markets.
-
-        "Entä jos hän" + an optional run of `_FINNISH_TEMPORAL_ASPECTUAL_ADVERBS`
-        + a non-negated residence/location verb from the existing vocabulary
-        (olla included - T1 always supplies an exact locative complement, so
-        the complement-shape restriction correction 10 put on olla does not
-        apply here) + an optional run of the same adverbs + EXACTLY ONE
-        configured-market inessive token, matched as a WHOLE token via
-        `_finnish_shape_words` (a hyphenated compound counts as one token) +
-        an optional trailing clause built only from `_FINNISH_ANAPHORIC_
-        FUNCTION_WORDS` + end punctuation. Returns the one market code and
-        the exact span to substitute, or ``None`` when the message does not
-        fit this shape at all - never a partial match.
-        """
-        words = _finnish_shape_words(message)
-        tokens = tuple(word.folded for word in words)
-        if any(token in _FINNISH_RESIDENCE_NEGATION_TOKENS for token in tokens):
-            return None
-        if len(tokens) < 5 or tokens[0] != "enta" or tokens[1] != "jos" or tokens[2] not in {"han", "hanen"}:
-            return None
-        index = 3
-        while index < len(tokens) and tokens[index] in _FINNISH_TEMPORAL_ASPECTUAL_ADVERBS:
-            index += 1
-        if index >= len(tokens):
-            return None
-        token = tokens[index]
-        is_verb = (
-            token in _FINNISH_OLLA_LOCATION_TOKENS
-            or token in _FINNISH_RESIDENCE_IDIOM_TOKENS
-            or any(token.startswith(stem) for stem in _FINNISH_RESIDENCE_VERB_STEMS)
-        )
-        if not is_verb:
-            return None
-        index += 1
-        while index < len(tokens) and tokens[index] in _FINNISH_TEMPORAL_ASPECTUAL_ADVERBS:
-            index += 1
-        if index >= len(tokens):
-            return None
-        code = self._finnish_inessive_market_codes().get(tokens[index])
-        if not code:
-            return None
-        span = (words[index].start, words[index].end)
-        index += 1
-        if any(token not in _FINNISH_ANAPHORIC_FUNCTION_WORDS for token in tokens[index:]):
-            return None
-        return code, (span,)
-
-    def _finnish_non_place_shape(self, message: str) -> bool:
-        """T2 (R03 correction 11): the ONLY shape trusted with no market to swap.
-
-        "Entä jos hän" + content with NO locative-case-bearing token at all -
-        checked on the bare token AND on the token with a clitic stripped
-        (`_finnish_shape_strip_clitic`), so "narniassakin" is still caught
-        even though the clitic suffix itself does not end in a case ending -
-        NO capitalised non-initial token, and NO configured-market name
-        stem. Anything else (a role, an ordinary topic, a negated claim with
-        no place) is trusted as a plain dependent follow-up with nothing to
-        substitute.
-        """
-        words = _finnish_shape_words(message)
-        tokens = tuple(word.folded for word in words)
-        if len(tokens) < 3 or tokens[0] != "enta" or tokens[1] != "jos" or tokens[2] not in {"han", "hanen"}:
-            return False
-        for index in range(3, len(tokens)):
-            token = tokens[index]
-            if words[index].raw[:1].isupper():
-                return False
-            if self._finnish_market_stem_prefix(token):
-                return False
-            if _FINNISH_LOCATIVE_CASE_ENDING.search(token):
-                return False
-            stripped = _finnish_shape_strip_clitic(token)
-            if stripped != token and _FINNISH_LOCATIVE_CASE_ENDING.search(stripped):
-                return False
-        return True
-
-    def _finnish_collect_residue_signals(
-        self, normalized_message: str, words: tuple[_FollowUpWord, ...], tokens: tuple[str, ...],
-    ) -> tuple[set[str], set[str], list[tuple[int, int]], bool, bool, bool]:
-        """The pre-correction-11 residue scan, unchanged, split out only to
-
-        keep `_resolve_finnish_anaphoric` itself readable. Returns
-        ``(codes, configured_codes, configured_spans, capitalized_unknown,
-        unaccounted_residue, strong_unknown_residence)`` - see the caller's
-        docstring for what each means.
-        """
-        codes: set[str] = set(find_market_mentions(normalized_message)) | set(
-            find_shared_office_record_countries(normalized_message)
-        )
-        configured_codes: set[str] = set()
-        configured_spans: list[tuple[int, int]] = []
-        capitalized_unknown = False
-        unaccounted_residue = False
-        strong_unknown_residence = False
-
-        for index in range(2, len(tokens)):
-            token = tokens[index]
-            if token in _FINNISH_ANAPHORIC_FUNCTION_WORDS:
-                continue
-            inessive_code = self._finnish_inessive_market_codes().get(token)
-            if inessive_code:
-                codes.add(inessive_code)
-                configured_codes.add(inessive_code)
-                configured_spans.append((words[index].start, words[index].end))
-                continue
-            if self._finnish_market_stem_prefix(token):
-                # A known market in an unsupported grammatical form - real,
-                # just not one we substitute; keep context untrusted.
-                unaccounted_residue = True
-                continue
-            if not _FINNISH_LOCATIVE_CASE_ENDING.search(token):
-                continue
-            if words[index].raw[:1].isupper():
-                capitalized_unknown = True
-                continue
-            tier = self._finnish_residence_verb_tier(tokens, index)
-            if tier == "strong":
-                unaccounted_residue = True
-                strong_unknown_residence = True
-            elif tier == "weak":
-                unaccounted_residue = True
-            # else: an ordinary case-marked noun with no market-stem prefix
-            # and no residence/location verb nearby is not a place candidate.
-
-        return codes, configured_codes, configured_spans, capitalized_unknown, unaccounted_residue, strong_unknown_residence
-
-    def _resolve_finnish_anaphoric(self, message: str) -> _FinnishAnaphoricResolution:
-        """Collect every place signal across the WHOLE message, then decide once.
-
-        Tokenized ONCE with spans (`_follow_up_words`), over text NFC-
-        normalized a single time, so a token's comparison form and its exact
-        surface span can never drift apart (R03 correction 9 BLOCKER).
-
-        Evidence, collected exhaustively before any decision is made:
-
-        1. exact configured inessive forms, matched on whole normalized
-           tokens (``_finnish_inessive_market_codes``);
-        2. direct market mentions and shared-office record countries, matched
-           over the ENTIRE message with the same matcher the rest of the
-           system uses (``find_market_mentions``/``find_shared_office_record_
-           countries``), which already understands multi-word names such as
-           "United States" or "South Africa"; and
-        3. place CANDIDATES - R03 correction 9 redefines this after an
-           independent review found the plain case-ending test both missed
-           and over-fired. A token is now a place candidate when:
-
-           (i) its comparison form STARTS WITH a configured market's name or
-               alias STEM (`_finnish_market_stem_prefix`) but is not exactly
-               the one supported inessive form - this catches a clitic
-               ("ugandassaKIN"), partitive ("edustaa ugandaA"), essive ("asuu
-               ugandaNA"), illative or elative form of a KNOWN market, with
-               no grammar-case list and no market literals, only configured
-               names; such a token always keeps ordinary (untrusted) context
-               rather than asserting a market swap - it is a real market,
-               just an unsupported form of it, so dropping the anchor
-               entirely would be needlessly destructive;
-           (ii) it carries a Finnish inner-locative or directional case
-               ending (`_FINNISH_LOCATIVE_CASE_ENDING`) AND sits within
-               `_FINNISH_RESIDENCE_VERB_WINDOW` tokens of a residence or
-               location verb stem (`_finnish_residence_verb_tier`) - an
-               ordinary case-marked noun with NO such verb nearby is not a
-               place candidate at all (this is the over-fire fix: "24
-               kuukauteen", "tilille", "netissä" out of residence context no
-               longer make an otherwise plain follow-up untrusted); or
-           (iii) it is a capitalized, non-initial token (not a known
-               function word) that also carries that case ending - an
-               unrecognised proper-noun-shaped place.
-
-        A market is trusted (``resolved`` with a ``code``) only when exactly
-        one code was collected, it came from the supported configured
-        inessive form, every place candidate is accounted for by that same
-        market, and no negation scopes a residence verb
-        (`_finnish_negation_scopes_residence`). A follow-up with no place
-        evidence at all is also trusted, with no market to substitute (a
-        plain dependent question, e.g. a role follow-up). Everything else is
-        not trusted: a capitalized unknown place, more than one competing
-        code, or an UNKNOWN place as the complement of the strong residence
-        verb ("asuu X") fails closed as ``standalone`` (the safe direction -
-        never guess a market); a negated residence claim over an otherwise
-        single, accounted-for code also fails closed as ``standalone``. Any
-        other place candidate - an unsupported form of a KNOWN market, or an
-        unknown place as the complement of a WEAK location verb - keeps the
-        prior anchor for retrieval but is recorded as ``unresolved`` - never
-        a trusted resolved follow-up.
-        """
-        words = _follow_up_words(message)
-        tokens = tuple(word.folded for word in words)
-        negation_scopes_residence = self._finnish_negation_scopes_residence(tokens)
-        normalized_message = unicodedata.normalize("NFC", message or "")
-        (
-            codes,
-            configured_codes,
-            configured_spans,
-            capitalized_unknown,
-            unaccounted_residue,
-            strong_unknown_residence,
-        ) = self._finnish_collect_residue_signals(normalized_message, words, tokens)
-
-        if capitalized_unknown or len(codes) > 1 or strong_unknown_residence:
-            return _FinnishAnaphoricResolution("standalone", None, (), "unknown_or_conflicting_place")
-        if negation_scopes_residence and (configured_codes or unaccounted_residue):
-            return _FinnishAnaphoricResolution("standalone", None, (), "negated_residence_claim")
-        if unaccounted_residue:
-            return _FinnishAnaphoricResolution("unresolved", None, (), "unaccounted_place_shaped_residue")
-        # R03 correction 11: every ``resolved`` outcome below is re-gated
-        # against the two trusted shapes (T1/T2) before it is returned. This
-        # is where the independent review's new holes actually closed - none
-        # of them was ever wrongly marked ``standalone`` or ``unresolved`` by
-        # the residue detection above; every one was wrongly marked
-        # ``resolved`` because the residue detection missed the place-shaped
-        # token entirely (a clitic on an unconfigured place, a word-order
-        # swap, an adverb outside the old fixed window) or, for the
-        # hyphenated-compound bug, because the OLD tokenizer split
-        # "Pohjois-Koreassa" into two tokens and matched the wrong market on
-        # the second half alone.
-        if not codes:
-            if self._finnish_non_place_shape(message):
-                return _FinnishAnaphoricResolution("resolved", None, (), "t2_non_place_shape")
-            return _FinnishAnaphoricResolution("unresolved", None, (), "t2_shape_not_matched")
-        if len(configured_codes) == 1 and configured_codes == codes:
-            shape = self._finnish_market_swap_shape(message)
-            if shape is not None and shape[0] == next(iter(configured_codes)):
-                code, spans = shape
-                return _FinnishAnaphoricResolution("resolved", code, spans, "t1_market_swap_shape")
-            return _FinnishAnaphoricResolution("unresolved", None, (), "t1_shape_not_matched")
-        # Exactly one code was collected, but it came only from a direct
-        # market-name mention with no configured inessive (residence) support
-        # behind it - a bare name mention is not itself a residence claim, so
-        # it keeps ordinary context without being trusted as a market swap.
-        return _FinnishAnaphoricResolution("unresolved", None, (), "direct_mention_without_residence_support")
-
-    def _finnish_anaphoric_trust_decision(self, message: str) -> tuple[str, str | None, str]:
-        """The one earned-trust decision, read by both query construction and provenance.
-
-        Neither consumer recomputes this: `_needs_history_context` and
-        `_contains_topic_shift_marker` use only the ``decision``,
-        `_has_ambiguous_finnish_lowercase_complement` (provenance) checks for
-        ``unresolved``, and `_canonicalize_finnish_anaphoric_market` (the
-        retrieval query) uses ``code``/``spans`` only when ``decision`` is
-        ``resolved``.
-        """
-        resolution = self._resolve_finnish_anaphoric(message)
-        return resolution.decision, resolution.code, resolution.reason
-
-    def _has_ambiguous_finnish_lowercase_complement(self, message: str) -> bool:
-        """True when the earned-trust decision for this follow-up is ``unresolved``.
-
-        The query can retain ordinary conversation context, but the capture
-        must not claim that an unresolved shape resolved the market.
-        """
-        if not self._is_finnish_anaphoric_follow_up(message):
-            return False
-        decision, _code, _reason = self._finnish_anaphoric_trust_decision(message)
-        return decision == "unresolved"
-
-    def _canonicalize_finnish_anaphoric_market(self, message: str) -> str:
-        """Replace every earned-trust Finnish inessive span for retrieval only.
-
-        Substitution is by exact SPAN, not a re-derived literal/regex search,
-        so it can never fail to find its own resolved token (R03 correction 9
-        BLOCKER) and, when the same resolved market form appears more than
-        once, every occurrence is replaced rather than only the first (R03
-        correction 9 NOTE).
-        """
-        if not self._is_finnish_anaphoric_follow_up(message):
-            return message
-        resolution = self._resolve_finnish_anaphoric(message)
-        if resolution.decision != "resolved" or not resolution.code or not resolution.spans:
-            return message
-        display_name = market_display_name(resolution.code)
-        if not display_name:
-            return message
-        normalized_message = unicodedata.normalize("NFC", message or "")
-        pieces: list[str] = []
-        cursor = 0
-        for start, end in sorted(resolution.spans):
-            pieces.append(normalized_message[cursor:start])
-            pieces.append(display_name)
-            cursor = end
-        pieces.append(normalized_message[cursor:])
-        return "".join(pieces)
 
     def _localized_follow_up_shape(self, message: str) -> str:
         """Name the non-English follow-up shape ``message`` opens with, or return "" (W14).
@@ -3724,9 +2702,7 @@ class AIOrchestrator:
             )
         )
 
-    def _insufficient_evidence_message(
-        self, language: str = "en", user_message: str = "", country: str = ""
-    ) -> str:
+    def _insufficient_evidence_message(self, language: str = "en", user_message: str = "") -> str:
         """Use the approved fallback while remaining compatible with older config.
 
         A question about prices, the catalogue, stock or order status gets a
@@ -3765,45 +2741,24 @@ class AIOrchestrator:
             boundary = localized_conversation_response("catalogue_scope", language)
             if boundary:
                 return boundary
-        message = localized_conversation_response("insufficient_evidence", language) or FALLBACK_RESPONSES.get(
+        return localized_conversation_response("insufficient_evidence", language) or FALLBACK_RESPONSES.get(
             "insufficient_evidence",
             FALLBACK_RESPONSES.get(
                 "low_confidence",
                 "I couldn't find a clear answer in the approved information available to me.",
             ),
         )
-        # The copy above carries a reviewed contact placeholder rather than a
-        # hardcoded number, because the contact differs per market while the
-        # wording is per language. Resolve it here with the same mechanism
-        # that already resolves contact placeholders in generated answers, so
-        # a market with a reviewed Customer Care number gets it inline and a
-        # market without one has the line removed cleanly instead of showing
-        # a broken token or a dangling lead-in sentence.
-        resolved_message, _contact_changes = remove_or_replace_contact_placeholders(message, country)
-        return resolved_message
 
-    def _cross_market_scope_message(
-        self, language: str = "en", user_message: str = "", country: str = ""
-    ) -> str:
-        """Explain a cross-market local-policy refusal without disclosing policy.
-
-        The reviewed copy names the other market ({country}). It is used only
-        when the question names exactly one market other than the session's;
-        otherwise the generic copy below is used, so a placeholder is never
-        delivered and a market is never guessed.
-        """
+    def _cross_market_scope_message(self, language: str = "en", user_message: str = "") -> str:
+        """Explain a cross-market local-policy refusal without disclosing policy."""
         copy, reviewed_for_locale = configured_conversation_response(
             "cross_market_policy_scope", language
         )
-        other_markets = sorted(
-            code for code in find_market_mentions(user_message or "") if code != (country or "").upper()
-        )
-        other_name = market_display_name(other_markets[0]) if len(other_markets) == 1 else ""
-        if copy and reviewed_for_locale and other_name:
-            return cx_render("cross_market_policy_scope", language, country=other_name)
+        if copy and reviewed_for_locale:
+            return copy
         if (language or "en").split("-", 1)[0].lower() == "en":
             return CROSS_MARKET_POLICY_SCOPE_RESPONSE
-        return self._insufficient_evidence_message(language, user_message, country)
+        return self._insufficient_evidence_message(language, user_message)
 
     def _candidate_narrowing_response(
         self,
@@ -3970,7 +2925,7 @@ class AIOrchestrator:
         if not contact_lines:
             return None
 
-        lead_in = localized_conversation_response("office_contact_lead_in", _answer_language(body)) or (
+        lead_in = localized_conversation_response("office_contact_lead_in", body.language) or (
             "In the meantime, here is a direct way to reach that office:"
         )
         return f"{lead_in}\n" + "\n".join(contact_lines)
@@ -3986,88 +2941,12 @@ class AIOrchestrator:
             body.message, body.language, relaxed_typo_tolerance=candidate_flags.wider_typo_tolerance
         )
         if not answer:
-            answer = localized_conversation_response("greeting", _answer_language(body)) or "Hello, I'm AskVera. How can I help?"
+            answer = localized_conversation_response("greeting", body.language) or "Hello, I'm AskVera. How can I help?"
         return self.response_builder.fallback(
             answer,
             correlation_id,
             metadata={"intent": "assistant_meta", "fallback": False, "response_source": "template"},
         )
-
-    def _resolve_unresolved_reference(
-        self, scrubbed_input: str, body: ChatRequest, correlation_id: str,
-    ) -> tuple[str, ChatResponse | None]:
-        """A7 hook: resolve or flag a closed-class back-reference before retrieval.
-
-        Delegates every decision to app.orchestrator.reference_resolution (pure,
-        deterministic, no model call). A contrastive reference ("the other one")
-        over 2+ user-named markets returns a clarification naming them instead of
-        a silent guess. A resolvable ordinal ("the first one") returns the
-        message with its candidate market appended, so the unmodified retrieval
-        anchor names it exactly as an explicit market follow-up would. Anything
-        else returns the input unchanged.
-
-        ``might_reference_market`` is checked first so the session-history
-        read below - a real store lookup, not a pure function - is skipped
-        entirely for the overwhelming majority of messages that plainly
-        cannot be an unresolved reference (no closed-class token at all, one
-        that names its own market, or one that turns out to modify real
-        content such as "the first ORDER" rather than a market).
-        """
-        if not might_reference_market(scrubbed_input, body.language):
-            return scrubbed_input, None
-        history = get_session_history(body.sessionId, correlation_id)
-        outcome = resolve_reference(scrubbed_input, history, body.language)
-        if outcome.clarification_candidates:
-            answer = localized_conversation_response("reference_clarification", _answer_language(body))
-            if answer:
-                candidates = cx_join_alternatives(outcome.clarification_candidates, _answer_language(body))
-                return scrubbed_input, self.response_builder.fallback(
-                    answer.replace("{candidates}", candidates),
-                    correlation_id,
-                    metadata={
-                        "fallback": False,
-                        "failure_layer": "directory_clarification",
-                        "response_source": "reference_resolution",
-                        "reference_candidates": list(outcome.clarification_candidates),
-                    },
-                )
-        return outcome.rewritten_message, None
-
-    def _repair_or_clarify(
-        self, text: str, body: ChatRequest, correlation_id: str,
-    ) -> tuple[str, ChatResponse | None, dict[str, object]]:
-        """CX pre-retrieval hook: conversation repair, then one typo question.
-
-        A self-correction of the previous user turn ("no, I meant Ghana")
-        rewrites the question retrieval sees; the original message is what is
-        persisted, exactly as for a reference rewrite. A market repair changes
-        only the directory target: the session country still governs policy.
-        An unresolved repair changes nothing (never ask "did you mean X?" of a
-        user who just said X). A genuinely ambiguous typo of a semantic-
-        collision pair asks one localized question instead of guessing.
-        """
-        language = _answer_language(body)
-        if might_be_repair(text, language):
-            history = get_session_history(body.sessionId, correlation_id)
-            repair = detect_repair(text, language, _user_turns(history))
-            if repair is not None and repair.rewritten_question:
-                return repair.rewritten_question, None, {
-                    "conversation_repair": {"kind": repair.kind, "replacement": repair.replacement},
-                }
-        clarification = one_question([typo_clarification(text, language)])
-        if clarification is None:
-            return text, None, {}
-        answer = cx_render(clarification.key, language, options=cx_join_alternatives(clarification.options, language))
-        return text, self.response_builder.fallback(
-            answer,
-            correlation_id,
-            metadata={
-                "fallback": False,
-                "failure_layer": "typo_clarification",
-                "response_source": "conversation_repair",
-                "clarification_options": list(clarification.options),
-            },
-        ), {}
 
     def _early_conversation_response(
         self,
@@ -4079,7 +2958,7 @@ class AIOrchestrator:
         """Handle privacy and exact zero-token conversation routes before retrieval."""
         if contains_sensitive_pii_placeholder(scrubbed_input):
             return self.response_builder.fallback(
-                localized_conversation_response("sensitive_pii", _answer_language(body))
+                localized_conversation_response("sensitive_pii", body.language)
                 or (
                     "For your privacy, I removed sensitive personal information from your message. "
                     "AskVera does not use or save government IDs, payment details, passwords, or other "
@@ -4120,7 +2999,7 @@ class AIOrchestrator:
         risks confidently using the wrong market's policies with no visible
         signal to the user, so this always asks rather than assumes.
         """
-        template = localized_conversation_response("country_typo_confirmation", _answer_language(body)) or (
+        template = localized_conversation_response("country_typo_confirmation", body.language) or (
             'Did you mean "{country}"? Please confirm, or rephrase your question with the country name.'
         )
         answer = template.replace("{country}", probable_country)
@@ -4149,7 +3028,7 @@ class AIOrchestrator:
 
         if client_action == "open_support_form":
             return self.response_builder.fallback(
-                localized_conversation_response("support_request", _answer_language(body))
+                localized_conversation_response("support_request", body.language)
                 or "Opening the support request form.",
                 correlation_id,
                 metadata={
@@ -4195,7 +3074,7 @@ class AIOrchestrator:
         elif intent == "medical_claim":
             if candidate_flags.in_voice_guardrail:
                 candidate = self._candidate_guardrail_phrasing(
-                    "medical_claim", _answer_language(body), body.country, correlation_id
+                    "medical_claim", body.language, body.country, correlation_id
                 )
                 if candidate:
                     return self.response_builder.fallback(
@@ -4207,7 +3086,7 @@ class AIOrchestrator:
                             "response_source": "candidate_guardrail_phrasing",
                         },
                     )
-            answer, claim_scope = localized_claim_response(body.message, intent, body.country, _answer_language(body))
+            answer, claim_scope = localized_claim_response(body.message, intent, body.country, body.language)
             if answer:
                 return self.response_builder.fallback(
                     answer,
@@ -4221,7 +3100,7 @@ class AIOrchestrator:
             response_key = intent
         elif intent in {"income_claim", "off_topic"}:
             if candidate_flags.in_voice_guardrail:
-                candidate = self._candidate_guardrail_phrasing(intent, _answer_language(body), body.country, correlation_id)
+                candidate = self._candidate_guardrail_phrasing(intent, body.language, body.country, correlation_id)
                 if candidate:
                     return self.response_builder.fallback(
                         candidate,
@@ -4236,7 +3115,7 @@ class AIOrchestrator:
         if not response_key:
             return None
 
-        answer = localized_conversation_response(response_key, _answer_language(body))
+        answer = localized_conversation_response(response_key, body.language)
         if not answer:
             return None
         return self.response_builder.fallback(
@@ -4260,18 +3139,6 @@ class AIOrchestrator:
         history: str = "",
     ) -> tuple[ChatResponse | None, RetrievalResult, EvidenceDecision | None]:
         """Resolve semantic routes or enforce the evidence gate for knowledge requests."""
-        if retrieval_result.availability is RetrievalAvailability.UNAVAILABLE:
-            # R02 routing site 1 of 2. It uses the one shared builder so the
-            # copy, the metadata and the DependencyUnavailable metric stay
-            # identical to the exception paths (integration, 2026-09-18).
-            unavailable = self._dependency_unavailable_response(
-                body,
-                correlation_id,
-                "retrieval",
-                retrieval_result=retrieval_result,
-                retrieval_availability=retrieval_result.availability.value,
-            )
-            return unavailable, retrieval_result, None
         routed_response = self._conversation_route_response(retrieval_result, body, correlation_id, candidate_flags)
         if routed_response:
             return routed_response, retrieval_result, None
@@ -4292,28 +3159,11 @@ class AIOrchestrator:
             evidence_decision = approve_evidence(retrieval_query, scoped_result, body.country, body.language)
             if not evidence_decision.approved:
                 evidence_decision = replace(evidence_decision, reason="cross_market_local_evidence")
-        _TURN_EVIDENCE.set(evidence_decision)
         approved_result = with_approved_evidence(retrieval_result, evidence_decision)
-        if (
-            retrieval_result.availability is RetrievalAvailability.DEGRADED
-            and not evidence_decision.approved
-            and evidence_decision.reason != "cross_market_policy_request"
-        ):
-            # R02 routing site 2 of 2: degraded, with no usable evidence after
-            # country-scope reapproval. A foreign company-policy request stays a
-            # scope refusal (the reason check above). Same shared builder.
-            unavailable = self._dependency_unavailable_response(
-                body,
-                correlation_id,
-                "retrieval",
-                retrieval_result=retrieval_result,
-                retrieval_availability=retrieval_result.availability.value,
-            )
-            return unavailable, retrieval_result, None
         if evidence_decision.approved:
             unsupported_years = unsupported_requested_years(body.message, approved_result.documents)
             if unsupported_years:
-                template = localized_conversation_response("period_not_covered", _answer_language(body)) or (
+                template = localized_conversation_response("period_not_covered", body.language) or (
                     "The approved documents available to me do not contain information for {period}. "
                     "I cannot speculate about policy changes outside the documented period."
                 )
@@ -4357,11 +3207,11 @@ class AIOrchestrator:
                 return narrowing_response, approved_result, evidence_decision
         if evidence_decision.reason == "cross_market_policy_request":
             fallback_message = self._cross_market_scope_message(
-                _answer_language(body), body.message, body.country
+                body.language, body.message
             )
         else:
             fallback_message = self._insufficient_evidence_message(
-                _answer_language(body), body.message, body.country
+                body.language, body.message
             )
         office_contact_addendum = self._office_contact_addendum(body, correlation_id)
         if office_contact_addendum:
@@ -4500,7 +3350,7 @@ class AIOrchestrator:
                 model_response=model_response,
                 retrieval_result=retrieval_result,
                 country=body.country,
-                language=_answer_language(body),
+                language=body.language,
                 role=body.role,
                 correlation_id=correlation_id,
             )
@@ -4591,7 +3441,7 @@ class AIOrchestrator:
                             model_response=model_response,
                             retrieval_result=retrieval_result,
                             country=body.country,
-                            language=_answer_language(body),
+                            language=body.language,
                             role=body.role,
                             correlation_id=correlation_id,
                         )
@@ -4644,7 +3494,7 @@ class AIOrchestrator:
             _record_diagnostic_validation(chat_response, result, "critical_fallback", numeric_repair_attempt)
             return self._with_validation_metadata(
                 self.response_builder.fallback(
-                    self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
+                    self._insufficient_evidence_message(body.language, body.message),
                     correlation_id,
                     metadata={"failure_layer": failure_layer},
                 ),
@@ -4773,7 +3623,7 @@ class AIOrchestrator:
             set_semantic_cache_value(
                 retrieval_query,
                 body.country,
-                _cache_language(body),
+                body.language,
                 body.role,
                 retrieval_result,
                 cache_value,

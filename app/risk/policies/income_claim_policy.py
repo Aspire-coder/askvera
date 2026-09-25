@@ -495,35 +495,6 @@ def _without_consumer_guarantees(text: str) -> str:
     return "".join(parts)
 
 
-# Fix A3 (2026-09-15): job-replacement and financial-independence phrasing
-# with no earnings/guarantee word at all ("Will this replace my nine to
-# five?", "Could this support my family?"). Confirmed misses (offline probe,
-# 2026-09-15): these bypassed the semantic income check entirely under PR
-# #154's has_income_context() gate, because they hold no earnings, money,
-# guarantee, gain/prize or translated income word. This regex is added ONLY
-# to has_income_context() below, never to _EARNINGS_MAIN_RE/_contains_income_claim:
-# it must widen which messages keep independent semantic review, but must
-# never itself pair with "guarantee" to widen refusal - IncomeClaimPolicy.evaluate
-# and every refusal path stay exactly as before.
-# English only for now: non-English equivalents in
-# app/risk/policies/income_claim_translations.py are intentionally left out
-# rather than guessed at - add them there, to the covered language's own
-# dict, only once their wording is confirmed.
-_JOB_OBJECT_RE = r"(?:full[\s-]?time\s+job|day\s+job|job|nine[\s-]?to[\s-]?five|9[\s-]?to[\s-]?5)"
-_JOB_REPLACEMENT_CONTEXT_RE = re.compile(
-    rf"\breplac\w*\s+(?:my|your|his|her|their|our|this)?\s*{_JOB_OBJECT_RE}\b"
-    r"|\bquit(?:ting)?\s+(?:my|your|his|her|their|our)?\s*(?:day\s+)?job\b"
-    r"|\bfull[\s-]?time\s+job\b"
-    r"|\bday\s+job\b"
-    r"|\bnine[\s-]?to[\s-]?five\b|\b9[\s-]?to[\s-]?5\b"
-    r"|\bfinancial(?:ly)?\s+(?:independen\w+|free\w*)\b"
-    r"|\bmake\s+a\s+living\b"
-    r"|\blive\s+off\s+(?:this|it)\b"
-    r"|\bsupport\s+(?:my|our)\s+family\b",
-    re.IGNORECASE,
-)
-
-
 class IncomeClaimPolicy:
     """Flag income and earnings claim language for governance visibility."""
 
@@ -534,7 +505,6 @@ class IncomeClaimPolicy:
         enabled=True,
         risk_level=RiskLevel.HIGH,
         action=PolicyAction.REFUSE,
-        is_claim_topic=True,
     )
     phrases = tuple(DENIED_TOPICS["income_claim"])
 
@@ -588,6 +558,5 @@ class IncomeClaimPolicy:
             self._contains_income_claim(normalized)
             or _EARNINGS_MAIN_RE.search(normalized)
             or _GAIN_OR_PRIZE_RE.search(normalized)
-            or _JOB_REPLACEMENT_CONTEXT_RE.search(normalized)
             or contains_translated_income_context(normalized)
         )

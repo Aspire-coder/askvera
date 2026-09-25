@@ -74,14 +74,7 @@ def _risk_decision(level: RiskLevel = RiskLevel.LOW, action: PolicyAction = Poli
 
 
 def test_allow_claim_topics_is_forwarded_to_the_provider() -> None:
-    """The exemption reaches the provider, defaulting off and gated on the answer pass.
-
-    is_generated_answer is the gate, and it is applied once so that the same
-    value reaches both enforcement points. The provider must not see the
-    exemption on a user-input pass: medical_claim's risk action is WARN, so
-    the provider is the only thing that refuses a medical claim, and an
-    ungated forward would exempt user input outright.
-    """
+    """The output-guardrail exemption must reach the provider, defaulting off."""
     provider = FakeProvider()
     _engine(_risk_decision(), provider).evaluate(
         text="hello", country="US", language="en", correlation_id="cid"
@@ -90,26 +83,13 @@ def test_allow_claim_topics_is_forwarded_to_the_provider() -> None:
 
     provider = FakeProvider()
     _engine(_risk_decision(), provider).evaluate(
-        text="hello", country="US", language="en", correlation_id="cid",
-        allow_claim_topics=True, is_generated_answer=True,
+        text="hello", country="US", language="en", correlation_id="cid", allow_claim_topics=True
     )
     assert provider.allow_claim_topics is True
 
-    provider = FakeProvider()
-    _engine(_risk_decision(), provider).evaluate(
-        text="hello", country="US", language="en", correlation_id="cid",
-        allow_claim_topics=True, is_generated_answer=False,
-    )
-    assert provider.allow_claim_topics is False
 
-
-def test_exemption_does_not_bypass_a_refusing_non_claim_topic_policy() -> None:
-    """Only claim-topic policies are suppressed; every other policy still refuses.
-
-    The fake risk engine here stands for a policy that is not marked
-    is_claim_topic -- off_topic, for instance. Such a policy refuses even on
-    the answer pass, and the provider is never reached.
-    """
+def test_allow_claim_topics_does_not_bypass_a_refusing_risk_policy() -> None:
+    """Risk policies run before the provider and are unaffected by the exemption."""
     provider = FakeProvider()
     decision = _engine(_risk_decision(RiskLevel.HIGH, PolicyAction.REFUSE), provider).evaluate(
         text="guaranteed income", country="US", language="en",
