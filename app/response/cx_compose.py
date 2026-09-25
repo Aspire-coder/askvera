@@ -246,6 +246,8 @@ def _name_missing_fields(
     language: str,
     render: Callable[..., str],
     applied: list[str],
+    *,
+    directory_contact_route: bool = False,
 ) -> str:
     """Swap the generic reviewed ``insufficient_evidence`` sentence for its
     ``evidence_missing_detail`` version naming the requested fields.
@@ -253,7 +255,17 @@ def _name_missing_fields(
     Only an answer that STARTS with the exact generic copy for ``language`` is
     changed, and only that copy is replaced; anything appended after it (an
     office-contact addendum) is kept. Otherwise the answer is returned as is.
+
+    ``directory_contact_route`` is true only for a response the
+    directory-contact-route trigger (``app.orchestrator.chat_orchestrator``)
+    already built: today's unchanged generic fallback text followed
+    immediately by the guarded phone/email block. Skipped unconditionally in
+    that case - "the approved documents do not contain enough detail about
+    the phone number" directly above the phone number it just supplied would
+    contradict the block, not introduce it.
     """
+    if directory_contact_route:
+        return answer
     generic = _generic_missing_first_paragraph(language, render)
     if not generic or not answer.startswith(generic):
         return answer
@@ -334,6 +346,17 @@ def compose_cx_response(
     if _blocked(response):
         return _unchanged(response)
 
+    # True only for a response app.orchestrator.chat_orchestrator's
+    # directory-contact-route trigger already built: today's unchanged
+    # generic fallback text, a reviewed lead-in naming the record's market,
+    # and the record's own guarded phone/email block. Both additions this
+    # module would otherwise layer on an evidence_missing-shaped fallback -
+    # the "not enough detail about the phone number" swap and a second,
+    # different contact offer below the block that just supplied one - would
+    # contradict copy that has already been delivered, so both are skipped
+    # for this response.
+    directory_contact_route = bool((response.metadata or {}).get("directory_contact_route"))
+
     applied: list[str] = []
     answer = response.answer or ""
     current_outcome = outcome
@@ -377,7 +400,9 @@ def compose_cx_response(
         # Name what could not be found, replacing only the generic reviewed
         # sentence it is the drop-in detail version of (coordinator,
         # 2026-09-19). Any other evidence-missing copy is left untouched.
-        answer = _name_missing_fields(answer, outcome, language, render, applied)
+        answer = _name_missing_fields(
+            answer, outcome, language, render, applied, directory_contact_route=directory_contact_route,
+        )
 
     # A personal-account lookup ("Where is my order?") usually has no evidence
     # at all, so the note applies to evidence_missing too, not only to answers
@@ -427,7 +452,7 @@ def compose_cx_response(
         ):
             current_outcome = replace(current_outcome, kind=OutcomeKind.PERSONAL_ACCOUNT)
 
-    contact_note = contact_escalation(
+    contact_note = None if directory_contact_route else contact_escalation(
         current_outcome, country=country, language=language, answer_text=answer, render=render,
     )
     answer = _apply_addition(answer, "contact_offer", contact_note, applied)
