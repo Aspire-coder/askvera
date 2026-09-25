@@ -1261,10 +1261,13 @@ evidence_gate
 evidence_contract
 aws_guardrail
 numeric_validator
+history_grounding
 citation_validator
 output_validator
 sensitive_pii_input
 ```
+
+`history_grounding` means the answer failed validation only because it repeated an earlier-turn claim that this turn's evidence does not support; if a numeric claim also failed, the value stays `numeric_validator`.
 
 These values support admin diagnostics without exposing private prompt content.
 
