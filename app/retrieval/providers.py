@@ -5,7 +5,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -21,6 +21,7 @@ from utils.logging import get_logger
 
 from .glossary import approved_joined_term_queries, glossary_queries
 from .models import RetrievedDocument, RetrievalResult
+from .typo_safety import safe_typo_ranking_queries
 
 LOGGER = get_logger("app.retrieval.providers")
 
@@ -274,6 +275,7 @@ def _runtime_scope_intent(
     shared_office_markets: set[str],
     deterministic_directory_route: bool,
     language: str = "en",
+    repaired_texts: Sequence[str] = (),
 ) -> dict[str, str]:
     """Record the explicit runtime scope decision without replay inference.
 
@@ -360,21 +362,47 @@ def _runtime_scope_intent(
     sites, so the collapse below is redundant with that helper's own but
     kept for the other regexes (``is_policy_safety_question``,
     ``SPONSORING_QUESTION_RE``) this function also matches against.
+
+    Canary fix (2026-09-25, retrieval_canary.json case
+    "mexico-sponsoring-multiple-typos"): this function was the only stage in
+    the whole retrieval path that still read the *raw*, uncorrected user
+    message. Every other stage (ranking, via
+    ``app.retrieval.typo_safety.safe_typo_ranking_queries``) already tolerates
+    bounded spelling slips, so a question like "How can I become a member in
+    Mexcio through internationl sponsring?" ranked the correct directory
+    record highly but this function still classified it "ambiguous" - neither
+    ``SPONSORING_QUESTION_RE`` nor ``directory_field_intent_present`` matched
+    the misspelled words - which zeroed the directory country bonus in
+    ``opensearch_sections._directory_record_country_score`` and let an
+    unrelated policy document win. The caller now also computes the same
+    bounded, token-level typo repair used for ranking and passes it here as
+    ``repaired_texts``; each text-based branch below additionally checks every
+    repaired form (never in place of the raw message - only in addition to
+    it), so a genuine typo repair can only ever turn "ambiguous" into a real
+    intent, the same one-directional guarantee the language additions above
+    already established. The non-text branches (``include_global_documents``,
+    ``deterministic_directory_route``) are computed by the caller from the
+    raw message only and are unchanged. Branch order is unchanged: policy is
+    still checked before sponsoring/directory, so a typo repair can never
+    weaken the policy-question suppression the R05/N6 follow-ups above
+    established - only add another way to detect the same phrasing.
     """
-    text = " ".join((message or "").split())
-    if (
-        is_policy_safety_question(text)
-        or directory_policy_wording_present(text)
-        or localized_policy_wording_present(text, language=language)
+    texts = [" ".join((message or "").split())]
+    texts.extend(" ".join((candidate or "").split()) for candidate in repaired_texts if candidate)
+    if any(
+        is_policy_safety_question(candidate)
+        or directory_policy_wording_present(candidate)
+        or localized_policy_wording_present(candidate, language=language)
+        for candidate in texts
     ):
         intent, source = "policy", "deterministic_policy_route"
-    elif SPONSORING_QUESTION_RE.search(text):
+    elif any(SPONSORING_QUESTION_RE.search(candidate) for candidate in texts):
         intent, source = "international_sponsoring", "deterministic_sponsoring_route"
     elif not include_global_documents:
         intent, source = "policy", "local_policy_only"
     elif deterministic_directory_route:
         intent, source = "directory", "deterministic_directory_route"
-    elif directory_field_intent_present(text, language=language):
+    elif any(directory_field_intent_present(candidate, language=language) for candidate in texts):
         intent, source = "directory", "multilingual_directory_field_route"
     else:
         intent, source = "ambiguous", "planner_global_scope_only"
@@ -1012,6 +1040,13 @@ def _planned_retrieval_plan(
                 operational_directory_route or own_market_directory_route or directory_topic_route
             ),
             language=language,
+            # Canary fix (2026-09-25, "mexico-sponsoring-multiple-typos"): reuse
+            # the same bounded, token-level typo repair ranking already trusts
+            # (`safe_typo_ranking_queries`) so the intent gate is no longer the
+            # only stage still reading the raw, uncorrected message. `merged[1:]`
+            # is the same "planner queries excluding the raw message" shape that
+            # opensearch_sections passes to this helper for ranking.
+            repaired_texts=safe_typo_ranking_queries(message, merged[1:]),
         ),
         authorized_policy_market=_authorized_policy_market(country),
     )
