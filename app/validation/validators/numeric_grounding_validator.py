@@ -6,6 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from app.response.quality import contact_for_country
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
 from config.timing_stage_vocabulary import TIMING_STAGE_VOCABULARY
 from services.market_config import find_market_mentions, market_adjective_codes
@@ -2037,6 +2038,73 @@ def _drop_orphaned_delimiters(text: str) -> str:
     return re.sub(r"\s+([,.;:!?])", r"\1", re.sub(r"[ \t]{2,}", " ", cleaned))
 
 
+class _ReviewedContactDocument:
+    """Minimal document-shaped wrapper so a reviewed contact value can flow
+    through the same claim-matching path as a retrieved document.
+
+    Not a retrieval result: ``content`` holds the reviewed values
+    ``app.response.quality.contact_for_country`` returns for one market -
+    exactly the values ``remove_or_replace_contact_placeholders`` can have
+    substituted into the answer before validation ever runs. ``title`` and
+    ``metadata`` are present only so callers that duck-type a document (as
+    ``unsupported_numeric_claims`` does) do not need a special case.
+    """
+
+    def __init__(self, content: str, country: str) -> None:
+        self.content = content
+        self.title = ""
+        self.country = country
+        self.metadata: dict = {}
+
+
+def _reviewed_contact_documents(country: str) -> list[object]:
+    """This session market's reviewed public contact values, as grounding text.
+
+    The orchestrator fills placeholder tokens with these exact values
+    (``remove_or_replace_contact_placeholders``, via ``contact_for_country``)
+    before the output validator runs, so a reviewed number the pipeline
+    itself inserted must not then be flagged as an invented claim. Scoped to
+    ``country`` only - the values for any other market are never included, so
+    a number that happens to equal another market's reviewed contact is not
+    protected here.
+    """
+    contacts = contact_for_country(country)
+    if not contacts:
+        return []
+    # A label word ahead of the number is what _grounded_phone_spans requires
+    # of a source before it will treat a phone-shaped figure as a contact
+    # value rather than an arbitrary digit run - see its docstring. "Customer
+    # Care Phone" carries the "customer care" phrase that label matches.
+    lines = [
+        f"Customer Care Phone: {value}" if key == "customerCarePhone" else f"{key}: {value}"
+        for key, value in contacts.items()
+        if value
+    ]
+    content = "\n".join(lines)
+    if not content:
+        return []
+    return [_ReviewedContactDocument(content, country)]
+
+
+def numeric_grounding_documents(documents: list[object], country: str) -> list[object]:
+    """This turn's retrieved ``documents``, plus this session market's
+    reviewed public contact values, as one grounding set for numeric-claim
+    detection and removal.
+
+    The single definition of "what grounds a number" that both
+    ``NumericGroundingValidator.validate`` and the orchestrator's numeric
+    repair (``remove_unsupported_numeric_sentences``, at both of its call
+    sites) build their claim list from, so detection and removal can never
+    disagree about a reviewed contact value: a figure the numeric validator
+    accepts as grounded must never be a figure repair then deletes. See
+    ``_reviewed_contact_documents`` - only ``country``'s reviewed values are
+    ever added, and only for numeric grounding; this set must not be used for
+    citations, history removal, the gutted-answer guard, or anything logged
+    or captured for diagnostics, none of which are about numeric claims.
+    """
+    return list(documents) + _reviewed_contact_documents(country)
+
+
 class NumericGroundingValidator:
     """Block measurable claims that are absent from retrieved context."""
 
@@ -2056,12 +2124,17 @@ class NumericGroundingValidator:
         if not source_documents:
             return
 
+        # This turn's retrieved evidence, plus this session market's reviewed
+        # public contact values - the same grounding set the orchestrator's
+        # numeric repair uses, so detection and removal always agree.
+        grounding_documents = numeric_grounding_documents(retrieval_result.documents, context.country)
+
         # unsupported_numeric_claims already excludes source-grounded contact
         # values. The remaining check rescues numbers that appear only inside a
         # structured office/staff directory record rather than in running text.
         unsupported = [
             claim.text
-            for claim in unsupported_numeric_claims(answer, retrieval_result.documents)
+            for claim in unsupported_numeric_claims(answer, grounding_documents)
             if not any(
                 _claim_is_supported(claim, source_text)
                 or (
