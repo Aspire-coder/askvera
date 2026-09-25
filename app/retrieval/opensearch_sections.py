@@ -7,6 +7,7 @@ import math
 import re
 import unicodedata
 from contextvars import ContextVar, Token
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any
 
@@ -137,14 +138,20 @@ def _client() -> OpenSearch:
     )
 
 
+# The language a market's documents are read in when it publishes no edition
+# in the requested one. Named once so the search side and the filter side
+# cannot drift apart.
+FALLBACK_DOCUMENT_LANGUAGE = "en"
+
+
 def _language_filter(language: str) -> dict[str, Any]:
     """Filter to the requested language, with an explicit optional English fallback."""
     normalized = (language or "en").split("-", 1)[0].lower()
-    if normalized == "en":
-        return {"term": {"language": "en"}}
+    if normalized == FALLBACK_DOCUMENT_LANGUAGE:
+        return {"term": {"language": FALLBACK_DOCUMENT_LANGUAGE}}
     languages = [normalized]
     if settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
-        languages.append("en")
+        languages.append(FALLBACK_DOCUMENT_LANGUAGE)
     return {"terms": {"language": languages}}
 
 
@@ -1889,6 +1896,7 @@ class OpenSearchSectionProvider:
                     "intent_confidence": search_plan.intent_confidence,
                 },
             )
+        search_plan = self._with_fallback_language_query(search_plan, message, language, correlation_id)
         client = _client()
         search_messages = search_plan.queries
         target_country_names = _directory_target_section_names(message, country)
@@ -2069,9 +2077,55 @@ class OpenSearchSectionProvider:
         )
         return result
 
+    def _with_fallback_language_query(
+        self, search_plan: RetrievalQueryPlan, message: str, language: str, correlation_id: str
+    ) -> RetrievalQueryPlan:
+        """Also search a market's fallback-language documents in their own language.
+
+        R10 capture (2026-09-22): "Can I pay for my order in cash?" was
+        answered in the US with confidence 0.95, and the same question asked
+        in Spanish (case r10-04b-us-cash-payment-1301c-es) was refused at the
+        low-confidence gate with 0.188. Nothing about the policy differs - US
+        section 13.01(c) is the evidence either way - but the US publishes
+        only English editions, so _language_filter widens the Spanish request
+        to those English sections and the locale channels then searched them
+        with the question's own Spanish words. The global scope has had a
+        translated query since it was introduced (_global_search_query); the
+        locale scope, which is where a market's own policy lives, had none.
+
+        The rendering is appended, never substituted: the question's own words
+        remain the first and highest-weighted query, so a market that does
+        publish in the requested language is unaffected, and a translation
+        failure falls back to the original message and changes nothing. It is
+        keyed on the configured fallback language rather than on any market or
+        language list, so every market and every non-English language gets the
+        same treatment. Being one of the plan's queries, it also reaches the
+        cross-language strong-match rescue
+        (_translated_query_local_relevance), which until now depended on the
+        advisory planner having chosen to emit an English phrase.
+        """
+        if not settings.OPENSEARCH_ALLOW_ENGLISH_FALLBACK:
+            return search_plan
+        if _language_key(language) == FALLBACK_DOCUMENT_LANGUAGE:
+            return search_plan
+        translated = self._translated_search_query(
+            message, language, FALLBACK_DOCUMENT_LANGUAGE, correlation_id
+        )
+        cleaned = re.sub(r"\s+", " ", translated).strip()
+        if not cleaned or cleaned in search_plan.queries:
+            return search_plan
+        return replace(search_plan, queries=[*search_plan.queries, cleaned])
+
     def _global_search_query(self, message: str, language: str, correlation_id: str) -> str:
         """Translate a query into the configured language of global documents."""
-        target_language = _language_key(settings.OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE)
+        return self._translated_search_query(
+            message, language, _language_key(settings.OPENSEARCH_GLOBAL_DOCUMENT_LANGUAGE), correlation_id
+        )
+
+    def _translated_search_query(
+        self, message: str, language: str, target_language: str, correlation_id: str
+    ) -> str:
+        """Render a query in the language the documents being searched are written in."""
         if _language_key(language) == target_language:
             return message
 
@@ -2088,13 +2142,16 @@ class OpenSearchSectionProvider:
                 messages=[{"role": "user", "content": [{"text": user_prompt}]}],
                 inferenceConfig={"maxTokens": settings.BEDROCK_GLOBAL_TRANSLATION_MAX_OUTPUT_TOKENS, "temperature": settings.BEDROCK_CLASSIFIER_TEMPERATURE},
             )
-            translated = response["output"]["message"]["content"][0].get("text", "").strip()
+            translated = response["output"]["message"]["content"][0].get("text", "")
         except (BotoCoreError, ClientError, KeyError, IndexError, TypeError):
             LOGGER.exception("opensearch_global_query_translation_failed", correlation_id=correlation_id)
             return message
 
-        if not translated:
+        # A provider that answers with anything but text leaves the question in
+        # its own words rather than turning a non-string into a search query.
+        if not isinstance(translated, str) or not translated.strip():
             return message
+        translated = translated.strip()
         LOGGER.info(
             "opensearch_global_query_translation_success",
             correlation_id=correlation_id,

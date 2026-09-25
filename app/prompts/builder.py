@@ -164,7 +164,7 @@ class PromptBuilder:
                 f"[Source {index}] {document.title}",
                 f"Source ID: {document.id}",
                 f"Source type: {source_type}",
-                f"{'Directory' if is_directory else 'Policy'} section: {section or 'not supplied'}",
+                f"{_section_label(directory_metadata, is_directory)} section: {section or 'not supplied'}",
                 f"Page: {document.page or 'not supplied'}",
                 f"URI: {document.source}",
                 f"Country: {document.country}",
@@ -200,6 +200,15 @@ _GLOBAL_DIRECTORY_DOCUMENT_TYPES = frozenset({"office_directory", "international
 _DIRECTORY_NOTE_PREFIX = "The approved evidence includes the public office directory record"
 _MAX_MARKET_NAME_CHARS = 80
 _UNNAMED_MARKET = "another market"
+
+
+def _section_label(metadata: dict[str, Any], is_directory: bool) -> str:
+    """Name a source's section by what it is, so product material is not read as company policy."""
+    if is_directory:
+        return "Directory"
+    if metadata.get("document_type") == "product_information":
+        return "Product information"
+    return "Policy"
 
 
 def _is_global_directory_record(document: Any) -> bool:

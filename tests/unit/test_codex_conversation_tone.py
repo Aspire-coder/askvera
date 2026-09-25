@@ -83,7 +83,15 @@ ROUTES_REST_SHA256 = "3ec04c67e6959926bfca3f738d6517c629854593bc4719225bc5d8110d
 # the evidence does not establish, keeping "prohibited or unavailable parts". PROMPT_VERSION was bumped with it, because
 # both caches key on it. These are instructions only: whether live answers
 # improve is unverified without a live run.
-TEMPLATE_LATER_SHA256 = "a6728cac7378e9889ecca0cd4da8784330129d757610da15a2d5dcd03fd4b90b"
+# Updated 2026-09-22 (owner-approved, R10 income-disclaimer quoting): the
+# compensation rule gained ", even quoted" so the model stops quoting
+# "guarantee" from policy 1.01(d), which the unchanged income policy refuses,
+# and "Explain bans on medical or income
+# claims" was reworded to "Explain medical or income claim bans" (same
+# meaning) so the rule stays within the existing 4392-character budget
+# without moving any budget assertion. Previous hash:
+# a6728cac7378e9889ecca0cd4da8784330129d757610da15a2d5dcd03fd4b90b
+TEMPLATE_LATER_SHA256 = "454c713329759149f748fecc2cd4d8d6687a2595c4b71fd3574d8ab16e997307"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
     "wellbeing": "Thanks for asking! I'm here to help. What's on your mind?",

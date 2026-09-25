@@ -346,6 +346,133 @@ def test_personal_account_note_never_fires_for_the_personal_account_fallback_kin
     assert result.answer.startswith(answer)
 
 
+# --- personal account promotion: symmetric across answer-like and ----------
+# --- evidence_missing base kinds, gated on approved evidence ---------------
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("en", "Did my commission arrive yet? Also, how is the commission calculated?"),
+        ("fr", "Quel est mon solde ? Aussi, comment la commission est-elle calculée ?"),
+    ],
+)
+def test_personal_account_promotes_answer_like_base_kind_with_no_evidence(
+    language: str, question: str
+) -> None:
+    # The asymmetry this fix closes: an answer-shaped turn with no approved
+    # evidence at all must be promoted to PERSONAL_ACCOUNT exactly like the
+    # equivalent evidence_missing turn is today, not left as "answer".
+    answer = "Commissions are calculated monthly based on approved CV."
+    response = _response(answer)
+    outcome = _outcome(OutcomeKind.ANSWER, language=language)
+
+    result, applied = _compose(
+        response, outcome, question=question, language=language, evidence_documents=[]
+    )
+
+    assert applied["cx_applied"].count("personal_account_limit") == 1
+    assert result.metadata["outcome"]["kind"] == OutcomeKind.PERSONAL_ACCOUNT.value
+
+
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("en", "Did my commission arrive yet? Also, how is the commission calculated?"),
+        ("fr", "Quel est mon solde ? Aussi, comment la commission est-elle calculée ?"),
+    ],
+)
+def test_personal_account_never_demotes_a_genuinely_grounded_answer(
+    language: str, question: str
+) -> None:
+    # A turn that HAS approved evidence keeps its base kind even though the
+    # personal_account_limit note still applies -- the note is informational,
+    # not a signal that the answer itself was ungrounded.
+    answer = "Commissions are calculated monthly based on approved CV."
+    response = _response(answer)
+    outcome = _outcome(OutcomeKind.ANSWER, language=language)
+    document = RetrievedDocument(
+        id="policy-doc",
+        title="Commission policy",
+        content="Commissions are calculated monthly based on approved CV.",
+        source="s3://approved/policy/commissions.pdf",
+        country="US",
+        language=language,
+        metadata={},
+    )
+
+    result, applied = _compose(
+        response, outcome, question=question, language=language, evidence_documents=[document]
+    )
+
+    assert applied["cx_applied"].count("personal_account_limit") == 1
+    assert result.metadata["outcome"]["kind"] == OutcomeKind.ANSWER.value
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_personal_account_promotes_evidence_missing_base_kind_unchanged(language: str) -> None:
+    # Preserve today's EVIDENCE_MISSING -> PERSONAL_ACCOUNT promotion exactly:
+    # the generic reviewed insufficient_evidence copy, no evidence, personal
+    # account question -> still promoted.
+    generic_answer = cx_render.render("insufficient_evidence", language)
+    response = _response(generic_answer)
+    outcome = _outcome(OutcomeKind.EVIDENCE_MISSING, language=language)
+    question = {
+        "en": "Did my commission arrive yet?",
+        "fr": "Quel est mon solde ?",
+    }[language]
+
+    result, applied = _compose(
+        response, outcome, question=question, language=language, evidence_documents=[]
+    )
+
+    assert applied["cx_applied"].count("personal_account_limit") == 1
+    assert result.metadata["outcome"]["kind"] == OutcomeKind.PERSONAL_ACCOUNT.value
+
+
+def test_personal_account_promotion_never_overwrites_an_earlier_partial_answer_promotion() -> None:
+    # First-promotion-wins: a question that BOTH requests a directory field
+    # (triggering the field-coverage step's PARTIAL_ANSWER promotion, with
+    # real fields_answered/fields_unsupported) AND is personal-account
+    # shaped (triggering this step's own note) must keep the PARTIAL_ANSWER
+    # kind and its field data -- the personal_account_limit note still gets
+    # added to the text, but must never overwrite the earlier, more
+    # informed promotion.
+    #
+    # Note this exercises the field-coverage promotion with its real
+    # precondition: app/response/partial_answer.py's
+    # _all_evidence_is_directory_shaped is deliberately False for an EMPTY
+    # evidence_documents (a field can only ever be "unsupported" -- and so
+    # only ever promote to PARTIAL_ANSWER -- when there IS approved,
+    # directory-shaped evidence; "no evidence at all" is evidence_missing
+    # territory, never partial_answer). So this turn's evidence is
+    # non-empty here, which also means this exact turn was already
+    # protected by this step's own `not evidence_documents` guard even
+    # before the `current_outcome.kind == outcome.kind` check was added --
+    # the new guard is the general, forward-looking safeguard (first
+    # promotion always wins, whatever added it), not the only thing
+    # preventing this particular case.
+    document = _kenya_document({"Telephone Office": "+254 20 2026869"})
+    answer = "You can reach the Kenya office at +254 20 2026869."
+    response = _response(answer)
+    outcome = _outcome(OutcomeKind.ANSWER, country="KE")
+
+    result, applied = _compose(
+        response,
+        outcome,
+        question="Did my commission arrive yet? Also, what is the phone number and email?",
+        country="KE",
+        evidence_documents=[document],
+    )
+
+    assert applied["cx_applied"].count("partial_note") == 1
+    assert applied["cx_applied"].count("personal_account_limit") == 1
+    assert result.metadata["outcome"]["kind"] == OutcomeKind.PARTIAL_ANSWER.value
+    assert result.metadata["outcome"]["fields_answered"] == ["phone"]
+    assert result.metadata["outcome"]["fields_unsupported"] == ["email"]
+    assert "personal account, order or earnings" in result.answer
+
+
 # --- contact escalation: fires, and is deduplicated -------------------------
 
 

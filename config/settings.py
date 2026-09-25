@@ -64,7 +64,7 @@ APP_VERSION = "1.0.0"
 # Runtime environment. Production disables development-only auth conveniences.
 APP_ENV = _env_str("APP_ENV", "development").lower()
 # Prompt/cache version values used to invalidate stale AI responses after content or policy changes.
-PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-09-18-composition-contract-v5")
+PROMPT_VERSION = _env_str("PROMPT_VERSION", "2026-09-22-income-disclaimer-quote-v6")
 # Rotate this value whenever approved indexed content is published. Keeping it
 # configurable lets the ingestion workflow invalidate stale answers without a
 # code change.
@@ -102,6 +102,9 @@ DB_SCHEMA_BOOTSTRAP_ON_STARTUP = _env_bool("DB_SCHEMA_BOOTSTRAP_ON_STARTUP", Fal
 # Default AWS client timeouts and retry budget.
 AWS_CONNECT_TIMEOUT_SECONDS = 3
 AWS_READ_TIMEOUT_SECONDS = 12
+# SQS long polling holds the connection open for up to 20 seconds, so the
+# client that polls must wait longer than that or every empty poll times out.
+AWS_SQS_LONG_POLL_READ_TIMEOUT_SECONDS = 30
 AWS_MAX_ATTEMPTS = 3
 # Interactive chat calls use a bounded budget so a transient dependency does
 # not consume the entire request latency budget.

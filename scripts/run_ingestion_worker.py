@@ -9,11 +9,18 @@ import re
 import socket
 import sys
 import threading
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import unquote, urlparse
 
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 from sqlalchemy.exc import SQLAlchemyError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +52,8 @@ from services.market_config import (  # noqa: E402
 from utils.logging import configure_logging, get_logger  # noqa: E402
 
 LOGGER = get_logger("scripts.run_ingestion_worker")
+# Pause before polling again after a network failure, so an outage is not a hot loop.
+POLL_RETRY_SECONDS = 5
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 REQUIRED_FIELDS = {
     "jobId",
@@ -341,13 +350,20 @@ def run_forever() -> None:
         raise RuntimeError("ADMIN_INGESTION_QUEUE_URL is required.")
     clients = get_aws_clients()
     while True:
-        response = clients.sqs.receive_message(
-            QueueUrl=settings.ADMIN_INGESTION_QUEUE_URL,
-            MaxNumberOfMessages=1,
-            WaitTimeSeconds=max(1, min(settings.ADMIN_INGESTION_WORKER_WAIT_SECONDS, 20)),
-            VisibilityTimeout=max(30, settings.ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS),
-            AttributeNames=["ApproximateReceiveCount"],
-        )
+        try:
+            response = clients.sqs_long_poll.receive_message(
+                QueueUrl=settings.ADMIN_INGESTION_QUEUE_URL,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=max(1, min(settings.ADMIN_INGESTION_WORKER_WAIT_SECONDS, 20)),
+                VisibilityTimeout=max(30, settings.ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS),
+                AttributeNames=["ApproximateReceiveCount"],
+            )
+        except (ReadTimeoutError, ConnectTimeoutError, EndpointConnectionError) as exc:
+            # A network blip while polling is not a reason to exit: nothing was
+            # received, so poll again rather than restarting the whole worker.
+            LOGGER.warning("ingestion_queue_poll_failed", error_type=type(exc).__name__)
+            time.sleep(POLL_RETRY_SECONDS)
+            continue
         for message in response.get("Messages", []):
             stop_heartbeat = threading.Event()
             heartbeat = threading.Thread(

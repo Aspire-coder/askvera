@@ -58,7 +58,7 @@ from app.validation.validators.numeric_grounding_validator import (
     removal_diagnostics,
 )
 from app.validation.validators.history_grounding_validator import documents_are_directory_only
-from config import settings
+from config import policy_request_vocabulary, settings
 from config.vera_persona import FALLBACK_RESPONSES, fbo_enrollment_is_unavailable
 from services.audit import write_audit_event
 from services.aws_clients import get_aws_clients
@@ -610,9 +610,11 @@ LOCALIZED_DIRECTORY_FIELD_PATTERN = _follow_up_stem_pattern(
     *(fragment for fragments in LOCALIZED_DIRECTORY_FIELD_TERMS.values() for fragment in fragments)
 )
 # POLICY_WORD in the same languages: "And the delivery policy?" is not a field request.
-LOCALIZED_POLICY_PATTERN = _follow_up_stem_pattern(
-    "policy", "beleid", "politique", "richtlinie", "politik", "política", "käytäntö", "politica", "retningslinj", "riktlinj", "политик", word_start=False
-)
+# The fragment list itself lives in config.policy_request_vocabulary now, shared
+# with app/evidence.py's company-policy gate, so the two cannot drift apart -
+# see that module's docstring. build_localized_policy_pattern() reproduces the
+# exact pattern the inline _follow_up_stem_pattern(...) call used to build.
+LOCALIZED_POLICY_PATTERN = policy_request_vocabulary.build_localized_policy_pattern(word_start=False)
 # Place prepositions for the capitalised-name guard on the topic ellipsis.
 LOCALIZED_PLACE_PREPOSITIONS = _follow_up_token_set(
     "in naar", "à a au aux en dans", "im nach", "em no na", "ad nel nella", "i till til", "u", "в во у"

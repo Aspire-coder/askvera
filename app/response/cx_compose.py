@@ -419,7 +419,37 @@ def compose_cx_response(
         answer = _apply_addition(
             answer, "personal_account_limit", render("personal_account_limit", language), applied,
         )
-        if outcome.kind == OutcomeKind.EVIDENCE_MISSING and applied[before:] == ["personal_account_limit"]:
+        # Promote to PERSONAL_ACCOUNT whenever this note was the only
+        # addition applied so far AND the turn carried no approved evidence
+        # -- symmetrically for an EVIDENCE_MISSING base kind (today's
+        # behaviour, preserved unchanged: that kind normally has no evidence
+        # anyway) and for an answer-like base kind (the asymmetry this fix
+        # closes: "What is the status of my order?" was typed "answer" in
+        # one market/language and "personal_account" in another, purely by
+        # which base kind the pipeline happened to reach, even though
+        # neither turn had any evidence backing it). A turn that DOES have
+        # approved evidence never gets demoted this way -- it keeps its
+        # base kind because the answer is genuinely grounded, not a
+        # personal-account gap the pipeline is papering over.
+        #
+        # `current_outcome.kind == outcome.kind` guards against overwriting
+        # an earlier re-typing this same call already made (e.g. the
+        # field-coverage step above promoting to PARTIAL_ANSWER with real
+        # fields_answered/fields_unsupported). First-promotion-wins: the
+        # earlier step always has strictly more information about the turn
+        # (it knows which requested fields were actually answered) than this
+        # step does, so it must not be overwritten just because a question
+        # also happens to be personal-account shaped. This generalises to any
+        # future promotion added ahead of this one, and leaves the existing
+        # EVIDENCE_MISSING behaviour untouched -- no earlier step promotes
+        # that kind, so `current_outcome.kind == outcome.kind` always holds
+        # for it here.
+        if (
+            outcome.kind in (OutcomeKind.EVIDENCE_MISSING, *_ANSWER_LIKE_KINDS)
+            and applied[before:] == ["personal_account_limit"]
+            and not evidence_documents
+            and current_outcome.kind == outcome.kind
+        ):
             current_outcome = replace(current_outcome, kind=OutcomeKind.PERSONAL_ACCOUNT)
 
     contact_note = None if directory_contact_route else contact_escalation(
