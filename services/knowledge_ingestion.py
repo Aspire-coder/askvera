@@ -48,6 +48,7 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".html", ".htm"}
 DOCUMENT_TYPES = {
     "policy",
     "office_directory",
+    "product_information",
 }
 ACCESS_SCOPES = {"country", "global"}
 HEADING_RE = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?\s+)?[^.!?]{3,120}$")
@@ -567,7 +568,7 @@ def process_ingestion_job(
             raise ValueError(
                 f"Only {len(sections)} section(s) were extracted from this document, below "
                 f"the {settings.ADMIN_INGESTION_LOW_COVERAGE_THRESHOLD}-section minimum expected "
-                "for a policy or office directory. Extraction likely failed silently - check the "
+                "for a policy, office directory or product document. Extraction likely failed silently - check the "
                 "source document's formatting before retrying."
             )
 
