@@ -45,27 +45,27 @@ CAMEROON_REAL = """Welcome to Forever Cameroon!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Please click here for the Forever Business Owner application form. Printouts are accepted.
-� Sign up online is not offered.
+• Sign up online is not offered.
 ORDERING PRODUCTS
-� Minimum order size FBO: First order requirement can be any CC above 0.4CC. However, we
+• Minimum order size FBO: First order requirement can be any CC above 0.4CC. However, we
 recommend 2CC at first order. There is no designated form required.
-� Delivery Cost: We do not deliver products to FBO�s yet. FBO�s pick up their products directly
+• Delivery Cost: We do not deliver products to FBO’s yet. FBO’s pick up their products directly
 from the office.
-� Average lead time for orders to arrive: N/A
-� Payment methods accepted: MTN Mobile Money and Bank deposit.
-� Local Product Centers available: No.
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes.
-� Grouped order possible?: No.
-� Online shop +website available for foreign FBO�s?: No.
+• Average lead time for orders to arrive: N/A
+• Payment methods accepted: MTN Mobile Money and Bank deposit.
+• Local Product Centers available: No.
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes.
+• Grouped order possible?: No.
+• Online shop +website available for foreign FBO’s?: No.
 Forever Living Products Cameroon S.A.R.L.
 Office & Product Center Address Santa Barbara, Route Bonamousaddi
 B.P . 18246, Douala - Cameroon
-Business Hours Office 08.30 am � 17.30 pm (Mon � Fri)
-Business Hours Product Centre 08.30 am � 17.30 pm (Mon � Fri)
-09.00 am � 13.00 pm (Sat)
+Business Hours Office 08.30 am – 17.30 pm (Mon – Fri)
+Business Hours Product Centre 08.30 am – 17.30 pm (Mon – Fri)
+09.00 am – 13.00 pm (Sat)
 Telephone Office +237 233 472 448
 Telephone for Orders (see above)
 Mobile +237 677 747 555
@@ -73,14 +73,14 @@ Email info@flpcameroon.com
 Website www.foreverliving.com
 Gabon
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Monthly bank transfers if bonus amount is greater than XAF 2000 (Local currency).
-� To foreign FBO�s
+• To foreign FBO’s
 By cheque.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 Forever Business opportunity presentation, How to start correctly, First steps to Manager, Product launch/
 Product trainings."""
@@ -90,10 +90,10 @@ VIETNAM_REAL = """Welcome to Forever Vietnam!
 +848 932 5076
 FREQUENTLY ASKED QUESTIONS
 NOTE
-The Vietnamese area does not offer incoming International Sponsoring. Foreign FBO�s cannot sponsor
+The Vietnamese area does not offer incoming International Sponsoring. Foreign FBO’s cannot sponsor
 anybody with Vietnamese residence, nor can they have their data unlocked for Vietnam and purchase
 products there.
-Vietnamese FBO�s can pursue International Sponsoring in other countries.
+Vietnamese FBO’s can pursue International Sponsoring in other countries.
 GENERAL INFORMATION
 Aloe Trading Company Ltd.
 Office Address
@@ -105,7 +105,7 @@ General Office
 99 Nam Ky Khoi Nghia
 ward 7district 3
 Hochiminh City, Vietnam
-Business Hours Office 09.00 am � 17.00 pm (Mon � Fri)
+Business Hours Office 09.00 am – 17.00 pm (Mon – Fri)
 Telephone Office +848 939 5076, 932 5475, 932 6509
 Telephone for orders See above
 Fax +848 932 5928
@@ -118,41 +118,41 @@ GABON_REAL = """Welcome to Forever Gabon!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Please click here for the Forever Business Owner application form. Printouts are accepted.
-� Sign up online is not offered.
+• Sign up online is not offered.
 ORDERING PRODUCTS
-� Minimum order size FBO: First order requirement can be any CC above 0.4CC. However, we
+• Minimum order size FBO: First order requirement can be any CC above 0.4CC. However, we
 recommend 2CC at first order. There is no designated form required.
-� Delivery Cost: We do not deliver products to FBO�s yet. FBO�s pick up their products directly from the
+• Delivery Cost: We do not deliver products to FBO’s yet. FBO’s pick up their products directly from the
 office.
-� Average lead time for orders to arrive: N/A
-� Payment methods accepted: Bank deposit.
-� Local Product Centers available: No.
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes.
-� Grouped order possible?: No.
-� Online shop +website available for foreign FBO�s?: No.
+• Average lead time for orders to arrive: N/A
+• Payment methods accepted: Bank deposit.
+• Local Product Centers available: No.
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes.
+• Grouped order possible?: No.
+• Online shop +website available for foreign FBO’s?: No.
 Forever Living Products Gabon (Gabon)
-Office & Product Center Address Aca�, Nomba Domaine
-1386 Libreville � Gabon
-Business Hours Office 09.00 am � 17.00 pm (Mon � Fri)
-Business Hours Product Centre 09.00 am � 17.00 pm (Mon � Fri)
-09.00 am � 13.00 pm (Sat)
+Office & Product Center Address Acaé, Nomba Domaine
+1386 Libreville – Gabon
+Business Hours Office 09.00 am – 17.00 pm (Mon – Fri)
+Business Hours Product Centre 09.00 am – 17.00 pm (Mon – Fri)
+09.00 am – 13.00 pm (Sat)
 Telephone Office +241 07 46 36 77 / 01 70 41 38
 Telephone for Orders No orders on the phone
 Mobile +241 02 17 02 73
 Email info@flpcameroon.com; forevergabon@gmail.com
 Website www.foreverliving.com
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Monthly bank transfers if bonus amount is greater than XAF 2000 (Local currency).
-� To foreign FBO�s
+• To foreign FBO’s
 Monthly bank transfers if bonus amount is greater than XAF 250000 (Local currency).
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 Forever Business opportunity presentation, How to start correctly, First steps to Manager, Product launch/
 Product trainings."""
@@ -167,23 +167,23 @@ IRAQ_REAL = """Welcome to Forever Iraq!
 +964 750 820 8001
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form
-Phone order is not available in Iraq. FBO�s have to come or send somebody else to Arbil office in order to
+• Sign up with a form
+Phone order is not available in Iraq. FBO’s have to come or send somebody else to Arbil office in order to
 place an order, make payment and pick up the products.
-� Sign up online
+• Sign up online
 N/A
 ORDERING PRODUCTS
-� Minimum order size FBO: The minimum order for new FBO�s is $100 and for FBO�s is $50.
-� Delivery Cost: There is no delivery option in Iraq. Products must be picked up at the Erbil office.
-� Average lead time for orders to arrive: N/A
-� Payment methods accepted: Bank transfer is the only payment option. No cash or Credit Card payments.
-� Local Product Centers available: Yes at the head office in Erbil.
-� Online purchase by foreign FBO�s available: Via this link you can register and order, only payment
+• Minimum order size FBO: The minimum order for new FBO’s is $100 and for FBO’s is $50.
+• Delivery Cost: There is no delivery option in Iraq. Products must be picked up at the Erbil office.
+• Average lead time for orders to arrive: N/A
+• Payment methods accepted: Bank transfer is the only payment option. No cash or Credit Card payments.
+• Local Product Centers available: Yes at the head office in Erbil.
+• Online purchase by foreign FBO’s available: Via this link you can register and order, only payment
 method in e-shop is to debt money to bank.
-� First order required while signing up as Preferred Customer?: Yes. To be a FBO, prospects have to
+• First order required while signing up as Preferred Customer?: Yes. To be a FBO, prospects have to
 provide an original and signed application form and copy of photo ID. Also first order has to be ordered.
-� Grouped order possible?: N/A
-� Online shop +website available for foreign FBO�s?: Via this link you can register and order, only
+• Grouped order possible?: N/A
+• Online shop +website available for foreign FBO’s?: Via this link you can register and order, only
 payment method in e-shop is to debt money to bank.
 GENERAL INFORMATION
 Forever Living Products Iraq
@@ -191,54 +191,75 @@ Office & Product Center Address
 Building number 6 Street number
 16, District Wazeeran (Next to
 the TBI Bank) Erbil, Iraq
-Business Hours Office 09.00 am � 17.00 pm (Sun � Thurs)
+Business Hours Office 09.00 am – 17.00 pm (Sun – Thurs)
 Telephone Office +964 750 820 8001
 Telephone for Orders +964 750 820 8002
 Email flpiraq@ymail.com
-Websites www.foreverliving.com"""
+Websites www.foreverliving.com
+BONUS PAYMENT
+• To local FBO’s
+Domestic bonuses are paid by bank transfer or cheques.
+• To foreign FBO’s
+Bonus payment is made by bank transfer to foreign FBOs. Bonus amount has to be $100 USD and up.
+The below information should be sent to the office in order to get paid.
+USD BANK ACCOUNT DETAILS
+FLP ID:
+Account Holder’s Name:
+Bank Name:
+Bank Address:
+Account Number:
+IBAN:
+Swift Code:
+• Country:
+LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
+• VAT Registration:
+• Social security registration:
+• Other registrations:
+LOCAL TRAININGS
+All trainings or business meetings are held by sponsors in Iraq."""
 
 # current_extractor.jsonl, record_country == "Burundi".
 BURUNDI_REAL = """Welcome to Forever Burundi!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Yes.
-� Sign up online:
+• Sign up online:
 Yes.
 ORDERING PRODUCTS
-� Minimum order size FBO: $100 worth of products when joining. $50 worth of products after joining.
-� Delivery Cost: $3.00 within the country.
-� Average lead time for orders to arrive: 12 - 24 hours.
-� Payment methods accepted: Bank deposit, Credit Card, Mobile money transfer (Mpesacam).
-� Local Product Centers available: Yes.
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes.
-� Grouped order possible?: Not available.
-� Online shop +website available for foreign FBO�s?: No.
+• Minimum order size FBO: $100 worth of products when joining. $50 worth of products after joining.
+• Delivery Cost: $3.00 within the country.
+• Average lead time for orders to arrive: 12 - 24 hours.
+• Payment methods accepted: Bank deposit, Credit Card, Mobile money transfer (Mpesacam).
+• Local Product Centers available: Yes.
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes.
+• Grouped order possible?: Not available.
+• Online shop +website available for foreign FBO’s?: No.
 Forever Living Products Burundi
 Office & Product Center Address
 Gatogato Building no. 15
 (KCB Bank Compound)
 1st Floor Boulevard Patrice Lumumba
 Burundi
-Business Hours Office 08.00 am � 17.00 pm (Mon � Fri)
+Business Hours Office 08.00 am – 17.00 pm (Mon – Fri)
 Telephone Office Not available
 Telephone for Orders Not available
 Fax Not available
 Email info@foreverea.com
 Website www.foreverliving.com
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Bonus paid via bank transfer ONLY when it accumulated to $5 and above. Bonus less than $5 will only be
 paid after accumulating to that level.
-� To foreign FBO�s
+• To foreign FBO’s
 Bonus paid via bank transfer ONLY when it accumulated to $100 and above. Bonus less than $100 will
 only be paid after accumulating to that level.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 New FBO orientation at the FLP Training Center."""
 
@@ -248,26 +269,26 @@ GHANA_REEXTRACTED_REAL = """Welcome to Forever Ghana!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Please click here to download the Forever Business Owner application form. Printouts are accepted.
-� Sign up online:
+• Sign up online:
 Residents can register on www.flpgh.com.
 ORDERING PRODUCTS
-� Minimum order size FBO: First order requirements is US$100 +3% VAT +3% Handling charge. No
+• Minimum order size FBO: First order requirements is US$100 +3% VAT +3% Handling charge. No
 designated order form required. Price list can be downloaded on www.flpgh.com
-� Delivery Cost: Not in place yet.
-� Average lead time for orders to arrive: N/A
-� Payment methods accepted: We accept payment in advance, slips, tellers and bank transfers.
-� Local Product Centers available: Yes, in Accra, Kumasi,Takoradi and Monrovia.
+• Delivery Cost: Not in place yet.
+• Average lead time for orders to arrive: N/A
+• Payment methods accepted: We accept payment in advance, slips, tellers and bank transfers.
+• Local Product Centers available: Yes, in Accra, Kumasi,Takoradi and Monrovia.
 Forever Living Products Ghana Ltd. Sierra Leone, Liberia
 Office & Product Center Address
 Number 11 Kwabena Duffour Street,
 Airport Residential Area - Accra
 PMB CT 251, Cantonments Accra, Ghana
 Postal Address PMB CT 251, Cantonments Accra, Ghana
-Business Hours Office 09.00 am � 06.00 pm (Mon � Fri)
-Business Hours Product Centre 09.00 am � 06.00 pm (Mon � Fri)
-09.00 am � 02.00 pm (Sat)
+Business Hours Office 09.00 am – 06.00 pm (Mon – Fri)
+Business Hours Product Centre 09.00 am – 06.00 pm (Mon – Fri)
+09.00 am – 02.00 pm (Sat)
 Telephone Office +233 (0) 302 799 340
 Telephone for Orders (see above)
 Fax +233 (0) 302 223 884
@@ -275,22 +296,22 @@ Email info@flpgh.com, michaelboafo@flpgh.com
 Website www.foreverliving.com
 www.flpgh.com
 Sierra Leone, Liberia
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes, a Preferred customer needs to
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes, a Preferred customer needs to
 have a first order with an application form.
-� Grouped order possible?: No.
-� Online shop +website available for foreign FBO�s?: No.
+• Grouped order possible?: No.
+• Online shop +website available for foreign FBO’s?: No.
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Bonuses equal or above US$10 are paid by bank transfer or mobile money. FBOs without bank account
 or mobile money details are paid by cheque when their bonuses are up to US$50 or above.
-� To foreign FBO�s
+• To foreign FBO’s
 Bonuses equal or above US$100 are paid by bank transfer. FBOs are resposible for all bank tranfer
 charges. Designated form required to submit banking data. Download form at www.flpgh.com.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 We have business opportunity meetings. Various FBO trainings and product trainings."""
 
@@ -303,26 +324,26 @@ GHANA_GUINEA_MERGED_V6_REAL = """Welcome to Forever Ghana!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Please click here to download the Forever Business Owner application form. Printouts are accepted.
-� Sign up online:
+• Sign up online:
 Residents can register on www.flpgh.com.
 ORDERING PRODUCTS
-� Minimum order size FBO: First order requirements is US$100 +3% VAT +3% Handling charge. No
+• Minimum order size FBO: First order requirements is US$100 +3% VAT +3% Handling charge. No
 designated order form required. Price list can be downloaded on www.flpgh.com
-� Delivery Cost: Not in place yet.
-� Average lead time for orders to arrive: N/A
-� Payment methods accepted: We accept payment in advance, slips, tellers and bank transfers.
-� Local Product Centers available: Yes, in Accra, Kumasi,Takoradi and Monrovia.
+• Delivery Cost: Not in place yet.
+• Average lead time for orders to arrive: N/A
+• Payment methods accepted: We accept payment in advance, slips, tellers and bank transfers.
+• Local Product Centers available: Yes, in Accra, Kumasi,Takoradi and Monrovia.
 Forever Living Products Ghana Ltd. Sierra Leone, Liberia
 Office & Product Center Address
 Number 11 Kwabena Duffour Street,
 Airport Residential Area - Accra
 PMB CT 251, Cantonments Accra, Ghana
 Postal Address PMB CT 251, Cantonments Accra, Ghana
-Business Hours Office 09.00 am � 06.00 pm (Mon � Fri)
-Business Hours Product Centre 09.00 am � 06.00 pm (Mon � Fri)
-09.00 am � 02.00 pm (Sat)
+Business Hours Office 09.00 am – 06.00 pm (Mon – Fri)
+Business Hours Product Centre 09.00 am – 06.00 pm (Mon – Fri)
+09.00 am – 02.00 pm (Sat)
 Telephone Office +233 (0) 302 799 340
 Telephone for Orders (see above)
 Fax +233 (0) 302 223 884
@@ -330,22 +351,22 @@ Email info@flpgh.com, michaelboafo@flpgh.com
 Website www.foreverliving.com
 www.flpgh.com
 Sierra Leone, Liberia
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes, a Preferred customer needs to
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes, a Preferred customer needs to
 have a first order with an application form.
-� Grouped order possible?: No.
-� Online shop +website available for foreign FBO�s?: No.
+• Grouped order possible?: No.
+• Online shop +website available for foreign FBO’s?: No.
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Bonuses equal or above US$10 are paid by bank transfer or mobile money. FBOs without bank account
 or mobile money details are paid by cheque when their bonuses are up to US$50 or above.
-� To foreign FBO�s
+• To foreign FBO’s
 Bonuses equal or above US$100 are paid by bank transfer. FBOs are resposible for all bank tranfer
 charges. Designated form required to submit banking data. Download form at www.flpgh.com.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 We have business opportunity meetings. Various FBO trainings and product trainings.
 Welcome to Forever Guinea
@@ -354,31 +375,31 @@ Bissau and Guinea Conakry!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Please click here to download the Forever Business Owner application form. Printouts are accepted.
-� Sign up online is not offered.
+• Sign up online is not offered.
 ORDERING PRODUCTS
-� Minimum order size FBO: The minimum amount for a purchase after registering is 53.000 francs CFA.
-� Delivery Cost: See fee schedule below:
+• Minimum order size FBO: The minimum amount for a purchase after registering is 53.000 francs CFA.
+• Delivery Cost: See fee schedule below:
 2.000 francs CFA until the highway (Maristes)
 3.000 francs CFA from Maristes to Thiaroye
 4.000 francs CFA around Petit Mbao, Keur Mbaye Fall, Keur Massar
-� Average lead time for orders to arrive: Within 1 day.
-� Payment methods accepted: Cash, Card, Money Transfer.
-� Local Product Centers available: Below the address of our different PC:
+• Average lead time for orders to arrive: Within 1 day.
+• Payment methods accepted: Cash, Card, Money Transfer.
+• Local Product Centers available: Below the address of our different PC:
 Guinea Bissau : Avenida Pensao Naisna Santa Luzia (+245 95 607 08 13)
 Mali : SOTUBA ACI (+223 44 90 05 41)
-Mauritania : Socogim Tevragh Zeina n� 155 (+222 45 29 73 79)
-Guinea Conakry : Kaporo Cit� Lot 6 (+224 620 48 02 37)
+Mauritania : Socogim Tevragh Zeina n° 155 (+222 45 29 73 79)
+Guinea Conakry : Kaporo Cité Lot 6 (+224 620 48 02 37)
 The Gambia : Y2K Building Gambia Electrical Kairaba Avenue
 Forever Living Products Senegal (Guinea Bissau
 and Guinea Conakry)
 Office Address
-Kaporo Cit�
+Kaporo Cité
 Vers les projets filets sociaux
-B�timent Mitoyen au Ceci � Conakry
-Business Hours Office 09.00 am � 13.30 pm (Mon � Fri)
-14.00 pm � 17.30 pm (Mon � Fri)
+Bâtiment Mitoyen au Ceci – Conakry
+Business Hours Office 09.00 am – 13.30 pm (Mon – Fri)
+14.00 pm – 17.30 pm (Mon – Fri)
 Telephone Office +224 625 80 66 70
 Telephone for Orders (see above)
 Fax +221 33 820 6691
@@ -386,20 +407,20 @@ Email contact@foreversenegal.com
 Websites www.foreverliving.com
 Ziguinchor : Rue Javelier (+221 76 638 00 41)
 Kaolack : Quartier Leona (+221 76 638 00 41)
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes, the minimum value to register is
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes, the minimum value to register is
 53.000 francs CFA.
-� Grouped order possible?: No.
-� Online shop +website available for foreign FBO�s?: No.
+• Grouped order possible?: No.
+• Online shop +website available for foreign FBO’s?: No.
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Bank or Money transfer.
-� To foreign FBO�s
+• To foreign FBO’s
 Bank or Money transfer.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 Free trainings (Business and Products) are held on Monday, Wednesday, Thursday and Saturday."""
 
@@ -410,19 +431,19 @@ KENYA_V6_REAL = """Welcome to Forever Kenya/East Africa!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Please click here for the Forever Business Owner application form. Printouts are accepted.
-� Sign up online is not offered.
+• Sign up online is not offered.
 ORDERING PRODUCTS
-� Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.
-� Delivery Cost: $3 within the country.
-� Average lead time for orders to arrive: 12 to 24 hours.
-� Payment methods accepted: Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).
-� Local Product Centers available: Yes.
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: Yes.
-� Grouped order possible?: Not available.
-� Online shop +website available for foreign FBO�s?: No.
+• Minimum order size FBO: $100 worth of products when joining, $50 of products after joining.
+• Delivery Cost: $3 within the country.
+• Average lead time for orders to arrive: 12 to 24 hours.
+• Payment methods accepted: Bank deposit, Credit Card, Mobile Money Transfer (Mpesa).
+• Local Product Centers available: Yes.
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: Yes.
+• Grouped order possible?: Not available.
+• Online shop +website available for foreign FBO’s?: No.
 Forever Living Products Kenya Uganda, Tanzania, Burundi, Rwanda,
 South Sudan, Ethiopia
 Office & Product Center Address
@@ -430,24 +451,24 @@ Kenya Reinsurance Plaza, 4th floor
 Taifa Rd. CBD, opp. High Court
 Central Business District
 P .O. Box 44919 - 00100
-Business Hours Office 09.00 am � 19.00 pm (Mon � Fri)
-10.00 am � 17.00 pm (Sat)
+Business Hours Office 09.00 am – 19.00 pm (Mon – Fri)
+10.00 am – 17.00 pm (Sat)
 Telephone Office +254 20 2026869 / +254 20 2026873
 Telephone for Orders +254 71 0600206
 Email info@foreverea.com
 Website www.foreverliving.com
 Uganda, Tanzania, Burundi, Rwanda, South Sudan, Ethiopia
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Bonus paid via bank transfers ONLY when it accumulated to $5 and above. Bonus less than $5 will only
 be paid after accumulating to that level.
-� To foreign FBO�s
+• To foreign FBO’s
 Bonus paid via bank transfers ONLY when it accumulated to $100 and above. Bonus less than $100 will
 only be paid after accumulating to that level.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: A tax identification number is required.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: A tax identification number is required.
 LOCAL TRAININGS
 New FBO Orientation at the FLP Training Center."""
 
@@ -462,18 +483,18 @@ THAILAND_REAL = """Welcome to Forever Thailand!
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
 Sign up with a form or online
-� Please register on website to access the Download area on https://shop.foreverliving.co.th to download
+• Please register on website to access the Download area on https://shop.foreverliving.co.th to download
 the FBO application form in English and Thai. Printouts are accepted. Applicant need to sign.
-� Sign up online at this link https://shop.foreverliving.co.th/en/register
+• Sign up online at this link https://shop.foreverliving.co.th/en/register
 ORDERING PRODUCTS
 Order online on web store; https://shop.foreverliving.co.th/
 or via LINE application; https://line.me/R/ti/p/@foreverthailand
-� Minimum order size FBO: There is no first order minimum requirement. A designated order form is not
+• Minimum order size FBO: There is no first order minimum requirement. A designated order form is not
 generally required but may be asked by staff under certain circumstances. Access the download area for
 latest price list, product brochure and other marketing tools.
-� Delivery Cost: Depends on the size of the order by weight. Free domestic delivery for orders above
+• Delivery Cost: Depends on the size of the order by weight. Free domestic delivery for orders above
 2,000 Thai Baht.
-� Average lead time for orders to arrive: Orders typically take 1 to 2 working days outside of Bangkok.
+• Average lead time for orders to arrive: Orders typically take 1 to 2 working days outside of Bangkok.
 GENERAL INFORMATION
 Forever Living Products Thailand Co., Ltd.
 Office & Product Center Address
@@ -481,7 +502,7 @@ Bangkok Product Centre
 Unit 3923, 9th Floor, BB Building
 54 Sukhumvit Soi (Asoke) Road, Bangkok, 10110
 Thailand
-Business Hours Office 10:00 am � 18:00 pm (Mon � Fri)
+Business Hours Office 10:00 am – 18:00 pm (Mon – Fri)
 Closed weekends and Bank Holidays
 Telephone Office +662 258 0842-3
 Telephone for orders +662 258 0842-3
@@ -494,29 +515,29 @@ support@foreverliving.co.th (FBO support)
 Websites www.foreverliving.co.th
 In Bangkok next day delivery is generally offered depending on area and if order is placed before 2pm.
 Same day delivery is offered at extra charge.
-� Payment methods accepted: Cash and credit cards if ordering at the product center. Credit cards, bank
+• Payment methods accepted: Cash and credit cards if ordering at the product center. Credit cards, bank
 transfer and cash payment at local convenience store are accepted when placing an order on web store.
-� Local Product Centers available: Bangkok Product center and any of our meeting venues.
-� Online purchase by foreign FBO�s available: Yes, foreign and local FBO�s can purchase online at
+• Local Product Centers available: Bangkok Product center and any of our meeting venues.
+• Online purchase by foreign FBO’s available: Yes, foreign and local FBO’s can purchase online at
 https://shop.foreverliving.co.th once they have registered as users on Web Store. In order to do this FBOs
 need to be internationally sponsored into Thailand.
-� First order required while signing up as Preferred Customer?: No.
-� Grouped order possible?: No, each FBO gets a separate invoice per transaction under their name and
+• First order required while signing up as Preferred Customer?: No.
+• Grouped order possible?: No, each FBO gets a separate invoice per transaction under their name and
 their corresponding ID number.
-� Online shop +website available for foreign FBO�s?: Yes.
+• Online shop +website available for foreign FBO’s?: Yes.
 BONUS PAYMENT
-� Bank transfer. The costs of payment via International Bank transfer is deducted from commissions.
-Costs varies according to the amount transferred and the recipient�s country.
+• Bank transfer. The costs of payment via International Bank transfer is deducted from commissions.
+Costs varies according to the amount transferred and the recipient’s country.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: In Thailand only companies can be VAT registered unless an individual�s annual
+• VAT Registration: In Thailand only companies can be VAT registered unless an individual’s annual
 turnover exceeds the 1.8 million Baht threshold (approx. 58k US$). Thai domestic distributors cannot
-register as an FBO business entity, we do however honor foreign FBO�s registered as a business entity.
+register as an FBO business entity, we do however honor foreign FBO’s registered as a business entity.
 Link to the Thai Revenue Dept.: www.rd.go.th/publish/6043.0.html
-� Social security registration: The 13 digit Thai National ID card is required when Thai nationals apply for
+• Social security registration: The 13 digit Thai National ID card is required when Thai nationals apply for
 a FBOship. For foreigners passport info is needed. Thailand requires for withholding tax to be withheld by
 the payer and paid to the Revenue Department on their behalf. National and foreign residents are taxed
 different rates according to double taxation treaties in existence with their country of residence.
-� Other registrations: No other known.
+• Other registrations: No other known.
 LOCAL TRAININGS
 Follow our social media channels for business meeting announcements, which can be physical, hybrid or
 online only meetings.
@@ -532,28 +553,28 @@ BOSNIA_HERZEGOVINA_REAL = """Welcome to Forever Bosnia & Herzegovina!
 GENERAL INFORMATION
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Printed forms are available in our Product Center.
-� Sign up online:
+• Sign up online:
 On-going introduction
 ORDERING PRODUCTS
-� Minimum order size FBO: �55,00 +17% VAT
-� Delivery Cost: This is determined by the weight of the order and the location it needs to be delivered to.
-� Average lead time for orders to arrive: Normal delivery time is 24 to 48 hours.
-� Payment methods accepted: Credit Card and wire transfer to our bank accounts.
-� Local Product Centers available: Yes: FLP Bosnia & Herzegovina, FLP Sarajevo Dzemala Bijedica
+• Minimum order size FBO: €55,00 +17% VAT
+• Delivery Cost: This is determined by the weight of the order and the location it needs to be delivered to.
+• Average lead time for orders to arrive: Normal delivery time is 24 to 48 hours.
+• Payment methods accepted: Credit Card and wire transfer to our bank accounts.
+• Local Product Centers available: Yes: FLP Bosnia & Herzegovina, FLP Sarajevo Dzemala Bijedica
 166A, 71000 Sarajevo.
-� Online purchase by foreign FBO�s available: -
-� First order required while signing up as Preferred Customer?: Yes, first order goes with an application
+• Online purchase by foreign FBO’s available: -
+• First order required while signing up as Preferred Customer?: Yes, first order goes with an application
 form.
-� Grouped order possible?: Yes.
-� Online shop +website available for foreign FBO�s?: In setup process at the moment
+• Grouped order possible?: Yes.
+• Online shop +website available for foreign FBO’s?: In setup process at the moment
 BONUS PAYMENT
 Forever Living Products Hungary (Bosnia &
 Herzegovina)
 Office & Product Center Address Trg Djenerala Draze 3
 763000 Bijeljina, Bosnia & Herzegovina
-Business Hours Office 09.00 am � 17.00 pm (Mon � Fri)
+Business Hours Office 09.00 am – 17.00 pm (Mon – Fri)
 Telephone Office +387 55 211 784
 Telephone for Orders +387 55 211 784
 Email
@@ -561,16 +582,16 @@ flpbos@teol.net
 forever.flpbos@gmail.com
 flpbosniacustomercare@gmail.com
 Websites www.flpshop.ba
-� To local FBO�s
+• To local FBO’s
 Domestic bonuses are paid by bank transfer. Income tax and contribution for pension security are
-deducted. FBO�s registered as companies send their companies invoices.
-� To foreign FBO�s
-Head office, Forever Living Products Hungary pays foreign FBO�s, we have mutual compensation bonus
+deducted. FBO’s registered as companies send their companies invoices.
+• To foreign FBO’s
+Head office, Forever Living Products Hungary pays foreign FBO’s, we have mutual compensation bonus
 agreement in our group.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: Not necessary for private persons, for entrepreneurships above certain level
-� Social security registration: -
-� Other registrations: Personal Identification number
+• VAT Registration: Not necessary for private persons, for entrepreneurships above certain level
+• Social security registration: -
+• Other registrations: Personal Identification number
 LOCAL TRAININGS
 Yes, the training is given by managers in the business. OTS (online training system), free access to Webinar
 platform, public presentations."""
@@ -585,18 +606,18 @@ NIGERIA_REAL = """Welcome to Forever Nigeria!
 +234 1 2711795
 FREQUENTLY ASKED QUESTIONS
 SIGNING UP
-� Sign up with a form:
+• Sign up with a form:
 Forever Business Owner application forms need to be supplied by the office as they have been produced
 in the print shop. No printouts of the form nor copies of any kind of the signed form are accepted.
-� Sign up online:
+• Sign up online:
 Residents of Nigeria can register online.
 ORDERING PRODUCTS
-� Minimum order size FBO: The first order requirement is USD304,15 including VAT. No designated order
+• Minimum order size FBO: The first order requirement is USD304,15 including VAT. No designated order
 form required. Price list can be downloaded from here under DOWNLOADS, no password required.
-� Delivery Cost: The minimum order must be the Naira equivalent of $52,50.
-� Average lead time for orders to arrive: Business owners are responsible for the collection and
+• Delivery Cost: The minimum order must be the Naira equivalent of $52,50.
+• Average lead time for orders to arrive: Business owners are responsible for the collection and
 transportation of their products to various destinations.
-� Payment methods accepted: Foreverliving.com accepts Visa, MasterCard, Discover card or Money
+• Payment methods accepted: Foreverliving.com accepts Visa, MasterCard, Discover card or Money
 Orders. The money order must be received at the home office before your product will be shipped. During
 GENERAL INFORMATION
 Forever Living Products Nigeria (Limited)
@@ -605,8 +626,8 @@ The Forever Complex
 21/23 Aromire Avenue
 Off Adeniyi Jones Avenue
 Ikeja, Lagos State
-Business Hours Office 08.30 am � 17.00 pm (Mon � Fri)
-Business Hours Product Centre 08.30 am � 17.00 pm (Mon � Fri)
+Business Hours Office 08.30 am – 17.00 pm (Mon – Fri)
+Business Hours Product Centre 08.30 am – 17.00 pm (Mon – Fri)
 Telephone Office +234 1 2711795
 Telephone for Orders (see above)
 Fax +234 1493 7895
@@ -614,21 +635,21 @@ Email flphelpdesk@yahoo.com, info@flpng.com,
 flpngmarketing@gmail.com
 Websites www.foreverliving.com
 the checkout process, you will be prompted to enter your credit card information.
-� Local Product Centers available: We have 5 Product Center. Contact Nigeria Office +234-1-2711795
+• Local Product Centers available: We have 5 Product Center. Contact Nigeria Office +234-1-2711795
 for more information on the location and hours of each Product Centre.
-� Online purchase by foreign FBO�s available: No.
-� First order required while signing up as Preferred Customer?: No.
-� Grouped order possible?: No.
-� Online shop +website available for foreign FBO�s?: No.
+• Online purchase by foreign FBO’s available: No.
+• First order required while signing up as Preferred Customer?: No.
+• Grouped order possible?: No.
+• Online shop +website available for foreign FBO’s?: No.
 BONUS PAYMENT
-� To local FBO�s
+• To local FBO’s
 Bonuses are paid into Nigerian bank accounts only.
-� To foreign FBO�s
+• To foreign FBO’s
 See above.
 LEGAL REQUIREMENTS AS FBO, OTHER THAN NORMAL INCOME TAXATION
-� VAT Registration: No.
-� Social security registration: No.
-� Other registrations: No.
+• VAT Registration: No.
+• Social security registration: No.
+• Other registrations: No.
 LOCAL TRAININGS
 Training for all our centers can be found online.
 The Business Presentation dates can be found online."""
