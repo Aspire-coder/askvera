@@ -4810,13 +4810,29 @@ class AIOrchestrator:
             return chat_response.citations
 
     def _validation_failure_layer(self, result: ValidationResult) -> str:
-        """Classify critical validation failures for diagnostics."""
+        """Classify critical validation failures for diagnostics.
+
+        A critical failure whose codes are ALL "history-sourced claim
+        ungrounded" (no numeric code present) is labelled "history_grounding",
+        not "numeric_validator" - HISTORY_SOURCED_CLAIM_UNGROUNDED matches
+        the old "ground" substring check even though it comes from the
+        history-grounding validator, not the numeric one, so a history-only
+        failure was previously mislabelled as numeric. When numeric and
+        history-grounding codes are BOTH critical together, the label stays
+        "numeric_validator", unchanged - this only splits the previously
+        conflated single-cause case into its own, correctly named layer; the
+        customer-visible outcome for either label is identical (see
+        app.response.outcome._FAILURE_LAYER_KINDS).
+        """
         critical_codes = {
             str(issue.code).lower()
             for issue in result.issues
             if issue.severity.value.upper() == "CRITICAL"
         }
-        if any("numeric" in code or "ground" in code for code in critical_codes):
+        grounding_codes = {code for code in critical_codes if "numeric" in code or "ground" in code}
+        if grounding_codes:
+            if grounding_codes <= {"history_sourced_claim_ungrounded"}:
+                return "history_grounding"
             return "numeric_validator"
         if any("citation" in code for code in critical_codes):
             return "citation_validator"

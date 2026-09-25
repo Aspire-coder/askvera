@@ -18,7 +18,7 @@ from app.orchestrator import chat_orchestrator
 from app.orchestrator.chat_orchestrator import AIOrchestrator
 from app.response.models import ChatResponse
 from app.retrieval.models import RetrievedDocument, RetrievalAvailability, RetrievalResult
-from app.validation.models import ValidationResult
+from app.validation.models import ValidationIssue, ValidationResult, ValidationSeverity
 from services.candidate_control import CandidateFlags
 from services.semantic_cache import SemanticCacheHit
 from utils.validators import ChatRequest
@@ -2579,3 +2579,118 @@ def test_a_legitimate_market_shift_after_a_refused_instruction_still_carries() -
 
     assert "Thailand" in anchor
     assert "Germany" not in anchor
+
+
+# --- _validation_failure_layer diagnostics -----------------------------
+#
+# HISTORY_SOURCED_CLAIM_UNGROUNDED contains "ground", so it used to match the
+# same substring check NUMERIC_CLAIM_UNGROUNDED matches and get mislabelled
+# "numeric_validator" even when no numeric code was involved at all. These
+# tests pin the corrected classification: a critical failure caused ONLY by
+# history-grounding codes is now labelled "history_grounding"; every other
+# case (numeric-only, the two together, citation-only, anything else) keeps
+# today's label unchanged.
+
+
+def _critical_result(*codes: str) -> ValidationResult:
+    result = ValidationResult()
+    for code in codes:
+        result.add_issue(ValidationIssue(code=code, message="x", severity=ValidationSeverity.CRITICAL))
+    return result
+
+
+def test_validation_failure_layer_history_only_is_history_grounding() -> None:
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+
+    layer = orchestrator._validation_failure_layer(_critical_result("HISTORY_SOURCED_CLAIM_UNGROUNDED"))
+
+    assert layer == "history_grounding"
+
+
+def test_validation_failure_layer_numeric_only_stays_numeric_validator() -> None:
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+
+    layer = orchestrator._validation_failure_layer(_critical_result("NUMERIC_CLAIM_UNGROUNDED"))
+
+    assert layer == "numeric_validator"
+
+
+def test_validation_failure_layer_mixed_numeric_and_history_stays_numeric_validator() -> None:
+    """The combined-cause case is unchanged - see
+    tests/conversation/test_followup_state_e2e.py::
+    test_a8_fabricated_prior_policy_claim_is_not_repeated_as_trusted_fact,
+    which exercises this exact code combination end to end through the real
+    orchestrator and already asserts "numeric_validator"."""
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+
+    layer = orchestrator._validation_failure_layer(
+        _critical_result("HISTORY_SOURCED_CLAIM_UNGROUNDED", "NUMERIC_CLAIM_UNGROUNDED")
+    )
+
+    assert layer == "numeric_validator"
+
+
+def test_validation_failure_layer_citation_only_is_unchanged() -> None:
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+
+    layer = orchestrator._validation_failure_layer(_critical_result("SOME_CITATION_MISSING"))
+
+    assert layer == "citation_validator"
+
+
+def test_validation_failure_layer_other_critical_falls_back_to_output_validator() -> None:
+    orchestrator = AIOrchestrator(validator=_FakeValidator(), governance=_FakeGovernance())
+
+    layer = orchestrator._validation_failure_layer(_critical_result("SOME_OTHER_CRITICAL_ISSUE"))
+
+    assert layer == "output_validator"
+
+
+class _CriticalCodesValidator:
+    """Stub validator returning fixed CRITICAL issues, for driving the real
+    `_validate_response` critical-failure fallback path end to end."""
+
+    def __init__(self, codes: tuple[str, ...]) -> None:
+        self._codes = codes
+
+    def validate(self, *_: object, **__: object) -> ValidationResult:
+        return _critical_result(*self._codes)
+
+
+def test_history_only_critical_failure_delivers_the_same_text_as_a_mixed_failure(monkeypatch) -> None:
+    """Only the failure_layer metadata label differs between a history-only
+    and a mixed numeric+history critical failure - the DELIVERED RESPONSE
+    TEXT is the same insufficient-evidence fallback either way.
+    _insufficient_evidence_message (app/orchestrator/chat_orchestrator.py)
+    never reads failure_layer, and response_builder.fallback() only ever
+    copies the failure_layer string into metadata/logging, never into the
+    answer text - so this is provable directly through the real
+    `_validate_response` critical-fallback path, with no other plumbing
+    needed to change."""
+    monkeypatch.setattr(chat_orchestrator, "append_session_turn", lambda *_: None)
+    body = ChatRequest(message="What did we discuss?", sessionId="session-1", country="US", language="en")
+    chat_response = ChatResponse(
+        answer="some model answer",
+        citations=[],
+        suggestions=[],
+        cards=[],
+        confidence=0.5,
+        metadata={},
+        correlation_id="cid",
+    )
+
+    history_orchestrator = AIOrchestrator(
+        validator=_CriticalCodesValidator(("HISTORY_SOURCED_CLAIM_UNGROUNDED",)),
+        governance=_FakeGovernance(),
+    )
+    mixed_orchestrator = AIOrchestrator(
+        validator=_CriticalCodesValidator(("HISTORY_SOURCED_CLAIM_UNGROUNDED", "NUMERIC_CLAIM_UNGROUNDED")),
+        governance=_FakeGovernance(),
+    )
+
+    history_response = history_orchestrator._validate_response(chat_response, body, "cid")
+    mixed_response = mixed_orchestrator._validate_response(chat_response, body, "cid")
+
+    assert history_response.metadata["failure_layer"] == "history_grounding"
+    assert mixed_response.metadata["failure_layer"] == "numeric_validator"
+    assert history_response.answer == mixed_response.answer

@@ -94,6 +94,21 @@ class OutcomeKind(str, Enum):
 #                                    model (app/models/bedrock_provider.py)
 #   low_confidence                - retrieval confidence too low to answer
 #                                    (app/models/bedrock_provider.py)
+#   history_grounding             - a critical output-validation failure
+#                                    caused ONLY by HISTORY_SOURCED_CLAIM_
+#                                    UNGROUNDED codes (a prior-turn claim the
+#                                    model repeated was not grounded in
+#                                    today's evidence). Set via
+#                                    AIOrchestrator._validation_failure_layer,
+#                                    like its siblings "numeric_validator",
+#                                    "citation_validator" and
+#                                    "output_validator", none of which appear
+#                                    in this table (derive_outcome's
+#                                    fail-safe default already maps an
+#                                    absent entry to EVIDENCE_MISSING).
+#                                    Listed explicitly so the label split
+#                                    off "numeric_validator" is documented;
+#                                    the OutcomeKind is identical either way.
 _FAILURE_LAYER_KINDS: dict[str, OutcomeKind] = {
     "dependency_unavailable": OutcomeKind.DEPENDENCY_UNAVAILABLE,
     "aws_guardrail": OutcomeKind.SAFETY_REFUSAL,
@@ -109,6 +124,7 @@ _FAILURE_LAYER_KINDS: dict[str, OutcomeKind] = {
     "risk_policy": OutcomeKind.SAFETY_REFUSAL,
     "retrieval_miss": OutcomeKind.EVIDENCE_MISSING,
     "low_confidence": OutcomeKind.EVIDENCE_MISSING,
+    "history_grounding": OutcomeKind.EVIDENCE_MISSING,
 }
 
 # The one EvidenceDecision.reason that changes the OutcomeKind for a given
