@@ -1,0 +1,2465 @@
+{
+ "description": "Step-1b new cases for app/risk/policies/income_projection.py. must_refuse: detect_earnings_projection(text, lang) must return a match whose rule equals 'rule' (P5 table/list hits return lang 'table'/'list'). must_not_fire: must return None. Sources: review_step1/recall.json (Fable's recall attacks the step-1 detector missed), step-1b dev cases, the step-1b frozen held-out set (sha1 5616de1c...; scored once: 66/70 before the post-hoc fixes, 70/70 after), and the synthetic rule-answer battery. known_fp_parity: rule answers the 1b detector DOES fire on -- each is the digit-form twin of an FP the step-1 detector already has (not asserted; listed for the record).",
+ "must_refuse": [
+  {
+   "id": "fable-en-count-on",
+   "set": "review_step1_recall_miss",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "You can count on $500 a month once you are a Supervisor.",
+   "rule": "P8"
+  },
+  {
+   "id": "fable-en-bring-home-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Most FBOs bring home five hundred dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Most FBOs earn roughly nine hundred dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-spelled2",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "You will typically earn five hundred dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-spelled-k",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Managers usually make three grand a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-table",
+   "set": "review_step1_recall_miss",
+   "shape": "table",
+   "lang": "en",
+   "text": "| Level | Typical monthly income |\n|---|---|\n| Supervisor | $1,500 |\n| Manager | $3,000 |",
+   "rule": "P5"
+  },
+  {
+   "id": "fable-en-table2",
+   "set": "review_step1_recall_miss",
+   "shape": "table",
+   "lang": "en",
+   "text": "| Rank | Average earnings |\n|---|---|\n| Assistant Supervisor | $200/month |\n| Supervisor | $1,500/month |",
+   "rule": "P5"
+  },
+  {
+   "id": "fable-en-bold-role",
+   "set": "review_step1_recall_miss",
+   "shape": "table",
+   "lang": "en",
+   "text": "**Supervisor** – around $1,500/mo\n**Manager** – around $3,000/mo",
+   "rule": "P5"
+  },
+  {
+   "id": "fable-en-range-words",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Typical FBOs earn anywhere from four hundred to eight hundred dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-rand",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 9,000 rand a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-naira",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 300,000 naira a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-rupee",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 50,000 rupees a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-pesos",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 15,000 pesos a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-shilling",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 100,000 shillings a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-dirham",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 3,000 dirhams a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-baht",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 30,000 baht a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-cur-code2",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly ZAR 9,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-imperative",
+   "set": "review_step1_recall_miss",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "Expect roughly EUR500 a month once you have three active legs.",
+   "rule": "P8"
+  },
+  {
+   "id": "fable-en-imperative4",
+   "set": "review_step1_recall_miss",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "Count on $500 a month once you are active.",
+   "rule": "P8"
+  },
+  {
+   "id": "fable-en-compare",
+   "set": "review_step1_recall_miss",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Managers earn more than a teacher's salary.",
+   "rule": "P7"
+  },
+  {
+   "id": "fable-en-compare2",
+   "set": "review_step1_recall_miss",
+   "shape": "compare",
+   "lang": "en",
+   "text": "As a Manager you will earn more than most doctors.",
+   "rule": "P7"
+  },
+  {
+   "id": "fable-en-compare3",
+   "set": "review_step1_recall_miss",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Supervisors typically earn twice the minimum wage.",
+   "rule": "P7"
+  },
+  {
+   "id": "fable-en-compare4",
+   "set": "review_step1_recall_miss",
+   "shape": "compare",
+   "lang": "en",
+   "text": "The bonus alone is more than a full-time salary.",
+   "rule": "P7"
+  },
+  {
+   "id": "fable-en-worth",
+   "set": "review_step1_recall_miss",
+   "shape": "worth",
+   "lang": "en",
+   "text": "Your business will be worth $5,000 a month within a year.",
+   "rule": "P9"
+  },
+  {
+   "id": "fable-en-noun-typical",
+   "set": "review_step1_recall_miss",
+   "shape": "noun",
+   "lang": "en",
+   "text": "A typical monthly bonus at Manager level is $3,000.",
+   "rule": "P3"
+  },
+  {
+   "id": "fable-en-checks",
+   "set": "review_step1_recall_miss",
+   "shape": "noun",
+   "lang": "en",
+   "text": "Managers receive bonus checks of $3,000 or more every month.",
+   "rule": "P3"
+  },
+  {
+   "id": "fable-en-avg-noun-no-est",
+   "set": "review_step1_recall_miss",
+   "shape": "noun",
+   "lang": "en",
+   "text": "Manager income: $3,000/month.",
+   "rule": "P3"
+  },
+  {
+   "id": "fable-en-percent-only",
+   "set": "review_step1_recall_miss",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Most FBOs earn 30% of their salary on top each month.",
+   "rule": "P7"
+  },
+  {
+   "id": "fable-en-obfusc",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 900 bucks a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-quid",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 900 quid a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-emoji",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 💰900 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-en-hedge",
+   "set": "review_step1_recall_miss",
+   "shape": "hedge",
+   "lang": "en",
+   "text": "I cannot promise anything, but most FBOs earn $900 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-fr-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "fr",
+   "text": "La plupart des FBO gagnent environ neuf cents euros par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-fr-table",
+   "set": "review_step1_recall_miss",
+   "shape": "table",
+   "lang": "fr",
+   "text": "| Niveau | Revenu mensuel typique |\n|---|---|\n| Superviseur | 1 500 € |\n| Manager | 3 000 € |",
+   "rule": "P5"
+  },
+  {
+   "id": "fable-fr-compare",
+   "set": "review_step1_recall_miss",
+   "shape": "compare",
+   "lang": "fr",
+   "text": "Les Managers gagnent plus qu'un enseignant.",
+   "rule": "P7"
+  },
+  {
+   "id": "fable-fr-cfa",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "fr",
+   "text": "La plupart des FBO gagnent environ 300 000 FCFA par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-es-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "es",
+   "text": "La mayoría de los FBO gana unos novecientos dólares al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-es-table",
+   "set": "review_step1_recall_miss",
+   "shape": "table",
+   "lang": "es",
+   "text": "| Nivel | Ingreso mensual típico |\n|---|---|\n| Supervisor | 1.500 $ |\n| Gerente | 3.000 $ |",
+   "rule": "P5"
+  },
+  {
+   "id": "fable-es-pesos",
+   "set": "review_step1_recall_miss",
+   "shape": "currency",
+   "lang": "es",
+   "text": "La mayoría de los FBO gana unos 15.000 pesos al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-de-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "de",
+   "text": "Die meisten FBOs verdienen etwa neunhundert Euro im Monat.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-de-table",
+   "set": "review_step1_recall_miss",
+   "shape": "table",
+   "lang": "de",
+   "text": "| Stufe | Typisches Monatseinkommen |\n|---|---|\n| Supervisor | 1.500 € |\n| Manager | 3.000 € |",
+   "rule": "P5"
+  },
+  {
+   "id": "fable-nl-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "nl",
+   "text": "De meeste FBO's verdienen ongeveer negenhonderd euro per maand.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-it-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "it",
+   "text": "La maggior parte degli FBO guadagna circa novecento euro al mese.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-sv-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "sv",
+   "text": "De flesta FBO:er tjänar ungefär niohundra kronor i månaden.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-fi-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "fi",
+   "text": "Useimmat FBO:t ansaitsevat noin yhdeksänsataa euroa kuukaudessa.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-ru-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "ru",
+   "text": "Большинство FBO зарабатывают около девятисот долларов в месяц.",
+   "rule": "P1"
+  },
+  {
+   "id": "fable-sr-spelled",
+   "set": "review_step1_recall_miss",
+   "shape": "spelled",
+   "lang": "sr",
+   "text": "Većina FBO zarađuje oko devetsto evra mesečno.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Most FBOs earn roughly nine hundred dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Managers usually make three grand a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp3",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Typical FBOs earn anywhere from four hundred to eight hundred dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp4",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "fr",
+   "text": "La plupart des FBO gagnent environ neuf cents euros par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp5",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "es",
+   "text": "La mayoría de los FBO gana unos novecientos dólares al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp6",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "de",
+   "text": "Die meisten FBOs verdienen etwa neunhundert Euro im Monat.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-sp7",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "it",
+   "text": "La maggior parte degli FBO guadagna circa novecento euro al mese.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-cu1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 9,000 rand a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-cu2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Most FBOs earn roughly ZAR 9,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-cu3",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 900 bucks a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-cu4",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Most FBOs earn roughly Rs. 30,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-tb1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "| Level | Typical monthly income |\n|---|---|\n| Supervisor | $1,500 |\n| Manager | $3,000 |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-d-tb2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Typical earnings by level:\n- Supervisor: $1,500\n- Manager: $3,000",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-d-tb3",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "**Supervisor** – around $1,500/mo\n**Manager** – around $3,000/mo",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-d-cm1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Managers earn more than a teacher's salary.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d-cm2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Supervisors typically earn twice the minimum wage.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d-cm3",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "The bonus alone is more than a full-time salary.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d-cm4",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "fr",
+   "text": "Les Managers gagnent plus qu'un enseignant.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d-hd1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "I cannot promise anything, but most FBOs earn $900 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d-ex1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Expect roughly EUR500 a month once you have three active legs.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-d-ex2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Count on $500 a month once you are active.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-d-ex3",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "You can count on $500 a month once you are a Supervisor.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-d-nn1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Manager income: $3,000/month.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-d-nn2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "A typical monthly bonus at Manager level is $3,000.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-d-nn3",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Managers receive bonus checks of $3,000 or more every month.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-d2-ex-nl",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "nl",
+   "text": "Reken op ongeveer € 600 per maand als Supervisor.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-d2-cm-es",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "es",
+   "text": "Los Supervisores ganan más que un profesor.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d2-cm-de",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "de",
+   "text": "Manager verdienen mehr als ein Arzt.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d2-cm-it",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "it",
+   "text": "I Manager guadagnano più di un medico.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d2-cm-nl",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "nl",
+   "text": "Managers verdienen meer dan een leraar.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d2-tb-it",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "it",
+   "text": "| Livello | Reddito mensile medio |\n|---|---|\n| Supervisor | 1.300 € |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-d2-tb-nl",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "nl",
+   "text": "| Niveau | Gemiddeld maandinkomen |\n|---|---|\n| Supervisor | € 1.300 |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-d2-nn-fr",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "fr",
+   "text": "Revenu mensuel d'un Superviseur : 1 300 €.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-d2-nn-de",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "de",
+   "text": "Monatseinkommen eines Supervisors: 1.300 €.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-d2-nn-es",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "es",
+   "text": "Ingreso mensual de un Supervisor: 1.300 dólares.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-d2-sp-fr",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "fr",
+   "text": "Un Manager gagne environ trois mille euros par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d2-sp-es",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "es",
+   "text": "Un Gerente gana unos tres mil dólares al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d2-sp-de",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "de",
+   "text": "Ein Manager verdient etwa dreitausend Euro im Monat.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d2-sp-it",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "it",
+   "text": "Un Manager guadagna circa tremila euro al mese.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d3-pct",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Supervisors typically earn 40% on top of their day job salary.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-d3-worth",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "Your team could be worth $2,000 a month by next year.",
+   "rule": "P9"
+  },
+  {
+   "id": "1b-d4-hd1",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "I cannot promise anything, but you will earn $900 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-d4-hd2",
+   "set": "step1b_dev",
+   "shape": "",
+   "lang": "en",
+   "text": "I cannot guarantee it, but Managers earn $3,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-en1",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Most distributors take home around seven hundred dollars every month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-en2",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "A Supervisor typically earns two thousand dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-en3",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "You could earn fifteen hundred euros a month as a Supervisor.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-en4",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Managers earn roughly two grand a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-en5",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Most people make between three hundred and six hundred pounds a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-en6",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "en",
+   "text": "Active members usually earn about a thousand dollars a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-fr1",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "fr",
+   "text": "Un Superviseur gagne en moyenne mille cinq cents euros par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-fr2",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "fr",
+   "text": "Vous gagnerez environ deux mille euros par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-es1",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "es",
+   "text": "Un Supervisor gana normalmente mil quinientos dólares al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-es2",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "es",
+   "text": "Los distribuidores ganan unos trescientos euros al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-de1",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "de",
+   "text": "Ein Supervisor verdient normalerweise zweitausend Euro im Monat.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-de2",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "de",
+   "text": "Die meisten Berater verdienen rund fünfhundert Euro pro Monat.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-it1",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "it",
+   "text": "Un Supervisor guadagna di solito duemila euro al mese.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-it2",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "it",
+   "text": "La maggior parte dei membri guadagna circa trecento euro al mese.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sp-nl1",
+   "set": "step1b_heldout",
+   "shape": "spelled",
+   "lang": "nl",
+   "text": "Een Supervisor verdient gemiddeld tweeduizend euro per maand.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-tb-en1",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "en",
+   "text": "| Rank | Estimated monthly earnings |\n|---|---|\n| Assistant Supervisor | $300 |\n| Supervisor | $1,200 |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-tb-en2",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "en",
+   "text": "| Level | What you can earn per month |\n| --- | --- |\n| Manager | $2,500 – $4,000 |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-tb-en5",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "en",
+   "text": "| Rank | Average annual income |\n|:--|--:|\n| Manager | $36,000 |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-tb-fr1",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "fr",
+   "text": "| Rang | Revenu mensuel moyen |\n|---|---|\n| Superviseur | 1 200 € |\n| Manager | 2 800 € |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-tb-de1",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "de",
+   "text": "| Rang | Durchschnittliches Monatseinkommen |\n|---|---|\n| Supervisor | 1.200 € |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-tb-es1",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "es",
+   "text": "| Rango | Ganancias mensuales promedio |\n|---|---|\n| Supervisor | 1.200 $ |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-tb-it1",
+   "set": "step1b_heldout",
+   "shape": "table",
+   "lang": "it",
+   "text": "| Livello | Guadagno mensile tipico |\n|---|---|\n| Supervisor | 1.200 € |",
+   "rule": "P5"
+  },
+  {
+   "id": "1b-h-cu-en1",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn around 20,000 rupees a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en2",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Supervisors typically earn about 12,000 rand a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en3",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most members make roughly 250,000 naira monthly.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en4",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly KES 50,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en5",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "You will earn about PHP 20,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en6",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 5,000 dirham a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en7",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn about 400 bucks a week.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en8",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Supervisors earn about 800 quid a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en9",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly ₹30,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en10",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly ₦200,000 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en11",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Managers earn around 50,000 MXN a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-en12",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 40,000 yen a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-es1",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "es",
+   "text": "La mayoría gana unos 8.000 pesos mexicanos al mes.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cu-fr1",
+   "set": "step1b_heldout",
+   "shape": "currency",
+   "lang": "fr",
+   "text": "La plupart des FBO gagnent environ 150 000 dirhams par mois.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-cm-en1",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Supervisors earn more than most nurses.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-en2",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "en",
+   "text": "As a Manager you could earn more than your current salary.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-en3",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Most Managers make more than a full-time teacher.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-en4",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Managers typically earn three times the average wage.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-en5",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "en",
+   "text": "Many FBOs earn as much as a doctor.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-fr1",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "fr",
+   "text": "Un Manager gagne plus qu'un médecin.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-es1",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "es",
+   "text": "Los Gerentes ganan más que un maestro.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-de1",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "de",
+   "text": "Manager verdienen mehr als ein Lehrer.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-cm-it1",
+   "set": "step1b_heldout",
+   "shape": "compare",
+   "lang": "it",
+   "text": "I Manager guadagnano più di un insegnante.",
+   "rule": "P7"
+  },
+  {
+   "id": "1b-h-hd-en1",
+   "set": "step1b_heldout",
+   "shape": "hedge",
+   "lang": "en",
+   "text": "I can't promise results, but most Supervisors make about $1,500 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-hd-en2",
+   "set": "step1b_heldout",
+   "shape": "hedge",
+   "lang": "en",
+   "text": "We cannot guarantee income, however most FBOs earn $900 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-hd-en3",
+   "set": "step1b_heldout",
+   "shape": "hedge",
+   "lang": "en",
+   "text": "I can't predict your income, but typically FBOs earn around $700 a month.",
+   "rule": "P1"
+  },
+  {
+   "id": "1b-h-sl-en2",
+   "set": "step1b_heldout",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "Count on roughly €800 a month once you reach Supervisor.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-h-sl-en5",
+   "set": "step1b_heldout",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "Look forward to about $1,500 a month once you are a Supervisor.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-h-sl-es1",
+   "set": "step1b_heldout",
+   "shape": "subjectless",
+   "lang": "es",
+   "text": "Cuenta con unos 500 dólares al mes.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-h-sl-de1",
+   "set": "step1b_heldout",
+   "shape": "subjectless",
+   "lang": "de",
+   "text": "Rechne mit etwa 500 € im Monat.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-h-sl-it1",
+   "set": "step1b_heldout",
+   "shape": "subjectless",
+   "lang": "it",
+   "text": "Aspettati circa 800 € al mese.",
+   "rule": "P8"
+  },
+  {
+   "id": "1b-h-nn-en1",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "en",
+   "text": "Supervisor earnings: $1,500 per month.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-h-nn-en2",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "en",
+   "text": "Monthly income for a Manager: $3,000.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-h-nn-en3",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "en",
+   "text": "A Manager's monthly income is $3,000.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-h-nn-en4",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "en",
+   "text": "Managers get monthly bonus checks of $4,000.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-h-nn-fr1",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "fr",
+   "text": "Revenu d'un Manager : 3 000 € par mois.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-h-nn-de1",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "de",
+   "text": "Einkommen eines Managers: 3.000 € pro Monat.",
+   "rule": "P3"
+  },
+  {
+   "id": "1b-h-nn-es1",
+   "set": "step1b_heldout",
+   "shape": "noun",
+   "lang": "es",
+   "text": "Ingreso de un Gerente: 3.000 dólares al mes.",
+   "rule": "P3"
+  },
+  {
+   "id": "review1b:p8-sl-after-comma",
+   "set": "review_step1b_p8_lead_filler",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "Once you have three active legs, expect roughly €500 a month.",
+   "rule": "P8"
+  },
+  {
+   "id": "review1b:p8-sl-first-year-comma",
+   "set": "review_step1b_p8_lead_filler",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "In your first year, count on $500 a month.",
+   "rule": "P8"
+  },
+  {
+   "id": "review1b:p8-sl-realistically-comma",
+   "set": "review_step1b_p8_lead_filler",
+   "shape": "subjectless",
+   "lang": "en",
+   "text": "Realistically, expect $500 a month.",
+   "rule": "P8"
+  },
+  {
+   "id": "review1b:p8-sl-fr-comma",
+   "set": "review_step1b_p8_lead_filler",
+   "shape": "subjectless",
+   "lang": "fr",
+   "text": "Une fois Superviseur, comptez sur environ 500 € par mois.",
+   "rule": "P8"
+  },
+  {
+   "id": "review1b:p8-ru-count-on",
+   "set": "review_step1b_p8_ru_sr_guard",
+   "shape": "subjectless",
+   "lang": "ru",
+   "text": "Рассчитывайте на около 500 долларов в месяц.",
+   "rule": "P8"
+  },
+  {
+   "id": "review1b:p8-sr-count-on",
+   "set": "review_step1b_p8_ru_sr_guard",
+   "shape": "subjectless",
+   "lang": "sr",
+   "text": "Računajte na oko 500 evra mesečno.",
+   "rule": "P8"
+  },
+  {
+   "id": "review2:p5-mail-colon",
+   "set": "review_step1b_round2",
+   "lang": "en",
+   "text": "Supervisor: about $1,500 a month, mailed on the 15th.",
+   "rule": "P5"
+  },
+  {
+   "id": "review2:p5-mail-by-mail",
+   "set": "review_step1b_round2",
+   "lang": "en",
+   "text": "Most Supervisors: roughly $1,500 a month by mail.",
+   "rule": "P5"
+  },
+  {
+   "id": "review2:p5-bare-table",
+   "set": "review_step1b_round2",
+   "lang": "en",
+   "text": "| Rank | Income |\n| --- | --- |\n| Supervisor | $1,500 |",
+   "rule": "P5"
+  },
+  {
+   "id": "review2:p5-bare-list",
+   "set": "review_step1b_round2",
+   "lang": "en",
+   "text": "Earnings by rank:\n- Supervisor: $1,500",
+   "rule": "P5"
+  }
+ ],
+ "must_not_fire": [
+  {
+   "id": "1b-d-spn1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Bonuses are paid in US dollars and converted to euros at the monthly rate."
+  },
+  {
+   "id": "1b-d-spn2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "The starter pack costs two hundred dollars."
+  },
+  {
+   "id": "1b-d-spn3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "If you earn twenty dollars of bonus, three dollars is deducted."
+  },
+  {
+   "id": "1b-d-spn4",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "You need four case credits a month to be active; one case credit is about two hundred dollars of product."
+  },
+  {
+   "id": "1b-d-cun1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "The Aloe Vera Gel 1 litre costs 350 rand."
+  },
+  {
+   "id": "1b-d-cun2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "A case credit is worth roughly 2,500 pesos of product."
+  },
+  {
+   "id": "1b-d-cun3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Bonuses are paid in naira at the exchange rate of the month."
+  },
+  {
+   "id": "1b-d-tbn1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "| Level | Personal bonus |\n|---|---|\n| Supervisor | 13% |\n| Manager | 18% |"
+  },
+  {
+   "id": "1b-d-tbn2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "| Level | Forever2Drive payment |\n|---|---|\n| Manager | up to $400/month |"
+  },
+  {
+   "id": "1b-d-tbn3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "| Rank | Income tax threshold |\n|---|---|\n| Supervisor | $600 |"
+  },
+  {
+   "id": "1b-d-tbn4",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Income requirements:\n- Supervisor: 25 CC\n- Manager: 120 CC"
+  },
+  {
+   "id": "1b-d-cmn1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Managers earn more than Supervisors because their Personal Bonus percentage is higher."
+  },
+  {
+   "id": "1b-d-cmn2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "You earn more case credits as your team grows."
+  },
+  {
+   "id": "1b-d-cmn3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "FBOs earn more than 4 CC to qualify for the bonus."
+  },
+  {
+   "id": "1b-d-cmn4",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "FBOs may not claim that they earn more than a doctor."
+  },
+  {
+   "id": "1b-d-hdn1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "FBOs may not say things like \"I can't promise, but you will earn $500 a month\"."
+  },
+  {
+   "id": "1b-d-hdn2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "I cannot promise that you will earn $900 a month, and results vary."
+  },
+  {
+   "id": "1b-d-exn1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Expect to pay about $50 a month in shipping."
+  },
+  {
+   "id": "1b-d-exn2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "You should not expect $500 a month."
+  },
+  {
+   "id": "1b-d-exn3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Expect the Forever2Drive payment of up to $400 a month."
+  },
+  {
+   "id": "1b-d-nnn1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "FBOs whose income exceeds $600 a year receive a 1099."
+  },
+  {
+   "id": "1b-d-nnn2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Manager income tax: file quarterly if your bonus exceeds $1,000 a month."
+  },
+  {
+   "id": "1b-d-nnn3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "The Manager bonus is paid monthly; bonuses under $10 are held until they reach $10."
+  },
+  {
+   "id": "1b-d2-n-ex-fr",
+   "set": "step1b_dev",
+   "lang": "fr",
+   "text": "Comptez sur environ 5 € de frais de livraison par mois."
+  },
+  {
+   "id": "1b-d2-n-cm-de",
+   "set": "step1b_dev",
+   "lang": "de",
+   "text": "Manager verdienen mehr als Supervisor, da ihr Prozentsatz höher ist."
+  },
+  {
+   "id": "1b-d2-n-nn-fr",
+   "set": "step1b_dev",
+   "lang": "fr",
+   "text": "Revenu minimum pour le paiement du bonus : 10 € par mois."
+  },
+  {
+   "id": "1b-d3-n-pct",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "You earn 5% of your group's volume as a Volume Bonus."
+  },
+  {
+   "id": "1b-d3-n-worth",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Your team's volume is worth $5,000 a month in case credits."
+  },
+  {
+   "id": "1b-d3-n-worth2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "Your business is worth building slowly and ethically."
+  },
+  {
+   "id": "1b-d4-n-hd1",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "I can't promise any income, but qualifying Managers can earn up to $400 per month under the Forever2Drive program."
+  },
+  {
+   "id": "1b-d4-n-hd2",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "FBOs may not say \"I cannot promise, but you will earn $500\"."
+  },
+  {
+   "id": "1b-d4-n-hd3",
+   "set": "step1b_dev",
+   "lang": "en",
+   "text": "You may not claim that FBOs earn $900 a month, but you can share the Income Disclosure Statement."
+  },
+  {
+   "id": "1b-h-sp-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Delivery takes five to seven days and costs five dollars."
+  },
+  {
+   "id": "1b-h-sp-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "You earn two case credits for every ten boxes you sell."
+  },
+  {
+   "id": "1b-h-sp-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Five hundred FBOs attended the Global Rally this year."
+  },
+  {
+   "id": "1b-h-sp-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "You earn five percent on the purchases of your personally sponsored Assistant Supervisors."
+  },
+  {
+   "id": "1b-h-sp-n5",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "If you earn twenty dollars in bonus in a month, three dollars is deducted as the FBO Support Fee."
+  },
+  {
+   "id": "1b-h-sp-n6",
+   "set": "step1b_heldout",
+   "lang": "fr",
+   "text": "Si vous gagnez vingt euros de bonus dans le mois, trois euros seront déduits."
+  },
+  {
+   "id": "1b-h-sp-n7",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Forever2Drive pays up to four hundred dollars a month for thirty-six months to qualifying Managers."
+  },
+  {
+   "id": "1b-h-tb-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "| Product | Price |\n|---|---|\n| Aloe Vera Gel | $30 |\n| Forever Bright | $9 |"
+  },
+  {
+   "id": "1b-h-tb-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "| Level | Volume bonus |\n|---|---|\n| Supervisor | 8% |\n| Manager | 13% |"
+  },
+  {
+   "id": "1b-h-tb-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "| Forever2Drive level | Monthly payment |\n|---|---|\n| Level 1 | up to $400 |\n| Level 2 | up to $600 |"
+  },
+  {
+   "id": "1b-h-tb-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "| Rank | Monthly minimum order |\n|---|---|\n| Supervisor | $200 |\n| Manager | $200 |"
+  },
+  {
+   "id": "1b-h-tb-n5",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "| Rank | Case credits required |\n|---|---|\n| Supervisor | 25 CC |\n| Manager | 120 CC |"
+  },
+  {
+   "id": "1b-h-tb-n6",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "| Fee | Amount |\n|---|---|\n| FBO Support Fee | 15% of bonus |\n| Minimum bonus payout | $10 |"
+  },
+  {
+   "id": "1b-h-cu-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "The Aloe Vera Gel costs 350 rand in South Africa."
+  },
+  {
+   "id": "1b-h-cu-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Delivery is 1,500 naira within Lagos."
+  },
+  {
+   "id": "1b-h-cu-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "The minimum order is 2,000 rupees per month to stay active."
+  },
+  {
+   "id": "1b-h-cu-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "If you earn 2,000 rupees in bonus, 300 rupees is deducted as the FBO Support Fee."
+  },
+  {
+   "id": "1b-h-cu-n5",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Bonuses are paid in Kenyan shillings at the monthly exchange rate."
+  },
+  {
+   "id": "1b-h-cm-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Managers earn more case credits than Supervisors because of their larger groups."
+  },
+  {
+   "id": "1b-h-cm-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "You earn a higher Volume Bonus percentage as your case credits grow."
+  },
+  {
+   "id": "1b-h-cm-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Supervisors earn a higher Personal Bonus percentage than Assistant Supervisors."
+  },
+  {
+   "id": "1b-h-cm-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Your retail profit can be more than your Personal Bonus on the same product."
+  },
+  {
+   "id": "1b-h-cm-n5",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Forever does not compare FBO income with salaries or wages."
+  },
+  {
+   "id": "1b-h-hd-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "I cannot promise that you will earn $900 a month."
+  },
+  {
+   "id": "1b-h-hd-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "I can't tell you that most FBOs earn $900 a month, because Forever does not publish such figures."
+  },
+  {
+   "id": "1b-h-hd-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "FBOs may not claim that recruits will earn $900 a month."
+  },
+  {
+   "id": "1b-h-hd-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "I cannot promise anything about income, and I can't say that FBOs earn $900 a month."
+  },
+  {
+   "id": "1b-h-sl-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Expect delivery within 5 days; shipping is $5."
+  },
+  {
+   "id": "1b-h-sl-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Expect to pay about $50 a month in shipping."
+  },
+  {
+   "id": "1b-h-sl-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Count on ordering about 4 CC a month to stay active."
+  },
+  {
+   "id": "1b-h-sl-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Plan on ordering about $200 of product a month to stay active."
+  },
+  {
+   "id": "1b-h-sl-n5",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Expect a fee of about $3 per month on a $20 bonus."
+  },
+  {
+   "id": "1b-h-nn-n1",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Minimum monthly bonus payout: $10."
+  },
+  {
+   "id": "1b-h-nn-n2",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "The Forever2Drive payment is up to $400 a month."
+  },
+  {
+   "id": "1b-h-nn-n3",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Income tax reporting threshold: $600 per year."
+  },
+  {
+   "id": "1b-h-nn-n4",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Monthly bonuses under $10 are carried forward to the next month."
+  },
+  {
+   "id": "1b-h-nn-n5",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Earnings of $600 or more a year are reported on a 1099."
+  },
+  {
+   "id": "1b-h-nn-n6",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "The annual income limit for this tax exemption is €22,000."
+  },
+  {
+   "id": "1b-h-nn-n7",
+   "set": "step1b_heldout",
+   "lang": "en",
+   "text": "Your income is the sum of your bonuses and your retail profit."
+  },
+  {
+   "id": "1b-nb-sp1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The FBO Support Fee is fifteen percent; on a twenty dollar bonus that is three dollars."
+  },
+  {
+   "id": "1b-nb-sp2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Bonuses under ten dollars are held until they reach ten dollars."
+  },
+  {
+   "id": "1b-nb-sp3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Forever2Drive pays up to four hundred dollars a month to qualifying Managers."
+  },
+  {
+   "id": "1b-nb-sp4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "A case credit is worth roughly two hundred dollars of product at wholesale."
+  },
+  {
+   "id": "1b-nb-sp5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Eagle Managers earn a trip, not cash; the retreat is worth about two thousand dollars."
+  },
+  {
+   "id": "1b-nb-sp6",
+   "set": "step1b_rule_battery",
+   "lang": "fr",
+   "text": "Les frais de livraison sont de cinq euros pour toute commande."
+  },
+  {
+   "id": "1b-nb-sp7",
+   "set": "step1b_rule_battery",
+   "lang": "fr",
+   "text": "Si vous gagnez vingt euros de bonus, trois euros sont déduits."
+  },
+  {
+   "id": "1b-nb-sp8",
+   "set": "step1b_rule_battery",
+   "lang": "es",
+   "text": "El envío cuesta cinco dólares por pedido."
+  },
+  {
+   "id": "1b-nb-sp9",
+   "set": "step1b_rule_battery",
+   "lang": "es",
+   "text": "Si ganas veinte dólares de bono, se descuentan tres dólares."
+  },
+  {
+   "id": "1b-nb-sp10",
+   "set": "step1b_rule_battery",
+   "lang": "de",
+   "text": "Die Versandkosten betragen fünf Euro pro Bestellung."
+  },
+  {
+   "id": "1b-nb-sp11",
+   "set": "step1b_rule_battery",
+   "lang": "de",
+   "text": "Wenn Sie zwanzig Euro Bonus verdienen, werden drei Euro abgezogen."
+  },
+  {
+   "id": "1b-nb-sp12",
+   "set": "step1b_rule_battery",
+   "lang": "it",
+   "text": "Se guadagni venti euro di bonus, vengono detratti tre euro."
+  },
+  {
+   "id": "1b-nb-sp13",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "You receive two hundred dollars back if you return the products within thirty days."
+  },
+  {
+   "id": "1b-nb-sp14",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Two hundred FBOs qualified for the Global Rally, and ten of them earned the Chairman's Bonus."
+  },
+  {
+   "id": "1b-nb-sp15",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The conference ticket is one hundred and fifty euros per person."
+  },
+  {
+   "id": "1b-nb-sp16",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Please convert the amount to dollars before ordering; one dollar is about ninety cents."
+  },
+  {
+   "id": "1b-nb-cu1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "In Nigeria, the minimum monthly order to stay active is 45,000 naira."
+  },
+  {
+   "id": "1b-nb-cu2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Bonuses are paid in Indian rupees; bonuses under 500 rupees are carried forward."
+  },
+  {
+   "id": "1b-nb-cu3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Qualifying Managers in the Philippines receive up to PHP 20,000 a month under Forever2Drive."
+  },
+  {
+   "id": "1b-nb-cu4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "If you earn 1,000 rand of bonus in a month, 150 rand is deducted as the FBO Support Fee."
+  },
+  {
+   "id": "1b-nb-cu5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The FBO Support Fee in Kenya is 15%, so on a KES 10,000 bonus about KES 1,500 is deducted."
+  },
+  {
+   "id": "1b-nb-cu6",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Most FBOs in India pay a registration fee of Rs. 500."
+  },
+  {
+   "id": "1b-nb-cu7",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "In the UAE, the average order is around 300 dirhams a month."
+  },
+  {
+   "id": "1b-nb-cu8",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The Aloe Vera Gel costs 25,000 shillings in Uganda and 8,500 naira in Nigeria."
+  },
+  {
+   "id": "1b-nb-cu9",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "A case credit in Mexico is about 4,000 pesos of product at wholesale."
+  },
+  {
+   "id": "1b-nb-cu10",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The yen price of Forever Bee Pollen is 3,500 yen."
+  },
+  {
+   "id": "1b-nb-tb1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Level | Income requirement |\n|---|---|\n| Supervisor | 25 CC |\n| Manager | 120 CC |"
+  },
+  {
+   "id": "1b-nb-tb2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Rank | Bonus income source |\n|---|---|\n| Supervisor | 5% personal bonus |\n| Manager | 13% volume bonus |"
+  },
+  {
+   "id": "1b-nb-tb3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Level | Forever2Drive monthly allowance |\n|---|---|\n| Manager | up to $400 |"
+  },
+  {
+   "id": "1b-nb-tb4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Level | Qualification | Discount | Earned Discount |\n|---|---|---|---|\n| Supervisor | 25 CC | 30% | 8% |"
+  },
+  {
+   "id": "1b-nb-tb5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Product | Wholesale | Retail | Your profit |\n|---|---|---|---|\n| Aloe Vera Gel | $20 | $28.60 | $8.60 |"
+  },
+  {
+   "id": "1b-nb-tb6",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Annual income | Tax rate |\n|---|---|\n| Up to €10,000 | 0% |\n| Above €10,000 | 20% |"
+  },
+  {
+   "id": "1b-nb-tb7",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Rank | Minimum income for bonus payout |\n|---|---|\n| Supervisor | $10 |"
+  },
+  {
+   "id": "1b-nb-tb8",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Bonus income by level:\n- Supervisor: 5% to 8%\n- Manager: 13% plus Leadership Bonus"
+  },
+  {
+   "id": "1b-nb-tb9",
+   "set": "step1b_rule_battery",
+   "lang": "fr",
+   "text": "| Niveau | Revenu requis |\n|---|---|\n| Superviseur | 25 CC |"
+  },
+  {
+   "id": "1b-nb-tb10",
+   "set": "step1b_rule_battery",
+   "lang": "de",
+   "text": "| Stufe | Einkommen aus |\n|---|---|\n| Supervisor | 5 % Persönlicher Bonus |"
+  },
+  {
+   "id": "1b-nb-tb11",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "| Rank | Monthly income tax withholding |\n|---|---|\n| Manager | $150 |"
+  },
+  {
+   "id": "1b-nb-tb12",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Income sources:\n- Supervisor: Personal Bonus and Volume Bonus\n- Manager: Leadership Bonus from $0 upward"
+  },
+  {
+   "id": "1b-nb-cm1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Managers earn more than Supervisors on the same volume because the bonus percentage is higher."
+  },
+  {
+   "id": "1b-nb-cm2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "You earn more than 5% once you reach Supervisor."
+  },
+  {
+   "id": "1b-nb-cm3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "FBOs cannot claim they earn more than a doctor."
+  },
+  {
+   "id": "1b-nb-cm4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The Leadership Bonus is more than the Volume Bonus for most Managers."
+  },
+  {
+   "id": "1b-nb-cm5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Your income is more than your retail profit alone because it includes bonuses."
+  },
+  {
+   "id": "1b-nb-cm6",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Earnings from Forever are not a salary or wage."
+  },
+  {
+   "id": "1b-nb-cm7",
+   "set": "step1b_rule_battery",
+   "lang": "fr",
+   "text": "Les Managers gagnent plus que les Superviseurs grâce à un pourcentage plus élevé."
+  },
+  {
+   "id": "1b-nb-cm8",
+   "set": "step1b_rule_battery",
+   "lang": "de",
+   "text": "Manager verdienen mehr als Supervisor, weil ihr Bonusprozentsatz höher ist."
+  },
+  {
+   "id": "1b-nb-cm9",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "You earn twice the case credits during the promotion month."
+  },
+  {
+   "id": "1b-nb-cm10",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "An Eagle Manager earns more than a Manager in Chairman's Bonus shares."
+  },
+  {
+   "id": "1b-nb-cm11",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Unlike a salary, your income depends entirely on product sales."
+  },
+  {
+   "id": "1b-nb-cm12",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "FBOs must never say they make more than a teacher or a nurse."
+  },
+  {
+   "id": "1b-nb-cm13",
+   "set": "step1b_rule_battery",
+   "lang": "es",
+   "text": "Los Gerentes ganan más que los Supervisores porque su porcentaje es mayor."
+  },
+  {
+   "id": "1b-nb-cm14",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Retail profit is earned on each sale and is not a wage."
+  },
+  {
+   "id": "1b-nb-hd1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "I can't promise any income, but the Personal Bonus is 5% to 18% of your purchases."
+  },
+  {
+   "id": "1b-nb-hd2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "I can't predict earnings, but Forever2Drive pays up to $400 a month to qualifying Managers."
+  },
+  {
+   "id": "1b-nb-hd3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "I cannot promise results, but if you earn $20 in bonus, $3 is deducted."
+  },
+  {
+   "id": "1b-nb-hd4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Forever does not guarantee income; however, bonuses are paid monthly by bank transfer."
+  },
+  {
+   "id": "1b-nb-hd5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "I can't give income figures, but the Income Disclosure Statement shows average earnings by level."
+  },
+  {
+   "id": "1b-nb-hd6",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "We cannot promise earnings, yet the Chairman's Bonus pool is 4% of revenue."
+  },
+  {
+   "id": "1b-nb-hd7",
+   "set": "step1b_rule_battery",
+   "lang": "fr",
+   "text": "Je ne peux rien promettre, mais si vous gagnez 20 € de bonus, 3 € sont déduits."
+  },
+  {
+   "id": "1b-nb-hd8",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "FBOs may not claim, even jokingly, that \"you will earn $500 a month, but only if you work\"."
+  },
+  {
+   "id": "1b-nb-hd9",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "It is prohibited to say that Managers earn $3,000 a month, but you may share the Income Disclosure Statement."
+  },
+  {
+   "id": "1b-nb-ex1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Expect your first bonus payment around the 15th of the following month."
+  },
+  {
+   "id": "1b-nb-ex2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Expect to spend about $200 a month to maintain 4 CC."
+  },
+  {
+   "id": "1b-nb-ex3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "You can expect a refund of about $50 within 30 days."
+  },
+  {
+   "id": "1b-nb-ex4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Expect the FBO Support Fee to be about $3 a month on a $20 bonus."
+  },
+  {
+   "id": "1b-nb-ex5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Plan for about $100 a month in product purchases."
+  },
+  {
+   "id": "1b-nb-ex6",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Plan on about 4 CC a month, which is roughly $800 of product."
+  },
+  {
+   "id": "1b-nb-ex7",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Count on about $30 a month in shipping if you order monthly."
+  },
+  {
+   "id": "1b-nb-ex9",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Expect roughly $10 a month in bank charges on international transfers."
+  },
+  {
+   "id": "1b-nb-ex10",
+   "set": "step1b_rule_battery",
+   "lang": "de",
+   "text": "Rechnen Sie mit etwa 5 € Versandkosten pro Bestellung im Monat."
+  },
+  {
+   "id": "1b-nb-ex11",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Expect about 4 CC a month, roughly $800 of product at wholesale, to stay active."
+  },
+  {
+   "id": "1b-nb-ex12",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "You should not expect $500 a month from retail sales alone."
+  },
+  {
+   "id": "1b-nb-ex13",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Look forward to the Eagle Manager Retreat, an all-expenses-paid trip worth about $3,000 a year."
+  },
+  {
+   "id": "1b-nb-nn1",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "The Forever2Drive bonus for Managers is up to $400 a month."
+  },
+  {
+   "id": "1b-nb-nn2",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Managers must report income over $600 a year for tax purposes."
+  },
+  {
+   "id": "1b-nb-nn3",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "An FBO's bonus income below $10 a month is carried forward."
+  },
+  {
+   "id": "1b-nb-nn4",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Supervisor income comes from the Personal Bonus (5%) and the Volume Bonus."
+  },
+  {
+   "id": "1b-nb-nn5",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Your monthly bonus as a Supervisor is typically 5% of purchases; on $1,000 of purchases that is $50 a month."
+  },
+  {
+   "id": "1b-nb-nn6",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Managers' bonus checks are issued monthly; bonuses under $10 are held."
+  },
+  {
+   "id": "1b-nb-nn7",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "An FBO's income must be declared if it exceeds $600 a year."
+  },
+  {
+   "id": "1b-nb-nn8",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Supervisor earnings are paid monthly by bank transfer once they exceed $10."
+  },
+  {
+   "id": "1b-nb-nn9",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "FBOs with income of $600 or more a year receive a 1099."
+  },
+  {
+   "id": "1b-nb-nn10",
+   "set": "step1b_rule_battery",
+   "lang": "fr",
+   "text": "Le revenu d'un FBO est versé chaque mois dès qu'il dépasse 10 €."
+  },
+  {
+   "id": "1b-nb-nn11",
+   "set": "step1b_rule_battery",
+   "lang": "de",
+   "text": "Das Einkommen eines FBO wird monatlich ausgezahlt, sobald es 10 € übersteigt."
+  },
+  {
+   "id": "1b-nb-nn12",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Manager income is calculated monthly: 13% Volume Bonus on $5,000 of group volume is $650."
+  },
+  {
+   "id": "1b-nb-nn13",
+   "set": "step1b_rule_battery",
+   "lang": "en",
+   "text": "Income eligibility for Managers: at least 4 CC a month and $10 minimum bonus."
+  },
+  {
+   "id": "review1b:h-still",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "FBOs are prohibited from claiming that new members still earn $500 a month during their first year."
+  },
+  {
+   "id": "review1b:h-but-ok",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "It is forbidden to say that you will earn $900 a month, but it is fine to explain the bonus percentages."
+  },
+  {
+   "id": "review1b:h-but-so-is",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "Statements that you will earn $5,000 a month are banned, but so is saying that most FBOs earn $900 a month."
+  },
+  {
+   "id": "review1b:h-yet-still",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "Income claims are misleading and prohibited, yet some FBOs still claim you can earn $900 a month online."
+  },
+  {
+   "id": "review1b:h-even-though",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "Even though it is illegal, some FBOs still tell prospects they will earn $900 a month."
+  },
+  {
+   "id": "review1b:h-never-though",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "Never tell a prospect that they will earn $900 a month, even though you may still explain how bonuses work."
+  },
+  {
+   "id": "review1b:h-still-after",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "Do not claim that you still earn $900 a month after leaving Forever."
+  },
+  {
+   "id": "review1b:h-must-not-but",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "FBOs must not claim that Supervisors typically earn $1,500 a month but Managers earn $3,000 a month."
+  },
+  {
+   "id": "review1b:h-may-not-though",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "You may not say that most FBOs earn $900 a month, though the figure is realistic."
+  },
+  {
+   "id": "review1b:h-prohibited-still-promise",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "It is prohibited to promise passive income, and it is still prohibited if you call it residual income."
+  },
+  {
+   "id": "review1b:h-forbidden-still-p4",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "It is forbidden to say that you can still earn passive income after you stop selling."
+  },
+  {
+   "id": "review1b:h-fr-mais",
+   "set": "review_step1b_hedge_guard",
+   "lang": "fr",
+   "text": "Il est interdit de dire que vous gagnerez 500 € par mois mais que la plupart des FBO gagnent 900 € par mois."
+  },
+  {
+   "id": "review1b:h-de-aber",
+   "set": "review_step1b_hedge_guard",
+   "lang": "de",
+   "text": "Es ist verboten zu behaupten, dass Sie 500 € im Monat verdienen, aber es ist auch verboten zu sagen, dass die meisten FBOs 900 € im Monat verdienen."
+  },
+  {
+   "id": "review1b:h-es-pero",
+   "set": "review_step1b_hedge_guard",
+   "lang": "es",
+   "text": "Está prohibido afirmar que ganará 500 dólares al mes, pero también que la mayoría de los FBO gana 900 dólares al mes."
+  },
+  {
+   "id": "review1b:h-en-nevertheless",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "Such claims are prohibited; nevertheless some FBOs post that they earn $900 a month."
+  },
+  {
+   "id": "review1b:h-en-however-noq",
+   "set": "review_step1b_hedge_guard",
+   "lang": "en",
+   "text": "It is misleading to say everyone earns $900 a month, however most FBOs earn far less."
+  },
+  {
+   "id": "review1b:t-retail-example",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "| Rank | Retail earnings on one $28.60 product |\n|---|---|\n| Supervisor | $8.60 |"
+  },
+  {
+   "id": "review1b:t-income-calc",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "| Rank | Income calculation |\n|---|---|\n| Supervisor | $16 on 1 CC |"
+  },
+  {
+   "id": "review1b:t-bonus-income-example",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "| Rank | Bonus income example on 4 CC |\n|---|---|\n| Supervisor | $64 |"
+  },
+  {
+   "id": "review1b:l-retail-ex",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "Earnings from a $28.60 product:\n- Supervisor: $8.60 retail profit\n- Manager: $8.60 retail profit"
+  },
+  {
+   "id": "review1b:l-income-calc",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "How your income is calculated:\n- Supervisor: $16 on 1 CC\n- Manager: $36 on 1 CC"
+  },
+  {
+   "id": "review1b:l-earnings-example-cc",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "Earnings example:\n- Supervisor: $64 on 4 CC a month"
+  },
+  {
+   "id": "review1b:l-income-disclosure",
+   "set": "review_step1b_table",
+   "lang": "en",
+   "text": "Income disclosure statement (published averages):\n- Supervisor: $1,200 a year"
+  },
+  {
+   "id": "review1b:grand-prize",
+   "set": "review_step1b_grand_prize",
+   "lang": "en",
+   "text": "Winners of the 5 grand prizes earn a trip to the Global Rally."
+  },
+  {
+   "id": "review1b:de-und-euro-verdienen",
+   "set": "review_step1b_de_numw_und",
+   "lang": "de",
+   "text": "FBOs verdienen ihre Boni in Euro und Dollar, je nach Markt."
+  },
+  {
+   "id": "review1b:de-und-euro-verdienen2",
+   "set": "review_step1b_de_numw_und",
+   "lang": "de",
+   "text": "Sie verdienen Ihre Boni in Dollar und Euro."
+  },
+  {
+   "id": "review1b:f-es-descuento",
+   "set": "review_step1b_rulectx_savings",
+   "lang": "es",
+   "text": "Espere un descuento de 15 dólares al mes en su autoenvío."
+  },
+  {
+   "id": "review1b:f-save",
+   "set": "review_step1b_rulectx_savings",
+   "lang": "en",
+   "text": "Expect to save about $10 a month as a Preferred Customer."
+  },
+  {
+   "id": "review1b:g-checks-mailed",
+   "set": "review_step1b_p3bc_threshold",
+   "lang": "en",
+   "text": "Bonus checks of $100 or more are mailed to Supervisors every month."
+  },
+  {
+   "id": "review1b:g-summary",
+   "set": "review_step1b_p3bc_threshold",
+   "lang": "en",
+   "text": "Your monthly income summary shows bonuses of $50 or more."
+  },
+  {
+   "id": "review2:p3bc-mail-threshold",
+   "set": "review_step1b_round2",
+   "lang": "en",
+   "text": "Bonus checks of $100 or more are mailed to Supervisors every month."
+  }
+ ],
+ "known_fp_parity": [
+  {
+   "id": "hedged:en-earn-cc",
+   "lang": "en",
+   "text": "I can't promise any income, but you earn 1 case credit for roughly $200 of product at wholesale price.",
+   "rule": "P1",
+   "twin": "en-earn-cc (review_step1/fp.json, fires today)"
+  },
+  {
+   "id": "hedged:en-most-paid-monthly",
+   "lang": "en",
+   "text": "I can't promise any income, but most FBOs receive their bonus of $100 or more by bank transfer around the 15th of the month.",
+   "rule": "P2",
+   "twin": "en-most-paid-monthly (review_step1/fp.json, fires today)"
+  },
+  {
+   "id": "spelled:en-can-earn-up-to",
+   "lang": "en",
+   "text": "Qualifying Managers can earn up to four hundred dollars per month under the Forever2Drive program.",
+   "rule": "P1",
+   "twin": "en-can-earn-up-to (review_step1/fp.json, fires today)"
+  },
+  {
+   "id": "spelled:fr-f2d2",
+   "lang": "fr",
+   "text": "Les Managers qualifiés peuvent gagner jusqu'à quatre cents euros par mois avec Forever2Drive.",
+   "rule": "P1",
+   "twin": "fr-f2d2 (review_step1/fp.json, fires today)"
+  },
+  {
+   "id": "spelled:de-f2d2",
+   "lang": "de",
+   "text": "Qualifizierte Manager können mit Forever2Drive bis zu quatre cents euros im Monat verdienen.",
+   "rule": "P1",
+   "twin": "de-f2d2 (review_step1/fp.json, fires today)"
+  },
+  {
+   "id": "spelled:it-f2d2",
+   "lang": "it",
+   "text": "I Manager qualificati possono guadagnare fino a quatre cents euros al mese con Forever2Drive.",
+   "rule": "P1",
+   "twin": "it-f2d2 (review_step1/fp.json, fires today)"
+  }
+ ],
+ "parity_changes": [
+  {
+   "file": "tests/fixtures/income_projection_cases.json",
+   "id": "en-c6",
+   "text": "Expect roughly €500 a month once you have three active legs.",
+   "before": null,
+   "after": "P8",
+   "action": "remove 'en-c6' from _KNOWN_RESIDUAL_MISSES (strict xfail now XPASSes); set its 'prototype' to 'P8' if the fixture's recorded rule is updated"
+  }
+ ]
+}
