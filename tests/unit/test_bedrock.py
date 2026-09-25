@@ -27,7 +27,7 @@ def test_build_prompt_replaces_all_variables() -> None:
     assert "US" in prompt.system_prompt
     assert '"retrieved_chunks": "chunk"' in prompt.user_prompt
     assert '"history": "history"' in prompt.user_prompt
-    assert prompt.prompt_version == "2026-09-18-composition-contract-v5"
+    assert prompt.prompt_version == "2026-09-22-income-disclaimer-quote-v6"
 
 
 def test_fixed_prompt_is_compact_without_losing_grounding_rules() -> None:
