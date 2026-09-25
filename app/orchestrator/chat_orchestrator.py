@@ -57,6 +57,7 @@ from app.validation.validators.numeric_grounding_validator import (
     remove_unsupported_numeric_sentences,
     removal_diagnostics,
 )
+from app.validation.validators.history_grounding_validator import documents_are_directory_only
 from config import settings
 from config.vera_persona import FALLBACK_RESPONSES, fbo_enrollment_is_unavailable
 from services.audit import write_audit_event
@@ -106,6 +107,9 @@ from app.response.contact_completion import (
     recommends_contact_in_language,
 )
 from utils.directory_fields import (
+    build_directory_contact_route,
+    directory_contact_route_locale,
+    directory_contact_route_locale_is_configured,
     canonical_requested_order_size,
     directory_field_conflicts,
     parse_directory_fields,
@@ -801,6 +805,93 @@ def _resolve_directory_field_target_names(lookup_text: str, country: str) -> lis
     session_name = market_display_name(country)
     session_aliases = sorted(find_sponsoring_directory_alias_countries(session_name or ""))
     return session_aliases or ([session_name] if session_name else [])
+
+
+def _explicit_directory_target_names(lookup_text: str) -> list[str]:
+    """Market(s) EXPLICITLY named in ``lookup_text`` - never a session fallback.
+
+    Combines the same three sources ``_resolve_directory_field_target_names``
+    already combines - the general market catalog
+    (``find_market_mentions``/``market_display_name``), sponsoring-directory
+    aliases, and shared-office record names - by calling
+    ``_resolve_support_contact_target_names`` with an empty ``country`` so
+    its own session-market fallback branch never fires. Used only by the
+    directory-contact-route trigger in ``_validate_response``, which must
+    never guess a market from the session country or "North America": a
+    wrong guess there would render one market's private contact details for
+    a question that named a different one (or none at all).
+    """
+    combined = [
+        *_resolve_support_contact_target_names(lookup_text, ""),
+        *sorted(find_sponsoring_directory_alias_countries(lookup_text)),
+        *sorted(find_shared_office_record_countries(lookup_text)),
+    ]
+    return list(dict.fromkeys(combined))
+
+
+def _is_directory_contact_route_candidate(document: Any) -> bool:
+    """POSITIVE allowlist: only a sponsoring/international-sponsoring record.
+
+    Accepts a GLOBAL record only when ``directory_kind ==
+    "international_sponsoring"`` or ``directory_section`` (case- and
+    whitespace-insensitively) equals ``"sponsoring"``. Office and staff
+    records are never candidates, regardless of how ``directory_section``
+    happens to be cased - a denylist keyed on the single literal
+    ``"staff"`` previously let a differently-cased staff record
+    (``directory_section="Staff"``) through and render a private cell
+    number and email (Fable review, 2026-09-24, finding N1).
+    """
+    if document.country != "GLOBAL":
+        return False
+    if document.metadata.get("directory_kind") == "international_sponsoring":
+        return True
+    section = str(document.metadata.get("directory_section") or "").strip().casefold()
+    return section == "sponsoring"
+
+
+def _select_directory_contact_route_record(documents: list, lookup_text: str) -> Any | None:
+    """Return the single directory record the directory-contact-route trigger may render.
+
+    Candidates are restricted to sponsoring/international-sponsoring
+    records by :func:`_is_directory_contact_route_candidate` - office and
+    staff records are never candidates at all, so neither can make an
+    otherwise-unambiguous sponsoring match ambiguous. Exactly one candidate
+    must match ``target_names`` (whole-segment, via
+    ``record_matches_any_target``); zero matches or two-or-more matches
+    return ``None`` rather than guessing. Deliberately NOT
+    ``_directory_documents_for_response``, which returns the sole retrieved
+    candidate when nothing matches at all - the exact mechanism that once
+    rendered Ghana's number for a Kenya question.
+
+    Before any of that: if ``lookup_text`` names two or more DISTINCT
+    markets (``services.market_config.find_market_mentions`` - the general
+    market catalog, not the alias-expanded ``target_names`` below), this
+    returns ``None`` unconditionally, even when only one of the named
+    markets' records was actually retrieved ("Is the Kenya office phone the
+    same as the Uganda one?" with only the Kenya/East Africa record in
+    evidence must never render Kenya's number as if it answered a
+    same-or-different comparison - Fable review, 2026-09-24, finding N2).
+    ``find_market_mentions`` is used rather than ``target_names`` because a
+    SINGLE named market can legitimately expand to more than one target
+    name (a shared-office alias contributes a name distinct from the
+    market's own - "Martinique" -> ["Martinique", "St. Maarten"] - and that
+    single-market framing must keep working).
+    """
+    if len(find_market_mentions(lookup_text)) >= 2:
+        return None
+    target_names = _explicit_directory_target_names(lookup_text)
+    if not target_names:
+        return None
+    matched: list[Any] = []
+    for document in documents:
+        if not _is_directory_contact_route_candidate(document):
+            continue
+        record_country = str(document.metadata.get("record_country") or "").strip()
+        if record_country and _directory_record_matches_a_target(record_country, target_names):
+            matched.append(document)
+    if len(matched) != 1:
+        return None
+    return matched[0]
 
 
 def _find_matching_support_contact_record(documents: list, target_names: list[str]):
@@ -1685,6 +1776,8 @@ class AIOrchestrator:
             correlation_id,
             model_response=model_response,
             retrieval_result=retrieval_result,
+            directory_contact_route=True,
+            lookup_text=request_query or body.message,
         )
         governance_decision = self._evaluate_governance(
             chat_response.answer,
@@ -2188,7 +2281,12 @@ class AIOrchestrator:
             resolved_request=resolved_request,
         )
         chat_response = self._validate_response(
-            chat_response, body, correlation_id, retrieval_result=evidence
+            chat_response,
+            body,
+            correlation_id,
+            retrieval_result=evidence,
+            directory_contact_route=True,
+            lookup_text=resolved_request or body.message,
         )
         chat_response = self._replace_answer(chat_response, chat_response.answer, {"cache": cache_type})
         governance_decision = self._evaluate_governance(
@@ -4493,8 +4591,19 @@ class AIOrchestrator:
         correlation_id: str,
         model_response: ModelResponse | None = None,
         retrieval_result: RetrievalResult | None = None,
+        directory_contact_route: bool = False,
+        lookup_text: str | None = None,
     ) -> ChatResponse:
-        """Validate a chat response and return a safe fallback for critical failures."""
+        """Validate a chat response and return a safe fallback for critical failures.
+
+        ``directory_contact_route``/``lookup_text`` are only ever passed by
+        the two model-answer call sites. When a critical failure fires on a
+        turn whose evidence is directory-only, ``_directory_contact_route_fallback``
+        gets one chance to add a guarded "reach that office" block (the
+        record's own verbatim phone/email) below today's unchanged
+        insufficient-evidence text; any other caller, and any turn that
+        does not qualify, gets exactly the fallback it gets today.
+        """
         result = self.output_validator.validate(
             ValidationContext(
                 chat_response=chat_response,
@@ -4643,6 +4752,12 @@ class AIOrchestrator:
                 ],
             )
             _record_diagnostic_validation(chat_response, result, "critical_fallback", numeric_repair_attempt)
+            if directory_contact_route:
+                routed_response = self._directory_contact_route_fallback(
+                    body, correlation_id, retrieval_result, lookup_text or body.message, failure_layer,
+                )
+                if routed_response is not None:
+                    return self._with_validation_metadata(routed_response, result)
             return self._with_validation_metadata(
                 self.response_builder.fallback(
                     self._insufficient_evidence_message(_answer_language(body), body.message, body.country),
@@ -4706,6 +4821,112 @@ class AIOrchestrator:
         if any("citation" in code for code in critical_codes):
             return "citation_validator"
         return "output_validator"
+
+    def _directory_contact_route_fallback(
+        self,
+        body: ChatRequest,
+        correlation_id: str,
+        retrieval_result: RetrievalResult | None,
+        lookup_text: str,
+        failure_layer: str,
+    ) -> ChatResponse | None:
+        """Guarded "reach that office" addition for a directory-only critical fallback.
+
+        The model's own answer is never delivered here, in any form: this
+        builds a brand-new response from today's unchanged
+        ``_insufficient_evidence_message``, a reviewed lead-in naming the
+        record's own market, and the record's own verbatim phone/email -
+        never a sentence the model wrote. Returns ``None`` for any
+        disqualifying condition (evidence is not directory-only, no single
+        record matches a market the question explicitly names, the record
+        offers no safe phone/email field, the answer language has no
+        reviewed ``international_directory_note`` locale, or scrubbing PII
+        would change the block), so the caller keeps today's plain fallback
+        exactly as it is.
+        """
+        if retrieval_result is None or not documents_are_directory_only(retrieval_result.documents):
+            return None
+        record = _select_directory_contact_route_record(retrieval_result.documents, lookup_text)
+        if record is None:
+            return None
+        language = _answer_language(body)
+        # The note is rendered directly through cx_render below, not through
+        # utils.directory_fields' own per-field guard, so it needs the
+        # identical configured-locale check applied explicitly: an
+        # unconfigured locale drops the whole block rather than ever
+        # reaching app.response.cx_render._translate_template /
+        # services.controlled_copy.localize_reviewed_copy, a live (Bedrock)
+        # translation call this offline rendering path must never make
+        # (Fable review, 2026-09-24, finding N3).
+        if not directory_contact_route_locale_is_configured(language):
+            return None
+        # The ALIASED locale (nb/nn -> "no"), not the raw request language,
+        # is what every part of the block renders under from here on.
+        # app.response.cx_render.render resolves its own locale with
+        # app.evidence._locale_key, which does not apply this alias, so
+        # passing "nb" through unaliased for the note below would resolve
+        # to a locale that is not one of the 12 configured routes and fall
+        # through to a live Bedrock translation call - the exact gap
+        # directory_contact_route_locale_is_configured above is meant to
+        # close (Fable review, 2026-09-25, N3 delta finding 1).
+        resolved_locale = directory_contact_route_locale(language)
+        block = build_directory_contact_route(record.content, resolved_locale)
+        if not block:
+            return None
+        record_country = str(record.metadata.get("record_country") or "").strip()
+        note = cx_render("international_directory_note", resolved_locale, country=record_country)
+        addition = f"{note}\n\n{block}"
+        # Only the ADDITION (the reviewed lead-in plus the record's own
+        # fields) is checked. The base fallback text is today's existing
+        # ``_insufficient_evidence_message`` output, already delivered
+        # unchanged and unscrubbed on the plain critical-fallback path this
+        # method sits beside; re-scrubbing it here would risk masking its
+        # own reviewed customer-care contact, which is not this record's
+        # content and was never in scope for this guard. A scrub that
+        # changes the addition drops the whole block rather than delivering
+        # a partially masked one.
+        safe_addition = scrub_pii(
+            addition,
+            correlation_id,
+            language,
+            allowed_texts=[record.content, *settings.PII_APPROVED_PUBLIC_TERMS],
+        )
+        if safe_addition != addition:
+            return None
+        base = self._insufficient_evidence_message(language, body.message, body.country)
+        answer = f"{base}\n\n{addition}"
+        labels = [
+            line[2:].split(":", 1)[0].strip() for line in block.splitlines() if line.startswith("- ")
+        ]
+        LOGGER.info(
+            "directory_contact_route_applied",
+            correlation_id=correlation_id,
+            record_id=record.id,
+            record_country=record_country,
+            labels=labels,
+            label_count=len(labels),
+        )
+        fallback_response = self.response_builder.fallback(
+            answer,
+            correlation_id,
+            metadata={
+                "failure_layer": failure_layer,
+                "directory_contact_route": {
+                    "record_id": record.id,
+                    "record_country": record_country,
+                    "labels": labels,
+                },
+            },
+        )
+        return ChatResponse(
+            answer=fallback_response.answer,
+            citations=[{**record.to_source(), SUPPORT_CONTACT_SUPPLEMENT_CITATION_FIELD: True}],
+            suggestions=fallback_response.suggestions,
+            cards=fallback_response.cards,
+            confidence=fallback_response.confidence,
+            metadata=fallback_response.metadata,
+            correlation_id=fallback_response.correlation_id,
+        )
 
     def _with_validation_metadata(self, chat_response: ChatResponse, result: ValidationResult) -> ChatResponse:
         """Attach validation summary metadata without changing the public API response."""
