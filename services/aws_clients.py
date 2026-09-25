@@ -136,6 +136,15 @@ class AwsClients:
         self.s3 = boto3.client("s3", region_name=settings.AWS_REGION, config=background_config)
         self.ses = boto3.client("ses", region_name=settings.AWS_REGION, config=background_config)
         self.sqs = boto3.client("sqs", region_name=settings.AWS_REGION, config=background_config)
+        # Only the ingestion worker long-polls; enqueueing keeps the shorter budget.
+        self.sqs_long_poll = boto3.client(
+            "sqs",
+            region_name=settings.AWS_REGION,
+            config=_client_config(
+                read_timeout=settings.AWS_SQS_LONG_POLL_READ_TIMEOUT_SECONDS,
+                max_attempts=settings.AWS_MAX_ATTEMPTS,
+            ),
+        )
         self.textract = boto3.client("textract", region_name=settings.AWS_REGION, config=background_config)
 
 

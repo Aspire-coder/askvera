@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError
 
 from scripts import run_ingestion_worker
 from scripts.run_ingestion_worker import (
@@ -254,3 +255,58 @@ def test_worker_retries_until_guardduty_scan_is_clean(monkeypatch) -> None:
         "Ingestion upload has not passed malware scanning.",
         retryable=True,
     )
+
+
+class _StopPolling(Exception):
+    """Ends run_forever's infinite loop once a test has seen enough polls."""
+
+
+def _polling_clients(outcomes):
+    """Clients whose long-poll receive returns or raises each queued outcome in turn."""
+    clients = MagicMock()
+
+    def receive_message(**_kwargs):
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    clients.sqs_long_poll.receive_message.side_effect = receive_message
+    # The short-timeout client must never be used to long-poll.
+    clients.sqs.receive_message.side_effect = AssertionError("polled with the short-timeout SQS client")
+    return clients
+
+
+@pytest.mark.parametrize(
+    "network_error",
+    [
+        lambda: ReadTimeoutError(endpoint_url="https://sqs.us-east-1.amazonaws.com/"),
+        lambda: ConnectTimeoutError(endpoint_url="https://sqs.us-east-1.amazonaws.com/"),
+        lambda: EndpointConnectionError(endpoint_url="https://sqs.us-east-1.amazonaws.com/"),
+    ],
+)
+def test_worker_keeps_polling_after_a_network_error(monkeypatch, network_error) -> None:
+    """A timed-out empty poll used to exit the worker; it must poll again instead."""
+    clients = _polling_clients([network_error(), {"Messages": []}, _StopPolling()])
+    monkeypatch.setattr(run_ingestion_worker, "get_aws_clients", lambda: clients)
+    monkeypatch.setattr(run_ingestion_worker.settings, "ADMIN_INGESTION_QUEUE_URL", "https://sqs.example/queue")
+    sleeps = []
+    monkeypatch.setattr(run_ingestion_worker.time, "sleep", sleeps.append)
+
+    with pytest.raises(_StopPolling):
+        run_ingestion_worker.run_forever()
+
+    assert clients.sqs_long_poll.receive_message.call_count == 3
+    assert sleeps == [run_ingestion_worker.POLL_RETRY_SECONDS]
+
+
+def test_worker_polls_through_the_long_poll_client_with_a_wait_under_its_timeout(monkeypatch) -> None:
+    clients = _polling_clients([{"Messages": []}, _StopPolling()])
+    monkeypatch.setattr(run_ingestion_worker, "get_aws_clients", lambda: clients)
+    monkeypatch.setattr(run_ingestion_worker.settings, "ADMIN_INGESTION_QUEUE_URL", "https://sqs.example/queue")
+
+    with pytest.raises(_StopPolling):
+        run_ingestion_worker.run_forever()
+
+    wait = clients.sqs_long_poll.receive_message.call_args.kwargs["WaitTimeSeconds"]
+    assert wait < run_ingestion_worker.settings.AWS_SQS_LONG_POLL_READ_TIMEOUT_SECONDS
