@@ -329,6 +329,30 @@ def test_product_information_is_an_accepted_upload_type():
     assert {entry["form_fields"]["document_type"] for entry in DOCUMENTS} == {"product_information"}
 
 
+@pytest.mark.parametrize(
+    ("document_type", "access_scope", "allowed"),
+    [
+        ("product_information", "country", True),
+        ("product_information", "global", False),
+        ("policy", "country", True),
+        ("policy", "global", False),
+        ("office_directory", "global", True),
+        ("office_directory", "country", False),
+    ],
+)
+def test_upload_scope_rules_keep_product_information_in_its_market(document_type, access_scope, allowed):
+    from fastapi import HTTPException
+
+    from api.admin_routes import _check_document_scope
+
+    if allowed:
+        _check_document_scope(document_type, access_scope)
+    else:
+        with pytest.raises(HTTPException) as error:
+            _check_document_scope(document_type, access_scope)
+        assert error.value.status_code == 400
+
+
 def test_prompt_labels_product_sections_as_product_information_not_policy():
     from app.prompts.builder import _section_label
 

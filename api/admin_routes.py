@@ -99,6 +99,25 @@ from app.widget_registry.service import widget_registry_service
 admin_router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin_identity)])
 
 
+def _check_document_scope(document_type: str, access_scope: str) -> None:
+    """Refuse a document type offered to markets it does not belong to."""
+    if document_type == "policy" and access_scope != "country":
+        raise HTTPException(
+            status_code=400,
+            detail="Company policies must be restricted to their selected market.",
+        )
+    if document_type == "product_information" and access_scope != "country":
+        raise HTTPException(
+            status_code=400,
+            detail="Product information must be restricted to its selected market.",
+        )
+    if document_type == "office_directory" and access_scope != "global":
+        raise HTTPException(
+            status_code=400,
+            detail="The approved office directory must use global availability.",
+        )
+
+
 def _preflight_uploaded_document(filename: str, content: bytes) -> None:
     """Reject suspicious uploads before durable storage when hardened preflight is enabled."""
     if not settings.ADMIN_DOCUMENT_PREFLIGHT_ENABLED:
@@ -889,21 +908,7 @@ async def upload_document(
     principal = getattr(request.state, "admin_identity", {}) or {}
     if access_scope == "global" and principal.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Only a Super Admin can upload global content.")
-    if document_type == "policy" and access_scope != "country":
-        raise HTTPException(
-            status_code=400,
-            detail="Company policies must be restricted to their selected market.",
-        )
-    if document_type == "product_information" and access_scope != "country":
-        raise HTTPException(
-            status_code=400,
-            detail="Product information must be restricted to its selected market.",
-        )
-    if document_type == "office_directory" and access_scope != "global":
-        raise HTTPException(
-            status_code=400,
-            detail="The approved office directory must use global availability.",
-        )
+    _check_document_scope(document_type, access_scope)
     if settings.ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED and (
         not document_owner.strip() or not approval_reference.strip()
     ):
