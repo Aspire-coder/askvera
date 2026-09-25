@@ -110,7 +110,14 @@ def test_finding_sentences_still_refused_with_allow_claim_topics(text: str) -> N
     assert decision.allowed is False
 
 
-# --- R10E texts: still refused via INCOME_CLAIM_RISK, not the new detector -----
+# --- R10E texts: allowed once the approved-disclaimer exemption is applied ----
+# (fix/income-disclaimer-exemption-20260925, app/risk/policies/income_disclaimer.py).
+# These three real generated answers quote the company's own mandatory US-EN
+# income disclaimer (Company Policy 1.01(d)) and were previously refused only
+# because IncomeClaimPolicy's guarantee/earnings pairing is not sentence-scoped
+# and fired on the disclaimer's own wording. IncomeProjectionPolicy correctly
+# never fired on these texts either before or after the fix -- they contain no
+# earnings-projection figure -- so that half of this test is unchanged.
 
 R10E_TEXTS = {
     "r10-05": (
@@ -177,14 +184,14 @@ _DISCLAIMER_RE = re.compile(r"[^.\n]*no guarantees regarding income or success\.
 
 
 @pytest.mark.parametrize("case_id,text", list(R10E_TEXTS.items()))
-def test_r10e_texts_refused_via_income_claim_risk_not_projection(case_id: str, text: str) -> None:
+def test_r10e_texts_allowed_via_disclaimer_exemption_and_never_hit_projection(case_id: str, text: str) -> None:
     ctx = _risk_context(text, is_generated_answer=True)
     claim_issues = IncomeClaimPolicy().evaluate(ctx)
-    assert [issue.code for issue in claim_issues] == ["INCOME_CLAIM_RISK"], case_id
+    assert claim_issues == [], f"{case_id}: the approved-disclaimer exemption should clear INCOME_CLAIM_RISK"
     projection_issues = IncomeProjectionPolicy().evaluate(ctx)
-    assert projection_issues == [], f"{case_id}: INCOME_PROJECTION_RISK must not fire when IncomeClaimPolicy already refuses"
+    assert projection_issues == [], f"{case_id}: INCOME_PROJECTION_RISK must not fire on these disclaimer-only texts"
     decision = _answer(text)
-    assert decision.allowed is False, case_id
+    assert decision.allowed is True, case_id
 
 
 @pytest.mark.parametrize("case_id,text", list(R10E_TEXTS.items()))

@@ -7,6 +7,7 @@ from app.risk.policies.income_claim_translations import (
     contains_translated_income_claim,
     contains_translated_income_context,
 )
+from app.risk.policies.income_disclaimer import mask_approved_disclaimers
 from app.risk.rules import RiskPolicyMetadata
 from config.guardrail_topics import DENIED_TOPICS
 from services.guardrails import is_policy_safety_question
@@ -539,7 +540,12 @@ class IncomeClaimPolicy:
     phrases = tuple(DENIED_TOPICS["income_claim"])
 
     def evaluate(self, context: RiskContext) -> list[RiskIssue]:
-        message = (context.user_message or "").lower()
+        raw_message = context.user_message or ""
+        if context.is_generated_answer:
+            # Only the model's own generated-answer text is ever masked; user
+            # input is judged byte-for-byte as before (see income_disclaimer.py).
+            raw_message = mask_approved_disclaimers(raw_message)
+        message = raw_message.lower()
         if is_policy_safety_question(message):
             return []
         if not self._contains_income_claim(message):
