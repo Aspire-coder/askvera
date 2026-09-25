@@ -75,6 +75,7 @@ class GovernanceEngine:
                     role=role,
                     correlation_id=correlation_id,
                     allow_claim_topics=suppress_claim_topics,
+                    is_generated_answer=is_generated_answer,
                 )
             )
             if risk_decision.should_refuse():

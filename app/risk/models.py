@@ -88,6 +88,14 @@ class RiskContext:
     reviewed policy. off_topic and every other risk policy are unaffected;
     see RiskPolicyMetadata.is_claim_topic and RiskEngine.evaluate.
     """
+    is_generated_answer: bool = False
+    """True only for the orchestrator's generated-answer passes (fresh and cached).
+
+    Set by GovernanceEngine from its own is_generated_answer parameter,
+    independently of allow_claim_topics. Policies that must act only on
+    model-generated text (never on user input), such as IncomeProjectionPolicy,
+    gate on this field directly.
+    """
 
 
 def _risk_rank(level: RiskLevel) -> int:

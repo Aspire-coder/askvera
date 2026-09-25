@@ -3,7 +3,13 @@
 from services.guardrails import asserts_denied_claim
 
 from .models import RiskContext, RiskDecision
-from .policies import CountryPolicy, IncomeClaimPolicy, InputLengthPolicy, MedicalClaimPolicy
+from .policies import (
+    CountryPolicy,
+    IncomeClaimPolicy,
+    IncomeProjectionPolicy,
+    InputLengthPolicy,
+    MedicalClaimPolicy,
+)
 from .rules import RiskPolicy
 
 
@@ -52,6 +58,7 @@ def default_policies() -> list[RiskPolicy]:
         InputLengthPolicy(),
         MedicalClaimPolicy(),
         IncomeClaimPolicy(),
+        IncomeProjectionPolicy(),
         CountryPolicy(),
     ]
 
