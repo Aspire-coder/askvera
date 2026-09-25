@@ -26,12 +26,72 @@ list. Flagging this CRITICAL under its own code, distinct from
 (which only fires when every critical issue is a numeric one) is skipped and
 the answer goes to the ordinary insufficient-evidence fallback instead -
 never a partially stripped answer.
+
+Canary fix (2026-09-25, retrieval_canary.json case
+chained-followup-market-continuity): a production run on a three-turn
+Belgium/Germany sponsoring conversation ("How do I sponsor someone in
+Belgium?", "What about Germany?", "Tell me more.") showed this validator
+firing wrongly, in two distinct ways this fix closes:
+
+1. It fired on TURN 0, where no history exists at all, against an ordinary
+   sentence ("The team can walk you through the sponsoring process and
+   answer your questions about qualifications and next steps.") that simply
+   is not covered by thin directory-only evidence - not because the model
+   copied it from an earlier turn, since there was no earlier turn to copy
+   from. The validator never actually checked that a flagged sentence came
+   from history; it only checked that this turn's evidence did not cover
+   it, which is also true of every generic connective/offer sentence a
+   legitimate directory answer contains.
+2. On the final turn, it fired against "What specific information would you
+   like to know more about?" and "Please let me know what would be most
+   helpful, and I'll provide the details from our approved resources." -
+   a clarifying question and a forward-looking offer, neither of which
+   asserts a fact at all, let alone one only history states.
+
+Fix: ``ValidationContext`` now carries ``conversation_history`` (threaded
+from the call site that already has the session's history text; empty by
+default). This validator returns immediately when it is empty or
+whitespace-only - turn 0 can never have a history-sourced claim - and
+otherwise flags a sentence only when it is BOTH (a) not covered by this
+turn's evidence (the original check) AND (b) IS covered by the conversation
+history text itself (:func:`app.evidence_contract.answer_sentences_covered_by`,
+the same token-coverage machinery run against history instead of evidence),
+so an uncovered-but-also-not-in-history sentence (case 1 above) is left
+alone. A sentence that ends in a question mark - checked language-agnostically
+via terminal "?"/full-width "？"/Arabic "؟", or a Spanish sentence opening
+with "¿" - is also never flagged (case 2 above): a question asserts no fact,
+so it cannot be a fact copied from history, however much vocabulary it
+happens to share with an earlier turn.
 """
 
 from __future__ import annotations
 
-from app.evidence_contract import unsupported_answer_sentences
+from app.evidence_contract import answer_sentences_covered_by, unsupported_answer_sentences
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+
+# Terminal question-mark variants recognized without depending on any single
+# language's grammar: ASCII "?", the full-width CJK "？", and the Arabic "؟".
+# An opening Spanish inverted question mark ("¿...") is also checked, since a
+# Spanish interrogative sentence may itself be only one clause of a longer,
+# already-split sentence and not always end on "?" within the checked span.
+_QUESTION_TERMINATORS = ("?", "？", "؟")
+_SPANISH_INVERTED_QUESTION_MARK = "¿"
+
+
+def _is_interrogative_sentence(sentence: str) -> bool:
+    """True for a question, language-agnostically - it asserts no fact to ground.
+
+    Checked structurally (terminal punctuation, or a leading Spanish "¿"),
+    never by matching question words in any one language, the same
+    discipline the rest of this module and ``app.evidence_contract`` use.
+    """
+    stripped = sentence.strip()
+    if not stripped:
+        return False
+    if stripped.startswith(_SPANISH_INVERTED_QUESTION_MARK):
+        return True
+    return stripped.rstrip("\"'”’)]").endswith(_QUESTION_TERMINATORS)
+
 
 # Mirrors the check `app.prompts.builder._is_global_directory_record` uses to
 # decide a retrieved document is a directory record rather than company
@@ -105,6 +165,14 @@ class HistoryGroundingValidator:
         if not _evidence_lacks_policy_document(retrieval_result.documents):
             return
 
+        # No history means nothing this turn's answer says can possibly be
+        # "history-sourced" - most directly, turn 0 of a conversation, which
+        # has no earlier turn to have copied prose from at all (see the
+        # module docstring's case 1).
+        history = context.conversation_history or ""
+        if not history.strip():
+            return
+
         answer = context.chat_response.answer or ""
         if not answer.strip():
             return
@@ -116,14 +184,31 @@ class HistoryGroundingValidator:
         if not unsupported:
             return
 
+        # A sentence only counts as "history-sourced" when history itself
+        # actually covers it - an uncovered-by-evidence sentence that history
+        # ALSO does not cover is an ordinary generic/offer sentence, not a
+        # fact copied from an earlier turn (module docstring case 1).
+        history_sourced = set(answer_sentences_covered_by(unsupported, [history]))
+        # A question asserts no fact, so it can never be a copied claim,
+        # however much vocabulary it shares with history (module docstring
+        # case 2).
+        flagged = [
+            sentence
+            for sentence in unsupported
+            if sentence in history_sourced and not _is_interrogative_sentence(sentence)
+        ]
+        if not flagged:
+            return
+
         result.add_issue(
             ValidationIssue(
                 code="HISTORY_SOURCED_CLAIM_UNGROUNDED",
                 message=(
-                    f"{len(unsupported)} answer sentence(s) were not supported by this turn's "
-                    "retrieved evidence, which contains no company-policy document; the model "
-                    "likely drew them from conversation history instead: "
-                    + "; ".join(unsupported)
+                    f"{len(flagged)} answer sentence(s) were not supported by this turn's "
+                    "retrieved evidence, which contains no company-policy document, but ARE "
+                    "covered by conversation history; the model likely drew them from "
+                    "conversation history instead: "
+                    + "; ".join(flagged)
                 ),
                 severity=ValidationSeverity.CRITICAL,
                 field="answer",

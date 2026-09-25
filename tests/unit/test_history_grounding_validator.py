@@ -7,6 +7,15 @@ documents?", retrieval returned exactly one global sponsoring-directory
 record, and the model answered from policy facts stated in an earlier turn's
 history instead - quoting section 18.01(c) and listing sections 19, 20 and 21,
 none of which this turn's evidence contains.
+
+Canary fix (2026-09-25, chained-followup-market-continuity): the validator
+now also requires ``conversation_history`` to actually cover a flagged
+sentence, and never requires history to exist at all before that check can
+even run - see ``history_grounding_validator``'s module docstring for the two
+false-positive classes this closes. Every ``_context(...)`` call below that
+exercises a genuine history-sourced-claim reproduction now also passes
+``history=...``; the ones that must stay valid either pass no history at all
+(turn 0) or history that does not itself state the sentence in question.
 """
 
 from app.response.models import ChatResponse
@@ -25,6 +34,14 @@ _HISTORY_POLICY_FACTS = (
     "Section 18.01(c) states that this agreement, together with the attached "
     "exhibits, constitutes the entire contract between the parties. Sections "
     "19, 20 and 21 govern termination, assignment and dispute resolution."
+)
+
+# The earlier-turn assistant answer the reproduced failure actually copied
+# prose from - "user:"/"assistant:" line prefixes, mirroring how
+# ``app.orchestrator.chat_orchestrator`` reads session history text.
+_HISTORY_WITH_POLICY_FACTS = (
+    "user: Is this the whole contract or are there other documents?\n"
+    f"assistant: {_HISTORY_POLICY_FACTS}"
 )
 
 
@@ -50,7 +67,9 @@ def _policy_document(content: str = _HISTORY_POLICY_FACTS) -> RetrievedDocument:
     )
 
 
-def _context(answer: str, documents: list[RetrievedDocument]) -> ValidationContext:
+def _context(
+    answer: str, documents: list[RetrievedDocument], history: str = ""
+) -> ValidationContext:
     return ValidationContext(
         chat_response=ChatResponse(
             answer=answer,
@@ -66,6 +85,7 @@ def _context(answer: str, documents: list[RetrievedDocument]) -> ValidationConte
         language="en",
         role="fbo",
         retrieval_result=RetrievalResult(documents=documents, citations=[], confidence=0.6),
+        conversation_history=history,
     )
 
 
@@ -78,11 +98,31 @@ def test_blocks_policy_facts_carried_over_from_history_when_only_a_directory_rec
     )
     result = ValidationResult()
 
-    HistoryGroundingValidator().validate(_context(answer, [_directory_document()]), result)
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=_HISTORY_WITH_POLICY_FACTS), result
+    )
 
     assert result.has_critical()
     codes = {issue.code for issue in result.issues}
     assert "HISTORY_SOURCED_CLAIM_UNGROUNDED" in codes
+
+
+def test_same_reproduction_without_history_is_not_flagged() -> None:
+    """Turn 0 of a conversation: the identical uncovered sentences must not be
+    flagged with no history present at all to have copied them from - the
+    first of the two false-positive classes this fix closes."""
+    answer = (
+        "This is the whole contract. Section 18.01(c) states that this agreement, "
+        "together with the attached exhibits, constitutes the entire contract "
+        "between the parties. Sections 19, 20 and 21 govern termination, "
+        "assignment and dispute resolution."
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(_context(answer, [_directory_document()]), result)
+
+    assert result.valid
+    assert not result.issues
 
 
 def test_never_produces_a_half_emptied_list_it_only_flags_for_fallback() -> None:
@@ -98,9 +138,18 @@ def test_never_produces_a_half_emptied_list_it_only_flags_for_fallback() -> None
         "4. Section 21 on dispute resolution"
     )
     original_answer = answer
+    history = (
+        "user: Is this the whole contract or are there other documents?\n"
+        "assistant: This is the entire agreement, and it fully covers every "
+        "requirement without needing any additional referenced material, and "
+        "it includes the main agreement, section 19 on termination, section "
+        "20 on assignment and section 21 on dispute resolution."
+    )
     result = ValidationResult()
 
-    HistoryGroundingValidator().validate(_context(answer, [_directory_document()]), result)
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=history), result
+    )
 
     assert result.has_critical()
     # The validator only ever reports issues; it must never mutate the answer
@@ -207,3 +256,92 @@ def test_empty_answer_is_untouched() -> None:
 
     assert result.valid
     assert not result.issues
+
+
+def test_followup_offer_and_question_not_covered_by_history_are_not_flagged() -> None:
+    """Reproduces the "Tell me more" turn of the live failure: a clarifying
+    question and a forward-looking offer, neither of which history itself
+    states, must not be flagged even though history is present and neither
+    sentence is covered by this turn's thin directory-only evidence."""
+    answer = (
+        "What specific information would you like to know more about? "
+        "Please let me know what would be most helpful, and I will provide "
+        "the details from our approved resources."
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=_HISTORY_WITH_POLICY_FACTS), result
+    )
+
+    assert result.valid
+    assert not result.issues
+
+
+def test_question_sentence_covered_by_history_is_still_not_flagged() -> None:
+    """A question asserts no fact, so it is never flagged even when its own
+    vocabulary happens to be covered by conversation history."""
+    history = (
+        "user: How do I sponsor someone in Belgium?\n"
+        "assistant: Would you like to know more about qualification "
+        "requirements or the application process for Belgium sponsoring?"
+    )
+    answer = (
+        "Would you like to know more about qualification requirements or the "
+        "application process for Belgium sponsoring?"
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=history), result
+    )
+
+    assert result.valid
+    assert not result.issues
+
+
+def test_spanish_question_sentence_covered_by_history_is_not_flagged() -> None:
+    """The interrogative skip is language-agnostic: a Spanish "¿...?" sentence
+    covered by history is still not flagged."""
+    history = (
+        "user: ¿Cómo puedo patrocinar a alguien en Bélgica?\n"
+        "assistant: ¿Le gustaría conocer los requisitos de "
+        "calificación o el proceso de solicitud para Bélgica?"
+    )
+    answer = (
+        "¿Le gustaría conocer los requisitos de calificación o "
+        "el proceso de solicitud para Bélgica?"
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=history), result
+    )
+
+    assert result.valid
+    assert not result.issues
+
+
+def test_non_english_history_sourced_claim_is_flagged() -> None:
+    """The history-sourced-claim check is language-agnostic: a Spanish factual
+    sentence copied from an earlier assistant turn is flagged the same way
+    the English reproduction is."""
+    history_facts = (
+        "La sección 18.01(c) establece que este acuerdo, junto con los "
+        "anexos adjuntos, constituye el contrato completo entre las partes. "
+        "Las secciones 19, 20 y 21 rigen la terminación, la cesión "
+        "y la resolución de disputas."
+    )
+    history = (
+        "user: ¿Es este todo el contrato o hay otros documentos?\n"
+        f"assistant: {history_facts}"
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(
+        _context(history_facts, [_directory_document()], history=history), result
+    )
+
+    assert result.has_critical()
+    codes = {issue.code for issue in result.issues}
+    assert "HISTORY_SOURCED_CLAIM_UNGROUNDED" in codes

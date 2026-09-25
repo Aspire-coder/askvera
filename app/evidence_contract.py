@@ -215,6 +215,30 @@ def unsupported_answer_sentences(
     ]
 
 
+def answer_sentences_covered_by(sentences: list[str], texts: list[str]) -> list[str]:
+    """Return which of ``sentences`` the token-coverage check considers supported by ``texts``.
+
+    Canary fix (2026-09-25, ``HistoryGroundingValidator``): the inverse of the
+    coverage test ``unsupported_answer_sentences`` runs against this turn's
+    evidence - same ``_content_tokens``/``_coverage_ratio``/
+    ``SENTENCE_COVERAGE_THRESHOLD`` machinery, but returning the sentences
+    that ARE covered rather than the ones that are not, so a caller can ask
+    "is this specific, already-flagged sentence actually explained by this
+    other text (conversation history)?" without re-deriving sentence spans a
+    second time. ``sentences`` is expected to already be sentence-like
+    segments (e.g. the output of ``unsupported_answer_sentences``), not a raw
+    answer string, so no structural/length filtering is reapplied here.
+    """
+    coverage_tokens: set[str] = set()
+    for text in texts:
+        coverage_tokens |= _content_tokens(text or "")
+    return [
+        sentence
+        for sentence in sentences
+        if _coverage_ratio(_content_tokens(sentence), coverage_tokens) >= SENTENCE_COVERAGE_THRESHOLD
+    ]
+
+
 def _claim_schema_error(claims: list, evidence_ids: list[str]) -> str:
     for claim in claims:
         if not isinstance(claim, dict):
