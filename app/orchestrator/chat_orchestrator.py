@@ -1780,6 +1780,7 @@ class AIOrchestrator:
             retrieval_result=retrieval_result,
             directory_contact_route=True,
             lookup_text=request_query or body.message,
+            conversation_history=history,
         )
         governance_decision = self._evaluate_governance(
             chat_response.answer,
@@ -4595,6 +4596,7 @@ class AIOrchestrator:
         retrieval_result: RetrievalResult | None = None,
         directory_contact_route: bool = False,
         lookup_text: str | None = None,
+        conversation_history: str = "",
     ) -> ChatResponse:
         """Validate a chat response and return a safe fallback for critical failures.
 
@@ -4605,6 +4607,26 @@ class AIOrchestrator:
         record's own verbatim phone/email) below today's unchanged
         insufficient-evidence text; any other caller, and any turn that
         does not qualify, gets exactly the fallback it gets today.
+
+        ``conversation_history`` (2026-09-25 canary fix, case
+        chained-followup-market-continuity; review round 1 correction):
+        only passed by the fresh-generation model-answer call site, which
+        already has the session's history text in scope (no new session
+        read is added here). ``HistoryGroundingValidator`` needs it to tell a
+        genuinely history-sourced claim (its actual purpose) apart from an
+        ordinary answer sentence that simply is not covered by this turn's
+        thin, directory-only evidence - see that validator's module
+        docstring for the false-positive classes this closes. Every other
+        caller passes nothing - not because the old behaviour was
+        conservative about missing history (it was not: it flagged an
+        uncovered sentence regardless of history, which is exactly the bug
+        this fix closes), but because history genuinely is not applicable or
+        not cheaply available there: the deterministic-route and fallback
+        callers build canned text the model never generated, and
+        ``_cached_response_value`` (the other ``directory_contact_route``
+        caller) revalidates an answer that was already checked against its
+        own history at generation time, so a second, cache-time history
+        check would need a fresh session read this method does not add.
         """
         result = self.output_validator.validate(
             ValidationContext(
@@ -4615,6 +4637,7 @@ class AIOrchestrator:
                 language=_answer_language(body),
                 role=body.role,
                 correlation_id=correlation_id,
+                conversation_history=conversation_history,
             )
         )
         if result.issues:
@@ -4706,6 +4729,7 @@ class AIOrchestrator:
                             language=_answer_language(body),
                             role=body.role,
                             correlation_id=correlation_id,
+                            conversation_history=conversation_history,
                         )
                     )
                     numeric_repair_attempt["result"] = repaired_result

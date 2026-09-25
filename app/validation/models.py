@@ -63,6 +63,14 @@ class ValidationContext:
     role: str
     model_response: ModelResponse | None = None
     retrieval_result: RetrievalResult | None = None
+    # Canary fix (2026-09-25, chained-followup-market-continuity): threaded
+    # through only from the call site(s) that already hold the session's
+    # history text, never a new session read. Consumed by
+    # HistoryGroundingValidator to require a flagged sentence be actually
+    # covered by history, not merely uncovered by this turn's evidence - see
+    # that validator's module docstring for the false positive this closes.
+    # Empty (the default) keeps every other caller's behaviour unchanged.
+    conversation_history: str = ""
 
 
 def _severity_rank(severity: ValidationSeverity) -> int:

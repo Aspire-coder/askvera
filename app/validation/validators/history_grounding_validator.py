@@ -26,12 +26,135 @@ list. Flagging this CRITICAL under its own code, distinct from
 (which only fires when every critical issue is a numeric one) is skipped and
 the answer goes to the ordinary insufficient-evidence fallback instead -
 never a partially stripped answer.
+
+Canary fix (2026-09-25, retrieval_canary.json case
+chained-followup-market-continuity): a production run on a three-turn
+Belgium/Germany sponsoring conversation ("How do I sponsor someone in
+Belgium?", "What about Germany?", "Tell me more.") showed this validator
+firing wrongly, in two distinct ways this fix closes:
+
+1. It fired on TURN 0, where no history exists at all, against an ordinary
+   sentence ("The team can walk you through the sponsoring process and
+   answer your questions about qualifications and next steps.") that simply
+   is not covered by thin directory-only evidence - not because the model
+   copied it from an earlier turn, since there was no earlier turn to copy
+   from. The validator never actually checked that a flagged sentence came
+   from history; it only checked that this turn's evidence did not cover
+   it, which is also true of every generic connective/offer sentence a
+   legitimate directory answer contains.
+2. On the final turn, it fired against "What specific information would you
+   like to know more about?" and "Please let me know what would be most
+   helpful, and I'll provide the details from our approved resources." -
+   a clarifying question and a forward-looking offer, neither of which
+   asserts a fact at all, let alone one only history states.
+
+Fix: ``ValidationContext`` now carries ``conversation_history`` (threaded
+from the call site that already has the session's history text; empty by
+default). This validator returns immediately when it is empty or
+whitespace-only - turn 0 can never have a history-sourced claim - and
+otherwise flags a sentence only when it is BOTH (a) not covered by this
+turn's evidence (the original check) AND (b) IS covered by the conversation
+history text itself (:func:`app.evidence_contract.answer_sentences_covered_by`,
+the same token-coverage machinery run against history instead of evidence),
+so an uncovered-but-also-not-in-history sentence (case 1 above) is left
+alone. A sentence that ends in a question mark - checked language-agnostically
+via terminal "?"/full-width "？"/Arabic "؟", or a Spanish sentence opening
+with "¿" - is also never flagged (case 2 above): a question asserts no fact,
+so it cannot be a fact copied from history, however much vocabulary it
+happens to share with an earlier turn.
+
+Review round 1 follow-up (2026-09-25): the fix above compared a flagged
+sentence against the WHOLE history text, including the user's own turns.
+That reopened a third false-positive class this validator must not produce:
+a model answer that legitimately restates the user's own earlier question
+("How do I sponsor someone in Belgium?" -> "To sponsor someone in
+Belgium...") shares plenty of vocabulary with that user turn and would be
+wrongly flagged, even though nothing was copied from an earlier ASSISTANT
+answer - this validator's actual purpose (see the module docstring's opening
+paragraphs; the reproduced failure copied prose the ASSISTANT stated in
+history, not the user). :func:`_assistant_text` now parses the formatted
+history (``services/session.py``'s ``append_session_turn``/``_format_history``
+shape: a sequence of "user: <text>"/"vera: <text>" turns, where a line
+that does not start a new "user:"/"vera:"/"assistant:" turn is a
+continuation of a multi-line assistant answer) and returns only the
+concatenated text of "vera:"/"assistant:" turns. Coverage is now checked
+against that assistant-only text; if a history has no assistant turn at all
+(e.g. malformed or user-only text), this validator returns without flagging,
+the same conservative default as no history at all.
 """
 
 from __future__ import annotations
 
-from app.evidence_contract import unsupported_answer_sentences
+from app.evidence_contract import answer_sentences_covered_by, unsupported_answer_sentences
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+
+# Role labels services/session.py's formatted history uses to start a new
+# turn ("user:") or a new assistant turn ("vera:"/"assistant:" - the second
+# spelling is accepted too so this parser is not brittle to a future rename).
+# Matched case-insensitively against the text before a line's first ":",
+# stripped of surrounding whitespace.
+_USER_ROLE_LABELS = frozenset({"user"})
+_ASSISTANT_ROLE_LABELS = frozenset({"vera", "assistant"})
+
+
+def _assistant_text(history: str) -> str:
+    """Return only the concatenated text of assistant ("vera:") turns.
+
+    ``history`` is the formatted text ``services/session.py``'s
+    ``_format_history`` produces: one "user: <text>" or "vera: <text>" line
+    per stored turn. A stored assistant answer can itself contain embedded
+    newlines (a multi-paragraph reply); a continuation line - one that does
+    not itself start with a recognized "user:"/"vera:"/"assistant:" role
+    label - belongs to whichever turn most recently started, never to a new,
+    unlabeled turn of its own. A line is a genuine continuation, not a new
+    turn, by construction (not a keyword list): a role line's own text can
+    still legitimately begin with a lookalike phrase (e.g. an assistant
+    answer stating "Note: see section 5"), so what determines a continuation
+    is where the label appears - the text before a line's OWN first ":",
+    stripped and case-folded - being exactly one of the recognized labels.
+    """
+    current_is_assistant = False
+    assistant_parts: list[str] = []
+    for line in (history or "").split("\n"):
+        label, separator, rest = line.partition(":")
+        role = label.strip().casefold()
+        if separator and role in _USER_ROLE_LABELS:
+            current_is_assistant = False
+        elif separator and role in _ASSISTANT_ROLE_LABELS:
+            current_is_assistant = True
+            assistant_parts.append(rest.strip())
+        elif current_is_assistant:
+            # A continuation line of the assistant turn most recently opened.
+            assistant_parts.append(line.strip())
+        # Any line before the first recognized role label (malformed input)
+        # has nothing to attach to and is dropped, the same as it would be if
+        # it were a user-turn continuation.
+    return " ".join(part for part in assistant_parts if part)
+
+
+# Terminal question-mark variants recognized without depending on any single
+# language's grammar: ASCII "?", the full-width CJK "？", and the Arabic "؟".
+# An opening Spanish inverted question mark ("¿...") is also checked, since a
+# Spanish interrogative sentence may itself be only one clause of a longer,
+# already-split sentence and not always end on "?" within the checked span.
+_QUESTION_TERMINATORS = ("?", "？", "؟")
+_SPANISH_INVERTED_QUESTION_MARK = "¿"
+
+
+def _is_interrogative_sentence(sentence: str) -> bool:
+    """True for a question, language-agnostically - it asserts no fact to ground.
+
+    Checked structurally (terminal punctuation, or a leading Spanish "¿"),
+    never by matching question words in any one language, the same
+    discipline the rest of this module and ``app.evidence_contract`` use.
+    """
+    stripped = sentence.strip()
+    if not stripped:
+        return False
+    if stripped.startswith(_SPANISH_INVERTED_QUESTION_MARK):
+        return True
+    return stripped.rstrip("\"'”’)]").endswith(_QUESTION_TERMINATORS)
+
 
 # Mirrors the check `app.prompts.builder._is_global_directory_record` uses to
 # decide a retrieved document is a directory record rather than company
@@ -105,6 +228,21 @@ class HistoryGroundingValidator:
         if not _evidence_lacks_policy_document(retrieval_result.documents):
             return
 
+        # No history means nothing this turn's answer says can possibly be
+        # "history-sourced" - most directly, turn 0 of a conversation, which
+        # has no earlier turn to have copied prose from at all (see the
+        # module docstring's case 1).
+        history = context.conversation_history or ""
+        if not history.strip():
+            return
+        # Only an earlier ASSISTANT answer is a source of "copied" facts; the
+        # user's own turns are excluded so a model answer that legitimately
+        # restates the user's own question is never mistaken for one (module
+        # docstring's review round 1 follow-up).
+        assistant_history = _assistant_text(history)
+        if not assistant_history.strip():
+            return
+
         answer = context.chat_response.answer or ""
         if not answer.strip():
             return
@@ -116,14 +254,33 @@ class HistoryGroundingValidator:
         if not unsupported:
             return
 
+        # A sentence only counts as "history-sourced" when an earlier
+        # assistant turn itself actually covers it - an uncovered-by-evidence
+        # sentence that assistant history ALSO does not cover is an ordinary
+        # generic/offer sentence, or a restatement of the user's own
+        # question, not a fact copied from an earlier assistant answer
+        # (module docstring case 1 / review round 1 follow-up).
+        history_sourced = set(answer_sentences_covered_by(unsupported, [assistant_history]))
+        # A question asserts no fact, so it can never be a copied claim,
+        # however much vocabulary it shares with history (module docstring
+        # case 2).
+        flagged = [
+            sentence
+            for sentence in unsupported
+            if sentence in history_sourced and not _is_interrogative_sentence(sentence)
+        ]
+        if not flagged:
+            return
+
         result.add_issue(
             ValidationIssue(
                 code="HISTORY_SOURCED_CLAIM_UNGROUNDED",
                 message=(
-                    f"{len(unsupported)} answer sentence(s) were not supported by this turn's "
-                    "retrieved evidence, which contains no company-policy document; the model "
-                    "likely drew them from conversation history instead: "
-                    + "; ".join(unsupported)
+                    f"{len(flagged)} answer sentence(s) were not supported by this turn's "
+                    "retrieved evidence, which contains no company-policy document, but ARE "
+                    "covered by conversation history; the model likely drew them from "
+                    "conversation history instead: "
+                    + "; ".join(flagged)
                 ),
                 severity=ValidationSeverity.CRITICAL,
                 field="answer",
