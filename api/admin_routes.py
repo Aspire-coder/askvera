@@ -54,9 +54,10 @@ from services.analytics_governance import (
 from services.knowledge_ingestion import (
     ACCESS_SCOPES,
     DOCUMENT_TYPES,
+    begin_ingestion_deletion,
     create_ingestion_job,
-    delete_ingestion_job,
     enqueue_ingestion_job,
+    finish_ingestion_deletion,
     fail_ingestion_job,
     list_ingestion_jobs,
     list_document_generations,
@@ -776,24 +777,40 @@ def ingestions(request: Request, limit: int = 50) -> dict[str, Any]:
     return _payload(visible[: max(1, min(limit, 200))], request)
 
 
-@admin_router.delete("/ingestions/{job_id}")
-def delete_ingestion(job_id: str, request: Request) -> dict[str, Any]:
-    """Delete a document and remove it from the live retrieval index."""
+def _finish_deletion_in_background(job: dict[str, Any]) -> None:
+    """Run the slow chunk/S3 sweep after the response; the job ends deleted or deletion_failed."""
+    finish_ingestion_deletion(job, raise_on_failure=False)
+
+
+@admin_router.delete("/ingestions/{job_id}", status_code=202)
+def delete_ingestion(job_id: str, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    """Remove a document from live retrieval now; clean up its chunks and storage in the background.
+
+    The chunk sweep waits on OpenSearch refresh cycles (minutes), longer than
+    the reverse proxy's 90 s read timeout, so the request returns 202 once the
+    pointer is gone and the tombstone is written. The portal's job polling
+    shows "deleting" until the sweep ends in "deleted" or "deletion_failed".
+    """
     principal = getattr(request.state, "admin_identity", {}) or {}
     if principal.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Only a Super Admin can delete documents.")
     require_admin_access(request, "knowledge", "manage")
     deleted_by = str(principal.get("email") or principal.get("sub") or "admin")[:320]
     try:
-        job = delete_ingestion_job(job_id, deleted_by=deleted_by)
+        job = begin_ingestion_deletion(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Ingestion job not found.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    background_tasks.add_task(_finish_deletion_in_background, job)
     record_admin_audit_event(deleted_by, "knowledge.document_deleted", job_id)
-    return _payload({"job": job, "message": "Document deleted from live retrieval and source storage."}, request)
+    return _payload(
+        {
+            "job": {**job, "status": "deleting"},
+            "message": "Document removed from live retrieval. Index and storage cleanup continues in the background.",
+        },
+        request,
+    )
 
 
 class IngestionPreviewTestRequest(BaseModel):
@@ -909,6 +926,11 @@ async def upload_document(
     if access_scope == "global" and principal.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Only a Super Admin can upload global content.")
     _check_document_scope(document_type, access_scope)
+    if review_before_publish and not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="Review before publish requires ADMIN_INGESTION_GENERATION_POINTER_ENABLED.",
+        )
     if settings.ADMIN_INGESTION_APPROVAL_METADATA_REQUIRED and (
         not document_owner.strip() or not approval_reference.strip()
     ):

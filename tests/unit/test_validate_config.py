@@ -285,3 +285,31 @@ def test_model_routing_rejects_negative_dashboard_pricing(monkeypatch) -> None:
     assert (
         "MODEL_ROUTING_FAST_INPUT_USD_PER_MILLION (must not be negative)" in validate()
     )
+
+
+def test_ingestion_visibility_timeout_must_cover_two_refresh_cycles(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS", 149)
+
+    assert "ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS (must be at least 150)" in validate()
+
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS", 150)
+    assert validate() == []
+
+
+def test_generation_pointer_is_required_in_every_deployed_environment(monkeypatch) -> None:
+    _configure_valid_production(monkeypatch)
+    monkeypatch.setattr(settings, "APP_ENV", "uat")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+
+    assert (
+        "ADMIN_INGESTION_GENERATION_POINTER_ENABLED "
+        "(must be enabled wherever admin ingestion is deployed)"
+    ) in validate()
+
+
+def test_generation_pointer_is_not_forced_in_local_development(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "APP_ENV", "development")
+    monkeypatch.setattr(settings, "ADMIN_INGESTION_GENERATION_POINTER_ENABLED", False)
+
+    assert not any("GENERATION_POINTER" in item for item in validate())
