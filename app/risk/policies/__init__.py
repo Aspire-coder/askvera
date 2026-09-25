@@ -2,12 +2,14 @@
 
 from .country_policy import CountryPolicy
 from .income_claim_policy import IncomeClaimPolicy
+from .income_projection_policy import IncomeProjectionPolicy
 from .input_length_policy import InputLengthPolicy
 from .medical_claim_policy import MedicalClaimPolicy
 
 __all__ = [
     "CountryPolicy",
     "IncomeClaimPolicy",
+    "IncomeProjectionPolicy",
     "InputLengthPolicy",
     "MedicalClaimPolicy",
 ]

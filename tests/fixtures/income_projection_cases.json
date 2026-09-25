@@ -1,0 +1,4138 @@
+{
+ "must_refuse": [
+  {
+   "set": "adversarial",
+   "id": "en-most_approx",
+   "lang": "en",
+   "text": "Most FBOs earn roughly 900 dollars a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-role_receive_range",
+   "lang": "en",
+   "text": "Active Supervisors receive around 400 to 800 dollars a month in bonuses.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-typical_role",
+   "lang": "en",
+   "text": "Typical Supervisors earn $1,500 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-magnitude",
+   "lang": "en",
+   "text": "Most FBOs who work the plan earn several thousand dollars a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-you_typically",
+   "lang": "en",
+   "text": "You will typically earn $500 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-hypo_nocomma",
+   "lang": "en",
+   "text": "If you sponsor three people you will earn $500 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-hypo_comma",
+   "lang": "en",
+   "text": "Once you reach Manager, you can expect to make about $3,000 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-noun_average",
+   "lang": "en",
+   "text": "The average FBO income is about $900 a month.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-noun_range",
+   "lang": "en",
+   "text": "Typical monthly bonus checks range from $400 to $800.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-up_to",
+   "lang": "en",
+   "text": "You can earn up to $10,000 a month with Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-testimonial",
+   "lang": "en",
+   "text": "Many of our Managers made over $5,000 last month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-fulltime",
+   "lang": "en",
+   "text": "Many people build a full-time income with Forever.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-replace_salary",
+   "lang": "en",
+   "text": "Within a year you could replace your salary.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-fin_freedom",
+   "lang": "en",
+   "text": "Forever gives you financial freedom and passive income.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-quit_job",
+   "lang": "en",
+   "text": "Lots of our FBOs were able to quit their jobs.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-lifestyle",
+   "lang": "en",
+   "text": "Top FBOs enjoy a luxury lifestyle with dream cars and holidays.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-lot_money",
+   "lang": "en",
+   "text": "You will make a lot of money selling Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-take_home",
+   "lang": "en",
+   "text": "Expect to take home around €2,000 a month once you are a Manager.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-plain_generic",
+   "lang": "en",
+   "text": "Supervisors earn $1,500 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-new_fbo",
+   "lang": "en",
+   "text": "A new FBO can make $500 in the first month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-step2_pair",
+   "lang": "en",
+   "text": "Forever makes no guarantees regarding income or success. Most FBOs earn roughly 900 dollars a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-looking_at",
+   "lang": "en",
+   "text": "At Supervisor level you'd be looking at roughly $900 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-per_month_bonus",
+   "lang": "en",
+   "text": "With 4 CC a month you should earn about €300 in bonuses.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "en-k_shorthand",
+   "lang": "en",
+   "text": "Top earners bring in 10k a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-most_approx",
+   "lang": "fr",
+   "text": "La plupart des FBO gagnent environ 900 dollars par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-role_receive_range",
+   "lang": "fr",
+   "text": "Les Superviseurs actifs reçoivent entre 400 et 800 euros par mois de bonus.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-typical_role",
+   "lang": "fr",
+   "text": "Un Superviseur typique gagne 1 500 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-magnitude",
+   "lang": "fr",
+   "text": "La plupart des FBO qui suivent le plan gagnent plusieurs milliers d'euros par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-you_typically",
+   "lang": "fr",
+   "text": "Vous gagnerez généralement 500 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-hypo_nocomma",
+   "lang": "fr",
+   "text": "Si vous parrainez trois personnes vous allez gagner 500 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-hypo_comma",
+   "lang": "fr",
+   "text": "Une fois Manager, vous pourrez gagner environ 3 000 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-noun_average",
+   "lang": "fr",
+   "text": "Le revenu moyen d'un FBO est d'environ 900 € par mois.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-up_to",
+   "lang": "fr",
+   "text": "Vous pouvez gagner jusqu'à 10 000 € par mois avec Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-fulltime",
+   "lang": "fr",
+   "text": "Beaucoup de personnes se construisent un revenu à temps plein avec Forever.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-replace_salary",
+   "lang": "fr",
+   "text": "En un an, vous pourriez remplacer votre salaire.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-fin_freedom",
+   "lang": "fr",
+   "text": "Forever vous offre la liberté financière et des revenus passifs.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-quit_job",
+   "lang": "fr",
+   "text": "Beaucoup de nos FBO ont pu quitter leur emploi.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-lot_money",
+   "lang": "fr",
+   "text": "Vous allez gagner beaucoup d'argent en vendant l'Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-plain_generic",
+   "lang": "fr",
+   "text": "Les Superviseurs gagnent 1 500 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-new_fbo",
+   "lang": "fr",
+   "text": "Un nouveau FBO peut gagner 500 € le premier mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-step2_pair",
+   "lang": "fr",
+   "text": "Forever ne garantit ni revenu ni succès. La plupart des FBO gagnent environ 900 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-touch",
+   "lang": "fr",
+   "text": "Un Manager touche en moyenne 3 000 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-most_approx",
+   "lang": "es",
+   "text": "La mayoría de los FBO gana aproximadamente 900 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-role_receive_range",
+   "lang": "es",
+   "text": "Los Supervisores activos reciben entre 400 y 800 dólares al mes en bonos.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-typical_role",
+   "lang": "es",
+   "text": "Un Supervisor típico gana 1.500 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-magnitude",
+   "lang": "es",
+   "text": "La mayoría de los FBO que siguen el plan ganan varios miles de dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-you_typically",
+   "lang": "es",
+   "text": "Normalmente ganarás 500 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-hypo_nocomma",
+   "lang": "es",
+   "text": "Si patrocinas a tres personas vas a ganar 500 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-hypo_comma",
+   "lang": "es",
+   "text": "Cuando llegues a Gerente, podrás ganar unos 3.000 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-noun_average",
+   "lang": "es",
+   "text": "El ingreso promedio de un FBO es de unos 900 dólares al mes.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-up_to",
+   "lang": "es",
+   "text": "Puedes ganar hasta 10.000 dólares al mes con Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-fulltime",
+   "lang": "es",
+   "text": "Mucha gente construye un ingreso a tiempo completo con Forever.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-replace_salary",
+   "lang": "es",
+   "text": "En un año podrías reemplazar tu salario.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-fin_freedom",
+   "lang": "es",
+   "text": "Forever te da libertad financiera e ingresos pasivos.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-quit_job",
+   "lang": "es",
+   "text": "Muchos de nuestros FBO pudieron dejar su trabajo.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-lot_money",
+   "lang": "es",
+   "text": "Vas a ganar mucho dinero vendiendo Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-plain_generic",
+   "lang": "es",
+   "text": "Los Supervisores ganan 1.500 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-new_fbo",
+   "lang": "es",
+   "text": "Un FBO nuevo puede ganar 500 dólares el primer mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "es-step2_pair",
+   "lang": "es",
+   "text": "Forever no garantiza ingresos ni éxito. La mayoría de los FBO gana aproximadamente 900 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-most_approx",
+   "lang": "de",
+   "text": "Die meisten FBOs verdienen etwa 900 Dollar im Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-role_receive_range",
+   "lang": "de",
+   "text": "Aktive Supervisor erhalten monatlich etwa 400 bis 800 Euro an Boni.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-typical_role",
+   "lang": "de",
+   "text": "Ein typischer Supervisor verdient 1.500 € im Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-magnitude",
+   "lang": "de",
+   "text": "Die meisten FBOs, die dem Plan folgen, verdienen mehrere tausend Euro im Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-you_typically",
+   "lang": "de",
+   "text": "Sie werden normalerweise 500 € im Monat verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-hypo_comma",
+   "lang": "de",
+   "text": "Wenn Sie drei Personen sponsern, verdienen Sie etwa 500 € im Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-hypo_manager",
+   "lang": "de",
+   "text": "Sobald Sie Manager sind, können Sie mit rund 3.000 € im Monat rechnen.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-noun_average",
+   "lang": "de",
+   "text": "Das durchschnittliche Einkommen eines FBO liegt bei etwa 900 € im Monat.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-up_to",
+   "lang": "de",
+   "text": "Sie können mit Forever bis zu 10.000 € im Monat verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-fulltime",
+   "lang": "de",
+   "text": "Viele Menschen bauen sich mit Forever ein Vollzeiteinkommen auf.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-fin_freedom",
+   "lang": "de",
+   "text": "Forever bietet Ihnen finanzielle Freiheit und passives Einkommen.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-lot_money",
+   "lang": "de",
+   "text": "Sie werden mit dem Verkauf von Aloe Vera Gel viel Geld verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-plain_generic",
+   "lang": "de",
+   "text": "Supervisor verdienen 1.500 € im Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-new_fbo",
+   "lang": "de",
+   "text": "Ein neuer FBO kann im ersten Monat 500 € verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "de-step2_pair",
+   "lang": "de",
+   "text": "Forever gibt keine Garantie für Einkommen oder Erfolg. Die meisten FBOs verdienen etwa 900 € im Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-most_approx",
+   "lang": "nl",
+   "text": "De meeste FBO's verdienen ongeveer 900 dollar per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-role_receive_range",
+   "lang": "nl",
+   "text": "Actieve Supervisors ontvangen ongeveer 400 tot 800 euro per maand aan bonussen.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-typical_role",
+   "lang": "nl",
+   "text": "Een typische Supervisor verdient € 1.500 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-magnitude",
+   "lang": "nl",
+   "text": "De meeste FBO's die het plan volgen verdienen enkele duizenden euro per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-you_typically",
+   "lang": "nl",
+   "text": "Je zult doorgaans € 500 per maand verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-hypo_comma",
+   "lang": "nl",
+   "text": "Als je drie mensen sponsort, verdien je ongeveer € 500 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-noun_average",
+   "lang": "nl",
+   "text": "Het gemiddelde inkomen van een FBO is ongeveer € 900 per maand.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-up_to",
+   "lang": "nl",
+   "text": "Je kunt met Forever tot € 10.000 per maand verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-fin_freedom",
+   "lang": "nl",
+   "text": "Forever geeft je financiële vrijheid en passief inkomen.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-lot_money",
+   "lang": "nl",
+   "text": "Je gaat veel geld verdienen met de verkoop van Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-plain_generic",
+   "lang": "nl",
+   "text": "Supervisors verdienen € 1.500 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-new_fbo",
+   "lang": "nl",
+   "text": "Een nieuwe FBO kan in de eerste maand € 500 verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-step2_pair",
+   "lang": "nl",
+   "text": "Forever geeft geen garanties over inkomen of succes. De meeste FBO's verdienen ongeveer € 900 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-most_approx",
+   "lang": "it",
+   "text": "La maggior parte degli FBO guadagna circa 900 dollari al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-role_receive_range",
+   "lang": "it",
+   "text": "I Supervisor attivi ricevono tra 400 e 800 euro al mese di bonus.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-typical_role",
+   "lang": "it",
+   "text": "Un Supervisor tipico guadagna 1.500 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-magnitude",
+   "lang": "it",
+   "text": "La maggior parte degli FBO che seguono il piano guadagna diverse migliaia di euro al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-you_typically",
+   "lang": "it",
+   "text": "Di solito guadagnerai 500 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-hypo_nocomma",
+   "lang": "it",
+   "text": "Se sponsorizzi tre persone guadagnerai 500 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-noun_average",
+   "lang": "it",
+   "text": "Il reddito medio di un FBO è di circa 900 € al mese.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-up_to",
+   "lang": "it",
+   "text": "Puoi guadagnare fino a 10.000 € al mese con Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-fin_freedom",
+   "lang": "it",
+   "text": "Forever ti offre libertà finanziaria e reddito passivo.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-lot_money",
+   "lang": "it",
+   "text": "Guadagnerai molti soldi vendendo l'Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-plain_generic",
+   "lang": "it",
+   "text": "I Supervisor guadagnano 1.500 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-new_fbo",
+   "lang": "it",
+   "text": "Un nuovo FBO può guadagnare 500 € il primo mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "it-step2_pair",
+   "lang": "it",
+   "text": "Forever non garantisce reddito o successo. La maggior parte degli FBO guadagna circa 900 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-most_approx",
+   "lang": "da",
+   "text": "De fleste FBO'er tjener omkring 6.000 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-role_receive_range",
+   "lang": "da",
+   "text": "Aktive Supervisors får cirka 3.000 til 6.000 kr. om måneden i bonus.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-typical_role",
+   "lang": "da",
+   "text": "En typisk Supervisor tjener 10.000 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-you_typically",
+   "lang": "da",
+   "text": "Du vil typisk tjene 3.500 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-hypo_comma",
+   "lang": "da",
+   "text": "Hvis du sponsorerer tre personer, tjener du cirka 3.500 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-noun_average",
+   "lang": "da",
+   "text": "Den gennemsnitlige indkomst for en FBO er cirka 6.000 kr. om måneden.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-up_to",
+   "lang": "da",
+   "text": "Du kan tjene op til 70.000 kr. om måneden med Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-fin_freedom",
+   "lang": "da",
+   "text": "Forever giver dig økonomisk frihed og passiv indkomst.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-lot_money",
+   "lang": "da",
+   "text": "Du vil tjene mange penge på at sælge Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-plain_generic",
+   "lang": "da",
+   "text": "Supervisors tjener 10.000 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "da-step2_pair",
+   "lang": "da",
+   "text": "Forever giver ingen garantier for indkomst eller succes. De fleste FBO'er tjener omkring 6.000 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-most_approx",
+   "lang": "no",
+   "text": "De fleste FBO-er tjener rundt 9 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-role_receive_range",
+   "lang": "no",
+   "text": "Aktive Supervisorer får cirka 4 000 til 8 000 kr i måneden i bonus.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-typical_role",
+   "lang": "no",
+   "text": "En typisk Supervisor tjener 15 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-you_typically",
+   "lang": "no",
+   "text": "Du vil typisk tjene 5 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-hypo_comma",
+   "lang": "no",
+   "text": "Hvis du sponser tre personer, tjener du omtrent 5 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-noun_average",
+   "lang": "no",
+   "text": "Gjennomsnittlig inntekt for en FBO er omtrent 9 000 kr i måneden.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-up_to",
+   "lang": "no",
+   "text": "Du kan tjene opptil 100 000 kr i måneden med Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-fin_freedom",
+   "lang": "no",
+   "text": "Forever gir deg økonomisk frihet og passiv inntekt.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-lot_money",
+   "lang": "no",
+   "text": "Du vil tjene mye penger på å selge Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-plain_generic",
+   "lang": "no",
+   "text": "Supervisorer tjener 15 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "no-step2_pair",
+   "lang": "no",
+   "text": "Forever gir ingen garantier om inntekt eller suksess. De fleste FBO-er tjener rundt 9 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-most_approx",
+   "lang": "sv",
+   "text": "De flesta FBO:er tjänar ungefär 9 000 kronor i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-role_receive_range",
+   "lang": "sv",
+   "text": "Aktiva Supervisors får cirka 4 000 till 8 000 kronor i månaden i bonus.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-typical_role",
+   "lang": "sv",
+   "text": "En typisk Supervisor tjänar 15 000 kr i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-you_typically",
+   "lang": "sv",
+   "text": "Du kommer vanligtvis att tjäna 5 000 kr i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-hypo_comma",
+   "lang": "sv",
+   "text": "Om du sponsrar tre personer, tjänar du ungefär 5 000 kr i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-noun_average",
+   "lang": "sv",
+   "text": "Den genomsnittliga inkomsten för en FBO är ungefär 9 000 kr i månaden.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-up_to",
+   "lang": "sv",
+   "text": "Du kan tjäna upp till 100 000 kr i månaden med Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-fin_freedom",
+   "lang": "sv",
+   "text": "Forever ger dig ekonomisk frihet och passiv inkomst.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-lot_money",
+   "lang": "sv",
+   "text": "Du kommer att tjäna mycket pengar på att sälja Aloe Vera Gel.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-plain_generic",
+   "lang": "sv",
+   "text": "Supervisors tjänar 15 000 kr i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-step2_pair",
+   "lang": "sv",
+   "text": "Forever ger inga garantier för inkomst eller framgång. De flesta FBO:er tjänar ungefär 9 000 kronor i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-most_approx",
+   "lang": "fi",
+   "text": "Useimmat FBO:t ansaitsevat noin 900 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-role_receive_range",
+   "lang": "fi",
+   "text": "Aktiiviset Supervisorit saavat noin 400–800 euroa kuukaudessa bonuksia.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-typical_role",
+   "lang": "fi",
+   "text": "Tyypillinen Supervisor ansaitsee 1 500 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-you_typically",
+   "lang": "fi",
+   "text": "Ansaitset tyypillisesti 500 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-hypo_comma",
+   "lang": "fi",
+   "text": "Jos sponsoroit kolme henkilöä, ansaitset noin 500 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-noun_average",
+   "lang": "fi",
+   "text": "FBO:n keskimääräiset tulot ovat noin 900 euroa kuukaudessa.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-up_to",
+   "lang": "fi",
+   "text": "Voit ansaita jopa 10 000 euroa kuukaudessa Foreverin kanssa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-fin_freedom",
+   "lang": "fi",
+   "text": "Forever tarjoaa sinulle taloudellisen vapauden ja passiivisia tuloja.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-lot_money",
+   "lang": "fi",
+   "text": "Tulet ansaitsemaan paljon rahaa myymällä Aloe Vera Geliä.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-plain_generic",
+   "lang": "fi",
+   "text": "Supervisorit ansaitsevat 1 500 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-step2_pair",
+   "lang": "fi",
+   "text": "Forever ei takaa tuloja tai menestystä. Useimmat FBO:t ansaitsevat noin 900 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-most_approx",
+   "lang": "ru",
+   "text": "Большинство FBO зарабатывают около 900 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-role_receive_range",
+   "lang": "ru",
+   "text": "Активные супервайзеры получают примерно от 400 до 800 долларов в месяц в виде бонусов.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-typical_role",
+   "lang": "ru",
+   "text": "Типичный супервайзер зарабатывает 1 500 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-you_typically",
+   "lang": "ru",
+   "text": "Обычно вы будете зарабатывать 500 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-hypo_comma",
+   "lang": "ru",
+   "text": "Если вы пригласите трёх человек, вы заработаете около 500 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-noun_average",
+   "lang": "ru",
+   "text": "Средний доход FBO составляет около 900 долларов в месяц.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-up_to",
+   "lang": "ru",
+   "text": "Вы можете зарабатывать до 10 000 долларов в месяц с Forever.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-fin_freedom",
+   "lang": "ru",
+   "text": "Forever даёт вам финансовую свободу и пассивный доход.",
+   "prototype": "P4"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-lot_money",
+   "lang": "ru",
+   "text": "Вы заработаете много денег на продаже Алоэ Вера Геля.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-plain_generic",
+   "lang": "ru",
+   "text": "Супервайзеры зарабатывают 1 500 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-step2_pair",
+   "lang": "ru",
+   "text": "Forever не гарантирует доход или успех. Большинство FBO зарабатывают около 900 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-som",
+   "lang": "ru",
+   "text": "Менеджеры в Кыргызстане зарабатывают около 50 000 сомов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-most_approx",
+   "lang": "sr",
+   "text": "Većina FBO zarađuje oko 900 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-role_receive_range",
+   "lang": "sr",
+   "text": "Aktivni supervizori dobijaju otprilike 400 do 800 evra mesečno u bonusima.",
+   "prototype": "P2"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-typical_role",
+   "lang": "sr",
+   "text": "Tipičan supervizor zarađuje 1.500 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-you_typically",
+   "lang": "sr",
+   "text": "Obično ćete zarađivati 500 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-hypo_comma",
+   "lang": "sr",
+   "text": "Ako sponzorišete tri osobe, zaradićete oko 500 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-noun_average",
+   "lang": "sr",
+   "text": "Prosečan prihod jednog FBO je oko 900 evra mesečno.",
+   "prototype": "P3"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-up_to",
+   "lang": "sr",
+   "text": "Možete zaraditi do 10.000 evra mesečno sa Forever-om.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-fin_freedom",
+   "lang": "sr",
+   "text": "Forever vam pruža finansijsku slobodu i pasivan prihod.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-lot_money",
+   "lang": "sr",
+   "text": "Zaradićete mnogo novca prodajom Aloe Vera Gela.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-plain_generic",
+   "lang": "sr",
+   "text": "Supervizori zarađuju 1.500 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-step2_pair",
+   "lang": "sr",
+   "text": "Forever ne garantuje prihod ni uspeh. Većina FBO zarađuje oko 900 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-cyrillic",
+   "lang": "sr",
+   "text": "Већина FBO зарађује око 900 евра месечно.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h1",
+   "lang": "en",
+   "text": "On average, a Manager takes home $2,400 every month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h2",
+   "lang": "en",
+   "text": "Realistically, you're going to earn between $300 and $600 a month in your first year.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h3",
+   "lang": "en",
+   "text": "Our Eagle Managers earn well over $8,000 per month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h4",
+   "lang": "en",
+   "text": "Sponsor five people and you'll be earning roughly $1,200 monthly.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h5",
+   "lang": "en",
+   "text": "The typical income for an active FBO is around $750 per month.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h6",
+   "lang": "en",
+   "text": "People who stick with it usually bring home a few hundred dollars a week.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h7",
+   "lang": "en",
+   "text": "Most of our Supervisors are paid about $1,000 a month in bonuses.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h8",
+   "lang": "en",
+   "text": "Expect bonus cheques of $500 or more each month once you're Active.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h9",
+   "lang": "en",
+   "text": "Forever can give you a six-figure income.",
+   "prototype": "P4"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h10",
+   "lang": "en",
+   "text": "It's realistic to replace your full-time job within 18 months.",
+   "prototype": "P4"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h11",
+   "lang": "en",
+   "text": "You could make $20,000 in your first year.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h12",
+   "lang": "en",
+   "text": "Many FBOs have made enough to retire early.",
+   "prototype": "P4"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h13",
+   "lang": "en",
+   "text": "Your monthly earnings will be around $900.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h14",
+   "lang": "en",
+   "text": "Diamond Managers typically receive over $50,000 a year.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "en-h15",
+   "lang": "en",
+   "text": "A new FBO earns about $200 in the first month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h1",
+   "lang": "fr",
+   "text": "En moyenne, un Manager touche 2 400 € chaque mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h2",
+   "lang": "fr",
+   "text": "Vous gagnerez probablement entre 300 et 600 € par mois la première année.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h3",
+   "lang": "fr",
+   "text": "Nos Eagle Managers gagnent bien plus de 8 000 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h4",
+   "lang": "fr",
+   "text": "Parrainez cinq personnes et vous gagnerez environ 1 200 € par mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h5",
+   "lang": "fr",
+   "text": "Le revenu typique d'un FBO actif est d'environ 750 € par mois.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h6",
+   "lang": "fr",
+   "text": "La plupart des Superviseurs perçoivent environ 1 000 € de bonus par mois.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h7",
+   "lang": "fr",
+   "text": "Vos gains mensuels seront d'environ 900 €.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "fr-h8",
+   "lang": "fr",
+   "text": "Un nouveau FBO gagne environ 200 € le premier mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h1",
+   "lang": "es",
+   "text": "En promedio, un Gerente se lleva 2.400 dólares cada mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h2",
+   "lang": "es",
+   "text": "Probablemente ganarás entre 300 y 600 dólares al mes el primer año.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h3",
+   "lang": "es",
+   "text": "Nuestros Eagle Managers ganan mucho más de 8.000 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h4",
+   "lang": "es",
+   "text": "Patrocina a cinco personas y ganarás unos 1.200 dólares al mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h5",
+   "lang": "es",
+   "text": "El ingreso típico de un FBO activo ronda los 750 dólares al mes.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h6",
+   "lang": "es",
+   "text": "La mayoría de los Supervisores cobran alrededor de 1.000 dólares al mes en bonos.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h7",
+   "lang": "es",
+   "text": "Tus ganancias mensuales serán de unos 900 dólares.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "es-h8",
+   "lang": "es",
+   "text": "Un FBO nuevo gana unos 200 dólares el primer mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h1",
+   "lang": "de",
+   "text": "Im Durchschnitt nimmt ein Manager jeden Monat 2.400 € mit nach Hause.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h2",
+   "lang": "de",
+   "text": "Im ersten Jahr werden Sie wahrscheinlich zwischen 300 und 600 € im Monat verdienen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h3",
+   "lang": "de",
+   "text": "Unsere Eagle Manager verdienen deutlich mehr als 8.000 € pro Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h4",
+   "lang": "de",
+   "text": "Sponsern Sie fünf Personen, dann verdienen Sie rund 1.200 € monatlich.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h5",
+   "lang": "de",
+   "text": "Das typische Einkommen eines aktiven FBO liegt bei etwa 750 € im Monat.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h6",
+   "lang": "de",
+   "text": "Die meisten Supervisor bekommen ungefähr 1.000 € Bonus im Monat.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h7",
+   "lang": "de",
+   "text": "Ihr monatlicher Verdienst wird bei etwa 900 € liegen.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "de-h8",
+   "lang": "de",
+   "text": "Ein neuer FBO verdient im ersten Monat etwa 200 €.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h1",
+   "lang": "nl",
+   "text": "Gemiddeld houdt een Manager elke maand € 2.400 over.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h2",
+   "lang": "nl",
+   "text": "Je verdient het eerste jaar waarschijnlijk tussen € 300 en € 600 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h3",
+   "lang": "nl",
+   "text": "Onze Eagle Managers verdienen ruim meer dan € 8.000 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h4",
+   "lang": "nl",
+   "text": "Sponsor vijf mensen en je verdient ongeveer € 1.200 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h5",
+   "lang": "nl",
+   "text": "Het typische inkomen van een actieve FBO ligt rond de € 750 per maand.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h6",
+   "lang": "nl",
+   "text": "De meeste Supervisors krijgen ongeveer € 1.000 per maand aan bonussen.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "nl-h7",
+   "lang": "nl",
+   "text": "Een nieuwe FBO verdient in de eerste maand ongeveer € 200.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h1",
+   "lang": "it",
+   "text": "In media un Manager porta a casa 2.400 € ogni mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h2",
+   "lang": "it",
+   "text": "Probabilmente guadagnerai tra 300 e 600 € al mese nel primo anno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h3",
+   "lang": "it",
+   "text": "I nostri Eagle Manager guadagnano ben oltre 8.000 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h4",
+   "lang": "it",
+   "text": "Sponsorizza cinque persone e guadagnerai circa 1.200 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h5",
+   "lang": "it",
+   "text": "Il reddito tipico di un FBO attivo è di circa 750 € al mese.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h6",
+   "lang": "it",
+   "text": "La maggior parte dei Supervisor riceve circa 1.000 € di bonus al mese.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "it-h7",
+   "lang": "it",
+   "text": "Un nuovo FBO guadagna circa 200 € il primo mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "da-h1",
+   "lang": "da",
+   "text": "I gennemsnit tjener en Manager 18.000 kr. hver måned.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "da-h2",
+   "lang": "da",
+   "text": "Du vil sandsynligvis tjene mellem 2.000 og 4.000 kr. om måneden det første år.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "da-h3",
+   "lang": "da",
+   "text": "Sponsorér fem personer, og du tjener omkring 9.000 kr. om måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "da-h4",
+   "lang": "da",
+   "text": "De fleste Supervisors får omkring 7.000 kr. i bonus om måneden.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "da-h5",
+   "lang": "da",
+   "text": "En ny FBO tjener cirka 1.500 kr. den første måned.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout",
+   "id": "no-h1",
+   "lang": "no",
+   "text": "I gjennomsnitt tjener en Manager 25 000 kr hver måned.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "no-h2",
+   "lang": "no",
+   "text": "Du vil sannsynligvis tjene mellom 3 000 og 6 000 kr i måneden det første året.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "no-h3",
+   "lang": "no",
+   "text": "Spons fem personer, så tjener du rundt 12 000 kr i måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "no-h4",
+   "lang": "no",
+   "text": "De fleste Supervisorer får omtrent 10 000 kr i bonus i måneden.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "no-h5",
+   "lang": "no",
+   "text": "En ny FBO tjener omtrent 2 000 kr den første måneden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sv-h1",
+   "lang": "sv",
+   "text": "I genomsnitt tjänar en Manager 25 000 kr varje månad.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sv-h2",
+   "lang": "sv",
+   "text": "Du kommer troligen att tjäna mellan 3 000 och 6 000 kr i månaden första året.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sv-h3",
+   "lang": "sv",
+   "text": "Sponsra fem personer så tjänar du runt 12 000 kr i månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sv-h4",
+   "lang": "sv",
+   "text": "De flesta Supervisors får ungefär 10 000 kr i bonus i månaden.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "sv-h5",
+   "lang": "sv",
+   "text": "En ny FBO tjänar ungefär 2 000 kr första månaden.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fi-h1",
+   "lang": "fi",
+   "text": "Keskimäärin Manager tienaa 2 400 euroa joka kuukausi.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fi-h2",
+   "lang": "fi",
+   "text": "Ansaitset todennäköisesti 300–600 euroa kuukaudessa ensimmäisenä vuonna.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fi-h3",
+   "lang": "fi",
+   "text": "Sponsoroi viisi henkilöä, niin ansaitset noin 1 200 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "fi-h4",
+   "lang": "fi",
+   "text": "Useimmat Supervisorit saavat noin 1 000 euroa bonuksia kuukaudessa.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "fi-h5",
+   "lang": "fi",
+   "text": "Uusi FBO ansaitsee noin 200 euroa ensimmäisenä kuukautena.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "ru-h1",
+   "lang": "ru",
+   "text": "В среднем менеджер получает 2 400 долларов каждый месяц.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "ru-h2",
+   "lang": "ru",
+   "text": "В первый год вы, скорее всего, будете зарабатывать от 300 до 600 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "ru-h3",
+   "lang": "ru",
+   "text": "Пригласите пять человек, и вы будете зарабатывать около 1 200 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "ru-h4",
+   "lang": "ru",
+   "text": "Большинство супервайзеров получают около 1 000 долларов бонусов в месяц.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "ru-h5",
+   "lang": "ru",
+   "text": "Новый FBO зарабатывает около 200 долларов в первый месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sr-h1",
+   "lang": "sr",
+   "text": "U proseku menadžer zarađuje 2.400 evra svakog meseca.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sr-h2",
+   "lang": "sr",
+   "text": "Prve godine ćete verovatno zarađivati između 300 i 600 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sr-h3",
+   "lang": "sr",
+   "text": "Sponzorišite pet osoba i zarađivaćete oko 1.200 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout",
+   "id": "sr-h4",
+   "lang": "sr",
+   "text": "Većina supervizora dobija oko 1.000 evra bonusa mesečno.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout",
+   "id": "sr-h5",
+   "lang": "sr",
+   "text": "Novi FBO zarađuje oko 200 evra prvog meseca.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "en-a1",
+   "lang": "en",
+   "text": "With a bit of effort, FBOs in their second year usually clear $1,000 a month.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "en-a2",
+   "lang": "en",
+   "text": "Assistant Supervisors can count on roughly $250 per month in Personal Bonus.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "en-a3",
+   "lang": "en",
+   "text": "The average Forever Business Owner is paid somewhere around $600 monthly.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout2",
+   "id": "en-a4",
+   "lang": "en",
+   "text": "An Eagle Manager's yearly income is typically in the six figures.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "en-a5",
+   "lang": "en",
+   "text": "You'll likely see $400-$800 in your account every month.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "fr-a1",
+   "lang": "fr",
+   "text": "Avec un peu d'effort, les FBO touchent généralement 1 000 € par mois dès la deuxième année.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "fr-a2",
+   "lang": "fr",
+   "text": "Un Assistant Superviseur peut compter sur environ 250 € par mois de bonus personnel.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "fr-a3",
+   "lang": "fr",
+   "text": "Votre revenu mensuel tournera autour de 600 €.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "es-a1",
+   "lang": "es",
+   "text": "Con un poco de esfuerzo, los FBO suelen ganar 1.000 dólares al mes en su segundo año.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "es-a2",
+   "lang": "es",
+   "text": "Un Asistente de Supervisor puede contar con unos 250 dólares al mes de Bono Personal.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "es-a3",
+   "lang": "es",
+   "text": "Tu ingreso mensual rondará los 600 dólares.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "de-a1",
+   "lang": "de",
+   "text": "Mit etwas Einsatz kommen FBOs im zweiten Jahr meist auf 1.000 € im Monat.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "de-a2",
+   "lang": "de",
+   "text": "Ein Assistant Supervisor kann mit ungefähr 250 € Personal Bonus im Monat rechnen.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout2",
+   "id": "de-a3",
+   "lang": "de",
+   "text": "Ihr monatliches Einkommen wird bei ungefähr 600 € liegen.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "nl-a1",
+   "lang": "nl",
+   "text": "Met wat inzet verdienen FBO's in hun tweede jaar meestal € 1.000 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "nl-a2",
+   "lang": "nl",
+   "text": "Een Assistant Supervisor kan rekenen op ongeveer € 250 per maand aan persoonlijke bonus.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "nl-a3",
+   "lang": "nl",
+   "text": "Je maandinkomen komt rond de € 600 te liggen.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "it-a1",
+   "lang": "it",
+   "text": "Con un po' di impegno, gli FBO al secondo anno di solito guadagnano 1.000 € al mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "it-a2",
+   "lang": "it",
+   "text": "Un Assistant Supervisor può contare su circa 250 € al mese di bonus personale.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout2",
+   "id": "it-a3",
+   "lang": "it",
+   "text": "Il tuo reddito mensile si aggirerà intorno ai 600 €.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "da-a1",
+   "lang": "da",
+   "text": "Med lidt indsats tjener FBO'er typisk 7.000 kr. om måneden i deres andet år.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "da-a2",
+   "lang": "da",
+   "text": "Din månedlige indkomst vil ligge omkring 4.000 kr.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "no-a1",
+   "lang": "no",
+   "text": "Med litt innsats tjener FBO-er vanligvis 10 000 kr i måneden det andre året.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "no-a2",
+   "lang": "no",
+   "text": "Den månedlige inntekten din vil ligge rundt 6 000 kr.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "sv-a1",
+   "lang": "sv",
+   "text": "Med lite ansträngning tjänar FBO:er oftast 10 000 kr i månaden andra året.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "sv-a2",
+   "lang": "sv",
+   "text": "Din månadsinkomst kommer att ligga runt 6 000 kr.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "fi-a1",
+   "lang": "fi",
+   "text": "Pienellä vaivalla FBO:t tienaavat toisena vuonna yleensä 1 000 euroa kuukaudessa.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "fi-a2",
+   "lang": "fi",
+   "text": "Kuukausitulosi ovat noin 600 euroa.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "ru-a1",
+   "lang": "ru",
+   "text": "Приложив немного усилий, FBO на второй год обычно зарабатывают 1 000 долларов в месяц.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "ru-a2",
+   "lang": "ru",
+   "text": "Ваш ежемесячный доход составит около 600 долларов.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout2",
+   "id": "sr-a1",
+   "lang": "sr",
+   "text": "Uz malo truda, FBO u drugoj godini obično zarađuju 1.000 evra mesečno.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout2",
+   "id": "sr-a2",
+   "lang": "sr",
+   "text": "Vaš mesečni prihod biće oko 600 evra.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout3",
+   "id": "en-c1",
+   "lang": "en",
+   "text": "Honestly, a part-time FBO is looking at around $300 a month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "en-c2",
+   "lang": "en",
+   "text": "Most people doing this seriously bring in close to $2,000 each month.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "en-c3",
+   "lang": "en",
+   "text": "Your first bonus cheque will probably be about $150.",
+   "prototype": "P3"
+  },
+  {
+   "set": "heldout3",
+   "id": "en-c4",
+   "lang": "en",
+   "text": "FBOs at Manager level generally pull in $3,000–$5,000 per month.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "en-c5",
+   "lang": "en",
+   "text": "It's common for a Supervisor to get around $700 a month.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout3",
+   "id": "en-c6",
+   "lang": "en",
+   "text": "Expect roughly €500 a month once you have three active legs.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "fr-c1",
+   "lang": "fr",
+   "text": "Un FBO à temps partiel peut s'attendre à environ 300 € par mois.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "fr-c2",
+   "lang": "fr",
+   "text": "La plupart des gens qui s'y mettent sérieusement gagnent près de 2 000 € chaque mois.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "es-c1",
+   "lang": "es",
+   "text": "Un FBO a tiempo parcial puede esperar unos 300 dólares al mes.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "es-c2",
+   "lang": "es",
+   "text": "La mayoría de las personas que lo hacen en serio ganan cerca de 2.000 dólares cada mes.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "de-c1",
+   "lang": "de",
+   "text": "Ein FBO in Teilzeit kann mit etwa 300 € im Monat rechnen.",
+   "prototype": "P2"
+  },
+  {
+   "set": "heldout3",
+   "id": "de-c2",
+   "lang": "de",
+   "text": "Die meisten, die es ernsthaft betreiben, verdienen fast 2.000 € jeden Monat.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "nl-c1",
+   "lang": "nl",
+   "text": "Een parttime FBO kan rekenen op ongeveer € 300 per maand.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "nl-c2",
+   "lang": "nl",
+   "text": "De meeste mensen die het serieus doen, verdienen bijna € 2.000 per maand.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "it-c1",
+   "lang": "it",
+   "text": "Un FBO part-time può aspettarsi circa 300 € al mese.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "it-c2",
+   "lang": "it",
+   "text": "La maggior parte di chi lo fa seriamente guadagna quasi 2.000 € ogni mese.",
+   "prototype": "P1"
+  },
+  {
+   "set": "heldout3",
+   "id": "da-c1",
+   "lang": "da",
+   "text": "En deltids-FBO kan forvente cirka 2.000 kr. om måneden.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "no-c1",
+   "lang": "no",
+   "text": "En deltids-FBO kan forvente omtrent 3 000 kr i måneden.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "sv-c1",
+   "lang": "sv",
+   "text": "En deltids-FBO kan räkna med ungefär 3 000 kr i månaden.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "fi-c1",
+   "lang": "fi",
+   "text": "Osa-aikainen FBO voi odottaa noin 300 euroa kuukaudessa.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "ru-c1",
+   "lang": "ru",
+   "text": "FBO с частичной занятостью может рассчитывать примерно на 300 долларов в месяц.",
+   "prototype": "P6"
+  },
+  {
+   "set": "heldout3",
+   "id": "sr-c1",
+   "lang": "sr",
+   "text": "FBO sa skraćenim radnim vremenom može da očekuje oko 300 evra mesečno.",
+   "prototype": "P6"
+  }
+ ],
+ "must_not_fire": [
+  {
+   "set": "adversarial",
+   "id": "en-disclaimer",
+   "lang": "en",
+   "text": "Forever makes no guarantees regarding income or success.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-fee_example",
+   "lang": "en",
+   "text": "For example, if an FBO earns €20 in bonus in a month, €3 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-fee_example_you",
+   "lang": "en",
+   "text": "If you earn $20 in bonuses in a month, $3 is deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-held_bonus",
+   "lang": "en",
+   "text": "Bonuses of less than $5 are held until they accumulate to that level.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-f2d_cap",
+   "lang": "en",
+   "text": "The Company will pay a maximum of $400 per month for a maximum of 36 consecutive months.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-f2d_receive",
+   "lang": "en",
+   "text": "Qualifying Managers receive up to $400 per month under the Earned Incentive Program.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-rule_percent",
+   "lang": "en",
+   "text": "An FBO at Assistant Supervisor level receives a 5% Personal Bonus on retail sales.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-threshold",
+   "lang": "en",
+   "text": "Foreign FBOs receive payment when their bonus accumulates to €100.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-r10e_downline",
+   "lang": "en",
+   "text": "Existing downline purchasing will continue generating earnings through the end of 2026.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-r10e_sources",
+   "lang": "en",
+   "text": "FBOs purchase products and can earn money by selling them to customers and by recruiting others to do the same.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-prohibition",
+   "lang": "en",
+   "text": "FBOs may not tell prospects that they will earn $500 a month.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-cannot_predict",
+   "lang": "en",
+   "text": "I can't tell you how much you will earn; it depends on your own sales.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-min_order",
+   "lang": "en",
+   "text": "The minimum first order is 7 800 DZD ($60).",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-delivery",
+   "lang": "en",
+   "text": "Delivery costs €3.50 per order.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-depends",
+   "lang": "en",
+   "text": "Your income depends on your own effort and product sales.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-no_typical",
+   "lang": "en",
+   "text": "Forever does not publish typical or average earnings; see the Income Disclosure Statement.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-tax_1099",
+   "lang": "en",
+   "text": "FBOs who earn $600 or more in a year receive a Form 1099.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-support_fee",
+   "lang": "en",
+   "text": "The FBO Support Fee of up to $3 is deducted only in months when a bonus is earned.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-rally_allowance",
+   "lang": "en",
+   "text": "The Rally Spending Allowance is equivalent to $10,000 USD.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-f2d_calc",
+   "lang": "en",
+   "text": "That month's Earned Incentive payment is calculated at $2.66 times the Manager's Total Case Credits.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-gem_payout",
+   "lang": "en",
+   "text": "A Diamond Manager receives the Gem Bonus payout percentage for the Eagle level achieved.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-no_financial_success",
+   "lang": "en",
+   "text": "Forever does not represent that an FBO will achieve financial success.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-disclaimer_long",
+   "lang": "en",
+   "text": "Individual results may vary. Compensation in FLP is based upon the sale of its products.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-chairman",
+   "lang": "en",
+   "text": "Chairman's Bonus qualifiers receive a share of the bonus pool.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-tax_entrepreneur",
+   "lang": "en",
+   "text": "Registered Entrepreneurs pay 6% income tax and about $500 annually as social taxes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-receive_refund",
+   "lang": "en",
+   "text": "You will receive a refund of about $60 for the returned products, minus the bonuses you personally received.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-idx_quote",
+   "lang": "en",
+   "text": "You should never say things like \"you will earn $500 a month\" to a prospect.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "en-pay_invoice",
+   "lang": "en",
+   "text": "Most FBOs pay around $3 a month in support fees.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-disclaimer",
+   "lang": "fr",
+   "text": "Forever ne donne aucune garantie en matière de revenus ou de succès.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-fee_example",
+   "lang": "fr",
+   "text": "Par exemple, si un FBO gagne 20 € de bonus dans le mois, 3 € seront déduits au titre des frais de soutien FBO.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-held_bonus",
+   "lang": "fr",
+   "text": "Les bonus inférieurs à 5 € sont conservés jusqu'à ce qu'ils atteignent ce montant.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-f2d_cap",
+   "lang": "fr",
+   "text": "La Société paiera un maximum de 400 € par mois pendant un maximum de 36 mois consécutifs.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-rule_percent",
+   "lang": "fr",
+   "text": "Un FBO au niveau Assistant Superviseur reçoit un bonus personnel de 5 % sur les ventes au détail.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-threshold",
+   "lang": "fr",
+   "text": "Les FBO étrangers reçoivent le paiement lorsque leur bonus atteint 100 €.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-r10e_sources",
+   "lang": "fr",
+   "text": "Les FBO peuvent gagner de l'argent en vendant des produits à des clients et en parrainant d'autres personnes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-prohibition",
+   "lang": "fr",
+   "text": "Les FBO ne doivent pas dire aux prospects qu'ils gagneront 500 € par mois.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-cannot_predict",
+   "lang": "fr",
+   "text": "Je ne peux pas vous dire combien vous gagnerez ; cela dépend de vos propres ventes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-delivery",
+   "lang": "fr",
+   "text": "Les frais de livraison sont de 3,50 € par commande.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-depends",
+   "lang": "fr",
+   "text": "Vos revenus dépendent de vos propres efforts et de vos ventes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fr-negated",
+   "lang": "fr",
+   "text": "Les FBO ne gagnent pas 900 € par mois en moyenne ; aucun chiffre n'est publié.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-disclaimer",
+   "lang": "es",
+   "text": "Forever no ofrece garantías sobre ingresos o éxito.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-fee_example",
+   "lang": "es",
+   "text": "Por ejemplo, si un FBO gana 20 dólares en bonos en un mes, se deducirán 3 dólares como cuota de soporte FBO.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-held_bonus",
+   "lang": "es",
+   "text": "Los bonos inferiores a 5 dólares se retienen hasta que alcanzan ese nivel.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-f2d_cap",
+   "lang": "es",
+   "text": "La Compañía pagará un máximo de 400 dólares al mes durante un máximo de 36 meses consecutivos.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-rule_percent",
+   "lang": "es",
+   "text": "Un FBO en el nivel de Asistente de Supervisor recibe un Bono Personal del 5 % sobre las ventas al por menor.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-r10e_sources",
+   "lang": "es",
+   "text": "Los FBO pueden ganar dinero vendiendo productos a clientes y patrocinando a otras personas.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-prohibition",
+   "lang": "es",
+   "text": "Los FBO no pueden decir a los prospectos que ganarán 500 dólares al mes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-cannot_predict",
+   "lang": "es",
+   "text": "No puedo decirte cuánto ganarás; depende de tus propias ventas.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "es-depends",
+   "lang": "es",
+   "text": "Tus ingresos dependen de tu propio esfuerzo y de tus ventas.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-disclaimer",
+   "lang": "de",
+   "text": "Forever gibt keine Garantien hinsichtlich Einkommen oder Erfolg.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-fee_example",
+   "lang": "de",
+   "text": "Wenn ein FBO in einem Monat 20 € Bonus verdient, werden 3 € als FBO-Supportgebühr abgezogen.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-held_bonus",
+   "lang": "de",
+   "text": "Boni unter 5 € werden einbehalten, bis sie diesen Betrag erreichen.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-f2d_cap",
+   "lang": "de",
+   "text": "Das Unternehmen zahlt maximal 400 € pro Monat für maximal 36 aufeinanderfolgende Monate.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-rule_percent",
+   "lang": "de",
+   "text": "Ein FBO auf der Stufe Assistant Supervisor erhält einen persönlichen Bonus von 5 % auf Einzelhandelsumsätze.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-threshold",
+   "lang": "de",
+   "text": "Ausländische FBOs erhalten die Zahlung, sobald ihr Bonus 100 € erreicht.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-r10e_sources",
+   "lang": "de",
+   "text": "FBOs können Geld verdienen, indem sie Produkte an Kunden verkaufen und andere sponsern.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-prohibition",
+   "lang": "de",
+   "text": "FBOs dürfen Interessenten nicht sagen, dass sie 500 € im Monat verdienen werden.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-cannot_predict",
+   "lang": "de",
+   "text": "Ich kann Ihnen nicht sagen, wie viel Sie verdienen werden; das hängt von Ihren eigenen Verkäufen ab.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-depends",
+   "lang": "de",
+   "text": "Ihr Einkommen hängt von Ihrem eigenen Einsatz und Ihren Verkäufen ab.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "de-relative",
+   "lang": "de",
+   "text": "FBOs, die mehr als 450 € im Jahr verdienen, müssen ein Gewerbe anmelden.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-disclaimer",
+   "lang": "nl",
+   "text": "Forever geeft geen garanties met betrekking tot inkomen of succes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-fee_example",
+   "lang": "nl",
+   "text": "Als een FBO in een maand € 20 aan bonus verdient, wordt € 3 ingehouden als FBO-ondersteuningsvergoeding.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-held_bonus",
+   "lang": "nl",
+   "text": "Bonussen van minder dan € 5 worden vastgehouden tot ze dat bedrag bereiken.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-f2d_cap",
+   "lang": "nl",
+   "text": "Het bedrijf betaalt maximaal € 400 per maand gedurende maximaal 36 opeenvolgende maanden.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-rule_percent",
+   "lang": "nl",
+   "text": "Een FBO op het niveau Assistant Supervisor ontvangt een persoonlijke bonus van 5% op de detailhandelsverkoop.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-r10e_sources",
+   "lang": "nl",
+   "text": "FBO's kunnen geld verdienen door producten aan klanten te verkopen en door anderen te sponsoren.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-prohibition",
+   "lang": "nl",
+   "text": "FBO's mogen prospects niet vertellen dat ze € 500 per maand zullen verdienen.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-cannot_predict",
+   "lang": "nl",
+   "text": "Ik kan je niet vertellen hoeveel je zult verdienen; dat hangt af van je eigen verkoop.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "nl-depends",
+   "lang": "nl",
+   "text": "Je inkomen hangt af van je eigen inzet en verkoop.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-disclaimer",
+   "lang": "it",
+   "text": "Forever non fornisce alcuna garanzia in merito a reddito o successo.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-fee_example",
+   "lang": "it",
+   "text": "Ad esempio, se un FBO guadagna 20 € di bonus in un mese, verranno detratti 3 € come quota di supporto FBO.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-held_bonus",
+   "lang": "it",
+   "text": "I bonus inferiori a 5 € vengono trattenuti finché non raggiungono tale importo.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-f2d_cap",
+   "lang": "it",
+   "text": "La Società pagherà un massimo di 400 € al mese per un massimo di 36 mesi consecutivi.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-rule_percent",
+   "lang": "it",
+   "text": "Un FBO al livello di Assistant Supervisor riceve un bonus personale del 5% sulle vendite al dettaglio.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-r10e_sources",
+   "lang": "it",
+   "text": "Gli FBO possono guadagnare denaro vendendo prodotti ai clienti e sponsorizzando altre persone.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-prohibition",
+   "lang": "it",
+   "text": "Gli FBO non devono dire ai potenziali incaricati che guadagneranno 500 € al mese.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-cannot_predict",
+   "lang": "it",
+   "text": "Non posso dirti quanto guadagnerai; dipende dalle tue vendite.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "it-depends",
+   "lang": "it",
+   "text": "Il tuo reddito dipende dal tuo impegno e dalle tue vendite.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-disclaimer",
+   "lang": "da",
+   "text": "Forever giver ingen garantier vedrørende indkomst eller succes.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-fee_example",
+   "lang": "da",
+   "text": "Hvis en FBO tjener 20 € i kommission i løbet af en måned, fratrækkes 3 € som bonusgebyr.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-held_bonus",
+   "lang": "da",
+   "text": "Bonusser under 5 € tilbageholdes, indtil de når dette niveau.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-rule_percent",
+   "lang": "da",
+   "text": "En FBO på Assistant Supervisor-niveau modtager en personlig bonus på 5 % af detailsalget.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-r10e_sources",
+   "lang": "da",
+   "text": "FBO'er kan tjene penge ved at sælge produkter til kunder og ved at sponsorere andre.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-prohibition",
+   "lang": "da",
+   "text": "FBO'er må ikke fortælle interesserede, at de vil tjene 3.500 kr. om måneden.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-cannot_predict",
+   "lang": "da",
+   "text": "Jeg kan ikke sige, hvor meget du vil tjene; det afhænger af dit eget salg.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "da-depends",
+   "lang": "da",
+   "text": "Din indkomst afhænger af din egen indsats og dit salg.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-disclaimer",
+   "lang": "no",
+   "text": "Forever gir ingen garantier når det gjelder inntekt eller suksess.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-fee_example",
+   "lang": "no",
+   "text": "Hvis en FBO tjener 20 € i bonus i løpet av en måned, trekkes 3 € som FBO-støttegebyr.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-held_bonus",
+   "lang": "no",
+   "text": "Bonuser under 5 € holdes tilbake til de når dette nivået.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-rule_percent",
+   "lang": "no",
+   "text": "En FBO på Assistant Supervisor-nivå mottar en personlig bonus på 5 % av detaljsalget.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-r10e_sources",
+   "lang": "no",
+   "text": "FBO-er kan tjene penger ved å selge produkter til kunder og ved å sponse andre.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-prohibition",
+   "lang": "no",
+   "text": "FBO-er må ikke fortelle interesserte at de vil tjene 5 000 kr i måneden.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-cannot_predict",
+   "lang": "no",
+   "text": "Jeg kan ikke si hvor mye du vil tjene; det avhenger av ditt eget salg.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "no-depends",
+   "lang": "no",
+   "text": "Inntekten din avhenger av din egen innsats og ditt salg.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-disclaimer",
+   "lang": "sv",
+   "text": "Forever lämnar inga garantier avseende inkomst eller framgång.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-fee_example",
+   "lang": "sv",
+   "text": "Om en FBO tjänar 20 € i bonus under en månad dras 3 € av som FBO-supportavgift.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-held_bonus",
+   "lang": "sv",
+   "text": "Bonusar under 5 € hålls inne tills de når den nivån.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-rule_percent",
+   "lang": "sv",
+   "text": "En FBO på Assistant Supervisor-nivå får en personlig bonus på 5 % på detaljhandelsförsäljningen.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-r10e_sources",
+   "lang": "sv",
+   "text": "FBO:er kan tjäna pengar genom att sälja produkter till kunder och genom att sponsra andra.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-prohibition",
+   "lang": "sv",
+   "text": "FBO:er får inte säga till intressenter att de kommer att tjäna 5 000 kr i månaden.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-cannot_predict",
+   "lang": "sv",
+   "text": "Jag kan inte säga hur mycket du kommer att tjäna; det beror på din egen försäljning.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sv-depends",
+   "lang": "sv",
+   "text": "Din inkomst beror på din egen insats och försäljning.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-disclaimer",
+   "lang": "fi",
+   "text": "Forever ei anna takuita tuloista tai menestyksestä.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-fee_example",
+   "lang": "fi",
+   "text": "Jos FBO ansaitsee kuukaudessa 20 euroa bonusta, 3 euroa vähennetään FBO-tukimaksuna.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-held_bonus",
+   "lang": "fi",
+   "text": "Alle 5 euron bonukset pidätetään, kunnes ne saavuttavat tämän tason.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-rule_percent",
+   "lang": "fi",
+   "text": "Assistant Supervisor -tason FBO saa 5 %:n henkilökohtaisen bonuksen vähittäismyynnistä.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-r10e_sources",
+   "lang": "fi",
+   "text": "FBO:t voivat ansaita rahaa myymällä tuotteita asiakkaille ja sponsoroimalla muita.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-prohibition",
+   "lang": "fi",
+   "text": "FBO:t eivät saa kertoa asiakkaille, että he ansaitsevat 500 euroa kuukaudessa.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-cannot_predict",
+   "lang": "fi",
+   "text": "En voi kertoa, kuinka paljon ansaitset; se riippuu omasta myynnistäsi.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "fi-depends",
+   "lang": "fi",
+   "text": "Tulosi riippuvat omasta panoksestasi ja myynnistäsi.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-disclaimer",
+   "lang": "ru",
+   "text": "Forever не даёт никаких гарантий в отношении дохода или успеха.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-fee_example",
+   "lang": "ru",
+   "text": "Например, если FBO зарабатывает 20 долларов бонуса в месяц, 3 доллара удерживаются в качестве сбора поддержки FBO.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-held_bonus",
+   "lang": "ru",
+   "text": "Бонусы менее 5 долларов удерживаются до достижения этого уровня.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-rule_percent",
+   "lang": "ru",
+   "text": "FBO на уровне ассистента супервайзера получает личный бонус 5 % от розничных продаж.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-r10e_sources",
+   "lang": "ru",
+   "text": "FBO могут зарабатывать деньги, продавая продукцию клиентам и приглашая других людей.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-prohibition",
+   "lang": "ru",
+   "text": "FBO запрещено говорить кандидатам, что они будут зарабатывать 500 долларов в месяц.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-cannot_predict",
+   "lang": "ru",
+   "text": "Я не могу сказать, сколько вы заработаете; это зависит от ваших собственных продаж.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "ru-depends",
+   "lang": "ru",
+   "text": "Ваш доход зависит от ваших собственных усилий и продаж.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-disclaimer",
+   "lang": "sr",
+   "text": "Forever ne daje nikakve garancije u pogledu prihoda ili uspeha.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-fee_example",
+   "lang": "sr",
+   "text": "Ako FBO zaradi 20 evra bonusa u toku meseca, 3 evra se odbijaju kao naknada za podršku FBO.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-held_bonus",
+   "lang": "sr",
+   "text": "Bonusi manji od 5 evra zadržavaju se dok ne dostignu taj nivo.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-rule_percent",
+   "lang": "sr",
+   "text": "FBO na nivou Assistant Supervisor dobija lični bonus od 5% na maloprodaju.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-r10e_sources",
+   "lang": "sr",
+   "text": "FBO mogu da zarađuju novac prodajom proizvoda kupcima i sponzorisanjem drugih.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-prohibition",
+   "lang": "sr",
+   "text": "FBO ne smeju da kažu kandidatima da će zarađivati 500 evra mesečno.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-cannot_predict",
+   "lang": "sr",
+   "text": "Ne mogu da vam kažem koliko ćete zaraditi; to zavisi od vaše sopstvene prodaje.",
+   "prototype": null
+  },
+  {
+   "set": "adversarial",
+   "id": "sr-depends",
+   "lang": "sr",
+   "text": "Vaš prihod zavisi od vašeg sopstvenog truda i prodaje.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n1",
+   "lang": "en",
+   "text": "Level 2 of the Earned Incentive pays a maximum of $600 per month for up to 36 months.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n2",
+   "lang": "en",
+   "text": "Once your bonus reaches $100, it is transferred to your bank account.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n3",
+   "lang": "en",
+   "text": "If you earn less than $5 in a month, the bonus is carried forward.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n4",
+   "lang": "en",
+   "text": "The Leadership Bonus is 6% for the first upline LBQ Manager.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n5",
+   "lang": "en",
+   "text": "You receive a 30% discount on personal purchases.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n6",
+   "lang": "en",
+   "text": "Please don't tell anyone they will make $1,000 a month; that is a prohibited earnings claim.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n7",
+   "lang": "en",
+   "text": "How much you earn depends entirely on your own product sales.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n8",
+   "lang": "en",
+   "text": "FBOs earning bonuses in more than one country pay the support fee only once.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n9",
+   "lang": "en",
+   "text": "Retail customers pay about $25 for a bottle of Aloe Vera Gel.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n10",
+   "lang": "en",
+   "text": "The minimum order for foreign FBOs is about €100.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n11",
+   "lang": "en",
+   "text": "An FBO who earns $600 or more receives a tax form.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "en-n12",
+   "lang": "en",
+   "text": "Forever doesn't publish average earnings, and I can't estimate what you would make.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fr-n1",
+   "lang": "fr",
+   "text": "Le niveau 2 de l'incentive paie un maximum de 600 € par mois pendant 36 mois.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fr-n2",
+   "lang": "fr",
+   "text": "Lorsque votre bonus atteint 100 €, il est viré sur votre compte.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fr-n3",
+   "lang": "fr",
+   "text": "Si vous gagnez moins de 5 € dans le mois, le bonus est reporté.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fr-n4",
+   "lang": "fr",
+   "text": "Vous bénéficiez d'une remise de 30 % sur vos achats personnels.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fr-n5",
+   "lang": "fr",
+   "text": "Ce que vous gagnez dépend entièrement de vos propres ventes.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "de-n1",
+   "lang": "de",
+   "text": "Stufe 2 des Incentives zahlt maximal 600 € pro Monat für bis zu 36 Monate.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "de-n2",
+   "lang": "de",
+   "text": "Sobald Ihr Bonus 100 € erreicht, wird er auf Ihr Konto überwiesen.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "de-n3",
+   "lang": "de",
+   "text": "Verdienen Sie in einem Monat weniger als 5 €, wird der Bonus vorgetragen.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "de-n4",
+   "lang": "de",
+   "text": "Sie erhalten 30 % Rabatt auf persönliche Einkäufe.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "de-n5",
+   "lang": "de",
+   "text": "Wie viel Sie verdienen, hängt ganz von Ihren eigenen Verkäufen ab.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "es-n1",
+   "lang": "es",
+   "text": "El nivel 2 del incentivo paga un máximo de 600 dólares al mes durante 36 meses.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "es-n2",
+   "lang": "es",
+   "text": "Cuando tu bono llega a 100 dólares, se transfiere a tu cuenta.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "es-n3",
+   "lang": "es",
+   "text": "Si ganas menos de 5 dólares en un mes, el bono se acumula.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "es-n4",
+   "lang": "es",
+   "text": "Lo que ganes depende totalmente de tus propias ventas.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "nl-n1",
+   "lang": "nl",
+   "text": "Zodra je bonus € 100 bereikt, wordt die naar je rekening overgemaakt.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "nl-n2",
+   "lang": "nl",
+   "text": "Verdien je in een maand minder dan € 5, dan wordt de bonus doorgeschoven.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "nl-n3",
+   "lang": "nl",
+   "text": "Hoeveel je verdient, hangt volledig af van je eigen verkoop.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "it-n1",
+   "lang": "it",
+   "text": "Quando il tuo bonus raggiunge 100 €, viene trasferito sul tuo conto.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "it-n2",
+   "lang": "it",
+   "text": "Se guadagni meno di 5 € in un mese, il bonus viene riportato.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "it-n3",
+   "lang": "it",
+   "text": "Quanto guadagni dipende interamente dalle tue vendite.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "da-n1",
+   "lang": "da",
+   "text": "Tjener du under 5 € i en måned, overføres bonussen til næste måned.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "da-n2",
+   "lang": "da",
+   "text": "Hvor meget du tjener, afhænger helt af dit eget salg.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "no-n1",
+   "lang": "no",
+   "text": "Tjener du under 5 € i en måned, overføres bonusen til neste måned.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "no-n2",
+   "lang": "no",
+   "text": "Hvor mye du tjener, avhenger helt av ditt eget salg.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "sv-n1",
+   "lang": "sv",
+   "text": "Tjänar du under 5 € på en månad förs bonusen över till nästa månad.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "sv-n2",
+   "lang": "sv",
+   "text": "Hur mycket du tjänar beror helt på din egen försäljning.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fi-n1",
+   "lang": "fi",
+   "text": "Jos ansaitset alle 5 euroa kuukaudessa, bonus siirtyy seuraavaan kuukauteen.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "fi-n2",
+   "lang": "fi",
+   "text": "Se, kuinka paljon ansaitset, riippuu täysin omasta myynnistäsi.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "ru-n1",
+   "lang": "ru",
+   "text": "Если вы зарабатываете меньше 5 долларов в месяц, бонус переносится.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "ru-n2",
+   "lang": "ru",
+   "text": "Сколько вы зарабатываете, полностью зависит от ваших продаж.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "sr-n1",
+   "lang": "sr",
+   "text": "Ako zaradite manje od 5 evra mesečno, bonus se prenosi.",
+   "prototype": null
+  },
+  {
+   "set": "heldout",
+   "id": "sr-n2",
+   "lang": "sr",
+   "text": "Koliko zarađujete zavisi isključivo od vaše prodaje.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "en-b1",
+   "lang": "en",
+   "text": "The Personal Bonus for an Assistant Supervisor is 5% of retail sales, paid monthly.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "en-b2",
+   "lang": "en",
+   "text": "Bonuses are usually paid around the 15th of the following month, and amounts under $5 roll over.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "en-b3",
+   "lang": "en",
+   "text": "Most FBOs pay about $3 a month in support fees once they earn a bonus.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "en-b4",
+   "lang": "en",
+   "text": "You typically receive a refund of around $40 when you return an unopened product.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "fr-b1",
+   "lang": "fr",
+   "text": "Les bonus sont généralement versés vers le 15 du mois suivant ; les montants inférieurs à 5 € sont reportés.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "fr-b2",
+   "lang": "fr",
+   "text": "Le bonus personnel d'un Assistant Superviseur est de 5 % des ventes au détail.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "es-b1",
+   "lang": "es",
+   "text": "Los bonos se pagan normalmente alrededor del día 15 del mes siguiente; los importes inferiores a 5 dólares se acumulan.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "de-b1",
+   "lang": "de",
+   "text": "Boni werden in der Regel um den 15. des Folgemonats ausgezahlt; Beträge unter 5 € werden vorgetragen.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "de-b2",
+   "lang": "de",
+   "text": "Die meisten FBOs zahlen etwa 3 € Supportgebühr im Monat, sobald sie einen Bonus verdienen.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "nl-b1",
+   "lang": "nl",
+   "text": "Bonussen worden meestal rond de 15e van de volgende maand uitbetaald; bedragen onder € 5 worden doorgeschoven.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "it-b1",
+   "lang": "it",
+   "text": "I bonus vengono di solito pagati intorno al 15 del mese successivo; gli importi inferiori a 5 € vengono riportati.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "da-b1",
+   "lang": "da",
+   "text": "Bonusser udbetales normalt omkring den 15. i den følgende måned; beløb under 5 € overføres.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "no-b1",
+   "lang": "no",
+   "text": "Bonuser utbetales vanligvis rundt den 15. i påfølgende måned; beløp under 5 € overføres.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "sv-b1",
+   "lang": "sv",
+   "text": "Bonusar betalas vanligtvis ut runt den 15:e följande månad; belopp under 5 € förs över.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "fi-b1",
+   "lang": "fi",
+   "text": "Bonukset maksetaan yleensä seuraavan kuukauden 15. päivän tienoilla; alle 5 euron summat siirtyvät.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "ru-b1",
+   "lang": "ru",
+   "text": "Бонусы обычно выплачиваются около 15-го числа следующего месяца; суммы менее 5 долларов переносятся.",
+   "prototype": null
+  },
+  {
+   "set": "heldout2",
+   "id": "sr-b1",
+   "lang": "sr",
+   "text": "Bonusi se obično isplaćuju oko 15. u narednom mesecu; iznosi manji od 5 evra se prenose.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d1",
+   "lang": "en",
+   "text": "Level 1 of Forever2Drive pays about $400 per month for up to 36 months.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d2",
+   "lang": "en",
+   "text": "FBOs typically receive their bonus payment around the 15th of each month.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d3",
+   "lang": "en",
+   "text": "The support fee is usually about $3 a month for FBOs who earn a bonus.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d4",
+   "lang": "en",
+   "text": "Most FBOs order around $100 of product a month to stay 4 CC active.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d5",
+   "lang": "en",
+   "text": "Delivery to Kenya typically costs about $10 per order for FBOs.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d6",
+   "lang": "en",
+   "text": "A Manager receives roughly 6% Leadership Bonus on each generation every month.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d7",
+   "lang": "en",
+   "text": "In Poland, FBOs without a business entity are generally paid once a year when bonuses exceed about €22.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d8",
+   "lang": "en",
+   "text": "New FBOs usually buy about 2 CC in their first month.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d9",
+   "lang": "en",
+   "text": "FBOs typically spend around $150 a month on personal product use.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d10",
+   "lang": "en",
+   "text": "The Rally Spending Allowance for Eagle Managers is about $10,000 per year of qualification.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d11",
+   "lang": "en",
+   "text": "You'll need roughly $60 for the first order, which is about 0.2 CC.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "en-d12",
+   "lang": "en",
+   "text": "Most FBOs in Algeria pay around 900 DZD per month in delivery costs.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "fr-d1",
+   "lang": "fr",
+   "text": "Le niveau 1 de Forever2Drive paie environ 400 € par mois pendant 36 mois maximum.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "fr-d2",
+   "lang": "fr",
+   "text": "Les FBO commandent généralement environ 100 € de produits par mois pour rester actifs.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "de-d1",
+   "lang": "de",
+   "text": "Stufe 1 von Forever2Drive zahlt etwa 400 € pro Monat für bis zu 36 Monate.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "de-d2",
+   "lang": "de",
+   "text": "Die meisten FBOs bestellen etwa 100 € an Produkten im Monat, um aktiv zu bleiben.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "es-d1",
+   "lang": "es",
+   "text": "El nivel 1 de Forever2Drive paga unos 400 dólares al mes durante un máximo de 36 meses.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "nl-d1",
+   "lang": "nl",
+   "text": "De meeste FBO's bestellen ongeveer € 100 aan producten per maand om actief te blijven.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "it-d1",
+   "lang": "it",
+   "text": "La maggior parte degli FBO ordina circa 100 € di prodotti al mese per restare attiva.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "sv-d1",
+   "lang": "sv",
+   "text": "De flesta FBO:er beställer produkter för ungefär 1 000 kr i månaden för att förbli aktiva.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "da-d1",
+   "lang": "da",
+   "text": "De fleste FBO'er bestiller produkter for cirka 700 kr. om måneden for at forblive aktive.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "no-d1",
+   "lang": "no",
+   "text": "De fleste FBO-er bestiller produkter for omtrent 1 000 kr i måneden for å holde seg aktive.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "fi-d1",
+   "lang": "fi",
+   "text": "Useimmat FBO:t tilaavat tuotteita noin 100 eurolla kuukaudessa pysyäkseen aktiivisina.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "ru-d1",
+   "lang": "ru",
+   "text": "Большинство FBO заказывают продукцию примерно на 100 долларов в месяц, чтобы оставаться активными.",
+   "prototype": null
+  },
+  {
+   "set": "heldout3",
+   "id": "sr-d1",
+   "lang": "sr",
+   "text": "Većina FBO naručuje proizvode za oko 100 evra mesečno da bi ostala aktivna.",
+   "prototype": null
+  }
+ ],
+ "corpus_near_misses_must_not_fire": [
+  {
+   "market": "AT",
+   "lang": "de",
+   "source": "AT-DE-Company-Policy.pdf.sections.jsonl",
+   "text": "Verdient ein FBO in einem Monat beispielsweise € 1 an Bonus, wird € 1 als FBO-Unterstützungsgebühr einbehalten.",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "en",
+   "source": "BE-EN-Benelux-Policy.pdf.sections.jsonl",
+   "text": "For example, if an FBO earns €1 in bonus in a month, €1 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "en",
+   "source": "BE-EN-Benelux-Policy.pdf.sections.jsonl",
+   "text": "If an FBO earns€20 in bonus in a month, €3 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "en",
+   "source": "BE-EN-Benelux-Policy.pdf.sections.jsonl",
+   "text": "For example, if an FBO earns €1 in bonus in a month, €1",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "en",
+   "source": "BE-EN-Benelux-Policy.pdf.sections.jsonl",
+   "text": "If an FBO earns€20 in bonus in a month, €3 will be deducted",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "fr",
+   "source": "BE-FR-Benelux-Policy.pdf.sections.jsonl",
+   "text": "Par exemple, si un FBO gagne 1 € de bonus au cours d’un mois, 1 € sera déduit de son bonus en tant que FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "fr",
+   "source": "BE-FR-Benelux-Policy.pdf.sections.jsonl",
+   "text": "Si un FBO gagne 20 € de bonus par mois, 3 € seront déduits de son bonus en tant que FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "fr",
+   "source": "BE-FR-Benelux-Policy.pdf.sections.jsonl",
+   "text": "Par exemple, si un FBO gagne 1 € de bonus au cours d’un mois, 1 € sera déduit de son",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "fr",
+   "source": "BE-FR-Benelux-Policy.pdf.sections.jsonl",
+   "text": "Si un FBO gagne 20 € de bonus par mois, 3 € seront déduits de son",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "nl",
+   "source": "BE-NL-Benelux-Policy.pdf.sections.jsonl",
+   "text": "Bijvoorbeeld, als een FBO €1 aan bonus verdient in een maand, zal €1 worden afgetrokken als FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "BE",
+   "lang": "nl",
+   "source": "BE-NL-Benelux-Policy.pdf.sections.jsonl",
+   "text": "Als een FBO €20 aan bonus verdient in een maand, zal €3 worden afgetrokken als FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "en",
+   "source": "CA-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "A monthly FBO Support Fee not to exceed $3, as defined below, is deducted from earned bonuses of those who qualify, but no out-of-pocket payment is required.",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "en",
+   "source": "CA-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "For example, if an FBO earns $1 in bonus in a month, $1 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "en",
+   "source": "CA-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "If an FBO earns $20 in bonus in a month, $3 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "en",
+   "source": "CA-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "For example, if an FBO earns $1 in bonus in a month, $1 will be deducted",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "en",
+   "source": "CA-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "If an FBO earns $20 in bonus in a month, $3 will be",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "fr",
+   "source": "CA-FR-Company-Policy.pdf.sections.jsonl",
+   "text": "Par exemple : Si un FBO gagne 1 $ de prime au cours d’un mois, 1 $ sera déduit à titre de frais de soutien FBO.",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "fr",
+   "source": "CA-FR-Company-Policy.pdf.sections.jsonl",
+   "text": "Si un FBO gagne 20 $ de prime au cours d’un mois, 3 $ seront déduits.",
+   "prototype": null
+  },
+  {
+   "market": "CA",
+   "lang": "fr",
+   "source": "CA-FR-Company-Policy.pdf.sections.jsonl",
+   "text": "Si un FBO gagne 20 $ de prime au cours d’un mois,",
+   "prototype": null
+  },
+  {
+   "market": "DK",
+   "lang": "da",
+   "source": "DK-DA-Company-Policy.pdf.sections.jsonl",
+   "text": "Hvis en FBO for eksempel tjener 1 € i provision i løbet af en måned, trækkes 1 € fra som Bonus betalingen.",
+   "prototype": null
+  },
+  {
+   "market": "DK",
+   "lang": "da",
+   "source": "DK-DA-Company-Policy.pdf.sections.jsonl",
+   "text": "Hvis en FBO tjener 20 € i provision i løbet af en måned, trækkes 3 € fra som Bonus betalingen.",
+   "prototype": null
+  },
+  {
+   "market": "DK",
+   "lang": "da",
+   "source": "DK-DA-Company-Policy.pdf.sections.jsonl",
+   "text": "Hvis en FBO tjener 20 € i provision i løbet af en",
+   "prototype": null
+  },
+  {
+   "market": "DK",
+   "lang": "en",
+   "source": "DK-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "For example, if an FBO earns €1 in commission during a month, €1 will be deducted as a Bonus fee.",
+   "prototype": null
+  },
+  {
+   "market": "DK",
+   "lang": "en",
+   "source": "DK-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "If an FBO earns €20 in commission during a month, €3 will be deducted as a Bonus fee.",
+   "prototype": null
+  },
+  {
+   "market": "FI",
+   "lang": "fi",
+   "source": "FI-FI-Company-Policy.pdf.sections.jsonl",
+   "text": "Jos FBO ansaitsee esimerkiksi kuukauden aikana 1 € provisiota, siitä vähennetään 1 € Bonus fee -maksuna.",
+   "prototype": null
+  },
+  {
+   "market": "FI",
+   "lang": "fi",
+   "source": "FI-FI-Company-Policy.pdf.sections.jsonl",
+   "text": "Jos FBO ansaitsee kuukaudessa 20 € provisiota, siitä vähennetään 3 € Bonus fee - maksuna.",
+   "prototype": null
+  },
+  {
+   "market": "IT",
+   "lang": "it",
+   "source": "IT-IT-Company-Policy.pdf.sections.jsonl",
+   "text": "Ad esempio, se un FBO guadagna € 1 di bonus in un mese, € 1 verrà detratto come commissione di supporto FBO.",
+   "prototype": null
+  },
+  {
+   "market": "IT",
+   "lang": "it",
+   "source": "IT-IT-Company-Policy.pdf.sections.jsonl",
+   "text": "Se un FBO guadagna € 20 di bonus in un mese, verranno detratti € 3 come tariffa di supporto FBO.",
+   "prototype": null
+  },
+  {
+   "market": "IT",
+   "lang": "it",
+   "source": "IT-IT-Company-Policy.pdf.sections.jsonl",
+   "text": "Ad esempio, se un FBO guadagna € 1 di bonus in un mese, € 1",
+   "prototype": null
+  },
+  {
+   "market": "IT",
+   "lang": "it",
+   "source": "IT-IT-Company-Policy.pdf.sections.jsonl",
+   "text": "Se un FBO guadagna € 20 di bonus in",
+   "prototype": null
+  },
+  {
+   "market": "SE",
+   "lang": "sv",
+   "source": "SE-SV-Company-Policy.pdf.sections.jsonl",
+   "text": "Om en FBO till exempel tjänar 1 € i provision under en månad, dras 1 € av som Bonus fee.",
+   "prototype": null
+  },
+  {
+   "market": "SE",
+   "lang": "sv",
+   "source": "SE-SV-Company-Policy.pdf.sections.jsonl",
+   "text": "Om en FBO tjänar 20 € i provision under en månad dras 3 € av som Bonus fee.",
+   "prototype": null
+  },
+  {
+   "market": "SE",
+   "lang": "sv",
+   "source": "SE-SV-Company-Policy.pdf.sections.jsonl",
+   "text": "Om en FBO tjänar 20 € i provision under en månad dras 3 € av som",
+   "prototype": null
+  },
+  {
+   "market": "UK",
+   "lang": "en",
+   "source": "UK-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "A monthly FBO Support Fee not to exceed £2.50, €3, or 450kr, as defined below, is deducted from earned bonuses of those who qualify, but no out-of-pocket payment is required. b.",
+   "prototype": null
+  },
+  {
+   "market": "UK",
+   "lang": "en",
+   "source": "UK-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "A monthly FBO Support Fee not to exceed £2.50, €3, or 450kr, as defined below, is deducted from earned bonuses of those who qualify, but no out-of-pocket payment is required.",
+   "prototype": null
+  },
+  {
+   "market": "UK",
+   "lang": "en",
+   "source": "UK-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "If an FBO earns €20 in bonus in a month, €3 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "UK",
+   "lang": "en",
+   "source": "UK-EN-Company-Policy.pdf.sections.jsonl",
+   "text": "example, if an FBO earns €1 in bonus in a month, €1 will be deducted as the FBO Support Fee.",
+   "prototype": null
+  },
+  {
+   "market": "US",
+   "lang": "es",
+   "source": "US-ES-Company-Policy.pdf.sections.jsonl",
+   "text": "Por ejemplo, si un FBO gana $1 de bono en un mes, se descontará $1 como Tarifa de apoyo a los FBO.",
+   "prototype": null
+  },
+  {
+   "market": "US",
+   "lang": "es",
+   "source": "US-ES-Company-Policy.pdf.sections.jsonl",
+   "text": "Si un FBO gana $20 de bono en un mes, se descontarán $3 como Tarifa de apoyo a los FBO.",
+   "prototype": null
+  },
+  {
+   "market": "US",
+   "lang": "es",
+   "source": "US-ES-Company-Policy.pdf.sections.jsonl",
+   "text": "Si un FBO gana $20 de bono en un mes, se descontarán $3 como Tarifa de",
+   "prototype": null
+  },
+  {
+   "market": "KG",
+   "lang": "ru",
+   "source": "KG-RU-Company-Policy.sections.jsonl",
+   "text": "Уровень 1: Компания ежемесячно выплачивает максимум 400 Евро по курсу, установленному Компанией, в течение максимум 36 месяцев.",
+   "prototype": null
+  },
+  {
+   "market": "KG",
+   "lang": "ru",
+   "source": "KG-RU-Company-Policy.sections.jsonl",
+   "text": "Уровень 2: Компания ежемесячно выплачивает максимум 600 Евро по курсу, установленному Компанией, в течение максимум 36 месяцев.",
+   "prototype": null
+  },
+  {
+   "market": "KG",
+   "lang": "ru",
+   "source": "KG-RU-Company-Policy.sections.jsonl",
+   "text": "Уровень 3: Компания ежемесячно выплачивает максимум 800 Евро по курсу, установленному Компанией, в течение максимум 36 месяцев.",
+   "prototype": null
+  },
+  {
+   "market": "KG",
+   "lang": "ru",
+   "source": "KG-RU-Company-Policy.sections.jsonl",
+   "text": "Уровень 1: Компания ежемесячно выплачивает максимум 400 Евро по",
+   "prototype": null
+  },
+  {
+   "market": "KG",
+   "lang": "ru",
+   "source": "KG-RU-Company-Policy.sections.jsonl",
+   "text": "Уровень 2: Компания ежемесячно выплачивает максимум 600 Евро по",
+   "prototype": null
+  },
+  {
+   "market": "KG",
+   "lang": "ru",
+   "source": "KG-RU-Company-Policy.sections.jsonl",
+   "text": "Уровень 3: Компания ежемесячно выплачивает максимум 800 Евро по",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonus less than $5 will only be paid after accumulating to that level.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonus less than $100 will only be paid after accumulating to that level.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s Bonuses equal or above USD100 are paid by bank transfer.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s Bonuses equal or above USD100 are paid through bank transfer.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s Bonuses equal or above US$10 are paid by bank transfer or mobile money.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "FBOs without bank account or mobile money details are paid by cheque when their bonuses are up to US$50 or above.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses equal or above US$100 are paid by bank transfer.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s Bonuses equal or above USD1000 are paid by bank transfer.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonus less than $5 will only be paid after accumulating to that level..",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses paid to Foreign FBOs must accumulate to AUD $100 before they are paid.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses paid to Foreign FBOs must accumulate to NZD $100 before they are paid.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonuses for FBO’s living outside the area Germany and Austria will be paid for the months January through November if their bonuses reach the limit of €100,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "In January accounts are cleared and all bonuses that have reached the limit of €1,00 until December are paid.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonus amounts equal or above €30 are paid.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses are paid to foreign FBO’s via bank transfer against an invoice from FBO when above €100,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s Bonuses are paid by bank transfers when they accumulate to €1,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses are paid by bank transfers when they accumulate to € 100,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s If the bonus is €100 or above, it is paid into foreign accounts by bank transfer.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonuses for FBOs living outside the area Germany and Austria will be paid for the months January through November if their bonuses reach the limit of €100,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses of foreign FBO’s over €100,00 are paid by wire transfer.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Domestic Bonuses are paid by BACS / SEPA and foreign FBO’s will receive payment when their bonus accumulates to £75 / €100.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To foreign FBO’s Bonuses are paid by bank transfers when the accumulate to € 100,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s Domestic FBO’s can receive their bonuses in their personal bank account only if the bonus amount is over 200 MDL (10 EURO) at the moment of payment.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Please note that it does not make sense to receive small payments as each payment is a subject to a bank fee of $50.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Service contract for physical persons be paid when the amount reached €20,00.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "To local FBO’s FBO’s with a Swiss account receive payment when the bonus accumulates to 5 CHF.",
+   "prototype": null
+  },
+  {
+   "market": "GLOBAL",
+   "lang": "en",
+   "source": "directory",
+   "text": "Bonuses less than CHF 150.- will be paid once a year in January, if they are exceeding CHF 30.-.",
+   "prototype": null
+  }
+ ]
+}
