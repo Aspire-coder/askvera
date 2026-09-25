@@ -399,6 +399,257 @@ def parse_directory_fields(content: str) -> dict[str, str]:
     return fields
 
 
+def directory_field_occurrences(content: str) -> list[tuple[str, str]]:
+    """Return every label/value occurrence in ``content``, never overwriting.
+
+    Runs the exact same consumption loop as :func:`parse_directory_fields`
+    (same line normalization, same label/inline detection) but appends every
+    match to a list instead of a dict, so a label repeated in the record -
+    the merged Ghana/Guinea and St. Maarten records each repeat "Telephone
+    Office" and "Email" once per merged country - is visible as more than
+    one occurrence instead of silently collapsing to whichever one was
+    parsed last. :func:`parse_directory_fields` itself is unchanged and
+    still used everywhere else.
+    """
+    lines = [
+        " ".join(line.replace("�", " ").split())
+        for line in (content or "").splitlines()
+        if line.strip()
+    ]
+    occurrences: list[tuple[str, str]] = []
+    index = 1  # The first line is the record title, not a field label.
+    while index < len(lines):
+        label = lines[index]
+        inline = _INLINE_FIELD_RE.match(label)
+        if inline and not _is_field_label(label):
+            occurrences.append((" ".join(inline.group("label").split()), inline.group("value").strip()))
+            index += 1
+            continue
+        if not _is_field_label(label):
+            index += 1
+            continue
+        index += 1
+        values: list[str] = []
+        while index < len(lines) and not (
+            _is_field_label(lines[index]) or _INLINE_FIELD_RE.match(lines[index])
+        ):
+            values.append(lines[index])
+            index += 1
+        value = " ".join(values).strip()
+        if value:
+            occurrences.append((label, value))
+    return occurrences
+
+
+# At least 7 digits. Outside any parenthetical, at most 2 alphabetic
+# tokens of 3 letters or fewer (a trunk-prefix note like "NI", a range
+# joiner like "to") - any longer token, or more than 2 short ones, is free
+# text and rejects the value ("order is not available in Iraq...", "Not
+# available"). Each parenthetical itself must be 30 characters or fewer.
+# Tightened from a simpler "no run of 4+ letters outside parentheses" rule
+# after verifying every real phone value in the corpus still passes (Fable
+# review, 2026-09-24, optional hardening).
+_DIRECTORY_CONTACT_ROUTE_PARENS_RE = re.compile(r"\([^)]*\)")
+_DIRECTORY_CONTACT_ROUTE_PHONE_TOKEN_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+_DIRECTORY_CONTACT_ROUTE_PHONE_PAREN_MAX_LENGTH = 30
+_DIRECTORY_CONTACT_ROUTE_PHONE_SHORT_TOKEN_MAX_LENGTH = 3
+_DIRECTORY_CONTACT_ROUTE_PHONE_MAX_SHORT_TOKENS = 2
+
+# An email value renders only when it is strictly one or more bare email
+# addresses - never prose, and never a parenthetical of any kind (Fable
+# review, 2026-09-25, delta hardening 3: the earlier <=40-char parenthetical
+# allowance is what let a caveat like "x@y (sponsoring closed, use home
+# office)" through). Each token must be a strict ASCII dotted-domain
+# address; addresses are separated by ",", ";" or ASCII whitespace only -
+# never a Unicode whitespace/bullet look-alike. Because the whole value is
+# matched end to end (^...$) against only this closed token/separator
+# character set, a stray zero-width character anywhere in the value (which
+# fits none of it) already fails the match on its own, with no separate
+# check needed. One accepted, deliberately NOT closed gap: a token like
+# "info@example.closed.do.not.sponsor.here" is a syntactically valid
+# multi-label dotted domain and passes - this guard authenticates SHAPE
+# (an email address), not semantic intent, and a fake-caveat-as-subdomain
+# is a known, accepted limitation (Fable review, 2026-09-25).
+#
+# Guards against the real shape a field-parsing quirk produces: an "Email"
+# label on its own line, followed by one address per line, then a plural
+# "Websites" line that _FIELD_LABEL_RE does not recognize as a label (it
+# only matches the singular "website"), so the value run keeps consuming
+# FAQ/legal prose all the way to the next RECOGNIZED label - reproduced
+# verbatim on the real Thailand and Bosnia & Herzegovina records (Fable
+# review, 2026-09-24, finding B1).
+_DIRECTORY_CONTACT_ROUTE_EMAIL_TOKEN = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
+_DIRECTORY_CONTACT_ROUTE_EMAIL_SEPARATOR = r"(?:[,;]|[ \t])+"
+_DIRECTORY_CONTACT_ROUTE_EMAIL_VALUE_RE = re.compile(
+    r"^" + _DIRECTORY_CONTACT_ROUTE_EMAIL_TOKEN
+    + r"(?:" + _DIRECTORY_CONTACT_ROUTE_EMAIL_SEPARATOR + _DIRECTORY_CONTACT_ROUTE_EMAIL_TOKEN + r")*$"
+)
+_DIRECTORY_CONTACT_ROUTE_EMAIL_BANNED_RE = re.compile(r"•|http|www\.", re.IGNORECASE)
+_DIRECTORY_CONTACT_ROUTE_EMAIL_MAX_LENGTH = 120
+
+# The 12 reviewed CX route locales (config/conversation_routes.json) carry
+# hand-reviewed "field_label_phone"/"field_label_email" copy; Norwegian
+# Bokmal/Nynorsk alias to the reviewed "no" table rather than falling
+# through to English, matching the alias the rest of this module already
+# applies for directory-intent vocabulary.
+_DIRECTORY_CONTACT_ROUTE_LOCALE_ALIASES = {"nb": "no", "nn": "no"}
+
+
+def _directory_contact_route_phone_is_safe(value: str) -> bool:
+    """True only for a plausible phone value, never a free-text caveat.
+
+    At least 7 digits; every parenthetical 30 characters or fewer; at most
+    2 alphabetic tokens of 3 letters or fewer outside any parenthetical.
+    """
+    if len(re.findall(r"\d", value)) < 7:
+        return False
+    for parenthetical in re.findall(r"\(([^)]*)\)", value):
+        if len(parenthetical) > _DIRECTORY_CONTACT_ROUTE_PHONE_PAREN_MAX_LENGTH:
+            return False
+    stripped = _DIRECTORY_CONTACT_ROUTE_PARENS_RE.sub("", value)
+    tokens = _DIRECTORY_CONTACT_ROUTE_PHONE_TOKEN_RE.findall(stripped)
+    if any(len(token) > _DIRECTORY_CONTACT_ROUTE_PHONE_SHORT_TOKEN_MAX_LENGTH for token in tokens):
+        return False
+    return len(tokens) <= _DIRECTORY_CONTACT_ROUTE_PHONE_MAX_SHORT_TOKENS
+
+
+def _directory_contact_route_email_is_safe(value: str) -> bool:
+    """True only for one or more bare email addresses, never prose.
+
+    Also rejects a value over ~120 characters or containing "•", "http"
+    or "www." even where the strict shape check alone would already have
+    caught it - belt and suspenders against the real Thailand/Bosnia &
+    Herzegovina shape (see the guard's own comment above).
+    """
+    if len(value) > _DIRECTORY_CONTACT_ROUTE_EMAIL_MAX_LENGTH:
+        return False
+    if _DIRECTORY_CONTACT_ROUTE_EMAIL_BANNED_RE.search(value):
+        return False
+    return bool(_DIRECTORY_CONTACT_ROUTE_EMAIL_VALUE_RE.match(value))
+
+
+def directory_contact_route_locale(language: str) -> str:
+    """Normalize ``language`` to a locale key, aliasing nb/nn to "no".
+
+    Exposed publicly (not just used internally by this module) because the
+    orchestrator's directory-contact-route trigger
+    (``app.orchestrator.chat_orchestrator._directory_contact_route_fallback``)
+    must render ``international_directory_note`` - which it calls directly
+    through ``app.response.cx_render.render`` rather than through this
+    module - with this SAME aliased locale, not the raw request language.
+    ``cx_render.render`` resolves its own locale with
+    ``app.evidence._locale_key``, which does NOT apply this nb/nn alias:
+    passing the raw language "nb" through to it resolves to locale "nb",
+    which is not one of the 12 configured routes, so it falls through to
+    ``_translate_template`` / ``services.controlled_copy.localize_reviewed_copy``
+    - a live (Bedrock) translation call - even though
+    :func:`directory_contact_route_locale_is_configured` (which DOES apply
+    this alias) reported "nb" as configured. Passing the aliased locale
+    from this function closes that gap: every part of the block then
+    renders under the identical resolved locale (Fable review, 2026-09-25,
+    N3 delta finding 1).
+    """
+    locale = (language or "en").split("-", 1)[0].lower()
+    return _DIRECTORY_CONTACT_ROUTE_LOCALE_ALIASES.get(locale, locale)
+
+
+def directory_contact_route_locale_is_configured(language: str) -> bool:
+    """True only for one of the 12 reviewed CX route locales (after the
+    nb/nn -> "no" alias).
+
+    The SAME configured-locale guard :func:`_directory_contact_route_label`
+    already applies before it will ever call
+    ``app.response.cx_render.render``, exposed here so the orchestrator's
+    directory-contact-route trigger
+    (``app.orchestrator.chat_orchestrator._directory_contact_route_fallback``)
+    can apply the identical guard to ``international_directory_note``,
+    which it renders directly through ``cx_render`` rather than through
+    this module. Unguarded, that render call falls through to
+    ``app.response.cx_render._translate_template`` /
+    ``services.controlled_copy.localize_reviewed_copy``, a live (Bedrock)
+    translation call this offline rendering path must never reach (Fable
+    review, 2026-09-24, finding N3).
+    """
+    from app.evidence import _conversation_routes
+
+    return directory_contact_route_locale(language) in _conversation_routes()
+
+
+def _directory_contact_route_label(field: str, language: str) -> str:
+    """Localized "Phone"/"Email" bullet label, never a live translation call.
+
+    Only the 12 reviewed CX locales get their reviewed
+    ``field_label_phone``/``field_label_email`` copy
+    (``app.response.cx_render.render``). Any other locale - including one
+    normalized from a region-tagged code - renders the reviewed English
+    text directly instead of calling ``render``, because ``render`` would
+    otherwise fall through to ``app.response.cx_render._translate_template``
+    / ``services.controlled_copy.localize_reviewed_copy``, a live (Bedrock)
+    translation call this offline rendering path must never reach.
+
+    Imports ``app.evidence``/``app.response.cx_render`` locally rather than
+    at module scope, so ``utils.directory_fields`` keeps no module-level
+    dependency on the ``app`` package.
+    """
+    from app.evidence import _conversation_routes
+    from app.response.cx_render import render as _cx_render_render
+
+    key = f"field_label_{field}"
+    if not directory_contact_route_locale_is_configured(language):
+        english_responses = (_conversation_routes().get("en", {}) or {}).get("responses", {}) or {}
+        label = str(english_responses.get(key, "")).strip()
+        return label or field.capitalize()
+    return _cx_render_render(key, directory_contact_route_locale(language))
+
+
+def build_directory_contact_route(content: str, language: str) -> str | None:
+    """Guarded bulleted phone/email block for the directory-contact-route fallback.
+
+    Only the canonical ``phone`` field (never ``order_phone``) and
+    ``email`` are eligible, each only when it occurs EXACTLY ONCE in
+    ``content`` - a duplicate (a merged multi-country record repeating the
+    label once per country) means that field is omitted entirely rather
+    than picking one arbitrarily. A self-referential value ("(see above)",
+    ":func:`_is_self_referential_value`") is filtered out before that
+    uniqueness count, the same way :func:`parse_directory_fields`'s own
+    corpus-derived cousin (the prototype this spec was measured from) does,
+    so a record whose only OTHER phone line is a real number still renders
+    it. The phone value must additionally pass
+    :func:`_directory_contact_route_phone_is_safe`; the email value must
+    pass :func:`_directory_contact_route_email_is_safe` (one or more bare
+    email addresses, never prose swallowed from an unrecognized later
+    label). Trailing ",;" and spaces are stripped from each rendered value.
+    Never renders business hours, address, fax, website or the order
+    phone. A field that fails its guard is simply omitted - the other field
+    may still render. Returns ``None`` when neither field qualifies.
+    """
+    phones: list[str] = []
+    emails: list[str] = []
+    for label, value in directory_field_occurrences(content):
+        canonical = _label_canonical_field(label)
+        cleaned = value.strip()
+        if not cleaned or _is_self_referential_value(cleaned):
+            continue
+        if canonical == "phone":
+            phones.append(cleaned)
+        elif canonical == "email":
+            emails.append(cleaned)
+    lines: list[str] = []
+    if len(phones) == 1 and _directory_contact_route_phone_is_safe(phones[0]):
+        lines.append(f"- {_directory_contact_route_label('phone', language)}: {phones[0].rstrip(',; ')}")
+    if len(emails) == 1:
+        # Stripped BEFORE the safety check, not just before rendering: a
+        # source line such as "flphelpdesk@yahoo.com, info@flpng.com,"
+        # (real Nigeria/Tanzania records) carries a trailing separator with
+        # nothing after it, which would otherwise fail the strict "ends in
+        # an email token" shape check even though the rendered value - with
+        # that trailing separator stripped - is perfectly safe.
+        candidate_email = emails[0].rstrip(',; ')
+        if _directory_contact_route_email_is_safe(candidate_email):
+            lines.append(f"- {_directory_contact_route_label('email', language)}: {candidate_email}")
+    return "\n".join(lines) if lines else None
+
+
 def format_directory_fields(fields: dict[str, object]) -> str:
     """Render non-empty approved fields without inventing placeholders."""
     return "\n".join(

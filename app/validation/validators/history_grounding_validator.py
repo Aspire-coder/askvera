@@ -81,6 +81,18 @@ def _evidence_lacks_policy_document(documents: list) -> bool:
     return bool(documents) and all(_is_directory_document(document) for document in documents)
 
 
+def documents_are_directory_only(documents: list) -> bool:
+    """Public wrapper for :func:`_evidence_lacks_policy_document`.
+
+    Same predicate this validator gates on - every retrieved document is a
+    directory/sponsoring record and none is anything else - exposed for a
+    caller outside this module (the directory-contact-route trigger in
+    ``app/orchestrator/chat_orchestrator.py``) that needs the identical
+    check without a second, drifting implementation.
+    """
+    return _evidence_lacks_policy_document(documents)
+
+
 class HistoryGroundingValidator:
     """Block a delivered answer whose factual prose only history, not this turn's evidence, supports."""
 

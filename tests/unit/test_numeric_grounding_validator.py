@@ -1087,3 +1087,162 @@ def test_a_thousands_group_is_not_reduced_to_its_leading_digit() -> None:
     assert "1.0" in variants
     assert "1" not in variants
     assert "1," not in variants and "1." not in variants
+
+
+# --- Fix 2: the reviewed contact the pipeline itself inserted must not be
+# rejected as an invented number --------------------------------------------
+#
+# The orchestrator fills contact placeholders with this session market's
+# reviewed public contact (app.response.quality.contact_for_country) before
+# validation runs. Live capture, 2026-09-24, approval R10D: three of the ten
+# affected journeys (r10-03, r10-13, cx-04a) carried NUMERIC_CLAIM_UNGROUNDED
+# for exactly "1-888-440-ALOE (2563)" - config/public_contacts.json's US
+# customerCarePhone - even though no retrieved document stated it.
+
+
+def _context_with_country(answer: str, source_text: str, country: str) -> ValidationContext:
+    return ValidationContext(
+        chat_response=ChatResponse(
+            answer=answer,
+            citations=[],
+            suggestions=[],
+            cards=[],
+            confidence=0.9,
+            metadata={},
+            correlation_id="test-correlation",
+        ),
+        correlation_id="test-correlation",
+        country=country,
+        language="en",
+        role="new-prospect",
+        retrieval_result=RetrievalResult(
+            documents=[
+                RetrievedDocument(
+                    id="doc-1",
+                    title="Kenya/East Africa Office Directory",
+                    content=source_text,
+                    source="s3://example/kenya-east-africa.pdf",
+                    country="GLOBAL",
+                    metadata={"document_type": "office_directory"},
+                )
+            ],
+            citations=[],
+            confidence=0.9,
+        ),
+    )
+
+
+def test_reviewed_us_contact_phone_is_not_flagged_for_a_us_session() -> None:
+    answer = "You can also reach customer care at 1-888-440-ALOE (2563)."
+    result = ValidationResult()
+
+    NumericGroundingValidator().validate(
+        _context_with_country(answer, "Kenya/East Africa Office\nTelephone: +254 20 2721133", "US"),
+        result,
+    )
+
+    assert result.valid
+    assert not result.issues
+
+
+def test_same_reviewed_phone_is_still_flagged_for_a_market_without_it() -> None:
+    """CA's reviewed contacts (config/public_contacts.json) carry no phone -
+    only the default website - so the US number is not grounding text here."""
+    answer = "You can also reach customer care at 1-888-440-ALOE (2563)."
+    result = ValidationResult()
+
+    NumericGroundingValidator().validate(
+        _context_with_country(answer, "Kenya/East Africa Office\nTelephone: +254 20 2721133", "CA"),
+        result,
+    )
+
+    assert result.has_critical()
+    assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
+
+
+def test_a_genuinely_invented_figure_is_still_flagged_and_removed() -> None:
+    """Fix 2 protects only the reviewed contact values - not numbers generally."""
+    answer = (
+        "The Kenya/East Africa office telephone number is +254 20 2721133. "
+        "There is also a one-time signup bonus of 4500 Case Credits."
+    )
+    result = ValidationResult()
+    context = _context_with_country(answer, "Kenya/East Africa Office\nTelephone: +254 20 2721133", "US")
+
+    NumericGroundingValidator().validate(context, result)
+    assert result.has_critical()
+    assert result.issues[0].code == "NUMERIC_CLAIM_UNGROUNDED"
+    assert "4500" in result.issues[0].message
+
+    repaired, removed = remove_unsupported_numeric_sentences(answer, context.retrieval_result.documents)
+    assert "4500" not in repaired
+    assert "+254 20 2721133" in repaired
+    assert removed == ["4500"]
+
+
+# --- Detection and removal must agree about the reviewed contact -----------
+#
+# Coordinator review, 2026-09-24: NumericGroundingValidator.validate treated
+# the session market's reviewed contact as grounded, but
+# remove_unsupported_numeric_sentences did not get the same grounding set, so
+# an answer with one invented figure plus the reviewed customer-care line was
+# flagged only for the invented figure and repair then deleted the correct
+# contact sentence too. numeric_grounding_documents is the single definition
+# of the grounding set both now use.
+
+
+def test_removal_keeps_the_reviewed_contact_sentence_when_repairing_a_different_invented_figure() -> None:
+    from app.validation.validators.numeric_grounding_validator import numeric_grounding_documents
+
+    answer = (
+        "There is a one-time signup bonus of 4500 Case Credits. "
+        "You can also call Customer Care at 1-888-440-ALOE (2563)."
+    )
+    documents = [
+        RetrievedDocument(
+            id="kenya-office", title="Kenya/East Africa Office Directory",
+            content="Kenya/East Africa Office\nTelephone: +254 20 2721133",
+            source="s3://directory/kenya-east-africa.pdf", country="GLOBAL",
+            metadata={"document_type": "office_directory"},
+        )
+    ]
+
+    repaired, removed = remove_unsupported_numeric_sentences(
+        answer, numeric_grounding_documents(documents, "US")
+    )
+
+    assert removed == ["4500"]
+    assert "4500" not in repaired
+    assert "1-888-440-ALOE (2563)" in repaired
+
+
+def test_removal_still_drops_the_reviewed_contact_sentence_for_a_market_without_it() -> None:
+    """Same answer, a market whose reviewed contacts do not include that
+    number: removal must behave exactly as it does today - both sentences
+    unsupported, both removed."""
+    from app.validation.validators.numeric_grounding_validator import numeric_grounding_documents
+
+    answer = (
+        "There is a one-time signup bonus of 4500 Case Credits. "
+        "You can also call Customer Care at 1-888-440-ALOE (2563)."
+    )
+    documents = [
+        RetrievedDocument(
+            id="kenya-office", title="Kenya/East Africa Office Directory",
+            content="Kenya/East Africa Office\nTelephone: +254 20 2721133",
+            source="s3://directory/kenya-east-africa.pdf", country="GLOBAL",
+            metadata={"document_type": "office_directory"},
+        )
+    ]
+
+    repaired, removed = remove_unsupported_numeric_sentences(
+        answer, numeric_grounding_documents(documents, "CA")
+    )
+    repaired_without_helper, removed_without_helper = remove_unsupported_numeric_sentences(answer, documents)
+
+    assert removed == ["4500", "1-888-440-ALOE (2563)"]
+    assert repaired == ""
+    # CA has no reviewed phone (config/public_contacts.json), so the helper's
+    # extra grounding document changes nothing here - same result as calling
+    # remove_unsupported_numeric_sentences with the plain document list.
+    assert (repaired, removed) == (repaired_without_helper, removed_without_helper)
