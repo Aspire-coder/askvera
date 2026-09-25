@@ -41,14 +41,26 @@ def generation_candidates(
     records: Iterable[dict[str, Any]],
     *,
     pointers: dict[str, str] | None = None,
+    excluded_ingestion_ids: set[str] | None = None,
 ) -> list[GenerationCandidate]:
-    """Return one unambiguous active generation for every source identity."""
+    """Return one unambiguous active generation for every source identity.
+
+    `excluded_ingestion_ids` drops any ingestion_id whose ingestion_jobs row
+    has a status other than 'ready' (e.g. still 'ready_for_review') so this
+    backfill can never create a pointer for, i.e. publish, an unreviewed
+    staged upload. A script-loaded generation has no ingestion_jobs row at
+    all and is never in this set.
+    """
+    exclusions = excluded_ingestion_ids or set()
     grouped: dict[
         tuple[str, str, str, str, str],
         dict[str, int],
     ] = defaultdict(lambda: defaultdict(int))
     for record in records:
         source = record.get("_source", record)
+        ingestion_id = str(source.get("ingestion_id") or "")
+        if ingestion_id in exclusions:
+            continue
         identity = (
             str(source.get("country") or "").upper(),
             str(source.get("language") or "").lower(),
@@ -56,7 +68,6 @@ def generation_candidates(
             str(source.get("document_type") or "").lower(),
             str(source.get("access_scope") or "").lower(),
         )
-        ingestion_id = str(source.get("ingestion_id") or "")
         if not all(identity) or not ingestion_id:
             raise ValueError(
                 "An active OpenSearch record is missing generation identity metadata."
@@ -148,6 +159,19 @@ def load_active_records(
         if next_search_after == search_after:
             raise RuntimeError("OpenSearch pagination token did not advance.")
         search_after = next_search_after
+
+
+def non_ready_ingestion_ids() -> set[str]:
+    """Return ingestion_ids whose ingestion_jobs row is not yet 'ready'.
+
+    Only a job with a row in ingestion_jobs can be mid-review; a script-
+    loaded generation has no such row and is never returned here.
+    """
+    with get_engine().connect() as connection:
+        rows = connection.execute(
+            text("SELECT job_id FROM ingestion_jobs WHERE status <> 'ready'")
+        ).all()
+    return {str(row[0]) for row in rows}
 
 
 def existing_pointers() -> dict[str, str]:
@@ -281,6 +305,7 @@ def main() -> int:
         candidates = generation_candidates(
             load_active_records(),
             pointers=pointers,
+            excluded_ingestion_ids=non_ready_ingestion_ids(),
         )
         failures = pointer_coverage_failures(candidates, pointers)
         print(f"Active logical documents: {len(candidates)}")

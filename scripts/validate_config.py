@@ -76,6 +76,33 @@ def _validate_semantic_cache(missing: list[str]) -> None:
             missing.append(f"{name} (must be greater than 0)")
 
 
+DEPLOYED_ENVIRONMENTS = {"uat", "production"}
+
+
+def _validate_ingestion_visibility_timeout(missing: list[str]) -> None:
+    """Keep the OpenSearch visibility wait above two Classic refresh cycles."""
+    minimum = settings.ADMIN_INGESTION_VISIBILITY_TIMEOUT_MIN_SECONDS
+    if settings.ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS < minimum:
+        missing.append(
+            f"ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS (must be at least {minimum})"
+        )
+
+
+def _validate_generation_pointer_invariant(missing: list[str]) -> None:
+    """Require the generation pointer wherever the portal can publish.
+
+    Portal chunks are written once as status=active; only the pointer gate in
+    retrieval keeps an unreviewed or superseded generation out of answers.
+    Development and test keep the False default so local retrieval without
+    pointer rows still works (and CI's minimum-config check still passes).
+    """
+    if settings.APP_ENV in DEPLOYED_ENVIRONMENTS and not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        missing.append(
+            "ADMIN_INGESTION_GENERATION_POINTER_ENABLED "
+            "(must be enabled wherever admin ingestion is deployed)"
+        )
+
+
 def _validate_model_routing(missing: list[str]) -> None:
     """Validate opt-in routing without silently enabling model changes."""
     for name in (
@@ -226,6 +253,8 @@ def validate(*, require_production: bool = False) -> list[str]:
     _validate_allowed_values(missing)
     _validate_retrieval_experiments(missing)
     _validate_semantic_cache(missing)
+    _validate_ingestion_visibility_timeout(missing)
+    _validate_generation_pointer_invariant(missing)
     _validate_model_routing(missing)
     if settings.APP_ENV == "production":
         _validate_production_auth(missing)

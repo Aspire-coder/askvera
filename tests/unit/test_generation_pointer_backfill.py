@@ -61,6 +61,46 @@ def test_pointer_coverage_reports_missing_mismatch_and_orphan() -> None:
     assert any(item.startswith("orphaned pointer:") for item in failures)
 
 
+def test_generation_candidates_ignores_ingestion_id_of_unready_job() -> None:
+    """Spec test 14: a generation still mid-review must never be backfilled
+    into an active pointer - that would publish an unreviewed staged upload."""
+    candidates = backfill.generation_candidates(
+        [_record(ingestion_id="staged-run")],
+        excluded_ingestion_ids={"staged-run"},
+    )
+
+    assert candidates == []
+
+
+def test_non_ready_ingestion_ids_reads_ingestion_jobs(monkeypatch) -> None:
+    class _FakeConnection:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, _statement):
+            return self
+
+        def all(self):
+            return self.rows
+
+    class _FakeEngine:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def connect(self):
+            return _FakeConnection(self.rows)
+
+    monkeypatch.setattr(backfill, "get_engine", lambda: _FakeEngine([("staged-run",), ("deleting-run",)]))
+
+    assert backfill.non_ready_ingestion_ids() == {"staged-run", "deleting-run"}
+
+
 class _SearchClient:
     def __init__(self, pages):
         self.pages = iter(pages)

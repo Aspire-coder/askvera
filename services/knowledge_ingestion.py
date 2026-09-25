@@ -1,4 +1,29 @@
-"""General-purpose approved-document ingestion for the admin portal."""
+"""General-purpose approved-document ingestion for the admin portal.
+
+Write-once generations (OpenSearch Serverless VECTORSEARCH)
+-----------------------------------------------------------
+VECTORSEARCH rejects client-supplied document ids, update-by-id,
+delete_by_query, update_by_query and indices.refresh. Every portal
+generation is therefore written exactly once, with status="active", and is
+never updated in place. Staging, publish, retire, rollback and delete are all
+database pointer operations (knowledge_active_generations).
+
+Safety invariant: this is only safe because retrieval gates every read on
+status="active" AND the chunk's ingestion_id being in the active pointer set.
+That second gate is app/retrieval/opensearch_sections.py's _generation_filters
+(with its "__no_active_generation__" sentinel when no pointer matches), which
+applies only while ADMIN_INGESTION_GENERATION_POINTER_ENABLED is true. With
+the flag off, a review-mode generation written as "active" would be served
+before anyone approved it. That is why review mode is refused at upload
+(api/admin_routes.py) and again in _index_sections when the flag is off, and
+why scripts/validate_config.py requires the flag in deployed environments.
+Do not relax any of those without first changing how retrieval gates reads.
+
+Chunks become searchable only after a refresh (~60 s on Classic), so
+writes are awaited (_await_generation) and deletes need two zero polls one
+refresh interval apart (_delete_generation_chunks). Both waits are bounded by
+ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS (never below 150 s).
+"""
 
 from __future__ import annotations
 
@@ -199,7 +224,8 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
                 WHERE job_id = :job_id
                   AND status NOT IN (
                       'ready', 'completed', 'cancelled',
-                      'failed_terminal', 'dead_lettered'
+                      'failed_terminal', 'dead_lettered',
+                      'ready_for_review', 'deleting', 'deleted', 'deletion_failed'
                   )
                   AND attempt_count < :max_attempts
                   AND (lease_expires_at IS NULL OR lease_expires_at <= now())
@@ -232,6 +258,7 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
             and status_row["status"] not in {
                 "ready", "completed", "cancelled",
                 "failed_terminal", "dead_lettered",
+                "ready_for_review", "deleting", "deleted", "deletion_failed",
             }
         ):
             connection.execute(
@@ -251,7 +278,7 @@ def claim_ingestion_job(job_id: str, worker_id: str, lease_seconds: int) -> str:
     status = status_row["status"] if status_row else None
     if status in {"ready", "ready_for_review", "completed"}:
         return "completed"
-    if status in {"failed_terminal", "dead_lettered", "cancelled"}:
+    if status in {"failed_terminal", "dead_lettered", "cancelled", "deleted", "deletion_failed"}:
         return "terminal"
     if status is None:
         return "missing"
@@ -478,6 +505,8 @@ def process_ingestion_job(
     document_owner: str = "",
     approval_reference: str = "",
     review_before_publish: bool = False,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
 ) -> bool:
     """Extract, embed, index, and activate one approved document."""
     path = Path(local_path)
@@ -583,14 +612,30 @@ def process_ingestion_job(
             access_scope=access_scope,
         )
         document_hash = _file_hash(path)
-        _update_job(job_id, status="indexing", progress=55, source_uri=source_uri, content_hash=document_hash)
-        stable_document_id = build_logical_document_id(
+        stable_document_id = _canonical_logical_document_id(
+            logical_document_id,
+            access_scope=access_scope,
+            document_type=document_type,
+            country=str(sections[0]["country"]),
+            language=str(sections[0]["language"]),
+        ) or build_logical_document_id(
             logical_document_id=logical_document_id,
             country=str(sections[0]["country"]),
             language=str(sections[0]["language"]),
             document_type=document_type,
             access_scope=access_scope,
             source_file=str(sections[0]["source_file"]),
+        )
+        # Persist the canonical key: publish, versions, rollback and delete
+        # must all use the same pointer key the worker indexes under, never
+        # the raw form value typed at upload.
+        _update_job(
+            job_id,
+            status="indexing",
+            progress=55,
+            source_uri=source_uri,
+            content_hash=document_hash,
+            logical_document_id=stable_document_id,
         )
         indexed = _index_sections(
             sections,
@@ -601,6 +646,8 @@ def process_ingestion_job(
             logical_document_id=stable_document_id,
             activated_by=accepted_by,
             review_before_publish=review_before_publish,
+            sleep=sleep,
+            clock=clock,
         )
         if not review_before_publish:
             _record_document(
@@ -879,6 +926,293 @@ def _upload_source(
     return f"s3://{bucket}/{key}"
 
 
+MAX_SECTIONS_PER_INGESTION = 10_000
+# Chunk reads for review, preview and versions never need the 1024-float
+# embedding; excluding it keeps a 115-record directory preview ~2 MB lighter.
+_SOURCE_WITHOUT_EMBEDDING = {"excludes": ["embedding"]}
+
+
+def _visibility_timeout() -> float:
+    """The configured visibility wait, never below the enforced floor."""
+    return float(max(
+        settings.ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS,
+        settings.ADMIN_INGESTION_VISIBILITY_TIMEOUT_MIN_SECONDS,
+    ))
+
+
+# Global scope is only allowed for the international sponsoring directory
+# (_check_document_scope in api/admin_routes.py), whose extractor always emits
+# country "GLOBAL" and language "en" regardless of the upload form's fields.
+GLOBAL_DOCUMENT_COUNTRY = "GLOBAL"
+GLOBAL_DOCUMENT_LANGUAGE = "en"
+
+
+def _canonical_logical_document_id(
+    value: str,
+    *,
+    access_scope: str,
+    document_type: str,
+    country: str,
+    language: str,
+) -> str:
+    """Return `value` only if it is already the canonical key of THIS document's namespace.
+
+    Canonical keys look like "<scope>:<COUNTRY>:<language>:<document_type>:<slug>"
+    (exactly four colons). Every namespace part must match the upload itself -
+    scope, document type, country (GLOBAL for global scope) and language - so
+    a typed stable id can only name a slot in the uploader's own market and
+    language. Admin RBAC is checked per market, so accepting another market's
+    key would let a CA admin retire the live US document. Anything else is
+    returned as "" and is slugified into the job's own namespace instead.
+    """
+    parts = str(value or "").strip().split(":")
+    if len(parts) != 5 or not all(parts):
+        return ""
+    scope = access_scope.lower()
+    expected_country = GLOBAL_DOCUMENT_COUNTRY if scope == "global" else country.upper()
+    expected = (scope, expected_country, language.lower(), document_type.lower())
+    if scope not in ACCESS_SCOPES or tuple(parts[:4]) != expected:
+        return ""
+    return ":".join(parts)
+
+
+def _job_logical_document_id(job: dict[str, Any]) -> str:
+    """Return the canonical pointer key for an ingestion job row.
+
+    New jobs have the worker's canonical key persisted. Jobs created before
+    that (or never processed) still hold the raw stable id typed at upload,
+    possibly blank, so rebuild it the same way the worker does. Outside the
+    worker there are no extracted sections, so the namespace comes from the
+    job row, except for global scope: the only global document type is the
+    sponsoring directory, whose extractor always emits GLOBAL/en, so those
+    fixed values are used rather than the form's market and language.
+    """
+    access_scope = str(job.get("access_scope") or "country").lower()
+    document_type = str(job.get("document_type") or "policy").lower()
+    if access_scope == "global":
+        country, language = GLOBAL_DOCUMENT_COUNTRY, GLOBAL_DOCUMENT_LANGUAGE
+    else:
+        country = str(job.get("country") or "")
+        language = str(job.get("language") or "")
+    stored = str(job.get("logical_document_id") or "")
+    canonical = _canonical_logical_document_id(
+        stored,
+        access_scope=access_scope,
+        document_type=document_type,
+        country=country,
+        language=language,
+    )
+    if canonical:
+        return canonical
+    return build_logical_document_id(
+        logical_document_id=stored,
+        country=country,
+        language=language,
+        document_type=document_type,
+        access_scope=access_scope,
+        source_file=str(job.get("filename") or ""),
+    )
+
+
+def _visible_ids(client: Any, index: str, ingestion_id: str) -> set[str]:
+    """Return the _ids currently searchable for a generation (post-refresh)."""
+    result = client.search(
+        index=index,
+        body={
+            "size": 10_000,
+            "_source": False,
+            "query": exact_term_query("ingestion_id", ingestion_id),
+        },
+    )
+    return {hit["_id"] for hit in result.get("hits", {}).get("hits", [])}
+
+
+def _count_for_ingestion(client: Any, index: str, ingestion_id: str) -> int:
+    result = client.count(
+        index=index,
+        body={"query": exact_term_query("ingestion_id", ingestion_id)},
+    )
+    return int(result.get("count", 0))
+
+
+def _delete_ids(client: Any, index: str, ids: Any) -> None:
+    """Delete chunks by their server-assigned _id (the only delete VECTORSEARCH supports)."""
+    id_list = list(ids)
+    if not id_list:
+        return
+    helpers.bulk(
+        client,
+        ({"_op_type": "delete", "_index": index, "_id": doc_id} for doc_id in id_list),
+        raise_on_error=False,
+        raise_on_exception=False,
+    )
+
+
+def _failure_summary(failure: dict[str, Any], position: int) -> dict[str, Any]:
+    """Reduce one bulk item failure to loggable fields, never document content.
+
+    Item-level rejections carry a dict error ({"type", "reason"}). A
+    request-level failure (e.g. 429 or 5xx on the whole _bulk call) is
+    reported by opensearch-py's _process_bulk_chunk_error with the error as
+    a plain string, plus the exception object and the document under "data" -
+    "data" is deliberately never read here.
+    """
+    error = failure.get("error")
+    if isinstance(error, dict):
+        error_type, reason = error.get("type"), error.get("reason")
+    else:
+        exception = failure.get("exception")
+        error_type = type(exception).__name__ if exception is not None else "transport_error"
+        reason = error
+    return {
+        "status": failure.get("status"),
+        "type": error_type,
+        "reason": str(reason)[:300],
+        "index": position,
+    }
+
+
+def _is_non_retryable(failure: dict[str, Any]) -> bool:
+    status = failure.get("status")
+    return isinstance(status, int) and 400 <= status < 500 and status != 429
+
+
+def _generation_write_error(failures: list[dict[str, Any]], written_count: int) -> Exception:
+    logged = [_failure_summary(failure, position) for position, failure in enumerate(failures[:5])]
+    for entry in logged:
+        LOGGER.error("generation_write_rejected", **entry)
+    first = logged[0]
+    message = (
+        f"OpenSearch rejected {len(failures)} of {len(failures) + written_count} chunks "
+        f"(first: {first['type']}: {first['reason']})."
+    )[:1000]
+    if all(_is_non_retryable(failure) for failure in failures):
+        return ValueError(message)
+    return RuntimeError(message)
+
+
+def _cleanup_written(client: Any, index: str, written: list[str]) -> None:
+    try:
+        _delete_ids(client, index, written)
+    except Exception:  # noqa: BLE001 - cleanup must never mask the original failure
+        LOGGER.exception("generation_write_cleanup_failed", written_count=len(written))
+
+
+def _write_generation(client: Any, actions: list[dict[str, Any]]) -> set[str]:
+    """Bulk-index a generation without a custom _id and return the assigned ids.
+
+    VECTORSEARCH rejects index/create with a client-supplied _id, so callers
+    must never set action["_id"] before this. On any item or request-level
+    failure, every already-written id is deleted (partial generations must
+    never be left behind) and an error is raised: ValueError when every
+    failure is a non-retryable 4xx (other than 429), RuntimeError otherwise.
+    """
+    index_name = actions[0].get("_index", "") if actions else ""
+    written: list[str] = []
+    failures: list[dict[str, Any]] = []
+    try:
+        for ok, item in helpers.streaming_bulk(
+            client,
+            actions,
+            raise_on_error=False,
+            raise_on_exception=False,
+        ):
+            (_op, info), = item.items()
+            if ok:
+                written.append(info.get("_id"))
+            else:
+                failures.append(info)
+    except Exception:
+        _cleanup_written(client, index_name, written)
+        raise
+    if not failures:
+        return set(written)
+    try:
+        error = _generation_write_error(failures, len(written))
+    finally:
+        _cleanup_written(client, index_name, written)
+    raise error
+
+
+def _await_generation(
+    client: Any,
+    index: str,
+    ingestion_id: str,
+    own_ids: set[str],
+    *,
+    timeout_seconds: float | None = None,
+    poll_seconds: float = 5.0,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
+) -> None:
+    """Wait for exactly `own_ids` to become searchable for `ingestion_id`.
+
+    Any visible id not in `own_ids` is a stray from a crashed or timed-out
+    earlier write attempt and is deleted along the way. On timeout, this
+    attempt's own ids are deleted so nothing partial is left behind, and a
+    retryable RuntimeError is raised.
+    """
+    timeout = _visibility_timeout() if timeout_seconds is None else timeout_seconds
+    deadline = clock() + timeout
+    while True:
+        seen = _visible_ids(client, index, ingestion_id)
+        strays = seen - own_ids
+        if strays:
+            _delete_ids(client, index, strays)
+            seen -= strays
+        if seen == own_ids and _count_for_ingestion(client, index, ingestion_id) == len(own_ids):
+            return
+        if clock() >= deadline:
+            _delete_ids(client, index, own_ids)
+            raise RuntimeError(
+                f"Generation {ingestion_id} did not become fully visible within {timeout}s."
+            )
+        sleep(poll_seconds)
+
+
+def _delete_generation_chunks(
+    client: Any,
+    index: str,
+    ingestion_id: str,
+    *,
+    timeout_seconds: float | None = None,
+    poll_seconds: float = 5.0,
+    refresh_interval_seconds: float = 65.0,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
+) -> None:
+    """Delete every chunk for a generation without the unsupported delete_by_query.
+
+    VECTORSEARCH has no delete_by_query, so this searches and bulk-deletes by
+    _id in a loop. A generation counts as fully removed only once a zero
+    count has been observed on two polls at least one refresh interval
+    apart - a single zero poll could just be looking at a stale, not-yet-
+    refreshed view that still has visible chunks moments away. On timeout,
+    this raises so the caller's existing deletion_failed path applies.
+    """
+    timeout = _visibility_timeout() if timeout_seconds is None else timeout_seconds
+    deadline = clock() + timeout
+    first_zero_at: float | None = None
+    while True:
+        ids = _visible_ids(client, index, ingestion_id)
+        if ids:
+            _delete_ids(client, index, ids)
+        count = _count_for_ingestion(client, index, ingestion_id)
+        if not ids and count == 0:
+            now = clock()
+            if first_zero_at is None:
+                first_zero_at = now
+            elif now - first_zero_at >= refresh_interval_seconds:
+                return
+        else:
+            first_zero_at = None
+        if clock() >= deadline:
+            raise RuntimeError(
+                f"Chunks for {ingestion_id} were not fully removed within {timeout}s."
+            )
+        sleep(poll_seconds)
+
+
 def _index_sections(
     sections: list[dict[str, Any]],
     *,
@@ -889,21 +1223,32 @@ def _index_sections(
     logical_document_id: str = "",
     activated_by: str = "",
     review_before_publish: bool = False,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
 ) -> int:
+    if len(sections) > MAX_SECTIONS_PER_INGESTION:
+        raise ValueError(
+            f"This document produced {len(sections)} sections, above the "
+            f"{MAX_SECTIONS_PER_INGESTION:,}-section limit for a single ingestion."
+        )
+    if review_before_publish and not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+        raise ValueError("Review before publish requires ADMIN_INGESTION_GENERATION_POINTER_ENABLED.")
+
     client = _client()
     index = settings.OPENSEARCH_INDEX
     if not client.indices.exists(index=index):
         client.indices.create(index=index, body=_index_body())
     source_prefix = source_uri.rsplit("/", 1)[0] if source_uri else ""
-    # Every generation starts invisible. Activation happens only after the
-    # complete bulk write has been verified.
-    publish_status = "staging"
+    # Chunks are written once as active and never updated in place. Retrieval
+    # already gates every read on status=active AND the ingestion_id being in
+    # the DB's active-generation pointer set, so an unpublished or
+    # not-yet-reviewed generation stays invisible without a "staging" status.
     new_actions = list(
         _actions(
             sections,
             index=index,
             source_uri_prefix=source_prefix,
-            status=publish_status,
+            status="active",
             ingestion_id=ingestion_id,
             document_type=document_type,
             access_scope=access_scope,
@@ -920,56 +1265,34 @@ def _index_sections(
     for action in new_actions:
         action["_source"]["logical_document_id"] = stable_document_id
         action["_source"].setdefault("metadata", {})["logical_document_id"] = stable_document_id
-    for action in new_actions:
-        action["_id"] = action["_source"]["id"]
-    success, errors = helpers.bulk(
-        client,
-        new_actions,
-        raise_on_error=False,
-    )
-    if errors:
-        try:
-            client.delete_by_query(
-                index=index,
-                body={"query": exact_term_query("ingestion_id", ingestion_id)},
-                conflicts="proceed",
-                refresh=True,
-            )
-        except Exception:
-            LOGGER.exception("partial_staged_generation_cleanup_failed", ingestion_id=ingestion_id)
-        raise RuntimeError(f"OpenSearch rejected {len(errors)} chunks.")
+
+    own_ids = _write_generation(client, new_actions)
+    _await_generation(client, index, ingestion_id, own_ids, sleep=sleep, clock=clock)
+
     if not review_before_publish:
-        _activate_staged_sections(
-            client,
-            index=index,
-            actions=new_actions,
-            expected_count=len(sections),
-            ingestion_id=ingestion_id,
-        )
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED and not review_before_publish:
-        _activate_generation_pointer(
-            logical_document_id=stable_document_id,
-            ingestion_id=ingestion_id,
-            country=str(sections[0]["country"]),
-            language=str(sections[0]["language"]),
-            source_file=str(sections[0]["source_file"]),
-            document_type=document_type,
-            access_scope=access_scope,
-            activated_by=activated_by,
-        )
-    identity = (sections[0]["country"], sections[0]["language"], sections[0]["source_file"])
-    if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED and not review_before_publish:
-        delete_actions = _older_source_actions(
-            client,
-            index=index,
-            country=str(identity[0]),
-            language=str(identity[1]),
-            source_file=str(identity[2]),
-            ingestion_id=ingestion_id,
-        )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
-    return int(success)
+        if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
+            _activate_generation_pointer(
+                logical_document_id=stable_document_id,
+                ingestion_id=ingestion_id,
+                country=str(sections[0]["country"]),
+                language=str(sections[0]["language"]),
+                source_file=str(sections[0]["source_file"]),
+                document_type=document_type,
+                access_scope=access_scope,
+                activated_by=activated_by,
+            )
+        else:
+            delete_actions = _older_source_actions(
+                client,
+                index=index,
+                country=str(sections[0]["country"]),
+                language=str(sections[0]["language"]),
+                source_file=str(sections[0]["source_file"]),
+                ingestion_id=ingestion_id,
+            )
+            if delete_actions:
+                helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
+    return len(own_ids)
 
 
 def _activate_generation_pointer(
@@ -1030,6 +1353,23 @@ def _activate_generation_pointer(
                 ),
                 {"document_id": previous_ingestion_id},
             )
+        # A script-loaded generation's registry row is bulk-<sha> while its
+        # pointer ingestion_id is a uuid hex, so the document_id match above
+        # never retires it. Retire every other still-active row for this
+        # logical document too. The new row is named by _record_document
+        # with document_id = the ingestion_id being activated here.
+        connection.execute(
+            text(
+                """
+                UPDATE knowledge_documents
+                SET status = 'retired', updated_at = now()
+                WHERE logical_document_id = :logical_document_id
+                  AND document_id <> :new_document_id
+                  AND status = 'active'
+                """
+            ),
+            {"logical_document_id": logical_document_id, "new_document_id": ingestion_id},
+        )
         connection.execute(
             text(
                 """
@@ -1104,71 +1444,6 @@ def _activate_generation_pointer(
     clear_active_generation_cache()
 
 
-def _activate_staged_sections(
-    client: Any,
-    *,
-    index: str,
-    actions: list[dict[str, Any]],
-    expected_count: int,
-    ingestion_id: str,
-) -> None:
-    """Verify a complete generation before making its chunks retrievable."""
-    client.indices.refresh(index=index)
-    result = client.count(
-        index=index,
-        body={
-            "query": {
-                "bool": {
-                    "filter": [
-                        exact_term_query("ingestion_id", ingestion_id),
-                        {"term": {"status": "staging"}},
-                    ]
-                }
-            }
-        },
-    )
-    actual_count = int(result.get("count", 0))
-    if actual_count != expected_count:
-        raise RuntimeError(
-            f"Staged publication verification failed: expected {expected_count}, found {actual_count}."
-        )
-    action_ids = [action["_id"] for action in actions]
-    activation_actions = (
-        {
-            "_op_type": "update",
-            "_index": index,
-            "_id": action_id,
-            "doc": {"status": "active"},
-        }
-        for action_id in action_ids
-    )
-    _, errors = helpers.bulk(
-        client,
-        activation_actions,
-        raise_on_error=False,
-        raise_on_exception=False,
-    )
-    if errors:
-        rollback_actions = (
-            {
-                "_op_type": "update",
-                "_index": index,
-                "_id": action_id,
-                "doc": {"status": "staging"},
-            }
-            for action_id in action_ids
-        )
-        helpers.bulk(
-            client,
-            rollback_actions,
-            raise_on_error=False,
-            raise_on_exception=False,
-        )
-        client.indices.refresh(index=index)
-        raise RuntimeError(f"OpenSearch rejected {len(errors)} activation updates.")
-    client.indices.refresh(index=index)
-
-
 def _update_job(job_id: str, **values: Any) -> None:
     allowed = {
         "status",
@@ -1185,6 +1460,7 @@ def _update_job(job_id: str, **values: Any) -> None:
         "accepted_by",
         "review_before_publish",
         "malware_scan_status",
+        "logical_document_id",
     }
     updates = {key: value for key, value in values.items() if key in allowed}
     if not updates:
@@ -1285,7 +1561,7 @@ def update_ingestion_malware_status(job_id: str, status: str) -> None:
 def list_document_generations(job_id: str) -> list[dict[str, Any]]:
     """Return version history for the stable document represented by a job."""
     job = _ingestion_job(job_id)
-    logical_document_id = str(job.get("logical_document_id") or "")
+    logical_document_id = _job_logical_document_id(job)
     if not logical_document_id:
         return []
     with get_engine().connect() as connection:
@@ -1296,7 +1572,7 @@ def list_document_generations(job_id: str) -> list[dict[str, Any]]:
                        j.filename, j.document_version, j.section_count, j.effective_date,
                        j.expiry_date, j.malware_scan_status, j.created_at
                 FROM knowledge_document_generations g
-                JOIN ingestion_jobs j ON j.job_id = g.ingestion_id
+                LEFT JOIN ingestion_jobs j ON j.job_id = g.ingestion_id
                 WHERE g.logical_document_id = :logical_document_id
                   AND g.status <> 'deleted'
                 ORDER BY COALESCE(g.activated_at, j.created_at) DESC
@@ -1316,7 +1592,7 @@ def rollback_document_generation(job_id: str, target_ingestion_id: str, *, activ
     if not settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
         raise ValueError("Generation rollback is not enabled.")
     job = _ingestion_job(job_id)
-    logical_document_id = str(job.get("logical_document_id") or "")
+    logical_document_id = _job_logical_document_id(job)
     generations = {str(item["ingestion_id"]): item for item in list_document_generations(job_id)}
     target = generations.get(target_ingestion_id)
     if not target:
@@ -1326,7 +1602,15 @@ def rollback_document_generation(job_id: str, target_ingestion_id: str, *, activ
         index=settings.OPENSEARCH_INDEX,
         body={"query": exact_term_query("ingestion_id", target_ingestion_id)},
     )
-    if int(available.get("count", 0)) != int(target.get("section_count") or 0) or not int(available.get("count", 0)):
+    available_count = int(available.get("count", 0))
+    target_section_count = target.get("section_count")
+    # A script-loaded generation has no ingestion_jobs row (LEFT JOIN leaves
+    # section_count NULL), so there is no expected count to match exactly -
+    # require only that some chunks are actually present.
+    if target_section_count is None:
+        if available_count <= 0:
+            raise ValueError("The selected generation is incomplete in the retrieval index.")
+    elif available_count != int(target_section_count) or not available_count:
         raise ValueError("The selected generation is incomplete in the retrieval index.")
     with get_engine().begin() as connection:
         connection.execute(text("SELECT pg_advisory_xact_lock(hashtext(:logical_document_id))"), {"logical_document_id": logical_document_id})
@@ -1347,19 +1631,39 @@ def rollback_document_generation(job_id: str, target_ingestion_id: str, *, activ
     return {"active_ingestion_id": target_ingestion_id, "previous_ingestion_id": current, "logical_document_id": logical_document_id}
 
 
-def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
-    """Remove a document from live retrieval and its durable source storage.
+def _deletion_in_progress(job: dict[str, Any]) -> bool:
+    """True while another request's chunk sweep may still be running.
 
-    The publication pointer is removed first so a partially completed cleanup
-    can never leave the document eligible for retrieval. OpenSearch chunks and
-    S3 objects are then deleted, while the ingestion and audit records remain
-    as a tombstone for traceability.
+    A sweep is bounded by the visibility timeout, so a "deleting" job whose
+    last update is older than twice that (plus slack) belongs to a worker
+    that died mid-sweep; allow it to be retried instead of sticking forever.
+    """
+    if job.get("status") != "deleting":
+        return False
+    try:
+        started = datetime.fromisoformat(str(job.get("updated_at") or ""))
+    except ValueError:
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    stale_after = 2 * _visibility_timeout() + 60
+    return (datetime.now(UTC) - started).total_seconds() < stale_after
+
+
+def begin_ingestion_deletion(job_id: str) -> dict[str, Any]:
+    """Remove a document from live retrieval and write its tombstone.
+
+    Fast and synchronous: the publication pointer is removed first, so a
+    partially completed cleanup can never leave the document eligible for
+    retrieval. The slow chunk sweep and S3 cleanup run afterwards in
+    finish_ingestion_deletion. Returns the job row as it was before this call.
     """
     job = _ingestion_job(job_id)
     if job.get("status") == "deleted":
         raise ValueError("This document has already been deleted.")
-    if job.get("status") in {"queued", "extracting", "indexing", "retryable"}:
+    if job.get("status") in {"queued", "extracting", "indexing", "retryable"} or _deletion_in_progress(job):
         raise ValueError("Wait until document processing finishes before deleting it.")
+    logical_document_id = _job_logical_document_id(job)
 
     with get_engine().begin() as connection:
         active = connection.execute(
@@ -1371,7 +1675,7 @@ def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
                 FOR UPDATE
                 """
             ),
-            {"logical_document_id": str(job.get("logical_document_id") or "")},
+            {"logical_document_id": logical_document_id},
         ).scalar()
         if active == job_id:
             connection.execute(
@@ -1381,7 +1685,7 @@ def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
                     WHERE logical_document_id = :logical_document_id
                     """
                 ),
-                {"logical_document_id": str(job.get("logical_document_id") or "")},
+                {"logical_document_id": logical_document_id},
             )
         connection.execute(
             text(
@@ -1413,16 +1717,22 @@ def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
             ),
             {"job_id": job_id},
         )
+    clear_active_generation_cache()
+    return job
 
+
+def finish_ingestion_deletion(
+    job: dict[str, Any],
+    *,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
+    raise_on_failure: bool = True,
+) -> None:
+    """Sweep the generation's chunks and S3 objects; end in deleted or deletion_failed."""
+    job_id = str(job["job_id"])
     try:
         client = _client()
-        client.delete_by_query(
-            index=settings.OPENSEARCH_INDEX,
-            body={"query": exact_term_query("ingestion_id", job_id)},
-            conflicts="proceed",
-            refresh=True,
-            wait_for_completion=True,
-        )
+        _delete_generation_chunks(client, settings.OPENSEARCH_INDEX, job_id, sleep=sleep, clock=clock)
         for uri in (str(job.get("source_uri") or ""), str(job.get("upload_uri") or "")):
             parsed = urlparse(uri)
             if parsed.scheme == "s3" and parsed.netloc and parsed.path:
@@ -1439,10 +1749,28 @@ def delete_ingestion_job(job_id: str, *, deleted_by: str) -> dict[str, Any]:
             progress=100,
             error_message="Document was removed from live retrieval, but storage cleanup needs retry.",
         )
-        raise RuntimeError("Document cleanup did not complete safely.") from exc
+        if raise_on_failure:
+            raise RuntimeError("Document cleanup did not complete safely.") from exc
     finally:
         clear_active_generation_cache()
 
+
+def delete_ingestion_job(
+    job_id: str,
+    *,
+    deleted_by: str,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
+) -> dict[str, Any]:
+    """Remove a document from live retrieval and its durable source storage, synchronously.
+
+    The admin route instead calls begin_ingestion_deletion and runs
+    finish_ingestion_deletion in the background, so the request never waits
+    on OpenSearch refresh cycles. The ingestion and audit records remain as a
+    tombstone for traceability.
+    """
+    job = begin_ingestion_deletion(job_id)
+    finish_ingestion_deletion(job, sleep=sleep, clock=clock)
     return _ingestion_job(job_id)
 
 
@@ -1499,18 +1827,16 @@ def _ingestion_job(job_id: str) -> dict[str, Any]:
 def _staging_documents(job_id: str, *, limit: int = 20) -> tuple[int, list[dict[str, Any]]]:
     client = _client()
     index = settings.OPENSEARCH_INDEX
-    filters = [
-        exact_term_query("ingestion_id", job_id),
-        {"term": {"status": "staging"}},
-    ]
+    filters = [exact_term_query("ingestion_id", job_id)]
     count = int(client.count(index=index, body={"query": {"bool": {"filter": filters}}}).get("count", 0))
     result = client.search(
         index=index,
         body={
             "size": max(1, min(int(limit), 10_000)),
+            "_source": _SOURCE_WITHOUT_EMBEDDING,
             "sort": [
                 {"start_page": {"order": "asc", "unmapped_type": "integer"}},
-                {"_id": {"order": "asc"}},
+                {"id": {"order": "asc", "unmapped_type": "keyword"}},
             ],
             "query": {"bool": {"filter": filters}},
         },
@@ -1552,11 +1878,12 @@ def test_ingestion_job(job_id: str, message: str, *, limit: int = 5) -> dict[str
     if job.get("status") != "ready_for_review":
         raise ValueError("This document is not ready for staging review.")
     client = _client()
-    filters = [exact_term_query("ingestion_id", job_id), {"term": {"status": "staging"}}]
+    filters = [exact_term_query("ingestion_id", job_id)]
     result = client.search(
         index=settings.OPENSEARCH_INDEX,
         body={
             "size": max(1, min(int(limit), 10)),
+            "_source": _SOURCE_WITHOUT_EMBEDDING,
             "query": {"bool": {"filter": filters, "must": [{"query_string": {
                 "query": message,
                 "fields": ["content", "search_text", "section_title"],
@@ -1584,46 +1911,21 @@ def publish_ingestion_job(job_id: str, *, accepted_by: str) -> dict[str, Any]:
     expected = int(job.get("section_count") or 0)
     if count != expected or not documents:
         raise ValueError(f"Staged publication verification failed: expected {expected}, found {count}.")
-    client = _client()
-    actions = [{"_id": document["id"]} for document in documents]
-    _activate_staged_sections(
-        client,
-        index=settings.OPENSEARCH_INDEX,
-        actions=actions,
-        expected_count=expected,
-        ingestion_id=job_id,
-    )
     first = documents[0]
-    logical_document_id = str(job.get("logical_document_id") or build_logical_document_id(
-        logical_document_id="",
-        country=str(first.get("country") or job.get("country") or ""),
-        language=str(first.get("language") or job.get("language") or ""),
+    logical_document_id = _job_logical_document_id(job)
+    # Review mode is only reachable with the pointer flag on (enforced at
+    # upload and again in _index_sections), so publication is always a
+    # pointer switch - there is no OpenSearch activation step any more.
+    _activate_generation_pointer(
+        logical_document_id=logical_document_id,
+        ingestion_id=job_id,
+        country=str(job.get("country") or first.get("country") or ""),
+        language=str(job.get("language") or first.get("language") or ""),
+        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
         document_type=str(job.get("document_type") or "policy"),
         access_scope=str(job.get("access_scope") or "country"),
-        source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-    ))
-    if settings.ADMIN_INGESTION_GENERATION_POINTER_ENABLED:
-        _activate_generation_pointer(
-            logical_document_id=logical_document_id,
-            ingestion_id=job_id,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            document_type=str(job.get("document_type") or "policy"),
-            access_scope=str(job.get("access_scope") or "country"),
-            activated_by=accepted_by,
-        )
-    else:
-        delete_actions = _older_source_actions(
-            client,
-            index=settings.OPENSEARCH_INDEX,
-            country=str(job.get("country") or first.get("country") or ""),
-            language=str(job.get("language") or first.get("language") or ""),
-            source_file=str(first.get("sourceFile") or job.get("filename") or ""),
-            ingestion_id=job_id,
-        )
-        if delete_actions:
-            helpers.bulk(client, delete_actions, raise_on_error=False, raise_on_exception=False)
+        activated_by=accepted_by,
+    )
     _record_document(
         job_id=job_id,
         filename=str(job.get("filename") or "document"),

@@ -188,6 +188,18 @@ ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS = _env_int(
     "ADMIN_INGESTION_WORKER_VISIBILITY_SECONDS",
     900,
 )
+# How long portal ingestion waits for a freshly written generation to become
+# searchable (or for its chunks to disappear on delete) on OpenSearch
+# Serverless VECTORSEARCH, whose Classic refresh interval is ~60s. A delete
+# needs two zero polls >= 65s apart after the last visible chunk is removed,
+# so the wait must cover at least two refresh cycles plus polling slack:
+# values below ADMIN_INGESTION_VISIBILITY_TIMEOUT_MIN_SECONDS are rejected by
+# scripts/validate_config.py and floored to it at runtime.
+ADMIN_INGESTION_VISIBILITY_TIMEOUT_MIN_SECONDS = 150
+ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS = _env_int(
+    "ADMIN_INGESTION_VISIBILITY_TIMEOUT_SECONDS",
+    180,
+)
 ADMIN_INGESTION_MAX_ATTEMPTS = _env_int("ADMIN_INGESTION_MAX_ATTEMPTS", 5)
 ADMIN_INGESTION_MAX_ARCHIVE_RATIO = _env_int("ADMIN_INGESTION_MAX_ARCHIVE_RATIO", 100)
 ADMIN_INGESTION_QUARANTINE_RETENTION_DAYS = _env_int(
