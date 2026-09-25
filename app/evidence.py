@@ -13,7 +13,7 @@ from typing import Any
 
 from app.retrieval.models import RetrievedDocument, RetrievalResult
 from app.retrieval.providers import SPONSORING_QUESTION_RE
-from config import settings
+from config import policy_request_vocabulary, settings
 from services.controlled_copy import localize_reviewed_copy
 from services.market_config import find_market_mentions, get_document_country_codes, market_adjective_codes
 from utils.text_similarity import edit_distance_at_most_one
@@ -150,15 +150,33 @@ def configured_conversation_response(key: str, language: str = "") -> tuple[str 
 def approve_evidence(query: str, retrieval_result: RetrievalResult, country: str, language: str) -> EvidenceDecision:
     """Approve approved, current-locale evidence before model generation."""
     intent = classify_intent(query, language)
-    # An explicit company-policy request cannot be satisfied by a global
-    # directory, even if the planner happens to route it to global evidence.
-    policy_requested = bool(_COMPANY_POLICY_REQUEST_RE.search(query))
-    # A foreign market named only as the place someone is being sponsored does
-    # not ask for that market's policy. The sponsoring fact is global, so the
-    # directory stays eligible; the policy part can still only come from the
-    # session's own rows, because _has_current_locale_document drops every
-    # foreign local-policy row.
-    mixed_sponsoring = policy_requested and is_mixed_sponsoring_policy_request(query, country)
+    # For an English session this whole block is byte-identical to main:
+    # the literal legacy regex and the English-only mixed-sponsoring
+    # carve-out, untouched. A non-English session takes a narrower path
+    # (config.policy_request_vocabulary) that never runs for English text -
+    # see that module's docstring for why (an earlier, broader version was
+    # rejected by adversarial review for refusing legitimate own-market
+    # questions). Cross-market refusal for a non-English session with a
+    # localized sponsoring word is deliberately skipped rather than carved
+    # out (also see that module's docstring): under-refusing a mixed
+    # sponsoring+policy question in these locales is accepted; refusing a
+    # legitimate one is not.
+    locale = (language or "en").split("-", 1)[0].lower()
+    if locale == "en":
+        # An explicit company-policy request cannot be satisfied by a global
+        # directory, even if the planner happens to route it to global evidence.
+        policy_requested = bool(_COMPANY_POLICY_REQUEST_RE.search(query))
+        # A foreign market named only as the place someone is being sponsored
+        # does not ask for that market's policy. The sponsoring fact is
+        # global, so the directory stays eligible; the policy part can still
+        # only come from the session's own rows, because
+        # _has_current_locale_document drops every foreign local-policy row.
+        mixed_sponsoring = policy_requested and is_mixed_sponsoring_policy_request(query, country)
+    else:
+        policy_requested = policy_request_vocabulary.is_company_policy_request(query, locale)
+        if policy_requested and policy_request_vocabulary.contains_sponsoring_stem(query, locale):
+            policy_requested = False
+        mixed_sponsoring = False
     if policy_requested and not mixed_sponsoring and _names_another_market(query, country):
         return EvidenceDecision(False, "cross_market_policy_request", [], intent, False, 0.0, 0.0)
     exclude_global = policy_requested and not mixed_sponsoring
