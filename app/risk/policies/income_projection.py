@@ -21,6 +21,16 @@ average"):
       ("Supervisor: about $1,500 a month", "| Manager | ~$3,000/mo |")
   P6  verb-free estimate ("FBOs in their second year usually clear $1,000 a
       month")
+  P7-P9 (step 1b) comparison with an outside pay benchmark, "expect"/"count
+      on" + amount, "your business will be worth ..." -- see the 1b block
+  P10 (step 1c) an amount with NO currency anchor followed directly by a
+      period phrase, in an earner / estimate shape ("Most Managers make
+      5,000 a month", "gagnent 1 500 par mois", "two thousand a month")
+  P11 (step 1c) a percentage return / yield / interest on money or an
+      investment per period, money that doubles, income that grows N% per
+      period ("Expect a 30% return every month", "ROI of 50% a year")
+  P12 (step 1c) a certainty-marked promise that people make / earn money
+      with no figure ("Everyone on my team makes money")
 
 It is set aside when the earn verb sits in a condition or relative clause
 ("if an FBO earns EUR 20 ..., EUR 3 is deducted", "FBOs who earn $600
@@ -141,6 +151,12 @@ _SPELLED_MONEY = (
 # MONEY_RE is scanned many times per sentence (per verb, per noun, per language) and the number-word alternation is
 # the costliest branch; one substitution pass per sentence keeps the detector's cost flat and lets every rule
 # (P1..P8, RANGE, the "make ..." lookahead) see a spelled amount exactly as it sees a figure.
+# 1c: the number-word run inside _SPELLED_MONEY is bounded to 8 joined tokens (see _SPELLED_NUM_BOUNDED below):
+# with the unbounded "(join token)*" run, "two thousand and " * N + "x y dollars" chained every number word into one
+# candidate run retried from every token -- O(n^2), measured 1.3 s / 12 s / 45 s at N = 500 / 1,000 / 2,000 on the
+# pre-1c detector. No real spelled amount has more than ~6 tokens, so every verdict is unchanged.
+_SPELLED_NUM_BOUNDED = _SPELLED_NUM[:_SPELLED_NUM.rindex(")*")] + r"){0,8}"
+_SPELLED_MONEY = _SPELLED_MONEY.replace(_SPELLED_NUM, _SPELLED_NUM_BOUNDED, 1)
 _SPELLED_RE = re.compile(r"(?<!\w)(?:" + _SPELLED_MONEY + r")")
 # cheap gate: a currency word (or "grand") right after a word -- only then is the number-word pass run
 _SPELLED_GATE = re.compile(r"[^\W\d_]\s+(?:" + _CUR_WORD + r"|grand)(?!\w)")
@@ -791,7 +807,9 @@ WIN_BEFORE, WIN_AFTER = 60, 80  # money must sit near the verb (chars)
 V2_LANGS = {"de", "nl", "sv", "da", "no"}
 # Prohibition stated AFTER the claim in the same sentence ("... promising a luxury lifestyle is prohibited").
 POST_BAN = {
-    "en": r"(?:is|are)\s+(?:strictly\s+)?(?:prohibited|forbidden|not\s+(?:allowed|permitted))|(?:is|are)\s+banned",
+    "en": r"(?:is|are)\s+(?:strictly\s+)?(?:prohibited|forbidden|not\s+(?:allowed|permitted))|(?:is|are)\s+banned"
+          # 1c post-hoc (held-out): "... are a classic sign of a fraudulent scheme" names the claim as a fraud marker
+          r"|(?:is|are)\s+(?:a\s+|the\s+)?(?:\w+\s+){0,2}?(?:signs?|hallmarks?|red\s+flags?)\s+of\s+(?:an?\s+)?(?:fraud\w*|scam\w*|pyramid|ponzi|illegal)",
     "fr": r"(?:est|sont)\s+(?:strictement\s+)?(?:interdit\w*|prohib\w*)|(?:n'est|ne\s+sont)\s+pas\s+(?:autoris\w*|permis\w*)",
     "es": r"(?:esta|estan)\s+(?:estrictamente\s+)?prohibid\w*|no\s+(?:esta|estan)\s+permitid\w*",
     "it": r"(?:e|sono)\s+(?:severamente\s+|rigorosamente\s+)?(?:vietat\w*|proibit\w*)|non\s+(?:e|sono)\s+(?:consentit|permess)\w*",
@@ -972,6 +990,12 @@ def _fold(raw):
     s = fold(raw)
     if _SPELLED_GATE.search(s):
         s = _SPELLED_RE.sub("$100", s)
+    # 1c/bare: a spelled amount with NO currency word but a period right after it ("two thousand a month", "cinq
+    # mille par mois", "funftausend pro Monat") is rewritten to a figure the same way, so every bare-amount rule
+    # (P10 and the "make ..." lookahead) sees it exactly as "1000 a month". Only spelled numbers that END in a
+    # magnitude word (hundred/thousand/mille/tausend/...) are rewritten: "two a month" is a count, not money.
+    if _SPELLED_BARE_GATE.search(s):
+        s = _SPELLED_BARE_RE.sub(lambda m: "1000" if _BARE_MAG_END.search(m.group(0)) else m.group(0), s)
     return s
 
 
@@ -1538,6 +1562,416 @@ def _detect_p9(s, lang, raw, idx=None):
 # <<< 1b block
 
 
+# >>> 1c block
+# ---------------------------------------------------------------------------------------------------------------
+# STEP 1c extensions: amounts with no currency anchor (P10), percentage returns on money (P11), money-naming
+# promises with no figure (P12). All three are applied only through detect_lang() -> generated answers only.
+# ---------------------------------------------------------------------------------------------------------------
+# A period phrase that must sit RIGHT AFTER the bare figure ("5,000 a month", "1 500 par mois", "5.000 al mes",
+# "1.500 im Monat", "900 monatlich", "50 000 i manaden", "5 000 kuukaudessa", "500 000 в месяц", "500.000 mesecno").
+# Adjacency is the main precision guard: "4 CC a month", "25 orders per month", "2 times a week", "18 months" and
+# "1.01(d)" never put a period phrase directly after the figure. A bare adverb form ("monatlich", "mensual") must
+# be followed by punctuation / the end of the clause or a preposition, so "12 monthly statements" is not an amount.
+_BARE_PERIOD = (
+    r"(?:a|per|each|every|par|chaque|al|por|cada|ogni|im|pro|je|jeden|elke|iedere|i|om|pr\.?|varje|hver|в|каждый|svakog|svaki|/)"
+    r"\s*(?:month|week|year|mo|wk|yr|annum|mois|semaine|an|annee|mes|semana|ano|mese|settimana|anno|monat|woche|jahr"
+    r"|maand|jaar|manaden|manad|veckan|vecka|aret|ar|maneden|maned|ugen|uge|uka|uken|uke|месяц|неделю|год|meseca|mesec)"
+    r"|all'anno|kuukaudessa|kuussa|viikossa|vuodessa|kuukausittain|joka\s+kuukausi|на\s+месец|na\s+mesec"
+    r"|(?:monthly|weekly|yearly|annually|mensuels?|mensuelles?|mensual(?:es|mente)?|semanales?|anuales?|mensili?|mensilmente"
+    r"|annui|monatlich|wochentlich|jahrlich|maandelijks|wekelijks|jaarlijks|manatligen|manadsvis|manedligt|manedlig"
+    r"|ежемесячно|mesecno|nedeljno|godisnje|месечно|недељно|годишње)"
+    r"(?=\s*(?:[.,;:!?)]|$|(?:in|from|as|with|within|after|on|once|when|while|and|or|but|so|by|for|at|to|de|en|von|aus|van|dans"
+    r"|au|nel|nach|bei|i|u|на|und|et|y|e|og|och|ja|и|od|iz|за|от|av|af|fra|fran|da|dal|dai|par|pour|fur|voor|for)\s))"
+    r"|in\s+(?:their|your|the|his|her)\s+first\s+(?:month|year|week)"
+)
+_BARE_PERIOD = _fold_pattern(_BARE_PERIOD)
+_BARE_FILLER = (
+    r"(?:(?:net|extra|more|clear|or\s+more|in\s+(?:bonuses|bonus|commissions?|income|profit|earnings|residuals?)"
+    r"|de\s+(?:bonus|revenus?|commissions?)|en\s+(?:bonos?|ingresos?|comisiones)|di\s+(?:bonus|provvigioni)"
+    r"|an\s+(?:bonus|boni|provision(?:en)?)|aan\s+bonus(?:sen)?|netto|brutto|nets?|nette?s?)\s+)?"
+)
+_BARE_FILLER = _fold_pattern(_BARE_FILLER)
+# spelled magnitude words a spelled bare amount must END in (see _fold)
+_BARE_MAG = (
+    r"hundred|thousand|cents?|mille|cien|ciento|(?:dos|tres|cuatro|seis|sete|ocho|nove)cient[oa]s|quinient[oa]s|mil|cento|mila|hundert|tausend|honderd|duizend|hundra|tusen"
+    r"|hundrede|tusind|hundre|sata|sataa|tuhat|tuhatta|сто|сот|тысяч\w*|sto|stotin\w*|hiljad\w*"
+)
+_BARE_MAG = _fold_pattern(_BARE_MAG)
+# The number-word run is BOUNDED (_SPELLED_NUM_BOUNDED, at most 8 joined tokens): _SPELLED_NUM's unbounded "(join
+# token)*" run lets number words chain across a whole sentence ("two thousand AND two thousand AND ..."), and a
+# rewrite that retries that run from every token was O(n^2) (40 s at 2,000 tokens).
+_SPELLED_BARE_RE = re.compile(
+    r"(?<!\w)(?:" + _SPELLED_NUM_BOUNDED + r")(?<=\w)(?=\s*" + _BARE_FILLER + r"(?:" + _BARE_PERIOD + r")(?!\w))"
+)
+# R3: no "\w*" prefix in the gate -- "\w*cient[oa]s" rescanned a long digit run from every position (a 25,000-digit
+# input took 15.9 s); the Spanish hundreds are spelled out instead and a digit may not precede the magnitude word.
+# (Not a full "(?<!\w)" boundary: German/Dutch/Swedish glue the number words -- "funftausend pro Monat".)
+_SPELLED_BARE_GATE = re.compile(r"(?<!\d)(?:" + _BARE_MAG + r")\s+\w")
+_BARE_MAG_END = re.compile(r"(?:" + _BARE_MAG + r")$")
+_BARE_AMOUNT = (
+    rf"(?:{_NUM})\s?(?:k|mil|mila|mille|tausend|tusen|tusind|тыс\.?|тысяч\w*|hiljad\w*)?"
+)
+_BARE_RE = re.compile(
+    rf"(?<![\w$€£.,/'’:-])(?:{_BARE_AMOUNT})(?![\w%])[\s*]*" + _BARE_FILLER + r"(?:" + _BARE_PERIOD + r")(?!\w)"
+)
+_BARE_KEY = re.compile(r"\d\s*(?:k|mil|mila|mille|tausend|tusen|tusind|тыс|тысяч\w*|hiljad\w*)?[\s*]*" + _BARE_FILLER + r"(?:" + _BARE_PERIOD + ")")
+# a currency right before the figure -> the existing money rules (P1..P9) own it, not P10
+_CUR_BEFORE_RE = re.compile(r"(?:(?<!\w)(?:" + _CUR_WORD + r")|" + _CUR_SYM + r")\s?$")
+_BARE_ROLE_SEP = re.compile(r"\s*(?:\*\*)?\s*(?:[:|=–—](?=\s)|\s-\s)")
+
+
+# Review R1: spending / cost wording that RULECTX does not cover (separable "gibt ... aus", "lägger", "bruger",
+# "трачу", "spent on", "budget", "goes on") -- a figure per period that the reader PAYS, applied to P10 path (e).
+_SPEND_RE = re.compile(_fold_pattern(
+    r"(?<!\w)(?:spen[dt]\w*|budget\w*|goes\s+on|go\s+on|uses?|using|rent\w*|lease\w*|insurance|electricity|utilit\w*|advertis\w*|samples?"
+    r"|depens\w*|loyer|gast\w*|alquiler|spend\w*|affitto|gebe|gibt|geben|gab|ausgeb\w*|miete|verbrauch\w*|geef|geeft|geven|uitgav\w*|huur"
+    r"|lagger|lagga|spender\w*|hyra\w*|bruger|bruge|brugt|husleje|bruker|bruke|brukt|husleie|kayt\w*|kulut\w*|vuokra\w*"
+    r"|трат\w*|трач\w*|расход\w*|аренд\w*|trosi\w*|potrosi\w*|kirij\w*|zakup\w*)(?!\w)"))
+
+
+def _bare_value(m):
+    """Numeric magnitude of a bare-amount match (thousand-word / k forms count as >= 1000)."""
+    digits = re.sub(r"\D", "", re.match(r"[\d .,'’ ]*", m.group(0)).group(0))
+    value = int(digits) if digits else 0
+    if re.match(r"[\d .,'’ ]*\s?(?:k|mil|mila|mille|tausend|tusen|tusind|тыс|тысяч|hiljad)", m.group(0)):
+        value = max(value, 1000)
+    return value
+
+
+def _p10_verb_ok(s, v, m, lang, idx, hi):
+    """Shared guards for a verb-anchored bare amount: same clause, no rule/program/threshold word between the verb
+    and 40 chars past the amount, no condition/negation/report around the verb."""
+    if m.start() - v.end() > WIN_AFTER or m.start() >= hi:
+        return False
+    gap = s[v.end():m.start()]
+    c = V[lang]["conj"].search(gap)
+    if c and not V[lang]["modal"].search(gap, c.end()):
+        return False
+    rhi = min(hi, m.end() + 40)
+    if RULECTX_RE[lang].search(s, v.end(), rhi) or _PROGRAM.search(s, v.end(), rhi) or _RULE1B.search(s, v.end(), m.start()):
+        return False
+    return True
+
+
+def _detect_p10(s, lang, raw, idx=None):  # noqa: C901
+    if not _BARE_KEY.search(s):
+        return None
+    voc = V[lang]
+    for m in _BARE_RE.finditer(s):
+        if _CUR_BEFORE_RE.search(s, max(0, m.start() - 12), m.start()):
+            continue
+        value = _bare_value(m)
+        if value < 10:
+            continue
+        lo, hi = _seg_start(s, m.start(), idx), _seg_end(s, m.end(), idx)
+        wlo = max(lo, m.start() - WIN_BEFORE - 20)
+        # (a) strong earn verb before the amount (P1 shape): "Most Managers make 5,000 a month"
+        for v in voc["strong"].finditer(s, wlo, m.end()):
+            if v.start() >= m.start():
+                break
+            if not _p10_verb_ok(s, v, m, lang, idx, hi):
+                continue
+            if _subordinate(s, v, lang, idx) or _negated(s, v, lang, idx) or _reported(s, v.start(), v.end(), lang, idx):
+                continue
+            return ("P10", lang, raw)
+        # (b) weak receive verb + estimate + earner subject (P2 shape): "Most FBOs receive about 400 a month"
+        for v in voc["weak"].finditer(s, wlo, m.end()):
+            if v.start() >= m.start():
+                break
+            if voc["refund"].match(s, v.end()) or not _p10_verb_ok(s, v, m, lang, idx, hi):
+                continue
+            span = s[max(lo, v.start() - WIN_BEFORE):min(hi, m.end() + 40)]
+            if not voc["earner"].search(s, max(lo, v.start() - WIN_BEFORE), v.start()):
+                continue
+            if not (voc["estimate"].search(span) or RANGE.search(span)):
+                continue
+            if _subordinate(s, v, lang, idx) or _negated(s, v, lang, idx) or _reported(s, v.start(), v.end(), lang, idx):
+                continue
+            return ("P10", lang, raw)
+        # (c) expectation verb (P8 shape): "Realistically, expect 1,200 a month once you have three active legs"
+        for v in EXPECT_RE[lang].finditer(s, wlo, m.end()):
+            if v.start() >= m.start():
+                break
+            if not _p10_verb_ok(s, v, m, lang, idx, hi):
+                continue
+            initial = v.start() - lo <= WIN_BEFORE and _LEAD_FILLER.match(s, lo, v.start())
+            if not (initial or voc["earner"].search(s, max(lo, v.start() - WIN_BEFORE), v.start())):
+                continue
+            v2_imperative = lang in V2_LANGS and v.start() == lo and s.find(",", v.end()) < 0
+            if (not v2_imperative and _subordinate(s, v, lang, idx)) or _negated(s, v, lang, idx) or _reported(s, v.start(), v.end(), lang, idx):
+                continue
+            return ("P10", lang, raw)
+        # (a2) verb-final V2 clause: "Sie werden 2.000 jeden Monat verdienen" -- the earn verb follows the period phrase
+        if lang in V2_LANGS and voc["earner"].search(s, max(lo, m.start() - WIN_BEFORE), m.start()):
+            for v in voc["strong"].finditer(s, m.end(), min(hi, m.end() + 40)):
+                if RULECTX_RE[lang].search(s, wlo, v.end()) or _PROGRAM.search(s, wlo, v.end()) or _RULE1B.search(s, wlo, m.start()):
+                    break
+                if voc["neg"].search(s, max(lo, m.start() - WIN_BEFORE), v.end()) or _reported(s, m.start(), v.end(), lang, idx):
+                    break
+                if voc["conj"].search(s, max(lo, m.start() - WIN_BEFORE), m.start()) or voc["rel"].search(s, max(lo, m.start() - WIN_BEFORE), m.start()):
+                    break
+                return ("P10", lang, raw)
+        if value < 100:
+            continue  # a verb-free bare figure under 100 is far more often a count than money
+        # (d) rank label (P5 shape): "Supervisor: about 1,500 a month"
+        r_ok = False
+        for r in ROLE.finditer(s, max(0, m.start() - 90), m.start()):
+            sep = _BARE_ROLE_SEP.match(s, r.end())
+            if not sep or sep.end() > m.start():
+                continue
+            tail = s[sep.end():min(len(s), sep.end() + 70)]
+            if not (EST6_RE[lang].search(tail) or RANGE.search(tail) or "~" in tail[:m.start() - sep.end() + 1]):
+                continue
+            if RULECTX_RE[lang].search(tail) or _PROGRAM.search(tail) or _RULE1B.search(tail) or _reported(s, r.start(), r.end(), lang, idx):
+                continue
+            r_ok = True
+            break
+        if r_ok:
+            return ("P10", lang, raw)
+        # (e) verb-free estimate with an earner / rank / income noun in the clause (P6 shape):
+        # "Distributors at Supervisor level: on average 2 000 per month"
+        cwlo, cwhi = max(lo, m.start() - 400), min(hi, m.end() + 400)
+        clause = s[cwlo:cwhi]
+        # Review R1: the earner / rank / income noun is always required -- "The rent for a small office is about
+        # 1,000 a month" has an estimate next to the figure but nobody earning it. The adjacent estimate only stands
+        # in for the clause-level EST6 requirement ("an average of 2 000 per month").
+        if not (voc["earner"].search(clause) or ROLE.search(clause) or NOUN_B_RE[lang].search(clause)):
+            continue
+        if not (EST6_RE[lang].search(s, max(lo, m.start() - 24), m.start()) or EST6_RE[lang].search(clause)):
+            continue
+        if RULECTX_RE[lang].search(clause) or _PROGRAM.search(clause) or _RULE1B.search(clause) or voc["neg"].search(clause):
+            continue
+        if _SPEND_RE.search(clause):
+            continue  # "I spend about 100 a month on products", "annual training budget is about 1,500 a year"
+        if _reported(s, m.start(), m.end(), lang, idx):
+            continue
+        if any(not PERIOD.match(clause, c.end() + 1) for c in voc["conj"].finditer(clause)) or voc["rel"].search(s, cwlo, m.start()):
+            continue
+        return ("P10", lang, raw)
+    return None
+
+
+# P11 (return): a percentage return / yield / interest on money or an investment per period ("Expect a 30% return
+# every month", "ROI of 50% a year", "rendement de 30 % par mois"), money that doubles / triples ("double your
+# money every year", "Ihr Geld verdoppelt sich alle sechs Monate"), or income that grows N% per period ("your
+# income grows 10% every month"). Bonus RATES ("Personal Bonus of 5%", "earn 8% on ..."), discounts, retail margin
+# ("43% retail profit") and product-return / refund rules ("returned products are refunded at 100%") never use a
+# return-on-money noun, or carry a RULECTX word (refund, purchase, price, order, discount ...) that sets them aside.
+_PCT = r"\d+(?:[.,]\d+)?\s*(?:%|percent|per\s+cent|pour\s*cent|por\s*ciento|per\s*cento|prozent|procent|prosent|prosenttia|процент\w*|posto|odsto)"
+_RET_NOUN = {
+    "en": r"returns?|roi|yields?|interest|profits?\s+(?:on|from)\s+(?:your|the|their|my)\s+(?:investment|money|capital)|capital\s+gains?",
+    "fr": r"rendements?|retours?\s+sur\s+(?:votre\s+|l'|leur\s+|un\s+)?investissement|roi|interets?|plus-values?",
+    "es": r"rendimientos?|retornos?\s+(?:de|sobre)\s+(?:la\s+|tu\s+|su\s+)?inversion|roi|intereses|rentabilidad",
+    "it": r"rendiment[oi]|ritorno\s+sull'?\s?investimento|roi|interessi|rendita",
+    "de": r"renditen?|kapitalrendite|roi|zinsen|verzinsung",
+    "nl": r"rendement|roi|rente",
+    "sv": r"avkastning\w*|roi|ranta",
+    "da": r"afkast\w*|roi|rente|forrentning",
+    "no": r"avkastning\w*|roi|rente|forrentning",
+    "fi": r"tuotto\w*|roi|korko\w*",
+    "ru": r"доходност\w*|roi|окупаемост\w*|прибыл\w*\s+(?:от|на|с)\s+(?:ваш\w*\s+)?(?:инвестиц\w*|вложени\w*)",
+    "sr": r"prinos\w*|povrat\w*\s+(?:na\s+)?(?:investicij\w*|ulaganj\w*|uloga)|roi|kamat\w*|принос\w*",
+}
+_RET_LINK = r"(?:of|on|de|del|della|du|von|van|pa|op|di|od|na|в|au\s+taux\s+de)"
+_RET_ADJ = r"(?:(?:monthly|annual|yearly|weekly|guaranteed|steady|passive|fixed|mensuel\w*|annuel\w*|mensual\w*|anual\w*|mensile|annuo|annuale|monatliche?n?|jahrliche?n?|maandelijks|jaarlijks|manatlig|arlig|manedlig|arlig|kuukausittai\w*|vuosittai\w*|ежемесячн\w*|годов\w*|mesecn\w*|godisnj\w*)\s+)?"
+_RET_NOUN_RE = {}
+for _k, _v in _RET_NOUN.items():
+    _noun = r"(?:" + _fold_pattern(_v) + r")"
+    _RET_NOUN_RE[_k] = re.compile(
+        r"(?<!\w)(?:(?:an?\s+|une?\s+|un[ao]?\s+|eine?n?\s+|een\s+|e[nt]\s+)?" + _fold_pattern(_PCT) + r"\s+" + _fold_pattern(_RET_ADJ) + _noun
+        + r"|" + _noun + r"\s+(?:" + _RET_LINK + r"\s+)?(?:\w+\s+){0,4}?" + _fold_pattern(_PCT) + r")(?!\w)"
+    )
+# "return on the products / goods / order" or "product returns" is a merchandise return, never money
+# Review A1: interest / yield that is a late-payment, statutory, bank, savings, deposit or bond rate is not a return
+# the reader earns from the business (all languages; checked over the return phrase's clause window).
+_RET_EXCL = re.compile(_fold_pattern(
+    r"(?<!\w)(?:bank\w*|savings|deposit\w*|bonds?|treasur\w*|gilts|overdue|late\s+payment\w*|late\s+fees?|statutory|arrears|penalt\w*|default\w*"
+    r"|mortgage\w*|loans?|credit\s+card\w*|balances?|tax\w*"
+    r"|retard|banque\w*|bancaire\w*|livret\w*|obligations?|impaye\w*|emprunt\w*|pret\w*|penalite\w*"
+    r"|demora|mora|banco\w*|bancari\w*|deposito\w*|bonos|prestamo\w*|hipotec\w*"
+    r"|ritardo|banca|bancari\w*|obbligazion\w*|scadut\w*|prestit\w*|mutu[oi]"
+    r"|verzug\w*|sparkonto\w*|sparbuch\w*|anleihe\w*|uberfallig\w*|darlehen\w*|kredit\w*|hypothek\w*|staatsanleihe\w*"
+    r"|te\s+late|spaarrekening\w*|spaargeld|obligatie\w*|achterstallig\w*|lening\w*|hypotheek\w*"
+    r"|drojsmal\w*|sparkonto|obligation\w*|forfall\w*|lan|bolan"
+    r"|opsparing\w*|forfaldne|forsinket|realkredit\w*"
+    r"|sparekonto\w*|obligasjon\w*|forfalt\w*|forsinkelse\w*"
+    r"|viivastys\w*|pankki\w*|saastotili\w*|talletu\w*|joukkovelka\w*|eraantyn\w*|laina\w*"
+    r"|банк\w*|вклад\w*|депозит\w*|облигац\w*|просроч\w*|пен[яи]\w*|кредит\w*|ипотек\w*"
+    r"|banka|banc\w*|stedn\w*|obveznic\w*|zakasn\w*|zatezn\w*|kredit\w*|hipotek\w*)(?!\w)"))
+# Round 3: a contrast / comparison word ("unlike a bond, ...", "... far more than any deposit", "forget the bank:")
+# separates the bank/bond/deposit word from the return the reader is promised -- _RET_EXCL is applied only to the
+# return phrase's own side of the nearest such word.
+_RET_CONTRAST = re.compile(_fold_pattern(
+    r"(?<!\w)(?:unlike|than|compared\s+(?:with|to)|instead\s+of|rather\s+than|while|whereas|but|forget|contrairement\s+a|plutot\s+que|au\s+lieu\s+de|alors\s+que|tandis\s+que|mais"
+    r"|a\s+diferencia\s+de|en\s+lugar\s+de|mientras|pero|anziche|invece\s+di|mentre|ma|anders\s+als|statt|wahrend|aber|in\s+tegenstelling\s+tot|dan|terwijl|maar"
+    r"|till\s+skillnad\s+fran|istallet\s+for|medan|men|i\s+modsaetning\s+til|i\s+stedet\s+for|end|mens|i\s+motsetning\s+til|enn|toisin\s+kuin|kuin|mutta"
+    r"|в\s+отличие\s+от|чем|но|za\s+razliku\s+od|nego|umesto|dok|ali)(?!\w)"))
+_RET_GOODS = re.compile(r"(?:products?|goods|merchandise|inventory|stock|orders?|items?|purchases?|produits?|productos?|prodotti|produkte?|producten)")
+_INVEST_WORD = re.compile(_fold_pattern(
+    r"(?<!\w)(?:invest\w*|roi|money|capital|savings|argent|capitaux|mise|dinero|inversion\w*|soldi|denaro|investimento|geld|investition\w*"
+    r"|kapital|einlage|pengar|penge\w*|investering\w*|rahasi|rahat|sijoitu\w*|деньги|денег|вложени\w*|инвестиц\w*|novac|ulaganj\w*|investicij\w*|ulog\w*)(?!\w)"))
+_MONEY_NOUN = (
+    r"money|investment|capital|savings|income|earnings|argent|investissement|mise|capital|dinero|inversion|ahorros|ingresos"
+    r"|soldi|denaro|investimento|capitale|geld|investition|kapital|einlage|einkommen|pengar|pengarna|penge|pengene|investering"
+    r"|rahasi|rahat|sijoituksesi|sijoitus|деньги|вложения|инвестиции|доход|novac|ulaganje|investiciju|investicija"
+)
+_DOUBLE_VERB = (
+    r"doubl(?:e|es|ed|ing|ez|er|era|erez|eront|ent)|tripl(?:e|es|ed|ing|ez|er|era)|quadrupl\w*|dupli(?:ca|cas|car|cara|caras|can|que)|tripli\w+"
+    r"|raddoppi\w+|triplic\w+|verdoppel\w*|verdreifach\w*|verdubbel\w*|verdrievoudig\w*|dubbl\w+|fordubbl\w*|fordobl\w+|fordoble|dobl\w+|tredobl\w+"
+    r"|tupla\w*|kaksinkertaist\w*|kolminkertaist\w*|удво\w*|утро\w*|udvostruc\w*|utrostruc\w*|multipl(?:y|ies|ied|iez|ica)"
+)
+_DOUBLE_RE = re.compile(_fold_pattern(
+    r"(?<!\w)(?:(?:" + _DOUBLE_VERB + r")\s+(?:(?:sie|du|vous|tu|usted|ustedes|voi|lei|jij|u|ni|dere|te|вы|ты|vi|ti)\s+)?(?:(?:your|their|his|her|my|the|votre|ton|leur|tu|su|el|i\s+tuoi|il\s+tuo|ihr|dein|sein|je|jouw|uw|dina|din|dine|deres|свои|ваши|свой|ваш|svoj|vas)\s+)?(?:" + _MONEY_NOUN + r")"
+    r"|(?:your|their|his|her|my|votre|ton|leur|tu|su|i\s+tuoi|il\s+tuo|ihr|dein|sein|je|jouw|uw|dina|din|dine|deres|ваши|свои|vas|svoj)\s+(?:" + _MONEY_NOUN + r")\s+(?:(?:dina|din|dine|deres|si)\s+)?(?:(?:will|could|can|would|va|se|si|sich|zich|sig|kan|zal|wird|kommer\s+att|vil|ce|tulee|kaksinkertaistuu)\s+)*(?:" + _DOUBLE_VERB + r")"
+    # possessive AFTER the noun (no "pengene dine", sv "pengarna dina") or built into it (fi "rahasi")
+    r"|(?:pengene|pengarna|penge|pengar|rahasi|rahat)\s+(?:(?:dina|din|dine|deres|si)\s+)?(?:(?:kommer\s+att|vil|kan)\s+)*(?:" + _DOUBLE_VERB + r"))(?!\w)"))
+_GROW_RE = re.compile(_fold_pattern(
+    r"(?<!\w)(?:income|earnings|revenus?|ingresos|reddito|guadagni|einkommen|inkomen|inkomst\w*|indkomst\w*|inntekt\w*|tulot|доход\w*|prihod\w*)"
+    r"(?!\s+(?:tax\w*|rates?|statements?|impot\w*|impuest\w*|impost\w*|steuer\w*|belasting\w*|skatt\w*|skat\w*|vero\w*|налог\w*|porez\w*))\s+"
+    r"(?:\w+\s+){0,2}?(?:grows?|growing|increases?|rises?|climbs?|augment\w+|cro(?:it|issent|itra)|crece\w*|aument\w+|cresc\w+|wachs\w+|steig\w+|groei\w+|stijg\w+"
+    r"|vaxer|okar|vokser|stiger|kasva\w+|раст\w+|выраст\w+|rast\w+)(?:\s+(?:\w+\s+){0,2}?(?:by|de|um|met|med|di|за|na|za)\s*)?\s*(?:un\s+)?" + _PCT + r"(?!\w)"))
+_PCT_KEY = re.compile(r"%|percent|cent|prozent|procent|prosent|процент|posto|odsto")
+_DOUBLE_KEY = re.compile(r"doubl|tripl|quadrupl|dupli|raddopp|verdopp|verdreif|verdubb|verdriev|dubbl|fordobl|dobl|tredobl|tupla|kertaist|удво|утро|udvostru|utrostru|multipl")
+
+
+def _p11_guard(s, m, lang, idx, need_period=False):
+    lo, hi = _seg_start(s, m.start(), idx), _seg_end(s, m.end(), idx)
+    wlo, whi = max(lo, m.start() - WIN_BEFORE), min(hi, m.end() + WIN_AFTER)
+    if need_period and not (PERIOD.search(s, wlo, whi) or _INVEST_WORD.search(s, wlo, whi)):
+        return False
+    # Post-hoc (held-out ru/sr misses, the Fable item 7 shape): an EXPECT verb before the return phrase carries its
+    # own rule-context stem (ru "рассчитывайте" -> "рассчит*", sr "racunajte" -> "racun*"), so the rule-context
+    # scan starts after the last such verb rather than over the verb's own span.
+    glo = wlo
+    for e in EXPECT_RE[lang].finditer(s, wlo, m.start()):
+        glo = e.end()
+    for mm in RULECTX_RE[lang].finditer(s, glo, whi):
+        # "this pays a 10% return every month": the pay verb whose object IS the return phrase is not rule context
+        if mm.group(0).startswith("pay") and mm.end() <= m.start() and re.fullmatch(r"\s+(?:(?:you|us|members)\s+)?(?:an?\s+|the\s+)?", s[mm.end():m.start()]):
+            continue
+        return False
+    if _RULE1B.search(s, glo, whi) or _RET_GOODS.search(s, wlo, whi):
+        return False
+    xlo, xhi = wlo, whi
+    for c in _RET_CONTRAST.finditer(s, wlo, whi):
+        if c.end() <= m.start():
+            xlo = c.end()  # nearest contrast word BEFORE the return phrase: ignore everything before it
+        elif c.start() >= m.end() and xhi == whi:
+            xhi = c.start()  # first contrast word AFTER it: ignore everything past it
+    if _RET_EXCL.search(s, xlo, xhi):
+        return False
+    if V[lang]["neg"].search(s, wlo, m.end()) or _reported(s, m.start(), m.end(), lang, idx):
+        return False
+    if V[lang]["conj"].search(s, wlo, m.start()) or V[lang]["rel"].search(s, wlo, m.start()):
+        return False
+    return True
+
+
+def _detect_p11(s, lang, raw, idx=None):
+    if _PCT_KEY.search(s):
+        for m in _RET_NOUN_RE[lang].finditer(s):
+            if _p11_guard(s, m, lang, idx, need_period=True):
+                return ("P11", lang, raw)
+        for m in _GROW_RE.finditer(s):
+            if PERIOD.search(s, m.start(), min(len(s), m.end() + 40)) and _p11_guard(s, m, lang, idx):
+                return ("P11", lang, raw)
+    if _DOUBLE_KEY.search(s):
+        for m in _DOUBLE_RE.finditer(s):
+            if _p11_guard(s, m, lang, idx):
+                return ("P11", lang, raw)
+    return None
+
+
+# P12 (money promise, no figure): a certainty-marked promise that people make / earn money ("Everyone on my team
+# makes money", "I promise you will earn money", "You will make money with us"). An explanation of HOW FBOs earn
+# money ("FBOs earn money through retail sales and bonuses", "you can earn money by selling them") carries no
+# certainty marker (everyone / will / promise / guarantee) or carries a modal / means word, and never fires.
+_MONEY_PROMISE = {
+    "en": [
+        # Review R2: "everyone / every FBO earns money (from sales)" is how the Marketing Plan is explained; only a
+        # TEAM / possessive scope ("everyone on my team", "all of my recruits") turns it into a personal promise.
+        r"(?:everyone|everybody|every\s+(?:member|fbo|recruit|person|new\s+\w+))\s+(?:who\s+(?:joins|joined|is\s+in|works\s+in|is\s+on)\s+)?(?:(?:on|in|of|from)\s+)?(?:my|our|this)\s+(?:forever\s+)?(?:team|downline|group|organi[sz]ation|network|business|line|circle)\s+(?:makes?|earns?|will\s+(?:make|earn)|is\s+making|are\s+making|are\s+earning|is\s+earning)\s+(?:[\"“”]?(?:good|real|serious|big)[\"“”]?\s+)?money",
+        r"all\s+(?:of\s+)?(?:the\s+)?(?:my|our)?\s*(?:recruits|members|people|fbos?|distributors|partners|sign[\s-]?ups)?\s*(?:(?:in|on|of)\s+)?(?:my|our)\s+(?:forever\s+)?(?:recruits|members|people|downline|team|group|fbos?|distributors|partners|organi[sz]ation|network|line)\s+(?:makes?|earns?|will\s+(?:make|earn)|are\s+making|are\s+earning)\s+(?:[\"“”]?(?:good|real|serious|big)[\"“”]?\s+)?money",
+        # round 3: sponsorship scope ("everyone I sponsored", "everyone who joins under me", "join my team: everyone makes money")
+        r"(?:everyone|everybody)\s+(?:(?:i|we)\s+(?:sponsored|sponsor|recruited|recruit|signed\s+up|brought\s+in)|who\s+(?:joins|joined|signs\s+up|signed\s+up|works)\s+(?:under|with|through|for)\s+(?:me|us))\s+(?:makes?|earns?|will\s+(?:make|earn)|are\s+making|are\s+earning|is\s+making)\s+(?:[\"“”]?(?:good|real|serious|big)[\"“”]?\s+)?money",
+        r"join(?:ing)?\s+(?:my|our)\s+(?:forever\s+)?(?:team|group|downline|organi[sz]ation|network)\s*[:,;-]*\s*(?:and\s+)?(?:everyone|everybody)\s+(?:makes?|earns?|will\s+(?:make|earn))\s+(?:[\"“”]?(?:good|real|serious|big)[\"“”]?\s+)?money",
+        r"(?:you|they|we)(?:'re|\s+are)?\s+(?:will|'ll|going\s+to|guaranteed\s+to)\s+(?:definitely\s+|certainly\s+|surely\s+|all\s+)?(?:make|earn)\s+(?:[\"“”]?(?:good|real|serious|big)[\"“”]?\s+)?money",
+        r"(?:i|we)\s+(?:promise|guarantee)\s+(?:you\s+)?(?:that\s+)?(?:you\s+)?(?:will|'ll)\s+(?:make|earn)\s+money",
+    ],
+    "fr": [r"tout\s+le\s+monde\s+(?:dans|de|sur)\s+(?:mon|ma|notre)\s+(?:equipe|groupe|reseau|organisation|downline|ligne)\s+gagne\s+de\s+l'argent",
+           r"vous\s+(?:allez\s+gagner|gagnerez)\s+de\s+l'argent"],
+    "es": [r"todos\s+(?:en|de)\s+(?:mi|nuestro|nuestra)\s+(?:equipo|grupo|red|organizacion|linea)\s+ganan\s+dinero",
+           r"(?:vas|van|va)\s+a\s+ganar\s+dinero", r"ganaras\s+dinero"],
+    "de": [r"jeder\s+(?:in|aus)\s+(?:meinem|meiner|unserem|unserer)\s+(?:team|gruppe|netzwerk|organisation|downline|linie)\s+verdient\s+geld",
+           r"(?:sie|du)\s+(?:werden|wirst)\s+(?:\w+\s+){0,5}?geld\s+verdienen"],
+    "it": [r"tutti\s+(?:nel|nella|del|della)\s+(?:mio|mia|nostro|nostra)\s+(?:team|squadra|gruppo|rete|organizzazione|linea)\s+guadagnano\s+soldi",
+           r"guadagnerai\s+soldi"],
+}
+_MONEY_PROMISE_RE = {k: _comp(v) for k, v in _MONEY_PROMISE.items()}
+# Round 3 (A4): a QUOTED promise is a reported claim only when (a) the quote opens the sentence and the closing
+# quote is followed by is/are/breaks/violates/must not/counts as ..., or (b) a say/report word whose subject is not
+# first person precedes the quote in its clause. 'I promise "you will make money"', 'As I always say: "..."',
+# '"..." - and that's a fact' are the answer's own promise and fire.
+_QUOTE_VERDICT = re.compile(_fold_pattern(
+    r"[\s,;:.!?)\-]*(?:is|are|was|were|would\s+be|breaks|violates|breaches|counts\s+as|constitutes|must\s+not|may\s+not|should\s+not|cannot|can't"
+    r"|est|sont|serait|constitue|enfreint|viole|ne\s+(?:doit|peut)\s+pas|es|son|seria|constituye|infringe|viola|no\s+(?:debe|puede)"
+    r"|ist|sind|ware|verstosst|verletzt|gilt|darf\s+nicht|e|sono|sarebbe|costituisce|viola|infrange|non\s+(?:deve|puo))(?!\w)"
+    # a copula that affirms the quote ("... is a fact", "... is what I guarantee") is not a verdict on it
+    r"(?![\s,]+(?:(?:a|an|the|my|our|simply|just|absolutely|not\s+an?)\s+)*(?:facts?|true|truth|promise|guarantee|motto"
+    r"|exaggeration|what\s+(?:i|we))(?!\w))"))
+_SAY_WORD = re.compile(_fold_pattern(
+    r"(?<!\w)(?:says?|said|saying|claims?|claimed|claiming|called|calling|such\s+as|like|e\.?g\.?|for\s+example|statements?|phrases?|wording|lines?|slogans?"
+    r"|tell\w*|told|writes?|wrote|written|reads?|posts?|posted|quotes?|quoted|dit|dire|dis|dites|disons|disant|disent|digas?|digan|declar\w*|affirm\w*|comme|telles?\s+que|par\s+exemple|phrases?|affirmations?"
+    r"|dice|dicen|decir|diciendo|afirm\w*|como|por\s+ejemplo|frases?|afirmaci\w*|sagt|sagen|gesagt|behaupt\w*|wie|zum\s+beispiel|aussagen?|satz|saetze"
+    r"|dicono|dicendo|afferm\w*|ad\s+esempio|frasi|affermazion\w*)(?!\w)"))
+_FIRST_PERSON = re.compile(r"(?<!\w)(?:i|we|je|nous|yo|nosotros|ich|wir|io|noi)(?!\w)")
+
+
+def _quoted_report(s, p, lo, hi):
+    """Whether the P12 match `p` sits inside quotation marks that report someone else's claim (see _QUOTE_VERDICT)."""
+    # quotation marks are clause breaks themselves (_CLAUSE_BREAK), so the quotes are looked up around the clause
+    q_open = None
+    for q in _QUOTE.finditer(s, max(0, p.start() - 200), p.start()):
+        q_open = q
+    if q_open is None:
+        return False
+    q_close = _QUOTE.search(s, p.end(), min(len(s), p.end() + 6))
+    if q_close is None:
+        return False
+    if not s[:q_open.start()].strip(" \t*_>#-•·") and _QUOTE_VERDICT.match(s, q_close.end()):
+        return True  # sentence-initial quotation judged by the sentence itself
+    lead = s[max(0, q_open.start() - WIN_BEFORE):q_open.start()]
+    say = None
+    for w in _SAY_WORD.finditer(lead):
+        say = w
+    return say is not None and not _FIRST_PERSON.search(lead[:say.start()])
+
+
+_PROMISE_SOFT = re.compile(_fold_pattern(
+    r"(?<!\w)(?:can|could|may|might|able|possib\w*|potential\w*|opportunit\w*|how|by|through|from|via|solely|only|exclusively|based|whether|if|depends?|some|not|no|never"
+    r"|peut|peuvent|pouvez|comment|si|uniquement|seulement|grace|puede|pueden|como|solo|unicamente|kann|konnen|wie|ob|nur|ausschliesslich|durch"
+    r"|puo|possono|come|soltanto|solamente)(?!\w)"))
+
+
+def _detect_p12(s, lang, raw, idx=None):
+    rx = _MONEY_PROMISE_RE.get(lang)
+    if rx is None:
+        return None
+    for p in rx.finditer(s):
+        lo, hi = _seg_start(s, p.start(), idx), _seg_end(s, p.end(), idx)
+        wlo = max(lo, p.start() - WIN_BEFORE)
+        if _PROMISE_SOFT.search(s, wlo, min(hi, p.end() + 40)) or V[lang]["neg"].search(s, wlo, p.start()):
+            continue
+        if _reported(s, p.start(), p.end(), lang, idx):
+            continue
+        if _quoted_report(s, p, lo, hi):
+            continue
+        return ("P12", lang, raw)
+    return None
+
+# <<< 1c block
+
+
 def detect_lang(text, lang):
     for raw in sentences(text):
         s = _mask_idioms(_fold(raw), lang)
@@ -1556,6 +1990,9 @@ def detect_lang(text, lang):
             or _detect_p8(s, lang, raw, idx)
             or _detect_p3bc(s, lang, raw, idx)
             or _detect_p9(s, lang, raw, idx)
+            or _detect_p10(s, lang, raw, idx)
+            or _detect_p11(s, lang, raw, idx)
+            or _detect_p12(s, lang, raw, idx)
         )
         if hit:
             return hit

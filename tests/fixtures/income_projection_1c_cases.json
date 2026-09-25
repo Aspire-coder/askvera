@@ -1,0 +1,2435 @@
+{
+  "description": "Step 1c cases for the earnings-projection detector. must_refuse: dev (tuning) and held-out (frozen sha1 b28c281c277ac0f828a44fa70bfaf8da1792b1b3, scored once before the two post-hoc fixes: 59/61; after: 61/61) projections -- item 1 = amount with no currency anchor + period (P10), item 2 = percentage return on money / investment per period (P11), item 3 = money-naming promise with no figure (P12). 'rule' is the rule id the 1c detector returns; 'pre_1c_rule' is what the step-1b detector returned (null = missed). must_not_fire: compliant sentences of the same shapes (bonus rates, discounts, Case Credits, prices, dates, phone/section numbers, rule descriptions, disclaimers, prohibitions, explanations of how FBOs earn money) in all 12 languages -- none may fire. stays_refused: the documented step-1 compliance calls that the pre-1c detector already refuses (P1) and that must keep firing on the SAME rule.",
+  "must_refuse": [
+    {
+      "id": "dev-1-en-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Most Managers make 5,000 a month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Active FBOs typically earn 1,500 per month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-3",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Stick with it and you'll be earning 900 a month within a year.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-4",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "New Supervisors bring in an average of 2 000 per month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-5",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Most of our team members take home 1.500 every month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-6",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "You will make 5k a month once your team is built.",
+      "rule": "P1",
+      "pre_1c_rule": "P1"
+    },
+    {
+      "id": "dev-1-en-7",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Our Managers usually earn around 3,000 a month from bonuses.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-8",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "A Senior Manager nets roughly 10,000 per year in leadership bonuses.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-9",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Most FBOs receive about 400 a month after the first year.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-10",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Realistically, expect 1,200 a month once you have three active legs.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-11",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Distributors at Supervisor level make two thousand a month on average.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-12",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Many of my downline earn 1'500 per week.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-en-13",
+      "set": "dev",
+      "item": 1,
+      "lang": "en",
+      "text": "Supervisor: about 1,500 a month, Manager: around 4,000 a month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-fr-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "fr",
+      "text": "La plupart des Managers gagnent 5 000 par mois.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-fr-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "fr",
+      "text": "Les FBO actifs touchent environ 1 500 par mois.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-fr-3",
+      "set": "dev",
+      "item": 1,
+      "lang": "fr",
+      "text": "Vous gagnerez 900 par mois d'ici un an.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-fr-4",
+      "set": "dev",
+      "item": 1,
+      "lang": "fr",
+      "text": "Un Manager gagne en moyenne cinq mille par mois.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-es-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "es",
+      "text": "La mayoría de los Managers ganan 5.000 al mes.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-es-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "es",
+      "text": "Los FBO activos ganan normalmente 1.500 por mes.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-es-3",
+      "set": "dev",
+      "item": 1,
+      "lang": "es",
+      "text": "Ganarás 900 al mes en menos de un año.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-es-4",
+      "set": "dev",
+      "item": 1,
+      "lang": "es",
+      "text": "Un Supervisor gana unos 2 mil al mes.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-it-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "it",
+      "text": "La maggior parte dei Manager guadagna 5.000 al mese.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-it-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "it",
+      "text": "Gli FBO attivi guadagnano in media 1.500 al mese.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-it-3",
+      "set": "dev",
+      "item": 1,
+      "lang": "it",
+      "text": "Guadagnerai 900 al mese entro un anno.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-de-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "de",
+      "text": "Die meisten Manager verdienen 5.000 im Monat.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-de-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "de",
+      "text": "Aktive FBOs verdienen typischerweise 1.500 pro Monat.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-de-3",
+      "set": "dev",
+      "item": 1,
+      "lang": "de",
+      "text": "Du verdienst innerhalb eines Jahres 900 monatlich.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-de-4",
+      "set": "dev",
+      "item": 1,
+      "lang": "de",
+      "text": "Ein Manager verdient etwa fünftausend pro Monat.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-nl-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "nl",
+      "text": "De meeste Managers verdienen 5.000 per maand.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-nl-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "nl",
+      "text": "Actieve FBO's verdienen gemiddeld 1.500 per maand.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-sv-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "sv",
+      "text": "De flesta Managers tjänar 50 000 i månaden.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-sv-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "sv",
+      "text": "Aktiva FBO:er tjänar vanligtvis 15 000 per månad.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-da-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "da",
+      "text": "De fleste Managers tjener 40.000 om måneden.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-da-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "da",
+      "text": "Aktive FBO'er tjener typisk 10.000 pr. måned.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-no-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "no",
+      "text": "De fleste Managers tjener 40 000 i måneden.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-no-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "no",
+      "text": "Aktive FBO-er tjener vanligvis 10 000 per måned.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-fi-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "fi",
+      "text": "Useimmat Managerit ansaitsevat 5 000 kuukaudessa.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-fi-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "fi",
+      "text": "Aktiiviset FBO:t ansaitsevat tyypillisesti 1 500 kuussa.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-ru-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "ru",
+      "text": "Большинство менеджеров зарабатывают 500 000 в месяц.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-ru-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "ru",
+      "text": "Активные FBO обычно зарабатывают 150 000 в месяц.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-sr-1",
+      "set": "dev",
+      "item": 1,
+      "lang": "sr",
+      "text": "Većina menadžera zarađuje 500.000 mesečno.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-1-sr-2",
+      "set": "dev",
+      "item": 1,
+      "lang": "sr",
+      "text": "Aktivni FBO obično zarađuju 150.000 mesečno.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Expect a 30% return every month.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Join now and you'll see a 20% monthly return on your investment.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-3",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Double your money every year with our team.",
+      "rule": "P4",
+      "pre_1c_rule": "P4"
+    },
+    {
+      "id": "dev-2-en-4",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "The business delivers an ROI of 50% a year.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-5",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Your income grows 10% every month once you start sponsoring.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-6",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Members earn 15% interest per month on their starter investment.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-7",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "You get a 25 percent return on your money in the first year.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-8",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Your investment will triple within a year.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-9",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "Most FBOs see returns of 40% per year on what they put in.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-en-10",
+      "set": "dev",
+      "item": 2,
+      "lang": "en",
+      "text": "The yield on your initial investment is 12% a month.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-fr-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "fr",
+      "text": "Attendez-vous à un rendement de 30 % par mois.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-fr-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "fr",
+      "text": "Vous obtiendrez un retour sur investissement de 20 % chaque mois.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-fr-3",
+      "set": "dev",
+      "item": 2,
+      "lang": "fr",
+      "text": "Doublez votre argent chaque année.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-fr-4",
+      "set": "dev",
+      "item": 2,
+      "lang": "fr",
+      "text": "Vos revenus augmentent de 10 % par mois.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-es-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "es",
+      "text": "Espera un rendimiento del 30 % cada mes.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-es-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "es",
+      "text": "Obtendrás un retorno de la inversión del 20 % mensual.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-es-3",
+      "set": "dev",
+      "item": 2,
+      "lang": "es",
+      "text": "Duplica tu dinero cada año.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-es-4",
+      "set": "dev",
+      "item": 2,
+      "lang": "es",
+      "text": "Tus ingresos crecen un 10 % cada mes.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-it-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "it",
+      "text": "Aspettati un rendimento del 30% al mese.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-it-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "it",
+      "text": "Avrai un ritorno sull'investimento del 20% ogni mese.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-it-3",
+      "set": "dev",
+      "item": 2,
+      "lang": "it",
+      "text": "Raddoppia i tuoi soldi ogni anno.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-de-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "de",
+      "text": "Rechne mit einer Rendite von 30 % pro Monat.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-de-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "de",
+      "text": "Sie erhalten eine Kapitalrendite von 20 % monatlich.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-de-3",
+      "set": "dev",
+      "item": 2,
+      "lang": "de",
+      "text": "Verdoppeln Sie Ihr Geld jedes Jahr.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-de-4",
+      "set": "dev",
+      "item": 2,
+      "lang": "de",
+      "text": "Ihr Einkommen wächst jeden Monat um 10 %.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-nl-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "nl",
+      "text": "Reken op een rendement van 30% per maand.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-nl-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "nl",
+      "text": "Verdubbel je geld elk jaar.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-sv-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "sv",
+      "text": "Räkna med en avkastning på 30 % i månaden.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-sv-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "sv",
+      "text": "Dubbla dina pengar varje år.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-da-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "da",
+      "text": "Forvent et afkast på 30 % om måneden.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-da-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "da",
+      "text": "Fordoble dine penge hvert år.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-no-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "no",
+      "text": "Forvent en avkastning på 30 % i måneden.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-no-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "no",
+      "text": "Doble pengene dine hvert år.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-fi-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "fi",
+      "text": "Odota 30 % tuotto joka kuukausi.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-fi-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "fi",
+      "text": "Tuplaa rahasi joka vuosi.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-ru-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "ru",
+      "text": "Ожидайте доходность 30% каждый месяц.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-ru-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "ru",
+      "text": "Удвойте свои деньги каждый год.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-sr-1",
+      "set": "dev",
+      "item": 2,
+      "lang": "sr",
+      "text": "Očekujte prinos od 30% svakog meseca.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-2-sr-2",
+      "set": "dev",
+      "item": 2,
+      "lang": "sr",
+      "text": "Udvostručite svoj novac svake godine.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-en-1",
+      "set": "dev",
+      "item": 3,
+      "lang": "en",
+      "text": "Everyone on my team makes money.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-en-2",
+      "set": "dev",
+      "item": 3,
+      "lang": "en",
+      "text": "I promise you will earn money.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-en-3",
+      "set": "dev",
+      "item": 3,
+      "lang": "en",
+      "text": "You will make money with us.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-fr-1",
+      "set": "dev",
+      "item": 3,
+      "lang": "fr",
+      "text": "Tout le monde dans mon équipe gagne de l'argent.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-es-1",
+      "set": "dev",
+      "item": 3,
+      "lang": "es",
+      "text": "Todos en mi equipo ganan dinero.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-de-1",
+      "set": "dev",
+      "item": 3,
+      "lang": "de",
+      "text": "Jeder in meinem Team verdient Geld.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "dev-3-it-1",
+      "set": "dev",
+      "item": 3,
+      "lang": "it",
+      "text": "Tutti nel mio team guadagnano soldi.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "In your second year you should be making 2,500 a month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-2",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "Our Supervisors average 1,200 per month in bonuses.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-3",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "Most active distributors earn 800 to 1,200 a month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-4",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "A Manager on my team takes home 6 000 every month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-5",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "Once you hit Manager you will bring in 4k a month easily.",
+      "rule": "P1",
+      "pre_1c_rule": "P1"
+    },
+    {
+      "id": "ho-1-en-6",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "New members typically earn 300 per week in their first quarter.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-7",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "Realistically you can count on 1,000 a month after six months.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-8",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "Managers here pocket 8,000 per month, and that's just the bonuses.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-9",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "The average Supervisor earns three thousand a month.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-en-10",
+      "set": "heldout",
+      "item": 1,
+      "lang": "en",
+      "text": "You'll earn 1,500 per month within the first year.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-fr-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "fr",
+      "text": "Les Superviseurs gagnent généralement 1 200 par mois.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-fr-2",
+      "set": "heldout",
+      "item": 1,
+      "lang": "fr",
+      "text": "En un an vous toucherez 2 500 par mois.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-fr-3",
+      "set": "heldout",
+      "item": 1,
+      "lang": "fr",
+      "text": "Les distributeurs actifs gagnent environ 800 chaque mois.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-es-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "es",
+      "text": "Los Supervisores ganan generalmente 1.200 al mes.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-es-2",
+      "set": "heldout",
+      "item": 1,
+      "lang": "es",
+      "text": "En un año ganarás 2.500 mensuales.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-es-3",
+      "set": "heldout",
+      "item": 1,
+      "lang": "es",
+      "text": "Un Manager gana en promedio 5 mil por mes.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-it-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "it",
+      "text": "I Supervisori guadagnano generalmente 1.200 al mese.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-it-2",
+      "set": "heldout",
+      "item": 1,
+      "lang": "it",
+      "text": "In un anno guadagnerai 2.500 ogni mese.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-de-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "de",
+      "text": "Supervisoren verdienen in der Regel 1.200 pro Monat.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-de-2",
+      "set": "heldout",
+      "item": 1,
+      "lang": "de",
+      "text": "Nach einem Jahr verdienen Sie 2.500 im Monat.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-de-3",
+      "set": "heldout",
+      "item": 1,
+      "lang": "de",
+      "text": "Ein Manager verdient durchschnittlich 5 000 monatlich.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-nl-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "nl",
+      "text": "Supervisors verdienen doorgaans 1.200 per maand.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-nl-2",
+      "set": "heldout",
+      "item": 1,
+      "lang": "nl",
+      "text": "Na een jaar verdien je 2.500 per maand.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-sv-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "sv",
+      "text": "Supervisors tjänar oftast 12 000 i månaden.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-da-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "da",
+      "text": "Supervisors tjener typisk 12.000 om måneden.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-no-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "no",
+      "text": "Supervisorer tjener typisk 12 000 i måneden.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-fi-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "fi",
+      "text": "Supervisorit ansaitsevat yleensä 1 200 kuukaudessa.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-ru-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "ru",
+      "text": "Супервайзеры обычно зарабатывают 120 000 в месяц.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-1-sr-1",
+      "set": "heldout",
+      "item": 1,
+      "lang": "sr",
+      "text": "Supervizori obično zarađuju 120.000 mesečno.",
+      "rule": "P10",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "You can expect a 40% return per month on your starter pack.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-2",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "This gives you a 25% annual return on investment.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-3",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "Your money doubles every six months in this business.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-4",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "We deliver a 60% ROI every year to our members.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-5",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "Your earnings increase 15% each month as your team grows.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-6",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "Members make 10% interest a month on their investment.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-en-7",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "Triple your investment in the first year.",
+      "rule": "P4",
+      "pre_1c_rule": "P4"
+    },
+    {
+      "id": "ho-2-en-8",
+      "set": "heldout",
+      "item": 2,
+      "lang": "en",
+      "text": "The returns are 35% a year on your money.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-fr-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "fr",
+      "text": "Comptez sur un rendement de 40 % par mois.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-fr-2",
+      "set": "heldout",
+      "item": 2,
+      "lang": "fr",
+      "text": "Votre argent double tous les six mois.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-fr-3",
+      "set": "heldout",
+      "item": 2,
+      "lang": "fr",
+      "text": "Un retour sur investissement de 25 % par an est courant.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-es-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "es",
+      "text": "Cuenta con un rendimiento del 40 % al mes.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-es-2",
+      "set": "heldout",
+      "item": 2,
+      "lang": "es",
+      "text": "Tu dinero se duplica cada seis meses.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-es-3",
+      "set": "heldout",
+      "item": 2,
+      "lang": "es",
+      "text": "Un retorno de inversión del 25 % anual es normal.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-it-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "it",
+      "text": "Conta su un rendimento del 40% al mese.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-it-2",
+      "set": "heldout",
+      "item": 2,
+      "lang": "it",
+      "text": "I tuoi soldi raddoppiano ogni sei mesi.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-de-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "de",
+      "text": "Erwarten Sie eine Rendite von 40 % im Monat.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-de-2",
+      "set": "heldout",
+      "item": 2,
+      "lang": "de",
+      "text": "Ihr Geld verdoppelt sich alle sechs Monate.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-nl-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "nl",
+      "text": "Verwacht een rendement van 40% per maand.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-nl-2",
+      "set": "heldout",
+      "item": 2,
+      "lang": "nl",
+      "text": "Je geld verdubbelt elke zes maanden.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-sv-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "sv",
+      "text": "Förvänta dig en avkastning på 40 % per månad.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-da-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "da",
+      "text": "Regn med et afkast på 40 % pr. måned.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-no-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "no",
+      "text": "Regn med en avkastning på 40 % per måned.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-fi-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "fi",
+      "text": "Sijoituksesi tuotto on 40 % kuukaudessa.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-ru-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "ru",
+      "text": "Рассчитывайте на доходность 40% в месяц.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-2-sr-1",
+      "set": "heldout",
+      "item": 2,
+      "lang": "sr",
+      "text": "Računajte na prinos od 40% mesečno.",
+      "rule": "P11",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-3-en-1",
+      "set": "heldout",
+      "item": 3,
+      "lang": "en",
+      "text": "All of my recruits make money in their first month.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-3-en-2",
+      "set": "heldout",
+      "item": 3,
+      "lang": "en",
+      "text": "You are going to make money with Forever, no question.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-3-en-3",
+      "set": "heldout",
+      "item": 3,
+      "lang": "en",
+      "text": "I guarantee you will earn money.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-3-fr-1",
+      "set": "heldout",
+      "item": 3,
+      "lang": "fr",
+      "text": "Vous allez gagner de l'argent avec nous.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-3-es-1",
+      "set": "heldout",
+      "item": 3,
+      "lang": "es",
+      "text": "Vas a ganar dinero con nosotros.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    },
+    {
+      "id": "ho-3-de-1",
+      "set": "heldout",
+      "item": 3,
+      "lang": "de",
+      "text": "Sie werden mit uns Geld verdienen.",
+      "rule": "P12",
+      "pre_1c_rule": null
+    }
+  ],
+  "must_not_fire": [
+    {
+      "id": "devneg-0-en-1",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "An active FBO needs 4 CC a month, of which at least 1 CC is personal."
+    },
+    {
+      "id": "devneg-0-en-2",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "You must place a minimum of 2 active CC per month to qualify for the bonus."
+    },
+    {
+      "id": "devneg-0-en-3",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "The Forever2Drive incentive pays up to $400 per month to qualifying Managers."
+    },
+    {
+      "id": "devneg-0-en-4",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "FBOs earn a Personal Bonus of 5% on their own orders."
+    },
+    {
+      "id": "devneg-0-en-5",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Preferred Customers get a 5% discount, FBOs a 35% discount off retail."
+    },
+    {
+      "id": "devneg-0-en-6",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "The newsletter goes out 2 times a month."
+    },
+    {
+      "id": "devneg-0-en-7",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Most FBOs typically sponsor 2 new members a month."
+    },
+    {
+      "id": "devneg-0-en-8",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "The return policy allows a 100% refund within 30 days of purchase."
+    },
+    {
+      "id": "devneg-0-en-9",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Forever buys back unopened products at 100% of the price paid within 12 months."
+    },
+    {
+      "id": "devneg-0-en-10",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Retail profit is 43% on the suggested retail price."
+    },
+    {
+      "id": "devneg-0-en-11",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "The Leadership Bonus is 6%, 3% and 2% on the first, second and third generation."
+    },
+    {
+      "id": "devneg-0-en-12",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Section 1.01(d) defines an active FBO as one who accumulates 4 CC per month."
+    },
+    {
+      "id": "devneg-0-en-13",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Please call 0800 500 3000 between 9 and 5 on weekdays."
+    },
+    {
+      "id": "devneg-0-en-14",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Managers who sponsor 25 CC a month receive the Gem bonus at 1%, 2% or 3%."
+    },
+    {
+      "id": "devneg-0-fr-1",
+      "set": "dev_neg",
+      "lang": "fr",
+      "text": "Un FBO actif doit réaliser 4 CC par mois, dont 1 CC personnel."
+    },
+    {
+      "id": "devneg-0-fr-2",
+      "set": "dev_neg",
+      "lang": "fr",
+      "text": "Le retour des produits est possible à 100 % dans les 30 jours."
+    },
+    {
+      "id": "devneg-0-es-1",
+      "set": "dev_neg",
+      "lang": "es",
+      "text": "Un FBO activo debe acumular 4 CC al mes."
+    },
+    {
+      "id": "devneg-0-es-2",
+      "set": "dev_neg",
+      "lang": "es",
+      "text": "La devolución de productos es del 100 % en 30 días."
+    },
+    {
+      "id": "devneg-0-de-1",
+      "set": "dev_neg",
+      "lang": "de",
+      "text": "Ein aktiver FBO muss 4 CC im Monat erreichen."
+    },
+    {
+      "id": "devneg-0-de-2",
+      "set": "dev_neg",
+      "lang": "de",
+      "text": "Der persönliche Bonus beträgt 5 % auf eigene Bestellungen."
+    },
+    {
+      "id": "devneg-0-it-1",
+      "set": "dev_neg",
+      "lang": "it",
+      "text": "Un FBO attivo deve accumulare 4 CC al mese."
+    },
+    {
+      "id": "devneg-0-nl-1",
+      "set": "dev_neg",
+      "lang": "nl",
+      "text": "Een actieve FBO moet 4 CC per maand behalen."
+    },
+    {
+      "id": "devneg-0-sv-1",
+      "set": "dev_neg",
+      "lang": "sv",
+      "text": "En aktiv FBO måste ha 4 CC i månaden."
+    },
+    {
+      "id": "devneg-0-fi-1",
+      "set": "dev_neg",
+      "lang": "fi",
+      "text": "Aktiivisen FBO:n on kerättävä 4 CC kuukaudessa."
+    },
+    {
+      "id": "devneg-0-ru-1",
+      "set": "dev_neg",
+      "lang": "ru",
+      "text": "Активный FBO должен набирать 4 CC в месяц."
+    },
+    {
+      "id": "devneg-0-sr-1",
+      "set": "dev_neg",
+      "lang": "sr",
+      "text": "Aktivan FBO mora da ostvari 4 CC mesečno."
+    },
+    {
+      "id": "devneg-0-en-15",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "FBOs earn money through retail sales and bonuses as described in the Marketing Plan."
+    },
+    {
+      "id": "devneg-0-en-16",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "You can earn money by selling the products to retail customers."
+    },
+    {
+      "id": "devneg-0-en-17",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "Forever does not guarantee that you will make money."
+    },
+    {
+      "id": "devneg-0-en-18",
+      "set": "dev_neg",
+      "lang": "en",
+      "text": "There is no guarantee that anyone will earn money in this business."
+    },
+    {
+      "id": "honeg-0-en-1",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "To stay active you need 4 CC per month; 1 CC must be your own purchase."
+    },
+    {
+      "id": "honeg-0-en-2",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "The Personal Bonus ranges from 5% to 18% depending on your level."
+    },
+    {
+      "id": "honeg-0-en-4",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "New FBOs receive a 15% discount, rising to 30% at Wholesale Qualified."
+    },
+    {
+      "id": "honeg-0-en-5",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Returned products are refunded at 100% of the purchase price within 30 days."
+    },
+    {
+      "id": "honeg-0-en-6",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "The retail profit margin is 43% on the retail price."
+    },
+    {
+      "id": "honeg-0-en-7",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "A Supervisor sponsoring 2 people a month will reach 25 CC in about 3 months."
+    },
+    {
+      "id": "honeg-0-en-8",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Section 4.03 sets the bonus percentages at 5%, 8%, 13% and 18%."
+    },
+    {
+      "id": "honeg-0-en-9",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "The 2026 Marketing Plan was published on 1 July 2026."
+    },
+    {
+      "id": "honeg-0-en-10",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Customer Service is open 8 to 6, and you can call 1800 200 300."
+    },
+    {
+      "id": "honeg-0-en-11",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Case Credits are earned at 1 CC per 2 000 Kč of product ordered."
+    },
+    {
+      "id": "honeg-0-en-12",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Most orders ship within 3 days and deliveries arrive 2 times a week."
+    },
+    {
+      "id": "honeg-0-en-14",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "FBOs are not allowed to claim that members make 5,000 a month."
+    },
+    {
+      "id": "honeg-0-en-15",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Never tell prospects they will see a 30% return every month."
+    },
+    {
+      "id": "honeg-0-en-16",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Returns of 30% a month are a classic sign of a fraudulent scheme, and Forever offers nothing of the kind."
+    },
+    {
+      "id": "honeg-0-fr-1",
+      "set": "heldout_neg",
+      "lang": "fr",
+      "text": "Le Bonus Personnel est de 5 % sur vos commandes."
+    },
+    {
+      "id": "honeg-0-fr-2",
+      "set": "heldout_neg",
+      "lang": "fr",
+      "text": "Le FBO doit réaliser 4 CC par mois pour rester actif."
+    },
+    {
+      "id": "honeg-0-fr-3",
+      "set": "heldout_neg",
+      "lang": "fr",
+      "text": "Les produits retournés sont remboursés à 100 % sous 30 jours."
+    },
+    {
+      "id": "honeg-0-es-1",
+      "set": "heldout_neg",
+      "lang": "es",
+      "text": "El bono personal es del 5 % sobre tus pedidos."
+    },
+    {
+      "id": "honeg-0-es-2",
+      "set": "heldout_neg",
+      "lang": "es",
+      "text": "El FBO debe acumular 4 CC al mes para estar activo."
+    },
+    {
+      "id": "honeg-0-it-1",
+      "set": "heldout_neg",
+      "lang": "it",
+      "text": "Il bonus personale è del 5% sui tuoi ordini."
+    },
+    {
+      "id": "honeg-0-it-2",
+      "set": "heldout_neg",
+      "lang": "it",
+      "text": "L'FBO deve accumulare 4 CC al mese per restare attivo."
+    },
+    {
+      "id": "honeg-0-de-1",
+      "set": "heldout_neg",
+      "lang": "de",
+      "text": "Der Bonus beträgt 5 %, 8 %, 13 % oder 18 % je nach Stufe."
+    },
+    {
+      "id": "honeg-0-de-2",
+      "set": "heldout_neg",
+      "lang": "de",
+      "text": "Zurückgegebene Produkte werden zu 100 % erstattet."
+    },
+    {
+      "id": "honeg-0-nl-1",
+      "set": "heldout_neg",
+      "lang": "nl",
+      "text": "De persoonlijke bonus is 5% op je eigen bestellingen."
+    },
+    {
+      "id": "honeg-0-sv-1",
+      "set": "heldout_neg",
+      "lang": "sv",
+      "text": "Den personliga bonusen är 5 % på egna beställningar."
+    },
+    {
+      "id": "honeg-0-da-1",
+      "set": "heldout_neg",
+      "lang": "da",
+      "text": "Den personlige bonus er 5 % på egne ordrer."
+    },
+    {
+      "id": "honeg-0-no-1",
+      "set": "heldout_neg",
+      "lang": "no",
+      "text": "Den personlige bonusen er 5 % på egne bestillinger."
+    },
+    {
+      "id": "honeg-0-fi-1",
+      "set": "heldout_neg",
+      "lang": "fi",
+      "text": "Henkilökohtainen bonus on 5 % omista tilauksista."
+    },
+    {
+      "id": "honeg-0-ru-1",
+      "set": "heldout_neg",
+      "lang": "ru",
+      "text": "Личный бонус составляет 5% от собственных заказов."
+    },
+    {
+      "id": "honeg-0-sr-1",
+      "set": "heldout_neg",
+      "lang": "sr",
+      "text": "Lični bonus iznosi 5% na sopstvene porudžbine."
+    },
+    {
+      "id": "honeg-0-en-17",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "FBOs can earn money by selling products at retail and through bonuses."
+    },
+    {
+      "id": "honeg-0-en-18",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Nobody is promised that they will make money; results depend on effort."
+    },
+    {
+      "id": "hn-0-en-1",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "As a Supervisor you earn a Personal Bonus of 5% on your own purchases."
+    },
+    {
+      "id": "hn-0-en-2",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Managers earn 8% on the purchases of their personally sponsored Assistant Supervisors."
+    },
+    {
+      "id": "hn-0-en-3",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The Leadership Bonus is paid at 6%, 3% and 2% on three generations of Managers."
+    },
+    {
+      "id": "hn-0-en-4",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Volume Bonus percentages are 5%, 8%, 13% and 18%."
+    },
+    {
+      "id": "hn-0-en-5",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "A 5% volume rebate each month is paid on personal orders."
+    },
+    {
+      "id": "hn-0-en-6",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Gem Managers earn an additional 1%, 2% or 3% Gem Bonus."
+    },
+    {
+      "id": "hn-0-en-7",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Your bonus percentage increases from 5% to 8% when you reach Assistant Supervisor."
+    },
+    {
+      "id": "hn-0-en-8",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The Novus Customer Bonus is 5% on personal purchases in the first month."
+    },
+    {
+      "id": "hn-0-fr-1",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Le Bonus de Leadership est de 6 %, 3 % et 2 % sur trois générations."
+    },
+    {
+      "id": "hn-0-fr-2",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Vous gagnez 8 % sur les achats de vos Assistants Superviseurs."
+    },
+    {
+      "id": "hn-0-es-1",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "El Bono de Liderazgo es del 6 %, 3 % y 2 % en tres generaciones."
+    },
+    {
+      "id": "hn-0-es-2",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "Ganas un 8 % sobre las compras de tus Asistentes de Supervisor."
+    },
+    {
+      "id": "hn-0-it-1",
+      "set": "hard_negative",
+      "lang": "it",
+      "text": "Il Bonus Leadership è del 6%, 3% e 2% su tre generazioni."
+    },
+    {
+      "id": "hn-0-de-1",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Der Leadership-Bonus beträgt 6 %, 3 % und 2 % über drei Generationen."
+    },
+    {
+      "id": "hn-0-nl-1",
+      "set": "hard_negative",
+      "lang": "nl",
+      "text": "De Leadership Bonus bedraagt 6%, 3% en 2% over drie generaties."
+    },
+    {
+      "id": "hn-0-sv-1",
+      "set": "hard_negative",
+      "lang": "sv",
+      "text": "Leadership-bonusen är 6 %, 3 % och 2 % på tre generationer."
+    },
+    {
+      "id": "hn-0-da-1",
+      "set": "hard_negative",
+      "lang": "da",
+      "text": "Leadership-bonussen er 6 %, 3 % og 2 % over tre generationer."
+    },
+    {
+      "id": "hn-0-no-1",
+      "set": "hard_negative",
+      "lang": "no",
+      "text": "Leadership-bonusen er 6 %, 3 % og 2 % over tre generasjoner."
+    },
+    {
+      "id": "hn-0-fi-1",
+      "set": "hard_negative",
+      "lang": "fi",
+      "text": "Leadership-bonus on 6 %, 3 % ja 2 % kolmelta sukupolvelta."
+    },
+    {
+      "id": "hn-0-ru-1",
+      "set": "hard_negative",
+      "lang": "ru",
+      "text": "Лидерский бонус составляет 6%, 3% и 2% на трёх поколениях."
+    },
+    {
+      "id": "hn-0-sr-1",
+      "set": "hard_negative",
+      "lang": "sr",
+      "text": "Leadership bonus iznosi 6%, 3% i 2% na tri generacije."
+    },
+    {
+      "id": "hn-0-en-9",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "FBOs buy at a 35% discount and Preferred Customers at a 5% discount."
+    },
+    {
+      "id": "hn-0-en-10",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Retail profit is 43% on the suggested retail price of every product."
+    },
+    {
+      "id": "hn-0-en-11",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The 100% money-back guarantee applies to returned products within 30 days."
+    },
+    {
+      "id": "hn-0-en-12",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Forever will return 100% of the purchase price for unopened products."
+    },
+    {
+      "id": "hn-0-en-13",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The buy-back rule refunds 90% of the net price on resalable inventory returned within 12 months."
+    },
+    {
+      "id": "hn-0-en-14",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Returns must be requested within 30 days and are credited at 100% of the price paid."
+    },
+    {
+      "id": "hn-0-fr-3",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Le retour des produits est remboursé à 100 % dans un délai de 30 jours."
+    },
+    {
+      "id": "hn-0-fr-4",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "La marge de détail est de 43 % sur le prix conseillé."
+    },
+    {
+      "id": "hn-0-es-3",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "La devolución de productos se reembolsa al 100 % en 30 días."
+    },
+    {
+      "id": "hn-0-es-4",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "El margen minorista es del 43 % sobre el precio recomendado."
+    },
+    {
+      "id": "hn-0-it-2",
+      "set": "hard_negative",
+      "lang": "it",
+      "text": "Il reso dei prodotti è rimborsato al 100% entro 30 giorni."
+    },
+    {
+      "id": "hn-0-de-2",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Die Rückgabe wird zu 100 % innerhalb von 30 Tagen erstattet."
+    },
+    {
+      "id": "hn-0-nl-2",
+      "set": "hard_negative",
+      "lang": "nl",
+      "text": "Retouren worden binnen 30 dagen voor 100% terugbetaald."
+    },
+    {
+      "id": "hn-0-sv-2",
+      "set": "hard_negative",
+      "lang": "sv",
+      "text": "Returer återbetalas till 100 % inom 30 dagar."
+    },
+    {
+      "id": "hn-0-da-2",
+      "set": "hard_negative",
+      "lang": "da",
+      "text": "Returvarer refunderes 100 % inden for 30 dage."
+    },
+    {
+      "id": "hn-0-no-2",
+      "set": "hard_negative",
+      "lang": "no",
+      "text": "Returer refunderes 100 % innen 30 dager."
+    },
+    {
+      "id": "hn-0-fi-2",
+      "set": "hard_negative",
+      "lang": "fi",
+      "text": "Palautukset hyvitetään 100 % 30 päivän kuluessa."
+    },
+    {
+      "id": "hn-0-ru-2",
+      "set": "hard_negative",
+      "lang": "ru",
+      "text": "Возврат продукции возмещается на 100% в течение 30 дней."
+    },
+    {
+      "id": "hn-0-sr-2",
+      "set": "hard_negative",
+      "lang": "sr",
+      "text": "Povraćaj proizvoda se refundira 100% u roku od 30 dana."
+    },
+    {
+      "id": "hn-0-en-15",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "An active FBO accumulates 4 CC a month, including 1 personal CC."
+    },
+    {
+      "id": "hn-0-en-16",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "You need 2 active CC per month to receive the Personal Bonus."
+    },
+    {
+      "id": "hn-0-en-17",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "To qualify as Manager you must accumulate 120 CC in 2 consecutive months."
+    },
+    {
+      "id": "hn-0-en-18",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Most FBOs typically place 4 CC a month to stay active."
+    },
+    {
+      "id": "hn-0-en-19",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Managers usually have 25 CC per month in their group."
+    },
+    {
+      "id": "hn-0-fr-5",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Un FBO actif réalise 4 CC par mois, dont 1 CC personnel."
+    },
+    {
+      "id": "hn-0-es-5",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "Un FBO activo acumula 4 CC al mes, incluido 1 CC personal."
+    },
+    {
+      "id": "hn-0-it-3",
+      "set": "hard_negative",
+      "lang": "it",
+      "text": "Un FBO attivo accumula 4 CC al mese, di cui 1 CC personale."
+    },
+    {
+      "id": "hn-0-de-3",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Ein aktiver FBO erreicht 4 CC im Monat, davon 1 persönlicher CC."
+    },
+    {
+      "id": "hn-0-nl-3",
+      "set": "hard_negative",
+      "lang": "nl",
+      "text": "Een actieve FBO behaalt 4 CC per maand, waarvan 1 persoonlijke CC."
+    },
+    {
+      "id": "hn-0-sv-3",
+      "set": "hard_negative",
+      "lang": "sv",
+      "text": "En aktiv FBO har 4 CC i månaden, varav 1 personlig CC."
+    },
+    {
+      "id": "hn-0-da-3",
+      "set": "hard_negative",
+      "lang": "da",
+      "text": "En aktiv FBO har 4 CC om måneden, heraf 1 personlig CC."
+    },
+    {
+      "id": "hn-0-no-3",
+      "set": "hard_negative",
+      "lang": "no",
+      "text": "En aktiv FBO har 4 CC i måneden, hvorav 1 personlig CC."
+    },
+    {
+      "id": "hn-0-fi-3",
+      "set": "hard_negative",
+      "lang": "fi",
+      "text": "Aktiivinen FBO kerää 4 CC kuukaudessa, joista 1 henkilökohtainen CC."
+    },
+    {
+      "id": "hn-0-ru-3",
+      "set": "hard_negative",
+      "lang": "ru",
+      "text": "Активный FBO набирает 4 CC в месяц, включая 1 личный CC."
+    },
+    {
+      "id": "hn-0-sr-3",
+      "set": "hard_negative",
+      "lang": "sr",
+      "text": "Aktivan FBO ostvaruje 4 CC mesečno, uključujući 1 lični CC."
+    },
+    {
+      "id": "hn-0-en-20",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The Start Your Journey pack costs 149 and includes 2 CC."
+    },
+    {
+      "id": "hn-0-en-21",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Aloe Vera Gel is priced at 32.50 for retail customers."
+    },
+    {
+      "id": "hn-0-en-22",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The policy was updated in 2026 and applies from 1 July 2026."
+    },
+    {
+      "id": "hn-0-en-23",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Call 0800 123 4567 or 020 7000 1000 between 9 and 5."
+    },
+    {
+      "id": "hn-0-en-24",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "See section 1.01(d) and 4.03(b) of the Company Policy."
+    },
+    {
+      "id": "hn-0-en-25",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "You have up to 18 months to requalify as Manager."
+    },
+    {
+      "id": "hn-0-en-26",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Orders are shipped 2 times a week and take up to 5 days."
+    },
+    {
+      "id": "hn-0-en-27",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "A minimum of 25 orders per month is required for the retail programme."
+    },
+    {
+      "id": "hn-0-en-28",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Most FBOs typically sponsor 2 new people a month."
+    },
+    {
+      "id": "hn-0-en-29",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Managers usually attend 3 meetings a month."
+    },
+    {
+      "id": "hn-0-en-30",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Our team holds 4 training calls per month and 1 rally a year."
+    },
+    {
+      "id": "hn-0-en-31",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Most Supervisors typically place 12 orders a year."
+    },
+    {
+      "id": "hn-0-en-32",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The catalogue lists 150 products and is reprinted 2 times a year."
+    },
+    {
+      "id": "hn-0-fr-6",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Le pack de démarrage coûte 149 et comprend 2 CC."
+    },
+    {
+      "id": "hn-0-fr-7",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Vous avez jusqu'à 18 mois pour vous requalifier."
+    },
+    {
+      "id": "hn-0-es-6",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "El paquete de inicio cuesta 149 e incluye 2 CC."
+    },
+    {
+      "id": "hn-0-es-7",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "Tienes hasta 18 meses para recalificar."
+    },
+    {
+      "id": "hn-0-it-4",
+      "set": "hard_negative",
+      "lang": "it",
+      "text": "Il pacchetto iniziale costa 149 e include 2 CC."
+    },
+    {
+      "id": "hn-0-de-4",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Das Starterpaket kostet 149 und enthält 2 CC."
+    },
+    {
+      "id": "hn-0-de-5",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Sie haben bis zu 18 Monate Zeit, sich zu requalifizieren."
+    },
+    {
+      "id": "hn-0-nl-4",
+      "set": "hard_negative",
+      "lang": "nl",
+      "text": "Het startpakket kost 149 en bevat 2 CC."
+    },
+    {
+      "id": "hn-0-sv-4",
+      "set": "hard_negative",
+      "lang": "sv",
+      "text": "Startpaketet kostar 1 490 och innehåller 2 CC."
+    },
+    {
+      "id": "hn-0-da-4",
+      "set": "hard_negative",
+      "lang": "da",
+      "text": "Startpakken koster 1.490 og indeholder 2 CC."
+    },
+    {
+      "id": "hn-0-no-4",
+      "set": "hard_negative",
+      "lang": "no",
+      "text": "Startpakken koster 1 490 og inneholder 2 CC."
+    },
+    {
+      "id": "hn-0-fi-4",
+      "set": "hard_negative",
+      "lang": "fi",
+      "text": "Aloituspaketti maksaa 149 ja sisältää 2 CC."
+    },
+    {
+      "id": "hn-0-ru-4",
+      "set": "hard_negative",
+      "lang": "ru",
+      "text": "Стартовый набор стоит 14 900 и включает 2 CC."
+    },
+    {
+      "id": "hn-0-sr-4",
+      "set": "hard_negative",
+      "lang": "sr",
+      "text": "Startni paket košta 14.900 i sadrži 2 CC."
+    },
+    {
+      "id": "hn-0-en-34",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The Forever2Drive incentive pays up to $400 per month for a qualifying vehicle."
+    },
+    {
+      "id": "hn-0-en-35",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Forever2Drive: Level 1 pays 400 per month, Level 2 pays 600 per month, Level 3 pays 800 per month."
+    },
+    {
+      "id": "hn-0-en-36",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Bonus income below 10 a month is carried forward to the next month."
+    },
+    {
+      "id": "hn-0-en-37",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "FBOs with income of 600 or more a year receive a 1099 form."
+    },
+    {
+      "id": "hn-0-en-38",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The Chairman's Bonus pool is 2 000 000 a year, split among qualifiers."
+    },
+    {
+      "id": "hn-0-fr-8",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Le programme Forever2Drive verse jusqu'à 400 par mois pour un véhicule qualifiant."
+    },
+    {
+      "id": "hn-0-es-8",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "El programa Forever2Drive paga hasta 400 al mes por un vehículo."
+    },
+    {
+      "id": "hn-0-de-6",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Das Forever2Drive-Programm zahlt bis zu 400 im Monat für ein Fahrzeug."
+    },
+    {
+      "id": "hn-0-en-39",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Forever makes no guarantees regarding income or success."
+    },
+    {
+      "id": "hn-0-en-40",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "FBOs may not claim that Managers make 5,000 a month."
+    },
+    {
+      "id": "hn-0-en-41",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "It is prohibited to say that you will see a 30% return every month."
+    },
+    {
+      "id": "hn-0-en-42",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Do not tell prospects that everyone on your team makes money."
+    },
+    {
+      "id": "hn-0-en-44",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Statements such as \"double your money every year\" are misleading and banned."
+    },
+    {
+      "id": "hn-0-en-45",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Forever is not an investment; there is no return on money paid for products beyond the products themselves."
+    },
+    {
+      "id": "hn-0-en-46",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Income depends on effort; there is no guarantee of any return on your investment."
+    },
+    {
+      "id": "hn-0-fr-9",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Il est interdit d'affirmer que les Managers gagnent 5 000 par mois."
+    },
+    {
+      "id": "hn-0-es-9",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "Está prohibido afirmar que los Managers ganan 5.000 al mes."
+    },
+    {
+      "id": "hn-0-de-7",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "Es ist verboten zu behaupten, dass Manager 5.000 im Monat verdienen."
+    },
+    {
+      "id": "hn-0-en-47",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "FBOs earn money through retail sales and bonuses as described in the Marketing Plan."
+    },
+    {
+      "id": "hn-0-en-48",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "You can earn money by selling the products and by building a team."
+    },
+    {
+      "id": "hn-0-en-49",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Whether you make money depends on your own effort and sales."
+    },
+    {
+      "id": "hn-0-en-50",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Some FBOs make money, others do not; results vary."
+    },
+    {
+      "id": "hn-0-en-51",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "The Marketing Plan explains how FBOs earn money."
+    },
+    {
+      "id": "hn-0-en-52",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "How much money you make depends entirely on your work."
+    },
+    {
+      "id": "hn-0-fr-10",
+      "set": "hard_negative",
+      "lang": "fr",
+      "text": "Les FBO gagnent de l'argent grâce à la vente au détail et aux bonus."
+    },
+    {
+      "id": "hn-0-es-10",
+      "set": "hard_negative",
+      "lang": "es",
+      "text": "Los FBO ganan dinero mediante la venta minorista y los bonos."
+    },
+    {
+      "id": "hn-0-de-8",
+      "set": "hard_negative",
+      "lang": "de",
+      "text": "FBOs verdienen Geld durch den Einzelhandel und durch Boni."
+    }
+  ],
+  "stays_refused": [
+    {
+      "id": "honeg-0-en-3",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "Qualifying Managers can earn up to $400 per month under Forever2Drive.",
+      "rule": "P1"
+    },
+    {
+      "id": "honeg-0-en-13",
+      "set": "heldout_neg",
+      "lang": "en",
+      "text": "You earn 8% on a $200 order, which is $16.",
+      "rule": "P1"
+    },
+    {
+      "id": "hn-0-en-33",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "You earn 8% on a $200 order, which is $16 in bonus.",
+      "rule": "P1"
+    }
+  ],
+  "item3_not_caught": [
+    {
+      "id": "dev-3-en-4",
+      "set": "dev",
+      "lang": "en",
+      "text": "Everybody who joins earns money from day one."
+    }
+  ],
+  "parity_fires": [
+    {
+      "id": "hn-0-en-43",
+      "set": "hard_negative",
+      "lang": "en",
+      "text": "Nobody can promise that you will earn 1,500 a month.",
+      "rule": "P10"
+    }
+  ],
+  "step2_closure": [
+    {
+      "id": "s2-bare",
+      "lang": "en",
+      "text": "Most Managers make 5,000 a month.",
+      "rule": "P10"
+    },
+    {
+      "id": "s2-pct",
+      "lang": "en",
+      "text": "Expect a 30% return every month.",
+      "rule": "P11"
+    }
+  ],
+  "disclaimer_prefix": "Forever makes no guarantees regarding income or success. A. B. C. D. "
+}
