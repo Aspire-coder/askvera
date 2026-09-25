@@ -528,6 +528,35 @@ def _directory_contact_route_email_is_safe(value: str) -> bool:
     return bool(_DIRECTORY_CONTACT_ROUTE_EMAIL_VALUE_RE.match(value))
 
 
+def _value_passes_contact_guards(canonical: str | None, value: str) -> bool:
+    """Shared reviewed-value guard for a phone/email contact value.
+
+    Single source of truth for both :func:`build_directory_contact_route`
+    and :func:`build_support_contact_supplement`: a phone value must pass
+    :func:`_directory_contact_route_phone_is_safe` (checked exactly as
+    parsed, matching the route's own phone check - real corpus records
+    have carried free-text caveats such as "order is not available in
+    Iraq..." or "Not available" in a phone field); an email value must pass
+    :func:`_directory_contact_route_email_is_safe`, checked with a
+    trailing ",", ";" or space stripped first - matching the route's own
+    email check and its documented reason (the real Nigeria/Tanzania record
+    shape, e.g. "flphelpdesk@yahoo.com, info@flpng.com," - a trailing
+    separator with nothing after it, which would otherwise fail the strict
+    "ends in an email token" shape check even though the value is perfectly
+    safe). In both cases the RENDERED value is left untouched by this
+    function - only the safety check itself uses the trimmed copy. Any
+    other canonical field (website, business_hours, address, ...) has no
+    guard here and always passes; self-referential values ("(see above)")
+    are the caller's responsibility (:func:`_is_self_referential_value`),
+    not this function's.
+    """
+    if canonical == "phone":
+        return _directory_contact_route_phone_is_safe(value)
+    if canonical == "email":
+        return _directory_contact_route_email_is_safe(value.rstrip(",; "))
+    return True
+
+
 def directory_contact_route_locale(language: str) -> str:
     """Normalize ``language`` to a locale key, aliasing nb/nn to "no".
 
@@ -635,7 +664,7 @@ def build_directory_contact_route(content: str, language: str) -> str | None:
         elif canonical == "email":
             emails.append(cleaned)
     lines: list[str] = []
-    if len(phones) == 1 and _directory_contact_route_phone_is_safe(phones[0]):
+    if len(phones) == 1 and _value_passes_contact_guards("phone", phones[0]):
         lines.append(f"- {_directory_contact_route_label('phone', language)}: {phones[0].rstrip(',; ')}")
     if len(emails) == 1:
         # Stripped BEFORE the safety check, not just before rendering: a
@@ -643,9 +672,12 @@ def build_directory_contact_route(content: str, language: str) -> str | None:
         # (real Nigeria/Tanzania records) carries a trailing separator with
         # nothing after it, which would otherwise fail the strict "ends in
         # an email token" shape check even though the rendered value - with
-        # that trailing separator stripped - is perfectly safe.
+        # that trailing separator stripped - is perfectly safe. (The strip
+        # itself now also happens inside _value_passes_contact_guards, so
+        # this is redundant-but-harmless for the *check*; it is kept here
+        # because it is also what gets RENDERED below.)
         candidate_email = emails[0].rstrip(',; ')
-        if _directory_contact_route_email_is_safe(candidate_email):
+        if _value_passes_contact_guards("email", emails[0]):
             lines.append(f"- {_directory_contact_route_label('email', language)}: {candidate_email}")
     return "\n".join(lines) if lines else None
 
@@ -2212,6 +2244,16 @@ def build_support_contact_supplement(
         elif canonical == "business_hours" and hours_requested:
             kind = "business_hours"
         else:
+            continue
+        if not _value_passes_contact_guards(canonical, value):
+            # Same reviewed guard the directory contact route already
+            # applies to a bare phone/email value (see
+            # _value_passes_contact_guards): an unsafe value - a caveat
+            # ("order is not available in Iraq..."), a placeholder ("Not
+            # available"), or swallowed prose - is treated as though this
+            # field were absent, so the supplement falls through to the
+            # next contact type in the existing preference order exactly
+            # as it already does today when no phone/email exists at all.
             continue
         if kind in have_kind:
             continue
