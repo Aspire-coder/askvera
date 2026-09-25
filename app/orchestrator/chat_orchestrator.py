@@ -4609,15 +4609,24 @@ class AIOrchestrator:
         does not qualify, gets exactly the fallback it gets today.
 
         ``conversation_history`` (2026-09-25 canary fix, case
-        chained-followup-market-continuity): only passed by the call site
-        that already has the session's history text in scope (no new session
+        chained-followup-market-continuity; review round 1 correction):
+        only passed by the fresh-generation model-answer call site, which
+        already has the session's history text in scope (no new session
         read is added here). ``HistoryGroundingValidator`` needs it to tell a
         genuinely history-sourced claim (its actual purpose) apart from an
         ordinary answer sentence that simply is not covered by this turn's
         thin, directory-only evidence - see that validator's module
-        docstring for the two false-positive classes this closes. Every other
-        caller keeps passing nothing, which keeps the validator's old,
-        conservative "no history means never flag" behaviour for them.
+        docstring for the false-positive classes this closes. Every other
+        caller passes nothing - not because the old behaviour was
+        conservative about missing history (it was not: it flagged an
+        uncovered sentence regardless of history, which is exactly the bug
+        this fix closes), but because history genuinely is not applicable or
+        not cheaply available there: the deterministic-route and fallback
+        callers build canned text the model never generated, and
+        ``_cached_response_value`` (the other ``directory_contact_route``
+        caller) revalidates an answer that was already checked against its
+        own history at generation time, so a second, cache-time history
+        check would need a fresh session read this method does not add.
         """
         result = self.output_validator.validate(
             ValidationContext(

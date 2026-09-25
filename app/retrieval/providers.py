@@ -378,14 +378,26 @@ def _runtime_scope_intent(
     bounded, token-level typo repair used for ranking and passes it here as
     ``repaired_texts``; each text-based branch below additionally checks every
     repaired form (never in place of the raw message - only in addition to
-    it), so a genuine typo repair can only ever turn "ambiguous" into a real
-    intent, the same one-directional guarantee the language additions above
-    already established. The non-text branches (``include_global_documents``,
-    ``deterministic_directory_route``) are computed by the caller from the
-    raw message only and are unchanged. Branch order is unchanged: policy is
-    still checked before sponsoring/directory, so a typo repair can never
-    weaken the policy-question suppression the R05/N6 follow-ups above
-    established - only add another way to detect the same phrasing.
+    it).
+
+    Review round 1 correction (2026-09-25): a repaired form can add
+    *detection* of any one of these branches' intents, not only turn
+    "ambiguous" into a real one - if the raw message alone would already
+    have classified as "international_sponsoring" or "directory" (a
+    non-"ambiguous" branch fired below), and only the REPAIRED form also
+    happens to carry genuine policy wording, the earlier, still-unchanged
+    branch order means the policy branch (checked first) now wins and the
+    question is reclassified "policy" instead. That is intended, not a
+    weakening: it is exactly the classification the raw message would have
+    received had the user spelled the policy wording correctly in the first
+    place, and policy suppression - the R05/N6 follow-ups above - must never
+    be skippable merely because the policy phrasing itself contains a typo.
+    The one-directional guarantee this fix actually provides is narrower:
+    a repair can only ever ADD a detected intent signal (from either the raw
+    message or a repaired form), never remove one the raw message alone
+    would have produced, and branch order (policy, then sponsoring, then
+    directory) is unchanged - so which added signal wins when more than one
+    fires is decided exactly as it always was, not by this fix.
     """
     texts = [" ".join((message or "").split())]
     texts.extend(" ".join((candidate or "").split()) for candidate in repaired_texts if candidate)

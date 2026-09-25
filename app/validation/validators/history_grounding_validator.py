@@ -62,12 +62,75 @@ via terminal "?"/full-width "？"/Arabic "؟", or a Spanish sentence opening
 with "¿" - is also never flagged (case 2 above): a question asserts no fact,
 so it cannot be a fact copied from history, however much vocabulary it
 happens to share with an earlier turn.
+
+Review round 1 follow-up (2026-09-25): the fix above compared a flagged
+sentence against the WHOLE history text, including the user's own turns.
+That reopened a third false-positive class this validator must not produce:
+a model answer that legitimately restates the user's own earlier question
+("How do I sponsor someone in Belgium?" -> "To sponsor someone in
+Belgium...") shares plenty of vocabulary with that user turn and would be
+wrongly flagged, even though nothing was copied from an earlier ASSISTANT
+answer - this validator's actual purpose (see the module docstring's opening
+paragraphs; the reproduced failure copied prose the ASSISTANT stated in
+history, not the user). :func:`_assistant_text` now parses the formatted
+history (``services/session.py``'s ``append_session_turn``/``_format_history``
+shape: a sequence of "user: <text>"/"vera: <text>" turns, where a line
+that does not start a new "user:"/"vera:"/"assistant:" turn is a
+continuation of a multi-line assistant answer) and returns only the
+concatenated text of "vera:"/"assistant:" turns. Coverage is now checked
+against that assistant-only text; if a history has no assistant turn at all
+(e.g. malformed or user-only text), this validator returns without flagging,
+the same conservative default as no history at all.
 """
 
 from __future__ import annotations
 
 from app.evidence_contract import answer_sentences_covered_by, unsupported_answer_sentences
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+
+# Role labels services/session.py's formatted history uses to start a new
+# turn ("user:") or a new assistant turn ("vera:"/"assistant:" - the second
+# spelling is accepted too so this parser is not brittle to a future rename).
+# Matched case-insensitively against the text before a line's first ":",
+# stripped of surrounding whitespace.
+_USER_ROLE_LABELS = frozenset({"user"})
+_ASSISTANT_ROLE_LABELS = frozenset({"vera", "assistant"})
+
+
+def _assistant_text(history: str) -> str:
+    """Return only the concatenated text of assistant ("vera:") turns.
+
+    ``history`` is the formatted text ``services/session.py``'s
+    ``_format_history`` produces: one "user: <text>" or "vera: <text>" line
+    per stored turn. A stored assistant answer can itself contain embedded
+    newlines (a multi-paragraph reply); a continuation line - one that does
+    not itself start with a recognized "user:"/"vera:"/"assistant:" role
+    label - belongs to whichever turn most recently started, never to a new,
+    unlabeled turn of its own. A line is a genuine continuation, not a new
+    turn, by construction (not a keyword list): a role line's own text can
+    still legitimately begin with a lookalike phrase (e.g. an assistant
+    answer stating "Note: see section 5"), so what determines a continuation
+    is where the label appears - the text before a line's OWN first ":",
+    stripped and case-folded - being exactly one of the recognized labels.
+    """
+    current_is_assistant = False
+    assistant_parts: list[str] = []
+    for line in (history or "").split("\n"):
+        label, separator, rest = line.partition(":")
+        role = label.strip().casefold()
+        if separator and role in _USER_ROLE_LABELS:
+            current_is_assistant = False
+        elif separator and role in _ASSISTANT_ROLE_LABELS:
+            current_is_assistant = True
+            assistant_parts.append(rest.strip())
+        elif current_is_assistant:
+            # A continuation line of the assistant turn most recently opened.
+            assistant_parts.append(line.strip())
+        # Any line before the first recognized role label (malformed input)
+        # has nothing to attach to and is dropped, the same as it would be if
+        # it were a user-turn continuation.
+    return " ".join(part for part in assistant_parts if part)
+
 
 # Terminal question-mark variants recognized without depending on any single
 # language's grammar: ASCII "?", the full-width CJK "？", and the Arabic "؟".
@@ -172,6 +235,13 @@ class HistoryGroundingValidator:
         history = context.conversation_history or ""
         if not history.strip():
             return
+        # Only an earlier ASSISTANT answer is a source of "copied" facts; the
+        # user's own turns are excluded so a model answer that legitimately
+        # restates the user's own question is never mistaken for one (module
+        # docstring's review round 1 follow-up).
+        assistant_history = _assistant_text(history)
+        if not assistant_history.strip():
+            return
 
         answer = context.chat_response.answer or ""
         if not answer.strip():
@@ -184,11 +254,13 @@ class HistoryGroundingValidator:
         if not unsupported:
             return
 
-        # A sentence only counts as "history-sourced" when history itself
-        # actually covers it - an uncovered-by-evidence sentence that history
-        # ALSO does not cover is an ordinary generic/offer sentence, not a
-        # fact copied from an earlier turn (module docstring case 1).
-        history_sourced = set(answer_sentences_covered_by(unsupported, [history]))
+        # A sentence only counts as "history-sourced" when an earlier
+        # assistant turn itself actually covers it - an uncovered-by-evidence
+        # sentence that assistant history ALSO does not cover is an ordinary
+        # generic/offer sentence, or a restatement of the user's own
+        # question, not a fact copied from an earlier assistant answer
+        # (module docstring case 1 / review round 1 follow-up).
+        history_sourced = set(answer_sentences_covered_by(unsupported, [assistant_history]))
         # A question asserts no fact, so it can never be a copied claim,
         # however much vocabulary it shares with history (module docstring
         # case 2).

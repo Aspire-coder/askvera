@@ -1042,14 +1042,17 @@ def _critical_fallback_response(orchestrator, body, model_text, record_doc, hist
     """Drive ``_validate_response`` the way the two model-answer call sites do.
 
     Canary fix (2026-09-25): ``HistoryGroundingValidator`` now also requires
-    that a flagged sentence be actually covered by ``conversation_history``,
-    not merely uncovered by this turn's directory-only evidence (see that
-    validator's module docstring). Every case in this file simulates the
-    model producing exactly this shape of content - unsupported prose over a
-    directory-only turn - so ``history`` defaults to the model's own text:
-    the simplest faithful stand-in for "this content came from an earlier
-    turn", which is what each of these fixtures (e.g.
-    ``_kenya_history_leak_case``) already names itself for.
+    that a flagged sentence be actually covered by an earlier ASSISTANT
+    ("vera:") turn of ``conversation_history``, not merely uncovered by this
+    turn's directory-only evidence (see that validator's module docstring).
+    Every case in this file simulates the model producing exactly this shape
+    of content - unsupported prose over a directory-only turn - so
+    ``history`` defaults to the model's own text formatted as a "vera:" turn
+    (``services/session.py``'s own history shape): the simplest faithful
+    stand-in for "this content came from an earlier assistant turn", which
+    is what each of these fixtures (e.g. ``_kenya_history_leak_case``)
+    already names itself for. A caller that passes ``history`` explicitly is
+    responsible for its own "user:"/"vera:" formatting.
     """
     model_response = ModelResponse(text=model_text, citations=[], confidence=0.9, provider="claude", model_name="m")
     chat_response = ChatResponse(
@@ -1061,7 +1064,7 @@ def _critical_fallback_response(orchestrator, body, model_text, record_doc, hist
         chat_response, body, "test",
         model_response=model_response, retrieval_result=retrieval_result,
         directory_contact_route=True, lookup_text=body.message,
-        conversation_history=model_text if history is None else history,
+        conversation_history=f"vera: {model_text}" if history is None else history,
     )
 
 

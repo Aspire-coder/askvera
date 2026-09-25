@@ -345,3 +345,58 @@ def test_non_english_history_sourced_claim_is_flagged() -> None:
     assert result.has_critical()
     codes = {issue.code for issue in result.issues}
     assert "HISTORY_SOURCED_CLAIM_UNGROUNDED" in codes
+
+
+def test_answer_restating_the_users_own_earlier_question_is_not_flagged() -> None:
+    """Review round 1 fix: this validator's purpose is catching prose copied
+    from an earlier ASSISTANT answer, not the user's own words reflected back.
+    The user's long earlier question shares plenty of vocabulary with an
+    answer that legitimately restates it - if history were compared as a
+    whole (including the user's own turns) this would be wrongly flagged -
+    but the actual earlier assistant reply shares little of that vocabulary,
+    so comparing against assistant-only text correctly leaves it alone.
+    """
+    history = (
+        "user: How do I sponsor someone in Belgium and what documents are "
+        "required for that application process?\n"
+        "vera: You can find the Belgium sponsoring office contact details below."
+    )
+    answer = (
+        "To sponsor someone in Belgium you need to provide the required "
+        "application documents for that process."
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=history), result
+    )
+
+    assert result.valid
+    assert not result.issues
+
+
+def test_fact_on_a_multiline_assistant_answers_continuation_line_is_flagged() -> None:
+    """A stored assistant answer can itself span multiple lines (a
+    multi-paragraph reply); a continuation line with no "user:"/"vera:"
+    prefix still belongs to that assistant turn, not to a new, unlabeled
+    turn - so a fact stated only on that continuation line and copied into
+    this turn's answer is still caught as history-sourced.
+    """
+    history = (
+        "user: What are the terms for sponsoring in Norway?\n"
+        "vera: You can sponsor someone in Norway by completing an application.\n"
+        "The minimum monthly volume requirement is 200 PV per associate."
+    )
+    answer = (
+        "The minimum monthly volume requirement is 200 PV per associate for "
+        "Norway sponsoring purposes."
+    )
+    result = ValidationResult()
+
+    HistoryGroundingValidator().validate(
+        _context(answer, [_directory_document()], history=history), result
+    )
+
+    assert result.has_critical()
+    codes = {issue.code for issue in result.issues}
+    assert "HISTORY_SOURCED_CLAIM_UNGROUNDED" in codes

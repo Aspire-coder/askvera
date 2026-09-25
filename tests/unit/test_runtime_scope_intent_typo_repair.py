@@ -18,9 +18,16 @@ Fix: the caller (``_planned_retrieval_plan``) now also computes
 ``_runtime_scope_intent`` as the new, keyword-only ``repaired_texts``
 parameter (default ``()``, so every other caller is unchanged). Each
 text-based branch inside ``_runtime_scope_intent`` now checks the raw message
-AND every repaired form; a repaired form can only ever turn "ambiguous" into
-a real intent, never suppress one the raw message alone would have produced,
-and branch order (policy checked before sponsoring/directory) is unchanged.
+AND every repaired form; a repair can only ever ADD a detected intent signal,
+never suppress one the raw message alone would have produced, and branch
+order (policy checked before sponsoring/directory) is unchanged. Because
+policy is checked first, a repaired form that happens to carry genuine
+policy wording can outrank a non-"ambiguous" intent the raw message alone
+already produced (e.g. "international_sponsoring") - see
+``test_policy_word_typo_added_by_repair_outranks_raw_sponsoring_match``
+below - exactly the classification the raw message would have received had
+the policy wording itself not contained a typo, and exactly why the
+suppression policy checks establish must never be skippable through a typo.
 """
 
 from app.retrieval.providers import _runtime_scope_intent
@@ -150,3 +157,44 @@ class TestRuntimeScopeIntentTypoRepair:
             repaired_texts=repaired,
         )
         assert result["intent"] != "international_sponsoring"
+
+    def test_policy_word_typo_added_by_repair_outranks_raw_sponsoring_match(self) -> None:
+        """Review round 1 correction: a repair does not only turn "ambiguous"
+        into a real intent - it can also add policy-wording detection that
+        outranks a non-"ambiguous" intent the raw message alone already
+        produced. The raw message alone matches SPONSORING_QUESTION_RE
+        ("sponsoring") but not any policy wording (its typo'd "polciy" does
+        not match ``DIRECTORY_POLICY_WORDING_RE``'s ``\\bpolic(?:y|ies)\\b``);
+        once repaired, the same sentence also carries genuine policy wording,
+        and because the policy branch is checked first, the final
+        classification becomes "policy" - not because a repair suppressed
+        the sponsoring match, but because it added a stronger, earlier-checked
+        signal, exactly as it would if the user had spelled "policy"
+        correctly from the start.
+        """
+        raw = "What is the polciy on international sponsoring?"
+        planner_queries = ["What is the policy on international sponsoring?"]
+        repaired = _repaired(raw, planner_queries)
+        assert repaired
+
+        without_repair = _runtime_scope_intent(
+            raw,
+            include_global_documents=True,
+            named_markets=set(),
+            shared_office_markets=set(),
+            deterministic_directory_route=False,
+            language="en",
+        )
+        assert without_repair["intent"] == "international_sponsoring"
+
+        with_repair = _runtime_scope_intent(
+            raw,
+            include_global_documents=True,
+            named_markets=set(),
+            shared_office_markets=set(),
+            deterministic_directory_route=False,
+            language="en",
+            repaired_texts=repaired,
+        )
+        assert with_repair["intent"] == "policy"
+        assert with_repair["decision_source"] == "deterministic_policy_route"
