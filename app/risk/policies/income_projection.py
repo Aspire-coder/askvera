@@ -1093,27 +1093,32 @@ def _detect_p5(s, lang, raw, idx: "_ClauseIndex | None" = None):
 
 
 _GROUP_PAIR = re.compile(r"\d{3}[ .,' ]\d{3}")
-_GROUP_HEAD = re.compile(r"(?<!\w)\d{1,3}$")
+_DIGIT_BLOCK = re.compile(r"(?<!\d)\d{1,3}$")
+_MONEY_START = re.compile(r"(?<!\w)")  # the start condition MONEY_RE puts in front of _NUM
 
 
-def _uncapped_start(s, m, pos):
-    """Where MONEY_RE would have started `m` without _NUM's 8-group cap, searching from `pos`.
+def _uncapped_start(s, m, pos, start_ok=_MONEY_START):
+    """Where `m` (a match of a pattern built on _NUM, whose starts obey `start_ok`) would have started without
+    _NUM's 8-group cap, the pattern being searched from `pos`.
 
     The cap only moves a match that starts at a thousands group whose earlier groups (from `pos` on) were never
-    tried as a start -- here, when the previous match ended inside the same number ("$1.5 000 000 000 ..."). The
-    uncapped scan then matched from the first of those groups, with the same end; walk back to it. P6 is the one
-    rule whose windows depend on where the amount starts. Walks only back to `pos`, so a finditer loop stays linear."""
+    tried as a start: the previous match ended inside the same number ("$1.5 000 000 000 ..."), or `start_ok`
+    rules out the number's head ("1.5 123 123 ..." for a pattern that may not start after "."). The uncapped scan
+    matched from the earliest start `start_ok` allows among those groups, with the same end; walk back to it.
+    Walks only back to `pos`, so a finditer loop that passes the previous match's end stays linear. MONEY_RE's P6
+    is the one rule here whose windows depend on where an amount starts."""
     start = j = m.start()
     if not _GROUP_PAIR.match(s, j):
         return start
     while j - 1 > pos and s[j - 1] in " .,'":
-        head = _GROUP_HEAD.search(s, max(pos, j - 4), j - 1)
-        if not head:
+        block = _DIGIT_BLOCK.search(s, max(pos, j - 4), j - 1)
+        if not block:
             break
-        start = head.start()
-        if head.end() - start < 3:
+        if start_ok.match(s, block.start()):
+            start = block.start()
+        if block.end() - block.start() < 3:
             break
-        j = start
+        j = block.start()
     return start
 
 
