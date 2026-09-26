@@ -91,7 +91,27 @@ ROUTES_REST_SHA256 = "3ec04c67e6959926bfca3f738d6517c629854593bc4719225bc5d8110d
 # meaning) so the rule stays within the existing 4392-character budget
 # without moving any budget assertion. Previous hash:
 # a6728cac7378e9889ecca0cd4da8784330129d757610da15a2d5dcd03fd4b90b
-TEMPLATE_LATER_SHA256 = "454c713329759149f748fecc2cd4d8d6687a2595c4b71fd3574d8ab16e997307"
+# Updated 2026-09-25 (owner decision "Prompt + widen to 1.01(d)", rework of
+# income step 2): the compensation rule gained one sentence telling the model
+# that the only permitted "guarantee" wording, in English answers, is the
+# standalone sentence "Forever makes no guarantees regarding income or
+# success." (not after a colon, joined to a clause or reworded; the R10F run
+# phrased it differently every time and every answer was refused). Fitted to
+# the existing 4392-character budget (4390 -> 4381) by meaning-preserving
+# trims only: "state the limitation" -> "say so"; "are not necessarily" ->
+# "need not be"; "when necessary" -> "if needed"; "placeholders such as [AGE]
+# and [VALUE]" -> "[AGE]/[VALUE] placeholders"; "describe ... as" -> "call";
+# "require support" -> "need support"; the COMPLIANCE_PROMPT sentence "Explain
+# sourced claims policies and bonus/discount rules without promising earnings
+# or projected, average or personalised outcomes." dropped as a duplicate of
+# the compensation rule's own "guaranteed, projected, average or personalised
+# earnings are not"; and one Oxford comma + line join in the (unhashed) first
+# rule. No budget assertion moved. PROMPT_VERSION bumped with it. Previous
+# hash: 454c713329759149f748fecc2cd4d8d6687a2595c4b71fd3574d8ab16e997307
+# 2026-09-26 review nit: the exception's dash framing became parentheses so the
+# model cannot read it as a bullet (same length, 4381). Previous hash:
+# 7b6c5e06c376c8d3001de6b68b55d2ec7a3c1b026aad93f52b8ef47795e2fc91
+TEMPLATE_LATER_SHA256 = "ca9167a60d5fec652262445fc6a2a8b123a2f9fe4d32e866d5953d151426826a"
 EXPECTED = {
     "greeting": "Hi! What can I help you with?",
     "wellbeing": "Thanks for asking! I'm here to help. What's on your mind?",

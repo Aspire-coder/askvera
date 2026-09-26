@@ -76,6 +76,50 @@ Round 3 also tightened the F3 line-break boundaries themselves (a previous
 line must genuinely end its own sentence; a no-period right boundary now
 requires a blank line or end of text, not merely a line that looks
 structural).
+
+Rework "income step 2" (2026-09-25, owner decision "Prompt + widen to
+1.01(d)"). In the live R10F run the model phrased the disclaimer differently
+every time, so none of the four English answers matched EN-1/EN-2 exactly and
+all were refused. Recognition is widened, still exact and fail-closed, to:
+  (a) the sentences of the verbatim US-EN Company Policy 1.01(d) paragraph
+      (POLICY_101D_SENTENCES). A neighbouring sentence that IS one of those
+      sentences (edge-normalised; optionally behind a clean colon lead-in on
+      the same line, or behind an APPROVED_UNIT_PREFIXES framing) is part of
+      the approved unit: it never triggers the guard -- so 1.01(d)'s own "FLP
+      has a long history of success, but does not represent ..." no longer
+      withholds the exemption from the disclaimer that follows it (R10F
+      r10-v2-income-identity-en) -- and it is stepped over, so the guard
+      always inspects the two nearest word-bearing sentences OUTSIDE the unit
+      (capped at _MAX_SKIPPED_UNIT_SENTENCES per side, fail closed). A unit
+      sentence with one word changed is not a unit sentence: it is judged as
+      an ordinary neighbour (S1's "but" then withholds as before).
+  (b) a colon lead-in on the same line ("...: EN-1"). Only when the text
+      before the colon on that line contains no cue, no currency amount and
+      no earnings word -- with one explicit allowance: the topic noun
+      "earnings" directly after on/about/regarding/concerning ("what the
+      company says about earnings:", "On earnings and success ...:") is a
+      label for the disclaimer, not a claim, and does not count. The guard
+      still inspects the lead-in as the nearest previous neighbour under the
+      same rule.
+  (c) bold/italic wrapping two approved sentences together
+      ("**EN-1 Individual results may vary.**") -- already handled by the
+      edge rules; pinned by tests.
+  (d) variant subjects and result clauses, each listed explicitly in
+      APPROVED_SUBJECTS / APPROVED_RESULTS_CLAUSES and expanded into
+      ACTIVE_VARIANTS (every standalone sentence is an explicit table entry).
+  (e) the quoted-fragment sentence 'FLP states it "makes no guarantees
+      regarding income or success."' (optionally preceded by the quoted
+      1.01(d) fragment "does not represent that an FBO will achieve financial
+      success" and), with the subject/verb grammar in
+      APPROVED_QUOTED_FRAGMENT_GRAMMAR. The whole sentence must match; the
+      fragment must be quoted.
+  (f) a clause join: an APPROVED_LEAD_CLAUSES sentence (a 1.01(d) sentence,
+      or compensation-based-on-sales wording copied from it) joined to a
+      variant by an em/en dash or ", and" (APPROVED_JOINS). Any other lead
+      clause, however innocent, stays refused.
+Everything above only adds whole-sentence exact forms; the mask still blanks
+only the guarantee word(s), and the guard, the money-elsewhere check and the
+user-input path are unchanged.
 """
 
 from __future__ import annotations
@@ -91,19 +135,74 @@ from app.risk.policies.income_projection import MONEY_RE as _AMOUNT_RE
 # Each entry: variant_id -> (language, source_note, exact sentence text).
 # ENABLED variants only. Adding an entry here requires owner + compliance
 # sign-off (see module docstring); do not add or edit without it.
+# The verbatim US-EN Company Policy 1.01(d) paragraph (Company Policies and Procedures, posted April 1, 2026;
+# corpus source US-EN-Company-Policy.pdf.sections.jsonl, section 1.01-part-2), sentence by sentence. S4 is EN-1.
+POLICY_101D_SENTENCES: tuple[str, ...] = (
+    "FLP has a long history of success, but does not represent that an FBO will achieve financial success.",
+    "Compensation in FLP is based upon the sale of its products.",
+    "Individual results may vary.",
+    "Forever makes no guarantees regarding income or success.",
+    "The Forever Business Owner opportunity and related incentives are not available to residents of the United "
+    "States beginning on May 1, 2026.",
+)
+_S1, _S2, _S3, _S4, _S5 = POLICY_101D_SENTENCES
+
+# (d) Approved standalone disclaimer sentences: variant id -> (language, source note, exact sentence).
+# Owner decision 2026-09-26: only forms that appeared in a live answer or are verbatim 1.01(d) wording are enabled.
+# Considered and deliberately NOT enabled pending live evidence (each would need a fresh owner sign-off): the
+# subjects "Forever Living" and "Forever Living Products", "FLP" and "the company" in any form other than the two
+# below, the clauses "Results may vary" and "Results vary", and every other subject/clause/order combination.
+_GUARANTEE_TAIL = "makes no guarantees regarding income or success"
 ACTIVE_VARIANTS: dict[str, tuple[str, str, str]] = {
-    "EN-1": (
-        "en",
-        "US-EN Company Policy 1.01(d)",
-        "Forever makes no guarantees regarding income or success.",
-    ),
+    "EN-1": ("en", "US-EN Company Policy 1.01(d) sentence 4, verbatim", _S4),
     "EN-2": (
         "en",
-        "US-EN Company Policy 1.01(d), 'Individual results may vary.' + "
-        "'Forever makes no guarantees regarding income or success.' joined by ', and' "
-        "(seen live in R10E r10-06)",
+        "1.01(d) sentences 3 and 4 joined by ', and' (R10E r10-06)",
         "Individual results may vary, and Forever makes no guarantees regarding income or success.",
     ),
+    "EN-2b": (
+        "en",
+        "EN-2 with 'individual results vary' (R10F r10-06)",
+        "Individual results vary, and Forever makes no guarantees regarding income or success.",
+    ),
+    "EN-3": (
+        "en",
+        "EN-1 with 'the company', followed by ', and individual results may vary' (corpus answer 2026-09-12)",
+        "The company makes no guarantees regarding income or success, and individual results may vary.",
+    ),
+}
+assert ACTIVE_VARIANTS["EN-1"][2] == "Forever makes no guarantees regarding income or success."
+# (e) Subjects allowed in the quoted-fragment grammar only (never as a standalone variant): subject -> source note.
+QUOTED_FRAGMENT_SUBJECTS: dict[str, str] = {
+    "FLP": "R10F r10-07 ('FLP states it ... \"makes no guarantees regarding income or success.\"')",
+}
+
+# (f) Approved lead clauses that may be joined to a variant in the same sentence: clause -> source note. Each is a
+# 1.01(d) sentence (without its final period) or compensation-based-on-sales wording copied from 1.01(d).
+APPROVED_LEAD_CLAUSES: dict[str, str] = {
+    _S1[:-1]: "US-EN 1.01(d) sentence 1, verbatim",
+    _S2[:-1]: "US-EN 1.01(d) sentence 2, verbatim",
+    _S3[:-1]: "US-EN 1.01(d) sentence 3, verbatim",
+    _S5[:-1]: "US-EN 1.01(d) sentence 5, verbatim",
+    "Compensation is based upon the sale of its products": "1.01(d) sentence 2 without 'in FLP' (R10E r10-06)",
+    "Compensation is based on the sale of products to consumers": "R10F r10-06 lead clause",
+    "Compensation is based on actual product sales": "corpus answer 2026-09-12 lead clause",
+}
+# (f) Approved joins between a lead clause and the variant: name -> regex.
+APPROVED_JOINS: dict[str, str] = {
+    "em/en dash": r"[ \t]{0,4}+[—–][ \t]{0,4}+",
+    ", and": r"[ \t]{0,4}+,\s+and\s+",
+}
+# (e) Approved quoted-fragment sentence grammar (R10F r10-07):
+#   <subject> states|says [that] [it] ["does not represent that an FBO will achieve financial success" and]
+#   "makes no guarantees regarding income or success."
+# The subject is one of QUOTED_FRAGMENT_SUBJECTS; the guarantee fragment must be quoted; the whole sentence must
+# match.
+APPROVED_QUOTED_FRAGMENT_GRAMMAR: dict[str, str] = {
+    "verbs": "states|says",
+    "optional link words": "that, it, that it",
+    "optional first fragment": '"does not represent that an FBO will achieve financial success" and',
+    "guarantee fragment": f'"{_GUARANTEE_TAIL}."',
 }
 
 # NOT enabled. Kept only for documentation of what was considered and
@@ -177,8 +276,11 @@ def _words(sentence: str) -> list[str]:
     return re.findall(r"[^\W_]+(?:['’][^\W_]+)*", sentence)
 
 
-def _variant_regex(sentence: str) -> re.Pattern[str]:
-    """Build a linear-time whole-sentence regex for one approved variant."""
+def _body(sentence: str) -> str:
+    """Regex body for one exact word sequence: words in order, whitespace runs as \\s+, punctuation kept literally.
+
+    No word may be added, removed, changed or reordered, and no other punctuation is allowed inside the sequence.
+    """
     words = [re.escape(w) for w in _words(sentence)]
     seps = re.split(r"[^\W_]+(?:['’][^\W_]+)*", sentence)
     body = ""
@@ -190,29 +292,98 @@ def _variant_regex(sentence: str) -> re.Pattern[str]:
             else:
                 body += r"\s*" + re.escape(sep.strip()) + r"\s+"
         body += w
-    # Left boundary: start of text, or immediately after a sentence-ending
-    # punctuation + space (optionally through closing quote/emphasis marks),
-    # or immediately after a line break. Never after ':' ',' ';' or a word
-    # character on the same line without a sentence boundary between them.
-    left = (
-        r"(?:(?<=\A)|(?<=[.!?][ \t])|(?<=[.!?][\"”'’*_][ \t])"
-        r"|(?<=[.!?][\"”'’*_]{2}[ \t])|(?<=\n))"
+    return body
+
+
+def _alternation(pieces) -> str:
+    """Non-capturing alternation, longest piece first (each piece is a fixed word sequence, so this is linear)."""
+    return "(?:" + "|".join(sorted(pieces, key=len, reverse=True)) + ")"
+
+
+# Left boundary: start of text, or immediately after a sentence-ending punctuation + space (optionally through
+# closing quote/emphasis marks), or immediately after a line break, or -- rework (b) -- immediately after a colon +
+# space (the colon lead-in is then re-checked by _colon_lead_in/_lead_in_ok in find_spans, fail closed). Never
+# after ',' ';' or a word character on the same line without a boundary between them.
+_LEFT = (
+    r"(?:(?<=\A)|(?<=[.!?][ \t])|(?<=[.!?][\"”'’*_][ \t])"
+    r"|(?<=[.!?][\"”'’*_]{2}[ \t])|(?<=\n)|(?<=:[ \t]))"
+)
+# Right boundary: optional final period, optional closing quotes/emphasis, then end of text, a line break, or
+# whitespace before the next sentence (only when a period was present).
+_RIGHT = rf"(?:(?P<p>{_EDGE_CLOSE}\.{_EDGE_CLOSE})(?=\s|\Z)|{_EDGE_CLOSE}(?={_NO_PERIOD_END}))"
+_Q_OPEN = f"[{_EDGE_OPEN_QUOTES}]"
+_Q_CLOSE = f"[{_EDGE_CLOSE_QUOTES}]"
+_FRAGMENT_1 = "does not represent that an FBO will achieve financial success"
+
+
+def _quoted_subject_body() -> str:
+    return _alternation(_body(s) for s in QUOTED_FRAGMENT_SUBJECTS)
+
+
+def _standalone_body() -> str:
+    """Exactly the ACTIVE_VARIANTS sentences (their final period is handled by the right boundary)."""
+    return _alternation(_body(text.rstrip(".")) for _, _, text in ACTIVE_VARIANTS.values())
+
+
+def _sentence_regex() -> re.Pattern[str]:
+    """One linear-time regex for every standalone variant, optionally behind an approved lead clause + join (f)."""
+    lead = _alternation(_body(c) for c in APPROVED_LEAD_CLAUSES)
+    join = _alternation(APPROVED_JOINS.values())
+    core = rf"(?:{lead}{join})?{_standalone_body()}"
+    return re.compile(_LEFT + _EDGE_OPEN + "(?P<core>" + core + ")" + _RIGHT, re.IGNORECASE)
+
+
+def _quoted_regex() -> re.Pattern[str]:
+    """(e): '<subject> states|says [that] [it] ["<fragment 1>" and] "makes no guarantees regarding income or success."'
+
+    The guarantee fragment must open with a quote mark; the sentence must end right after it: a period inside or
+    outside the closing quote, or (no period) a blank line / end of text.
+    """
+    core = (
+        rf"{_quoted_subject_body()}\s+(?:states|says)\s+(?:that\s+)?(?:it\s+)?"
+        rf"(?:{_Q_OPEN}{_body(_FRAGMENT_1)}{_Q_CLOSE}\s+and\s+)?{_Q_OPEN}{_body(_GUARANTEE_TAIL)}"
     )
-    # Right boundary: optional final period, optional closing quotes/
-    # emphasis, then end of text, a line break, or whitespace before the
-    # next sentence (only when a period was present).
-    right = rf"(?:(?P<p>{_EDGE_CLOSE}\.{_EDGE_CLOSE})(?=\s|\Z)|{_EDGE_CLOSE}(?={_NO_PERIOD_END}))"
-    return re.compile(left + _EDGE_OPEN + "(?P<core>" + body + ")" + right, re.IGNORECASE)
+    right = (
+        rf"(?:{_Q_CLOSE}?\.{_EDGE_CLOSE}(?=\s|\Z)|\.{_Q_CLOSE}{_EDGE_CLOSE}(?=\s|\Z)"
+        rf"|{_Q_CLOSE}{_EDGE_CLOSE}(?={_NO_PERIOD_END}))"
+    )
+    return re.compile(_LEFT + _EDGE_OPEN + "(?P<core>" + core + ")" + right, re.IGNORECASE)
 
 
-_COMPILED: list[tuple[str, re.Pattern[str]]] | None = None
+_COMPILED: list[re.Pattern[str]] | None = None
 
 
-def _compiled() -> list[tuple[str, re.Pattern[str]]]:
+def _compiled() -> list[re.Pattern[str]]:
     global _COMPILED
     if _COMPILED is None:
-        _COMPILED = [(vid, _variant_regex(text)) for vid, (_, _, text) in ACTIVE_VARIANTS.items()]
+        _COMPILED = [_sentence_regex(), _quoted_regex()]
     return _COMPILED
+
+
+# --- variant id for a matched core (reporting only; never affects matching) ---
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip().rstrip(".").casefold()
+
+
+_NORM_INDEX: dict[str, str] = {_norm(text): vid for vid, (_, _, text) in ACTIVE_VARIANTS.items()}
+_LEAD_INDEX: dict[str, str] = {_norm(c): f"L{i + 1}" for i, c in enumerate(APPROVED_LEAD_CLAUSES)}
+_JOIN_SPLIT: re.Pattern[str] | None = None
+
+
+def _classify(core: str) -> str:
+    n = _norm(core)
+    vid = _NORM_INDEX.get(n)
+    if vid:
+        return vid
+    global _JOIN_SPLIT
+    if _JOIN_SPLIT is None:
+        lead = _alternation(_body(c) for c in APPROVED_LEAD_CLAUSES)
+        join = _alternation(APPROVED_JOINS.values())
+        _JOIN_SPLIT = re.compile(rf"\A(?P<lead>{lead})(?P<join>{join})(?P<rest>.*)\Z", re.IGNORECASE)
+    m = _JOIN_SPLIT.match(n)
+    if m:
+        return f"JOIN/{_LEAD_INDEX.get(_norm(m.group('lead')), '?')}/{_NORM_INDEX.get(_norm(m.group('rest')), '?')}"
+    return "QUOTED/" + n.split(" ")[0]
 
 
 # F3 left-boundary post-filter. The compiled regex's own left lookahead accepts any bare "\n" (fixed-width
@@ -244,15 +415,80 @@ def _left_boundary_ok(text: str, start: int) -> bool:
     return True
 
 
+# Rework (b): a colon lead-in. When the match is reached through ":" + space on the same line, the text before the
+# colon on that line is the lead-in. It may contain no contrast/dismissal cue, no currency-anchored amount and no
+# earnings word. The only allowances are (1) the topic phrase "on/about/regarding/concerning earnings [and
+# success]" when it ENDS the lead-in ("Here's what the company says about earnings:"), which labels the disclaimer
+# rather than saying anything about earnings, and (2) the exact live framing in APPROVED_LEAD_INS. Review
+# 2026-09-26: an allowance matched anywhere in the lead-in let "Regarding earnings, which are excellent:" and
+# "About earnings, most make 900 a month:" through, so anything after the topic phrase now withholds as before.
+# Any other earnings word ("Everyone earns well:") still withholds. This check can only discard a match the regex
+# found (fail closed); it never manufactures one.
+# The phrase is exempt only as the whole label ("On earnings") or after a reporting verb ("... says about earnings"),
+# never after any other words: "Most FBOs are thrilled about earnings:" states something about earnings.
+_TOPIC_EARNINGS_RE = re.compile(
+    r"(?:\A[*_\"“”'‘’\s]*|(?<!\w)(?:says|states|said|stated|writes|wrote|explains|puts\s+it)\s+)"
+    r"(?:on|about|regarding|concerning)\s+earnings(?:\s+and\s+success)?[*_\"“”'’)\]]*\s*\Z",
+    re.IGNORECASE,
+)
+# Exact lead-ins seen live that name earnings in a way the topic phrase cannot express: lead-in -> source note.
+APPROVED_LEAD_INS: dict[str, str] = {
+    "On earnings and success, Forever is explicit": "R10E r10-05 (tests/governance/test_income_projection_governance.py)",
+}
+_APPROVED_LEAD_IN_NORMS = frozenset(" ".join(lead.split()).casefold() for lead in APPROVED_LEAD_INS)
+_LEAD_EDGE = " \t*_\"“”'’"
+
+
+def _colon_lead_in(text: str, start: int) -> str | None:
+    """The lead-in text before a colon on the span's own line, or None when the span does not follow a colon.
+
+    Only the last _NEIGHBOUR_CAP + 1 characters of the line are looked at (and copied), so a single very long
+    line holding many colon-led disclaimers stays linear; a lead-in longer than the cap then fails _lead_in_ok
+    (fail closed), exactly like a neighbour scan that finds no boundary within the cap.
+    """
+    i = start
+    while i and text[i - 1] in _LEFT_EDGE_CHARS:
+        i -= 1
+    if i and text[i - 1] == ":":
+        window_start = max(0, i - 1 - _NEIGHBOUR_CAP - 1)
+        line_start = text.rfind("\n", window_start, i - 1) + 1
+        return text[max(line_start, window_start):i - 1]
+    return None
+
+
+def _lead_in_ok(lead: str) -> bool:
+    from app.risk.policies.income_claim_policy import _NEARBY_EARNINGS_RE  # deferred: circular at module level
+
+    if len(lead) > _NEIGHBOUR_CAP or _GUARD_CUES.search(lead) or _AMOUNT_RE.search(lead):
+        return False
+    # A label neighbour ("**On earnings:**") arrives with its colon and closing marks; a same-line lead-in without.
+    # Judge both on the text before the colon, so the topic phrase can only be exempt when it ends that text.
+    lead = _LABEL_END_RE.sub("", lead)
+    if " ".join(lead.strip(_LEAD_EDGE).split()).casefold() in _APPROVED_LEAD_IN_NORMS:
+        return True
+    return _NEARBY_EARNINGS_RE.search(_TOPIC_EARNINGS_RE.sub(" ", lead)) is None
+
+
+# A previous neighbour that is a label -- it ends with ":" (optionally through closing marks) and so introduces
+# what follows, whether on the disclaimer's own line ("what the company says about earnings: EN-1") or as a
+# heading line ("**On earnings:**") -- is judged by the lead-in rule above instead of the plain neighbour rule.
+# The only difference between the two rules is the "on/about/regarding/concerning earnings" topic-label
+# allowance; cues and amounts withhold either way, and following neighbours never get the allowance.
+_LABEL_END_RE = re.compile(r":[*_\"“”'’)\]]*\s*\Z")
+
+
 def find_spans(text: str) -> list[tuple[int, int, str]]:
     """Return (start, end, variant_id) for every approved-variant sentence match, sorted by position."""
     out: list[tuple[int, int, str]] = []
-    for vid, rx in _compiled():
+    for rx in _compiled():
         for m in rx.finditer(text):
             start = m.start("core")
             if not _left_boundary_ok(text, start):
                 continue
-            out.append((start, m.end("core"), vid))
+            lead = _colon_lead_in(text, start)
+            if lead is not None and not _lead_in_ok(lead):
+                continue
+            out.append((start, m.end("core"), _classify(m.group("core"))))
     return sorted(out)
 
 
@@ -314,7 +550,11 @@ _NEIGHBOUR_CAP = 4000
 # "Really." still count, since they do contain a word character; only truly empty/punctuation-only stretches are
 # skipped.
 _HAS_WORD = re.compile(r"\w")
-_MAX_SKIPPED_FRAGMENTS = 6
+# N8: the walk may take at most this many steps over word-bearing neighbours and word-free fragments together (the
+# 1.01(d) unit sentences of rework (a) are budgeted separately, below); running out before two neighbours are found
+# and before the edge of the text withholds. Review 2026-09-26: counting fragments alone let
+# "EN-1 / Really. / five '---' lines / Great products." through, which the committed module refused.
+_MAX_NEIGHBOUR_STEPS = 6
 
 
 # Both helpers work on offsets into the whole text and never copy the text before or after a match, so the guard
@@ -326,11 +566,21 @@ def _prev_sentence_bounds(text: str, start: int) -> tuple[int, int] | None:
     while head_end and text[head_end - 1] in _PREV_EDGE + "\n":
         head_end -= 1
     stop = max(0, head_end - 1)
-    begin = max(0, stop - _NEIGHBOUR_CAP)
-    ends = [m.end() for m in _SENT_END.finditer(text, begin, stop)]
-    if not ends and begin > 0:
-        return None
-    return (ends[-1] if ends else 0), head_end
+    # Only the LAST sentence end before `stop` is wanted, so look in a short window first and widen up to the cap.
+    # Every _SENT_END match is a single character whose lookahead is bounded by the same `stop`, so the rightmost
+    # match found in a narrower window is exactly the rightmost match of the capped window (identical result);
+    # this just avoids collecting ~70 earlier ends per span on answers made of many short sentences (rework
+    # 2026-09-25: the 16,000-repeat perf shape went from 1.5-3.0 s to well under the budget).
+    for width in (256, 1024, _NEIGHBOUR_CAP):
+        begin = max(0, stop - width)
+        last = None
+        for m in _SENT_END.finditer(text, begin, stop):
+            last = m.end()
+        if last is not None:
+            return last, head_end
+        if begin == 0:
+            return 0, head_end
+    return None
 
 
 def _prev_sentence(text: str, start: int) -> str:
@@ -358,46 +608,66 @@ def _next_sentence(text: str, end: int) -> str:
     return text[bounds[0]:bounds[1]] if bounds else ""
 
 
+# Rework (a): a neighbour that is itself one of the verbatim 1.01(d) sentences (S1, S2, S3, S5) belongs to the
+# approved unit and is stepped over exactly like a word-free fragment, so the guard always inspects the two
+# nearest sentences OUTSIDE the unit ("Everyone on my team makes money. S1 S2 S3 EN-1" is withheld even though
+# three unit sentences separate the claim from the disclaimer). At most _MAX_SKIPPED_UNIT_SENTENCES are stepped
+# over per side (the paragraph only has three before and one after the disclaimer); more than that -- a repeated
+# unit -- withholds (fail closed), like N8 does when the fragment budget runs out.
+_MAX_SKIPPED_UNIT_SENTENCES = 4
+
+
 def _prev_neighbours(text: str, start: int) -> list[str] | None:
-    """Up to two nearest word-bearing sentences before `start`. None means the cap was exceeded (fail closed)."""
+    """Up to two nearest word-bearing, non-unit sentences before `start`. None means a cap was exceeded (fail closed)."""
     out: list[str] = []
     pos = start
-    for _ in range(_MAX_SKIPPED_FRAGMENTS):
+    fragments = units = 0
+    while True:
         bounds = _prev_sentence_bounds(text, pos)
         if bounds is None:
             return None
         sentence = text[bounds[0]:bounds[1]]
-        if _HAS_WORD.search(sentence):
+        if not _HAS_WORD.search(sentence):
+            fragments += 1
+        elif _is_unit_sentence(sentence):
+            units += 1
+        else:
             out.append(sentence)
             if len(out) == 2:
                 return out
         pos = bounds[0]
         if pos == 0:
             return out
-    # N8 (review round 4): the fragment budget ran out before two word-bearing neighbours were found and before
-    # the edge of the text, so the guard would check nothing on this side. Withhold instead (fail closed).
-    return None
+        if len(out) + fragments >= _MAX_NEIGHBOUR_STEPS or units > _MAX_SKIPPED_UNIT_SENTENCES:
+            # N8 (review round 4): a budget ran out before two neighbours were found and before the edge of the
+            # text, so the guard would check nothing on this side. Withhold instead (fail closed).
+            return None
 
 
 def _next_neighbours(text: str, end: int) -> list[str] | None:
-    """Up to two nearest word-bearing sentences after `end`. None means the cap was exceeded (fail closed)."""
+    """Up to two nearest word-bearing, non-unit sentences after `end`. None means a cap was exceeded (fail closed)."""
     out: list[str] = []
     pos = end
-    for _ in range(_MAX_SKIPPED_FRAGMENTS):
+    fragments = units = 0
+    while True:
         bounds = _next_sentence_bounds(text, pos)
         if bounds is None:
             return None
         sentence = text[bounds[0]:bounds[1]]
-        if _HAS_WORD.search(sentence):
+        if not _HAS_WORD.search(sentence):
+            fragments += 1
+        elif _is_unit_sentence(sentence):
+            units += 1
+        else:
             out.append(sentence)
             if len(out) == 2:
                 return out
         pos = bounds[1]
         if pos >= len(text):
             return out
-    # N8 (review round 4): the fragment budget ran out before two word-bearing neighbours were found and before
-    # the edge of the text, so the guard would check nothing on this side. Withhold instead (fail closed).
-    return None
+        if len(out) + fragments >= _MAX_NEIGHBOUR_STEPS or units > _MAX_SKIPPED_UNIT_SENTENCES:
+            # N8 (review round 4): see _prev_neighbours.
+            return None
 
 
 def _money_elsewhere(text: str, spans: list[tuple[int, int, str]]) -> bool:
@@ -444,15 +714,62 @@ def guarded_spans(text: str) -> list[tuple[int, int, str]]:
         # money.", or the same cue one short filler sentence/heading further away ("... success. Really. But
         # everyone makes money."). A bare amount (e.g. a year or a phone number) does not count -- MONEY_RE
         # requires a currency symbol/word/code, never bare digits.
-        neighbours = prevs + nexts
-        if (
-            any(_GUARD_CUES.search(n) for n in neighbours)
-            or any(_NEARBY_EARNINGS_RE.search(n) for n in neighbours)
-            or any(_AMOUNT_RE.search(n) for n in neighbours)
-        ):
+        # Rework (a)/(b): the neighbours are the two nearest sentences OUTSIDE the 1.01(d) unit (unit sentences
+        # were stepped over by _prev_neighbours/_next_neighbours, so 1.01(d)'s own "but" never counts). A
+        # previous neighbour that is a label (ends with ":") -- the same-line colon lead-in, or a heading line --
+        # is judged by the lead-in rule (same three checks, plus the "on/about earnings" topic-label allowance).
+        withheld = False
+        for n in prevs:
+            if _LABEL_END_RE.search(n):
+                if not _lead_in_ok(n):
+                    withheld = True
+                    break
+            elif _GUARD_CUES.search(n) or _NEARBY_EARNINGS_RE.search(n) or _AMOUNT_RE.search(n):
+                withheld = True
+                break
+        if not withheld:
+            for n in nexts:
+                if _GUARD_CUES.search(n) or _NEARBY_EARNINGS_RE.search(n) or _AMOUNT_RE.search(n):
+                    withheld = True
+                    break
+        if withheld:
             continue
         out.append((s, e, vid))
     return out
+
+
+# Rework (a): the four non-disclaimer sentences of the verbatim US-EN 1.01(d) paragraph (S1, S2, S3, S5), each
+# recognised whole with the same edge normalisation as the variants, optionally behind a colon lead-in on the same
+# line (which must itself pass the lead-in rule) or behind one of the explicitly approved framing prefixes below.
+# Exact sentences only otherwise: "Nobody believes that FLP has a long history of success, but ..." is NOT a unit
+# sentence, and its "but" still withholds when it is a neighbour.
+# Approved framing prefixes: prefix -> source note. Seen live in R10E r10-07 (accepted fixture).
+APPROVED_UNIT_PREFIXES: dict[str, str] = {
+    "It's important to understand that": "R10E r10-07 (accepted fixture), before 1.01(d) sentence 1",
+    "It is important to understand that": "same framing, apostrophe-free spelling",
+    "It’s important to understand that": "same framing, curly apostrophe",
+}
+_UNIT_RX: re.Pattern[str] | None = None
+
+
+def _unit_regex() -> re.Pattern[str]:
+    global _UNIT_RX
+    if _UNIT_RX is None:
+        bodies = _alternation(_body(s[:-1]) for s in (_S1, _S2, _S3, _S5))
+        prefixes = _alternation(_body(p) for p in APPROVED_UNIT_PREFIXES)
+        _UNIT_RX = re.compile(
+            rf"\A(?:(?P<lead>[^\n]*?):[ \t]+)?{_EDGE_OPEN}(?:{prefixes}\s+)?{bodies}(?:{_EDGE_CLOSE}\.)?{_EDGE_CLOSE}\Z",
+            re.IGNORECASE,
+        )
+    return _UNIT_RX
+
+
+def _is_unit_sentence(neighbour: str) -> bool:
+    m = _unit_regex().fullmatch(neighbour.strip())
+    if m is None:
+        return False
+    lead = m.group("lead")
+    return lead is None or _lead_in_ok(lead)
 
 
 # ---------------------------------------------------------------------------

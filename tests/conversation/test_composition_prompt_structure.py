@@ -74,7 +74,7 @@ def test_prompt_stays_inside_the_existing_budget() -> None:
 def test_prompt_version_moved_with_the_prompt() -> None:
     """Both caches key on PROMPT_VERSION; an unchanged version would keep serving
     answers composed under the previous rules."""
-    assert settings.PROMPT_VERSION == "2026-09-22-income-disclaimer-quote-v6"
+    assert settings.PROMPT_VERSION == "2026-09-25-income-disclaimer-exact-sentence-v7"
 
 
 def test_language_instruction_is_unchanged_for_other_languages() -> None:
