@@ -504,3 +504,25 @@ def test_range_verdicts_are_unchanged_by_the_linear_scan(text: str, is_range: bo
     from app.risk.policies.income_projection import RANGE
 
     assert bool(RANGE.search(text)) is is_range
+
+
+@pytest.mark.parametrize(
+    ("text", "rule"),
+    [
+        # The first amount ("$1.5 000") ends inside the number, so the next scan resumes mid-number with 10 groups
+        # left; P6 must still see the second amount start where the uncapped scan started it (at the first "000"),
+        # or its 400-char clause window shifts past "fbos" / "never" and the verdict flips.
+        ("fbos " + "x" * 372 + " typically $1.5 000" + " 000" * 10 + " dollars a month", "P6"),
+        ("never " + "x" * 366 + " fbos typically $1.5 000" + " 000" * 10 + " dollars a month", None),
+    ],
+)
+def test_p6_window_starts_where_the_uncapped_scan_started_a_resumed_amount(text: str, rule: str | None) -> None:
+    from app.risk.policies.income_projection import MONEY_RE, _uncapped_start
+
+    pos, spans = 0, []
+    for m in MONEY_RE.finditer(text):
+        spans.append((_uncapped_start(text, m, pos), m.end()))
+        pos = m.end()
+    assert spans[1][0] == text.index("$1.5 000") + len("$1.5 000") + 1  # the first "000" after the first amount
+    result = detect_earnings_projection(text, "en")
+    assert (result[0] if result else None) == rule

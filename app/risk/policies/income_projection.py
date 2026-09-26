@@ -56,8 +56,10 @@ from app.risk.policies.income_claim_translations import _fold_pattern, fold
 # after a 1-3 digit group (not itself after a word character) plus separator: a match could have started at that
 # earlier group, and when it failed there it fails here too. (A 1-2 digit head, as in "1.5 123 ...", stays unbounded.) Everywhere else ("123 123 123 ... %" from its 2nd group on) the run would otherwise
 # be rescanned from every group, O(n^2) per scan; there it is capped at 8 groups (possessive: a shorter run cannot
-# let an amount end, since what follows is "<sep><digits>"), so every scan is linear. The cap can only matter for a
-# search window or a previous match that starts/ends mid-number, with more than 8 thousands groups after it.
+# let an amount end, since what follows is "<sep><digits>"), so every scan is linear. The cap can only move the start
+# of a match, and only when the scan begins mid-number (a search window, or a previous match that ended inside the
+# number) with more than 8 thousands groups after it: _detect_p6, the one rule whose windows depend on the start,
+# recovers the uncapped start with _uncapped_start(); the other rules use only whether an amount exists and its end.
 _NUM = (
     r"(?:(?<!\d)(?:(?<!(?<!\w)\d[ .,' ])(?<!(?<!\w)\d\d[ .,' ])(?<!(?<!\w)\d{3}[ .,' ])|(?!\d{3}(?!\d)))"
     r"\d{1,3}(?:[ .,' ]\d{3})+"
@@ -1090,28 +1092,55 @@ def _detect_p5(s, lang, raw, idx: "_ClauseIndex | None" = None):
     return None
 
 
+_GROUP_PAIR = re.compile(r"\d{3}[ .,' ]\d{3}")
+_GROUP_HEAD = re.compile(r"(?<!\w)\d{1,3}$")
+
+
+def _uncapped_start(s, m, pos):
+    """Where MONEY_RE would have started `m` without _NUM's 8-group cap, searching from `pos`.
+
+    The cap only moves a match that starts at a thousands group whose earlier groups (from `pos` on) were never
+    tried as a start -- here, when the previous match ended inside the same number ("$1.5 000 000 000 ..."). The
+    uncapped scan then matched from the first of those groups, with the same end; walk back to it. P6 is the one
+    rule whose windows depend on where the amount starts. Walks only back to `pos`, so a finditer loop stays linear."""
+    start = j = m.start()
+    if not _GROUP_PAIR.match(s, j):
+        return start
+    while j - 1 > pos and s[j - 1] in " .,'":
+        head = _GROUP_HEAD.search(s, max(pos, j - 4), j - 1)
+        if not head:
+            break
+        start = head.start()
+        if head.end() - start < 3:
+            break
+        j = start
+    return start
+
+
 def _detect_p6(s, lang, raw, idx=None):
     voc = V[lang]
+    pos = 0
     for m in MONEY_RE.finditer(s):
-        if _PERCENT_OR_CC.match(s, m.start()):
+        ms, pos = _uncapped_start(s, m, pos), m.end()
+        if _PERCENT_OR_CC.match(s, ms):
             continue
-        lo, hi = _seg_start(s, m.start(), idx), _seg_end(s, m.end(), idx)
+        lo, hi = _seg_start(s, ms, idx), _seg_end(s, m.end(), idx)
         # Fable perf addendum: `clause = s[lo:hi]` (and `voc["rel"].search(s, lo, ...)` below) was unbounded --
         # pre-existing in step 1, not new to 1b, but the same O(len)-per-call / O(n^2)-overall shape as the other
         # fixes above: an unpunctuated sentence with many money matches (no comma/clause-break to advance lo/hi)
         # made every scan here O(n). Windowed to a generous 400 chars each side (P6 is clause-scoped, not
         # verb-distance-scoped like P1/P2, so this stays much wider than WIN_BEFORE/WIN_AFTER) for the identical
         # result on real and battery text -- Fable verified this on the full battery.
-        wlo, whi = max(lo, m.start() - 400), min(hi, m.end() + 400)
+        wlo, whi = max(lo, ms - 400), min(hi, m.end() + 400)
         clause = s[wlo:whi]
-        if not PERIOD.search(s, m.end(), min(hi, m.end() + 40)) and not PERIOD.search(s, max(lo, m.start() - 30), m.start()):
+        if not PERIOD.search(s, m.end(), min(hi, m.end() + 40)) and not PERIOD.search(s, max(lo, ms - 30), ms):
             continue
         if not voc["earner"].search(clause) or not EST6_RE[lang].search(clause):
             continue
-        if RULECTX_RE[lang].search(clause) or voc["neg"].search(clause) or _reported(s, m.start(), m.end(), lang, idx):
+        if RULECTX_RE[lang].search(clause) or voc["neg"].search(clause) or _reported(s, ms, m.end(), lang, idx):
             continue
         if any(not PERIOD.match(clause, c.end() + 1) for c in voc["conj"].finditer(clause)) \
-                or voc["rel"].search(s, wlo, m.start()):
+                or voc["rel"].search(s, wlo, ms):
             continue
         return ("P6", lang, raw)
     return None
