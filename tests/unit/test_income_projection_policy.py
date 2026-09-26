@@ -476,6 +476,9 @@ def test_range_check_over_a_long_run_of_digit_groups_evaluates_well_under_one_se
         ("88648,361 418 615 329 631 603 263 602 012 156 396 338 dollars",
          ["361 418 615 329 631 603 263 602 012 156 396 338 dollars"]),
         ("a1 000 000 000 000 000 000 000 000 000 000 dollars", ["000 000 000 000 000 000 000 000 000 000 dollars"]),
+        # a 1-2 digit head after "<digits><sep>" cannot be absorbed by the earlier group, so it stays unbounded
+        ("7.5 123 123 123 123 123 123 123 123 123 123 euros", ["5 123 123 123 123 123 123 123 123 123 123 euros"]),
+        ("000.5 000 000 000 000 000 000 000 000 000 dollars", ["5 000 000 000 000 000 000 000 000 000 dollars"]),
     ],
 )
 def test_money_matches_inside_digit_group_runs_are_unchanged_by_the_linear_scan(text: str, amounts: list[str]) -> None:

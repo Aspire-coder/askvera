@@ -52,14 +52,15 @@ from app.risk.policies.income_claim_translations import _fold_pattern, fold
 # ---------------------------------------------------------------------------------------------------------------
 # Shared: money quantities
 # ---------------------------------------------------------------------------------------------------------------
-# Thousands groups are unbounded where a run of groups can START: not after a digit, and not after a 1-3 digit group
-# (not itself after a word character) plus separator -- a match could have started at that earlier group, and when it
-# failed there it fails here too. Everywhere else ("123 123 123 ... %" from its 2nd group on) the run would otherwise
+# Thousands groups are unbounded where a run of groups can START: not after a digit, and -- for a 3-digit group -- not
+# after a 1-3 digit group (not itself after a word character) plus separator: a match could have started at that
+# earlier group, and when it failed there it fails here too. (A 1-2 digit head, as in "1.5 123 ...", stays unbounded.) Everywhere else ("123 123 123 ... %" from its 2nd group on) the run would otherwise
 # be rescanned from every group, O(n^2) per scan; there it is capped at 8 groups (possessive: a shorter run cannot
 # let an amount end, since what follows is "<sep><digits>"), so every scan is linear. The cap can only matter for a
 # search window or a previous match that starts/ends mid-number, with more than 8 thousands groups after it.
 _NUM = (
-    r"(?:(?<!\d)(?<!(?<!\w)\d[ .,' ])(?<!(?<!\w)\d\d[ .,' ])(?<!(?<!\w)\d{3}[ .,' ])\d{1,3}(?:[ .,' ]\d{3})+"
+    r"(?:(?<!\d)(?:(?<!(?<!\w)\d[ .,' ])(?<!(?<!\w)\d\d[ .,' ])(?<!(?<!\w)\d{3}[ .,' ])|(?!\d{3}(?!\d)))"
+    r"\d{1,3}(?:[ .,' ]\d{3})+"
     r"|\d{1,3}(?:[ .,' ]\d{3}){1,8}+)(?:[.,]\d{1,2})?|\d++(?:[.,]\d{1,2})?"
 )
 _CUR_WORD = (
