@@ -657,25 +657,53 @@ def find_market_mentions(message: str) -> set[str]:
     if not normalized_message:
         return set()
 
-    markets = [market for market in load_market_config()["markets"] if market.get("enabled", True)]
-    markets.extend(load_global_directory_markets())
-    names: dict[str, set[str]] = {}
+    # Match longer names first so "Equatorial Guinea" does not also select
+    # Guinea. Unambiguous full names only; never infer access from an alias.
+    padded_message = f" {normalized_message} "
+    matches: set[str] = set()
+    for name, code in _market_name_table():
+        if f" {name} " in padded_message:
+            matches.add(code)
+            padded_message = padded_message.replace(f" {name} ", " ")
+    return matches
+
+
+# The normalised name table, rebuilt only when one of its three cached sources
+# is reloaded. It is keyed on the identity of those source objects (and holds
+# them, so their ids cannot be reused) rather than kept in a separate
+# lru_cache, so the many tests that call ``load_market_config.cache_clear()``
+# and swap a config keep working without also having to clear this. Measured
+# before: rebuilding and sorting every market's aliases in 38 languages cost
+# about 4 ms per call, which the history-grounding validator could pay once
+# per answer line (23 s on a 6,000-line answer).
+_NAME_TABLE_CACHE: tuple[Any, Any, Any, list[tuple[str, str]]] | None = None
+
+
+def _market_name_table() -> list[tuple[str, str]]:
+    """Unambiguous normalised market names with their code, longest first."""
+    global _NAME_TABLE_CACHE
+    config = load_market_config()
+    directory_markets = load_global_directory_markets()
     localized = _localized_market_names()
+    cached = _NAME_TABLE_CACHE
+    if cached is not None and cached[0] is config and cached[1] is directory_markets and cached[2] is localized:
+        return cached[3]
+    markets = [market for market in config["markets"] if market.get("enabled", True)]
+    markets.extend(directory_markets)
+    names: dict[str, set[str]] = {}
     for market in markets:
         code = str(market["code"]).upper()
         for name in [market["name"], *localized.get(code, [])]:
             normalized_name = _normalize_market_text(name)
             if normalized_name:
                 names.setdefault(normalized_name, set()).add(code)
-    # Match longer names first so "Equatorial Guinea" does not also select
-    # Guinea. Unambiguous full names only; never infer access from an alias.
-    padded_message = f" {normalized_message} "
-    matches: set[str] = set()
-    for name in sorted(names, key=len, reverse=True):
-        if len(names[name]) == 1 and f" {name} " in padded_message:
-            matches.update(names[name])
-            padded_message = padded_message.replace(f" {name} ", " ")
-    return matches
+    table = [
+        (name, next(iter(codes)))
+        for name, codes in sorted(names.items(), key=lambda item: len(item[0]), reverse=True)
+        if len(codes) == 1
+    ]
+    _NAME_TABLE_CACHE = (config, directory_markets, localized, table)
+    return table
 
 
 def find_probable_market_typo(message: str) -> str | None:

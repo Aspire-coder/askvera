@@ -81,12 +81,56 @@ concatenated text of "vera:"/"assistant:" turns. Coverage is now checked
 against that assistant-only text; if a history has no assistant turn at all
 (e.g. malformed or user-only text), this validator returns without flagging,
 the same conservative default as no history at all.
+
+Canary fix, third mode (2026-09-26, same retrieval_canary.json case
+chained-followup-market-continuity): a production deploy of main 65dbb74
+rolled back because the blocking live canary's "Tell me more." turn was
+turned into the insufficient-evidence fallback by this validator
+(``output_validator_critical_fallback``, failure_layer history_grounding).
+Retrieval was right (Forever Germany, confidence 0.95, evidence approved);
+the one flagged sentence was "**Getting started** – how the business
+opportunity works, or sponsoring someone" - a generic menu/option line the
+model repeated from its OWN previous assistant turn. It passes both existing
+checks (uncovered by the Germany directory record, covered by assistant
+history, not a question), yet asserts no market fact at all, so blocking the
+whole answer - and losing the Germany directory details with it - was wrong.
+
+Fix: a history-sourced MENU LINE (:func:`_is_menu_line` - structurally a
+bullet or numbered item whose text opens with a bold "**label**" followed by
+a dash or colon, the exact shape of the line that failed live and of a menu
+of options in any language) is now flagged only when it also carries a
+*specific fact marker* that could mislead about this turn's market
+(:func:`_carries_specific_fact`): a digit (numbers, section refs, amounts,
+phone numbers, dates), a currency symbol or ISO code, an email/URL marker,
+or a market/country name (resolved through the repo's shared, alias-driven
+``services.market_config.find_market_mentions`` - the configured names and
+their localized aliases, whole-name and casefolded, never a new country
+list; an inflected or adjectival form such as "Belgian", "belgische" or
+"В Бельгии" is NOT recognised, so it is not a marker). A menu line with none
+of these is a generic option line and is left alone. Every other sentence -
+prose, a plain bullet, a bare bold-label line - keeps the previous treatment
+whether or not it carries a marker: the directory-contact-route REJ1 case
+(tests/unit/test_directory_contact_route.py) relies on a marker-free
+sentence that inverts a record's note ("...is not taking on any fresh
+applicants...") still being caught, and the adversarial review of this fix
+(2026-09-26) showed that same inverted note delivered as "- ..." or
+"**Note**: ..." once plain bullets and bold labels were exempted, so the
+exemption is confined to the one shape that actually failed live.
+Everything still flagged keeps the CRITICAL severity and the fallback path
+above; ``unsupported_answer_sentences``' thresholds are untouched. The
+accepted residual: a digit-free, market-free, contact-free menu line copied
+from history is now delivered even if it happens to state a policy fact.
 """
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from app.evidence_contract import answer_sentences_covered_by, unsupported_answer_sentences
 from app.validation.models import ValidationContext, ValidationIssue, ValidationResult, ValidationSeverity
+from app.validation.validators.numeric_grounding_validator import _AMBIGUOUS_CODE_WORDS, _ROLE_CURRENCY_CODES
+from services.market_config import find_market_mentions
 
 # Role labels services/session.py's formatted history uses to start a new
 # turn ("user:") or a new assistant turn ("vera:"/"assistant:" - the second
@@ -154,6 +198,71 @@ def _is_interrogative_sentence(sentence: str) -> bool:
     if stripped.startswith(_SPANISH_INVERTED_QUESTION_MARK):
         return True
     return stripped.rstrip("\"'”’)]").endswith(_QUESTION_TERMINATORS)
+
+
+# Fact markers (module docstring, third mode). Each is checked structurally,
+# never by an English word list:
+# - a digit, in any script (str.isdigit covers non-ASCII digits too);
+# - a currency symbol (Unicode category "Sc": "$", "€", "£", "¥", "₽" ...) or
+#   an ISO 4217 code written the way prose writes one, as an upper-case
+#   whole token ("EUR", "USD"); the code set is the one
+#   ``NumericGroundingValidator`` already maintains, minus the codes that
+#   spell an ordinary word ("try", "pen" ...), and the upper-case requirement
+#   also keeps a French "ils" (ILS) from ever counting;
+# - an email/URL marker ("@", "http", "www.");
+# - a market/country name, via the shared alias-driven whole-name matcher
+#   ``services.market_config.find_market_mentions``.
+_CURRENCY_CODES = _ROLE_CURRENCY_CODES - _AMBIGUOUS_CODE_WORDS
+_UPPER_CODE_TOKEN_RE = re.compile(r"(?<![^\W\d_])([A-Z]{3})(?![^\W\d_])")
+_CONTACT_MARKER_RE = re.compile(r"@|http|www\.", re.IGNORECASE)
+
+
+def _carries_specific_fact(sentence: str) -> bool:
+    """True when a sentence states something specific enough to mislead about a market.
+
+    A history-sourced menu line that carries none of these markers is a
+    generic option line which asserts no market fact, so repeating it
+    from an earlier assistant turn is harmless and must not cost the reader
+    the whole answer (module docstring, third mode). Anything with a marker
+    keeps the original treatment.
+    """
+    if any(character.isdigit() for character in sentence):
+        return True
+    if any(unicodedata.category(character) == "Sc" for character in sentence):
+        return True
+    if any(match.group(1).lower() in _CURRENCY_CODES for match in _UPPER_CODE_TOKEN_RE.finditer(sentence)):
+        return True
+    if _CONTACT_MARKER_RE.search(sentence):
+        return True
+    return bool(find_market_mentions(sentence))
+
+
+# The shape of a menu/option line, judged structurally (markdown, not any
+# language's words): a bullet ("-", "*", "•") or a numbered marker ("1.",
+# "1)", "(1)") AND, right after it, a bold "**label**" followed by a dash or
+# colon - the live failure's "- **Getting started** – how the business
+# opportunity works, or sponsoring someone". Both parts are required: the
+# 2026-09-26 adversarial review showed a directory note inverted as a plain
+# bullet ("- This office accepts new sponsoring applications ...") or as a
+# bare bold-label line ("**Note**: the office is currently accepting ...")
+# slipping through when either shape alone was exempted, so those keep the
+# previous treatment. Deliberately not an en/em dash as the list marker,
+# which French and Russian prose also use as a quotation dash, nor a letter
+# marker ("a."), which is also an initial. ``utils.sentence_spans`` hands
+# such a line through as its own sentence, marker included, so the marker is
+# checked on the sentence text itself.
+_LIST_MARKER_PREFIX_RE = re.compile(r"^\s*(?:[-*•]|\(?\d{1,3}[.)])\s+", re.UNICODE)
+_MENU_LINE_RE = re.compile(r"^\s*(?:[-*•]|\(?\d{1,3}[.)])\s+\*\*[^*\n]+\*\*\s*[-–—:]", re.UNICODE)
+
+
+def _is_menu_line(sentence: str) -> bool:
+    """True for a bullet or numbered item that opens with a bold label and a dash/colon - a menu of options."""
+    return bool(_MENU_LINE_RE.match(sentence))
+
+
+def _list_item_text(sentence: str) -> str:
+    """The item without its leading bullet/number marker, so "1." is never read as a fact."""
+    return _LIST_MARKER_PREFIX_RE.sub("", sentence, count=1)
 
 
 # Mirrors the check `app.prompts.builder._is_global_directory_record` uses to
@@ -263,11 +372,17 @@ class HistoryGroundingValidator:
         history_sourced = set(answer_sentences_covered_by(unsupported, [assistant_history]))
         # A question asserts no fact, so it can never be a copied claim,
         # however much vocabulary it shares with history (module docstring
-        # case 2).
+        # case 2). A history-sourced MENU LINE (bullet + bold label + dash)
+        # with no specific fact marker (digit, currency, email/URL, market
+        # name) is a generic option line repeated from the model's own
+        # earlier turn and misleads about nothing (module docstring, third
+        # mode); every other sentence keeps the previous treatment.
         flagged = [
             sentence
             for sentence in unsupported
-            if sentence in history_sourced and not _is_interrogative_sentence(sentence)
+            if sentence in history_sourced
+            and not _is_interrogative_sentence(sentence)
+            and (not _is_menu_line(sentence) or _carries_specific_fact(_list_item_text(sentence)))
         ]
         if not flagged:
             return
