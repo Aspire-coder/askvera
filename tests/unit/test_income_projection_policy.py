@@ -418,3 +418,86 @@ def test_currency_period_p6_no_comma_2000_evaluates_well_under_one_second() -> N
     elapsed = time.perf_counter() - started
     assert result is None  # no earner word anywhere in the text
     assert elapsed < 1.0, f"expected well under 1.0s, took {elapsed:.3f}s (possible quadratic regression)"
+
+
+# --- performance: digit-group runs (_NUM thousands groups, RANGE's bare-figure branch) ---------------------------
+#
+# `_NUM`'s "(?:[ .,' ]\d{3})+" thousands-group run was retried from every group of a long run of groups, and each
+# try rescanned the rest of the run before the suffix ("%" here) failed it: O(n^2) per MONEY_RE scan. Measured on
+# the pre-fix detector: detect_earnings_projection(("123 " * n) + "%", "en") took ~1.0s / 4.4s / 16.9s at n = 500 /
+# 1,000 / 2,000 (8 KB). RANGE's bare-figure branch "(?<!\w)\d[\d .,]*" had the same shape (reachable through P2's
+# unwindowed `span`). The 200 KB bound is on the number scans themselves: the whole detector's ordinary linear cost
+# on a 200 KB answer of any kind (plain prose included) is itself around 1s, so the detector-level bound below uses
+# the 8 KB input the quadratic path was reported on.
+
+@pytest.mark.parametrize("sep", [" ", ",", ".", "'"])
+def test_number_scans_over_a_200kb_run_of_digit_groups_take_well_under_one_second(sep: str) -> None:
+    from app.risk.policies.income_projection import MONEY_RE, RANGE
+
+    text = ("123" + sep) * 50_000 + "%"
+    assert len(text) > 200_000
+    started = time.perf_counter()
+    money = list(MONEY_RE.finditer(text))
+    found_range = RANGE.search(text)
+    elapsed = time.perf_counter() - started
+    assert money == [] and found_range is None  # a run ending in "%" is neither an amount nor a range
+    assert elapsed < 1.0, f"expected well under 1.0s, took {elapsed:.3f}s (possible quadratic regression)"
+
+
+def test_detector_on_an_8kb_run_of_digit_groups_evaluates_well_under_one_second() -> None:
+    text = "123 " * 2000 + "%"  # 16.9s before the fix
+    started = time.perf_counter()
+    result = detect_earnings_projection(text, "en")
+    elapsed = time.perf_counter() - started
+    assert result is None
+    assert elapsed < 1.0, f"expected well under 1.0s, took {elapsed:.3f}s (possible quadratic regression)"
+
+
+def test_range_check_over_a_long_run_of_digit_groups_evaluates_well_under_one_second() -> None:
+    """P2's estimate check runs RANGE over the whole segment before the verb (3.3s here before the fix)."""
+    text = "fbos " + "123 " * 2000 + "x receive $500 a month"
+    started = time.perf_counter()
+    result = detect_earnings_projection(text, "en")
+    elapsed = time.perf_counter() - started
+    assert result is None  # no estimate word and no range: a bare "receive $500" is not a projection
+    assert elapsed < 1.0, f"expected well under 1.0s, took {elapsed:.3f}s (possible quadratic regression)"
+
+
+@pytest.mark.parametrize(
+    ("text", "amounts"),
+    [
+        ("1 000 000 dollars", ["1 000 000 dollars"]),
+        ("12345 123 dollars", ["123 dollars"]),  # a 4+ digit head cannot start a grouped number; its tail can
+        ("1.5 123 euros", ["5 123 euros"]),
+        ("123 456k a month", ["456k"]),
+        ("$1 000 000x", ["$1 000"]),
+        ("$1 000 000dollars", ["$1 000", "000dollars"]),
+        # more than 8 thousands groups after a head that cannot start the number: still one unbounded run
+        ("88648,361 418 615 329 631 603 263 602 012 156 396 338 dollars",
+         ["361 418 615 329 631 603 263 602 012 156 396 338 dollars"]),
+        ("a1 000 000 000 000 000 000 000 000 000 000 dollars", ["000 000 000 000 000 000 000 000 000 000 dollars"]),
+    ],
+)
+def test_money_matches_inside_digit_group_runs_are_unchanged_by_the_linear_scan(text: str, amounts: list[str]) -> None:
+    """Pins the pre-fix MONEY_RE matches (computed with the pre-fix module) on the shapes the linear-scan guard
+    distinguishes: where a thousands-group run may start, and where it may not."""
+    from app.risk.policies.income_projection import MONEY_RE
+
+    assert [m.group() for m in MONEY_RE.finditer(text)] == amounts
+
+
+@pytest.mark.parametrize(
+    ("text", "is_range"),
+    [
+        ("12 - 15 dollars", True),
+        ("between 1 000 and 2 000 euros", True),
+        ("x , 5 to 6 euros", True),
+        ("a123 123 - 5 dollars", True),  # the first digit not glued to a word is after "a123 "
+        ("a123 - 5 dollars", False),  # no digit that can start a figure
+        ("1 2 3 4", False),
+    ],
+)
+def test_range_verdicts_are_unchanged_by_the_linear_scan(text: str, is_range: bool) -> None:
+    from app.risk.policies.income_projection import RANGE
+
+    assert bool(RANGE.search(text)) is is_range

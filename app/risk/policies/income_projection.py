@@ -52,7 +52,16 @@ from app.risk.policies.income_claim_translations import _fold_pattern, fold
 # ---------------------------------------------------------------------------------------------------------------
 # Shared: money quantities
 # ---------------------------------------------------------------------------------------------------------------
-_NUM = r"\d{1,3}(?:[ .,' ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
+# Thousands groups are unbounded where a run of groups can START: not after a digit, and not after a 1-3 digit group
+# (not itself after a word character) plus separator -- a match could have started at that earlier group, and when it
+# failed there it fails here too. Everywhere else ("123 123 123 ... %" from its 2nd group on) the run would otherwise
+# be rescanned from every group, O(n^2) per scan; there it is capped at 8 groups (possessive: a shorter run cannot
+# let an amount end, since what follows is "<sep><digits>"), so every scan is linear. The cap can only matter for a
+# search window or a previous match that starts/ends mid-number, with more than 8 thousands groups after it.
+_NUM = (
+    r"(?:(?<!\d)(?<!(?<!\w)\d[ .,' ])(?<!(?<!\w)\d\d[ .,' ])(?<!(?<!\w)\d{3}[ .,' ])\d{1,3}(?:[ .,' ]\d{3})+"
+    r"|\d{1,3}(?:[ .,' ]\d{3}){1,8}+)(?:[.,]\d{1,2})?|\d++(?:[.,]\d{1,2})?"
+)
 _CUR_WORD = (
     r"dollars?|dolares|dollari|dollaria|dollarin|dollar|usd|us\$|eur|euros?|euro[an]?|evra|evro|evru|евро|евра|евру|chf|gbp|pounds?"
     r"|sterling|kr\.?|kronor|kroner|kronur|sek|nok|dkk|rsd|dinara|dinar[ai]?|динар\w*|rub|рубл\w*|руб\.?|сом\w*|kgs"
@@ -82,7 +91,7 @@ _CUR_SYM = _CUR_SYM + "|" + _CUR_SYM_1B
 _CODES = _CODES + "|" + _CODES_1B
 AMOUNT = (
     rf"(?:\d+(?:[.,]\d)?\s?k(?=\s*(?:a|per|each|every|/)\s*(?:month|week|year|mo)(?!\w))|(?:{_CUR_SYM})\s?(?:{_NUM})(?:\s?(?:k|000))?"
-    rf"|(?:{_NUM})\s?(?:k\s?)?(?:{_CUR_SYM}|(?:{_CUR_WORD})(?!\w))"
+    rf"|(?:{_NUM})\s?(?:k\s?)?(?:{_CUR_SYM}|(?=[^\W\d_])(?:{_CUR_WORD})(?!\w))"
     rf"|(?:{_NUM})\s?:-"
     rf"|(?=[a-z]{{2,3}}\.?\s?\d)(?:{_CODES})\s?(?:{_NUM}))"
 )
@@ -565,8 +574,12 @@ _NO_SUBJ = {
     "fi": r"(?:kukaan|mikaan)", "ru": r"(?:ни\s+один\w*|никто)", "sr": r"(?:nijedan|niko|нијед\w*|нико)",
 }
 _RANGE_SEP = r"(?:-|–|—|to|a|à|y|e|bis|tot|till|til|до|do|и|i|et|und|och|og|en|ja|ou|or|and)"
+# RANGE is only ever used as a yes/no test. Its bare-figure branch is tried once per run of [\d .,] (from the run's
+# first character, up to its first digit not preceded by a word character) and takes the whole run: retried from
+# every digit, as "(?<!\w)\d[\d .,]*" was, a long run of figures cost O(n^2). A range is found exactly when it was.
 RANGE = re.compile(
-    rf"(?<!\w)(?:{AMOUNT}|\d[\d .,]*)\s*{_RANGE_SEP}\s*(?:{AMOUNT}|\d[\d .,]*\s*(?:{_CUR_WORD}))"
+    rf"(?:(?<!\w)(?:{AMOUNT})|(?<![\d .,])(?:[ .,]*+(?<!\w)|\d++[ .,]++)\d[\d .,]*+)"
+    rf"\s*{_RANGE_SEP}\s*(?:{AMOUNT}|\d[\d .,]*\s*(?:{_CUR_WORD}))"
 )
 FUTURE = {
     "fr": re.compile(r"gagner(?:a|as|ez|ons|ont|ai|ais|ait|aient|iez|ions)|toucher(?:a|as|ez|ont)"),
